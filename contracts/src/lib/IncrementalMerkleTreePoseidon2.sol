@@ -10,7 +10,9 @@ import {IPoseidon2} from "./IPoseidon.sol";
  *
  * @title IncrementalMerkleTreePoseidon2
  * @notice Same insert API as keccak tree, but H(left,right)=Poseidon2(left,right).
- * @dev Pair with unshield.circom MerkleTreeChecker. Depth 20.
+ * @dev Pair with unshield.circom MerkleTreeChecker. Depth 20. No root ring buffer:
+ *      nothing read it and `knownRoots` is what checks a root (Kann I-06), so each
+ *      insert does two fewer storage writes.
  */
 library IncrementalMerkleTreePoseidon2 {
     uint256 internal constant DEPTH = 20;
@@ -22,9 +24,6 @@ library IncrementalMerkleTreePoseidon2 {
         uint256[DEPTH] filledSubtrees;
         uint256[DEPTH] zeros;
         mapping(uint256 => bool) knownRoots;
-        uint32 rootHistorySize;
-        uint32 currentRootIndex;
-        mapping(uint256 => uint256) rootHistory;
         IPoseidon2 poseidon;
         bool initialized;
     }
@@ -67,9 +66,6 @@ library IncrementalMerkleTreePoseidon2 {
             15019797232609675441998260052101280400536945603062888308240081994073687793470;
         self.currentRoot = z;
         self.knownRoots[z] = true;
-        self.rootHistory[0] = z;
-        self.rootHistorySize = 100;
-        self.currentRootIndex = 0;
         self.nextIndex = 0;
         self.initialized = true;
     }
@@ -100,16 +96,11 @@ library IncrementalMerkleTreePoseidon2 {
         self.currentRoot = currentLevelHash;
         self.knownRoots[currentLevelHash] = true;
 
-        uint32 newRootIndex = (self.currentRootIndex + 1) % self.rootHistorySize;
-        self.currentRootIndex = newRootIndex;
-        self.rootHistory[newRootIndex] = currentLevelHash;
-
         self.nextIndex = index + 1;
     }
 
     /// @dev Every root ever produced stays valid permanently (via `knownRoots`), so an
-    ///      in-flight proof never expires. The `rootHistory` ring buffer is retained only
-    ///      for off-chain observability; it is intentionally NOT the validity source.
+    ///      in-flight proof never expires.
     function isKnownRoot(Tree storage self, uint256 root) internal view returns (bool) {
         if (root == 0) return false;
         return self.knownRoots[root];
