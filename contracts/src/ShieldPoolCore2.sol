@@ -24,13 +24,25 @@ interface IERC20 {
  *         deposits (shield / shieldBound), private transfers, withdrawals
  *         (unshield), the setup-then-timelock owner, and beta deposit limits.
  * @dev Leaves/roots stored as uint256 field elements, exposed as bytes32 for IShieldPool.
- *      ShieldPoolPoseidon adds sealed swaps on top; ShieldPoolPayments is this alone.
+ *      ShieldPoolPayments2 is this alone.
+ *
+ * What differs from ShieldPoolCore.sol, by Kann Audits finding (report of 1 Nov 2026):
+ *  - L-02 unshield() takes an optional minimum received, covered by the proof.
+ *  - I-01 turning the fee off keeps the recipient, so owed fees stay collectable.
+ *  - I-03 unshield() refuses the pool itself as recipient.
+ *  - I-04 the timelock no longer takes setShieldVerifier.
+ *  - I-05 every cheap check runs before a proof, on all three proof paths.
+ *  - I-06 the tree keeps no root ring buffer.
+ *  - I-07 verifiers must be contracts, at construction and when set.
+ *  - I-08 sweepStrayToken() recovers ERC-20s that back nothing.
+ * Same circuits, same verifiers, same proofs; no new ceremony.
  *
  * Owner powers (no-middlemen hardening):
  *  - The owner has NO function that moves user funds. There is no emergencyWithdraw;
  *    notes leave the pool only through proof-gated unshield(). sweepStrayNative()
  *    can only take native currency above deposited[address(0)] + feesOwed[address(0)],
  *    i.e. ETH sent straight to receive() that backs no note and is no owed fee.
+ *    sweepStrayToken() does the same for an ERC-20, and pays only strayRecipient.
  *  - Every setter that affects proof validity or asset flows is instant only
  *    during setup mode. After endSetup() it must go through ChangeTimelock:
  *    queueChange -> CHANGE_DELAY (3 days) public notice -> executeChange.
@@ -90,6 +102,8 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
 
     /// @notice Cash-out fee receiver. address(0) means the fee is off.
     address public feeRecipient;
+    /// @notice The one address sweepStrayToken() can pay. Fixed at deploy.
+    address public immutable strayRecipient;
     /// @notice Cash-out fee in basis points of the unshielded amount. 0 means off.
     uint16 public withdrawFeeBps;
     /// @notice Cash-out fees held in the pool per asset, waiting for collectFees().
@@ -108,6 +122,7 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
     event ShieldVerifierSet(address indexed verifier);
     event VerifierSet(address indexed verifier);
     event StrayNativeSwept(address indexed to, uint256 amount);
+    event StrayTokenSwept(address indexed asset, address indexed to, uint256 amount);
     event DepositLimitsOn();
     event DepositLimitSet(address indexed asset, uint128 perDeposit, uint128 total);
     event WithdrawFeeSet(uint16 bps, address indexed recipient);
@@ -159,12 +174,14 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
     /**
      * @param poseidon2_ Circomlib Poseidon (2 inputs)
      * @param verifier_ UnshieldIVerifier or address(0) until set
+     * @param strayRecipient_ Where sweepStrayToken() pays. Fixed for good.
      */
-    constructor(address poseidon2_, address verifier_) {
-        if (poseidon2_ == address(0)) revert ZeroAddress();
+    constructor(address poseidon2_, address verifier_, address strayRecipient_) {
+        if (poseidon2_ == address(0) || strayRecipient_ == address(0)) revert ZeroAddress();
         if (poseidon2_.code.length == 0) revert NotAContract();
         owner = msg.sender;
         poseidon2 = IPoseidon2(poseidon2_);
+        strayRecipient = strayRecipient_;
         if (verifier_ != address(0)) {
             if (verifier_.code.length == 0) revert NotAContract();
             verifier = IVerifier(verifier_);
@@ -221,7 +238,8 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
 
     /// @notice Set the cash-out fee and who collects it. Instant in setup; after
     ///         it, queue it. bps is capped at MAX_WITHDRAW_FEE_BPS, and a non-zero
-    ///         fee needs a recipient. (0, address(0)) turns the fee off.
+    ///         fee needs a recipient. (0, address(0)) turns the fee off and leaves
+    ///         the recipient as it was.
     function setWithdrawFee(uint16 bps, address recipient) external onlyOwner onlySetup {
         _setWithdrawFee(bps, recipient);
     }
@@ -257,8 +275,10 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
         if (bps > MAX_WITHDRAW_FEE_BPS) revert FeeTooHigh();
         if (bps != 0 && recipient == address(0)) revert ZeroAddress();
         withdrawFeeBps = bps;
-        feeRecipient = recipient;
-        emit WithdrawFeeSet(bps, recipient);
+        // (0, address(0)) turns the fee off and keeps the recipient, so fees already
+        // owed stay collectable instead of waiting on a timelocked new one (Kann I-01).
+        if (recipient != address(0)) feeRecipient = recipient;
+        emit WithdrawFeeSet(bps, feeRecipient);
     }
 
     // ── ChangeTimelock hooks ────────────────────────────────────────────────
@@ -315,8 +335,7 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
     ///         permanently stuck, since unshield only pays proof-bound notes. Only
     ///         the surplus over deposited[address(0)] + feesOwed[address(0)] is
     ///         sweepable, so shielded native balances and owed fees are never
-    ///         touched. This is the owner's only value-moving function and it
-    ///         cannot reach note-backing funds.
+    ///         touched. It cannot reach note-backing funds.
     function sweepStrayNative(address to) external onlyOwner nonReentrant {
         if (to == address(0)) revert ZeroAddress();
         uint256 backed = deposited[address(0)] + feesOwed[address(0)];
@@ -326,6 +345,28 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
         (bool ok, ) = to.call{value: surplus}("");
         if (!ok) revert TransferFailed();
         emit StrayNativeSwept(to, surplus);
+    }
+
+    /// @notice Recover an ERC-20 sent straight to the pool, which backs no note and
+    ///         is otherwise stuck for good (Kann I-08). Only the surplus over
+    ///         deposited[asset] + feesOwed[asset] moves, and only to strayRecipient,
+    ///         so the owner chooses nothing but which token. The native coin goes
+    ///         through sweepStrayNative().
+    /// @dev Owner only, unlike collectFees(): the surplus is worked out per token
+    ///      address, so a token with two entry points to one balance would read as
+    ///      all surplus under its second address. Nothing listed is like that today
+    ///      and a listing must keep it so; keeping this behind the owner means a
+    ///      stranger can never point it at one.
+    function sweepStrayToken(address asset) external onlyOwner nonReentrant {
+        if (asset.code.length == 0) revert NotAContract();
+        uint256 backed = deposited[asset] + feesOwed[asset];
+        uint256 bal = IERC20(asset).balanceOf(address(this));
+        if (bal <= backed) revert NothingToSweep();
+        uint256 surplus = bal - backed;
+        _pushAsset(asset, strayRecipient, surplus);
+        // A token that takes more than it was told to must not eat into the notes.
+        if (IERC20(asset).balanceOf(address(this)) < backed) revert InsufficientPoolBalance();
+        emit StrayTokenSwept(asset, strayRecipient, surplus);
     }
 
     /// @notice Send an asset's owed cash-out fees to feeRecipient. Anyone may call

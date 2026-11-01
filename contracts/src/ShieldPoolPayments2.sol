@@ -20,8 +20,13 @@ contract ShieldPoolPayments2 is ShieldPoolCore2 {
     /**
      * @param poseidon2_ Circomlib Poseidon (2 inputs)
      * @param verifier_ UnshieldIVerifier or address(0) until set
+     * @param strayRecipient_ Where sweepStrayToken() pays. Fixed for good.
      */
-    constructor(address poseidon2_, address verifier_) ShieldPoolCore2(poseidon2_, verifier_) {}
+    constructor(
+        address poseidon2_,
+        address verifier_,
+        address strayRecipient_
+    ) ShieldPoolCore2(poseidon2_, verifier_, strayRecipient_) {}
 
     /// @notice Deposits take shieldBound() only: its proof binds the commitment to
     ///         the amount sent, so this pool never takes an unbound deposit, not
