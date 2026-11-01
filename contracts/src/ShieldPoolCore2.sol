@@ -185,8 +185,9 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
 
     /// @notice Enable value-bound deposits. Once set, plain shield() is blocked and
     ///         callers must use shieldBound() with a proof binding commitment↔amount↔asset.
-    /// @dev M-4: one-way. Once bound-shield enforcement is on it can never be
-    ///      cleared or repointed (e.g. reset to 0 to reopen the unbound C1 path).
+    /// @dev M-4: one-way, and setup only. Once bound-shield enforcement is on it can
+    ///      never be cleared or repointed (e.g. reset to 0 to reopen the unbound C1
+    ///      path), and the timelock does not take this setter.
     function setShieldVerifier(address verifier_) external onlyOwner onlySetup {
         _setShieldVerifier(verifier_);
     }
@@ -266,9 +267,10 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
 
     /// @dev Whitelist of timelockable setters and their static-arg word counts.
     ///      A pool that adds setters checks its own first, then calls this.
+    ///      setShieldVerifier is not here: it is set once in setup and never again,
+    ///      so a queued change could only ever fail (Kann I-04).
     function _changeArgWords(bytes4 selector) internal pure virtual override returns (uint256) {
         if (selector == ShieldPoolCore2.setVerifier.selector) return 1;
-        if (selector == ShieldPoolCore2.setShieldVerifier.selector) return 1;
         if (selector == ShieldPoolCore2.setDepositLimit.selector) return 3;
         if (selector == ShieldPoolCore2.setWithdrawFee.selector) return 2;
         return 0;
@@ -278,8 +280,6 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
     function _applyChange(bytes4 selector, bytes calldata args) internal virtual override {
         if (selector == ShieldPoolCore2.setVerifier.selector) {
             _setVerifier(abi.decode(args, (address)));
-        } else if (selector == ShieldPoolCore2.setShieldVerifier.selector) {
-            _setShieldVerifier(abi.decode(args, (address)));
         } else if (selector == ShieldPoolCore2.setDepositLimit.selector) {
             (address asset, uint128 per, uint128 total) = abi.decode(args, (address, uint128, uint128));
             _setDepositLimit(asset, per, total);
