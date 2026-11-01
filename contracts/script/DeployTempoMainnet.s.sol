@@ -29,7 +29,7 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  *   # amount for FEE_RECIPIENT (paid out by collectFees(asset)). Capped at 100 bps (1%) in the contract.
  *   # Leave FEE_RECIPIENT unset to launch with the fee off; turning it on later takes the 3-day timelock.
  *   # A frozen FEE_RECIPIENT never blocks withdrawals; fees just wait in the pool until it can receive.
- *   export WITHDRAW_FEE_BPS=25          # 0.25%; this is the default when unset
+ *   export WITHDRAW_FEE_BPS=50          # 0.5%; this is the default when unset
  *   export FEE_RECIPIENT=0x...          # fee collector (e.g. the treasury multisig)
  *   export NEW_OWNER=0x...              # the owner multisig; it must call acceptOwnership()
  *

@@ -12,6 +12,8 @@ import {DeployEthereumSepolia} from "../script/DeployEthereumSepolia.s.sol";
 import {DeployGloamPayMemo} from "../script/DeployGloamPayMemo.s.sol";
 import {ElysiumDeploySteps} from "./DeployElysium.t.sol";
 import {BnbDeploySteps} from "./DeployBnb.t.sol";
+import {DeployNextVault} from "../script/DeployNextVault.s.sol";
+import {ShieldPoolPayments2} from "../src/ShieldPoolPayments2.sol";
 
 /**
  * The Base deploy scripts, run in a local EVM with the exact settings in
@@ -118,6 +120,73 @@ contract DeployBaseTest is Test, ElysiumDeploySteps, BnbDeploySteps {
         _mainnetDeploy();
         vm.revertToState(snap);
         _ethereumDeploy();
+        _nextVaultDeploy();
+    }
+
+    /// The next vault's script (not deployed, not audited): its gates, and MainnetDeploy's default fee.
+    function _nextVaultDeploy() internal {
+        DeployNextVault s = new DeployNextVault();
+        vm.chainId(8453);
+
+        // Refuses by default: nothing below this runs without the ack.
+        vm.setEnv("GLOAM_ACK_NEXT_VAULT_UNAUDITED", "0");
+        vm.expectRevert(
+            bytes("the next vault is not audited: set GLOAM_ACK_NEXT_VAULT_UNAUDITED=1 only after an outside review")
+        );
+        s.run();
+        vm.setEnv("GLOAM_ACK_NEXT_VAULT_UNAUDITED", "1");
+
+        // A deploy pointed at the wrong RPC stops, on any chain but the one named.
+        vm.setEnv("NEXT_VAULT_CHAIN_ID", "1");
+        vm.expectRevert(bytes("wrong chain for this script"));
+        s.run();
+        vm.setEnv("NEXT_VAULT_CHAIN_ID", "84532");
+        vm.chainId(84532);
+        vm.expectRevert(bytes("not a Gloam mainnet"));
+        s.run();
+        vm.chainId(8453);
+        vm.setEnv("NEXT_VAULT_CHAIN_ID", "8453");
+
+        // The script's own env, with the fee left at its default.
+        _token(USDC);
+        vm.setEnv("DEPLOYER_PK", vm.toString(bytes32(PK)));
+        vm.setEnv("POSEIDON2", vm.toString(_deployPoseidon()));
+        vm.setEnv("LIMIT_ASSETS", string.concat(vm.toString(USDC), ",0x0000000000000000000000000000000000000000"));
+        vm.setEnv("LIMIT_PER_DEPOSIT", "500000000,200000000000000000");
+        vm.setEnv("LIMIT_TOTAL", "25000000000,10000000000000000000");
+        vm.setEnv("WITHDRAW_FEE_BPS", "");
+        vm.setEnv("FEE_RECIPIENT", vm.toString(TREASURY));
+        vm.setEnv("STRAY_RECIPIENT", "");
+        vm.setEnv("NEW_OWNER", vm.toString(OWNER));
+        vm.setEnv("NEW_OWNER_EOA", "1");
+        vm.setEnv("DEPLOYER", "");
+
+        uint256 n = vm.getNonce(vm.addr(PK));
+        s.run();
+        ShieldPoolPayments2 pool = ShieldPoolPayments2(payable(vm.computeCreateAddress(vm.addr(PK), n + 7)));
+
+        assertEq(pool.withdrawFeeBps(), 50, "the default fee follows the 0.5% being queued");
+        assertEq(pool.feeRecipient(), TREASURY);
+        assertEq(pool.strayRecipient(), TREASURY, "stray recipient falls back to the fee recipient");
+        assertTrue(pool.depositLimitsOn());
+        assertFalse(pool.setupMode());
+        assertEq(pool.pendingOwner(), OWNER);
+        (uint128 per, uint128 total) = pool.depositLimit(USDC);
+        assertEq(per, 500e6);
+        assertEq(total, 25_000e6);
+
+        // A fixed address must exist one way or the other.
+        vm.setEnv("FEE_RECIPIENT", "");
+        vm.expectRevert(bytes("set STRAY_RECIPIENT or FEE_RECIPIENT"));
+        s.run();
+        vm.setEnv("STRAY_RECIPIENT", vm.toString(address(0x57A7)));
+        n = vm.getNonce(vm.addr(PK));
+        s.run();
+        pool = ShieldPoolPayments2(payable(vm.computeCreateAddress(vm.addr(PK), n + 7)));
+        assertEq(pool.strayRecipient(), address(0x57A7));
+        assertEq(pool.withdrawFeeBps(), 0, "no recipient, fee off");
+
+        vm.setEnv("GLOAM_ACK_NEXT_VAULT_UNAUDITED", "0");
     }
 
     function _sepoliaDeploy() internal {
