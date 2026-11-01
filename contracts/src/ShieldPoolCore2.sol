@@ -160,9 +160,11 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
      */
     constructor(address poseidon2_, address verifier_) {
         if (poseidon2_ == address(0)) revert ZeroAddress();
+        if (poseidon2_.code.length == 0) revert NotAContract();
         owner = msg.sender;
         poseidon2 = IPoseidon2(poseidon2_);
         if (verifier_ != address(0)) {
+            if (verifier_.code.length == 0) revert NotAContract();
             verifier = IVerifier(verifier_);
         }
         tree.initialize(IPoseidon2(poseidon2_));
@@ -229,6 +231,8 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
     }
 
     function _setVerifier(address verifier_) internal {
+        // A verifier with no code would stop every spend (Kann I-07). Covers address(0) too.
+        if (verifier_.code.length == 0) revert NotAContract();
         verifier = IVerifier(verifier_);
         emit VerifierSet(verifier_);
     }
@@ -236,6 +240,7 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
     function _setShieldVerifier(address verifier_) internal {
         if (address(shieldVerifier) != address(0)) revert ShieldVerifierAlreadySet();
         if (verifier_ == address(0)) revert ZeroAddress();
+        if (verifier_.code.length == 0) revert NotAContract();
         shieldVerifier = IVerifier(verifier_);
         emit ShieldVerifierSet(verifier_);
     }

@@ -16,7 +16,14 @@ contract DualProofVerifier2 is IVerifier {
     IVerifier public immutable unshieldVerifier;
     IVerifier public immutable transferVerifier;
 
+    error NotAContract();
+
+    /// @dev Both must be deployed contracts: these addresses are immutable, so a bad
+    ///      one here would mean a new router (Kann I-07). No code also means address(0).
     constructor(IVerifier unshieldVerifier_, IVerifier transferVerifier_) {
+        if (address(unshieldVerifier_).code.length == 0 || address(transferVerifier_).code.length == 0) {
+            revert NotAContract();
+        }
         unshieldVerifier = unshieldVerifier_;
         transferVerifier = transferVerifier_;
     }
