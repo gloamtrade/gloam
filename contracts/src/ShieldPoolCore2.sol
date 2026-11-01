@@ -66,7 +66,7 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
     IVerifier public verifier;
     /// @notice Optional shield (deposit) verifier: binds the inserted commitment to the
     ///         public (commitment, amount, asset). While address(0), shield() trusts the
-    ///         client — which lets a depositor embed a larger amount than they send (C1).
+    ///         client, which lets a depositor embed a larger amount than they send (C1).
     ///         Once set, plain shield() is blocked and shieldBound() (proof required) is the
     ///         only deposit path, closing the value-binding gap.
     IVerifier public shieldVerifier;
@@ -416,7 +416,7 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
 
     /**
      * @notice Value-bound deposit. Requires a proof that `commitment` opens to the
-     *         PUBLIC (amount, asset) — so the note's value cannot exceed the funds sent.
+     *         PUBLIC (amount, asset), so the note's value cannot exceed the funds sent.
      * @param proof Groth16 proof for public inputs [commitment, amount, asset].
      */
     function shieldBound(

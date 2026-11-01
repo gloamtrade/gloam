@@ -258,8 +258,8 @@ contract NextVaultTest is Test {
     function testFuzz_L02_recipient_input_is_a_field_element_and_never_an_address(address who, uint256 floor) public view {
         vm.assume(floor != 0);
         uint256 input = pool.recipientInput(who, floor);
+        assertEq(input >> 247, 1, "bit 247 set, nothing above it");
         assertGt(input, type(uint160).max);
-        assertLt(input, 1 << 248);
         // BN254 scalar field: the verifiers' checkField takes it
         assertLt(input, 21888242871839275222246405745257275088548364400416034343698204186575808495617);
     }
