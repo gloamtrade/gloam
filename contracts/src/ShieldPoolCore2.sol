@@ -141,6 +141,8 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
     error FeeNotLower();
     error NothingToCollect();
     error DepositLimitsOff();
+    error RecipientIsPool();
+    error BelowMinReceived(uint256 received, uint256 minReceived);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -367,6 +369,7 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
         bytes32 commitment
     ) external payable virtual override nonReentrant {
         if (address(shieldVerifier) != address(0)) revert ShieldProofRequired();
+        _checkShield(asset, amount, commitment);
         _shield(asset, amount, commitment);
     }
 
@@ -382,6 +385,7 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
         bytes calldata proof
     ) external payable nonReentrant {
         if (address(shieldVerifier) == address(0)) revert VerifierNotSet();
+        _checkShield(asset, amount, commitment);
         uint256[] memory inputs = new uint256[](3);
         inputs[0] = uint256(commitment);
         inputs[1] = amount;
@@ -390,11 +394,13 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
         _shield(asset, amount, commitment);
     }
 
-    function _shield(
+    /// @dev Everything a deposit can fail on short of the proof and the token pull,
+    ///      before the proof runs (Kann I-05). Reads only.
+    function _checkShield(
         address asset,
         uint256 amount,
         bytes32 commitment
-    ) internal {
+    ) private view {
         if (commitment == bytes32(0)) revert ZeroCommitment();
         if (amount == 0) revert InvalidAmount();
         if (commitmentSeen[commitment]) revert DuplicateCommitment();
@@ -404,8 +410,6 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
                 revert OverDepositLimit();
             }
         }
-        commitmentSeen[commitment] = true;
-
         if (asset == address(0)) {
             if (msg.value != amount) revert InvalidMsgValue();
         } else {
@@ -415,6 +419,17 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
             // against an EOA/undeployed address and mint phantom `deposited` credit.
             // (The balanceOf delta below also catches it today, but only incidentally.)
             if (asset.code.length == 0) revert NotAContract();
+        }
+    }
+
+    function _shield(
+        address asset,
+        uint256 amount,
+        bytes32 commitment
+    ) internal {
+        commitmentSeen[commitment] = true;
+
+        if (asset != address(0)) {
             uint256 before = IERC20(asset).balanceOf(address(this));
             _pullERC20(msg.sender, amount, asset);
             uint256 received = IERC20(asset).balanceOf(address(this)) - before;
@@ -433,14 +448,19 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
         bytes32 nullifier,
         bytes32[2] calldata newCommitments
     ) external override nonReentrant {
-        // spent first: a duplicate spend stops before the ~300k gas proof check (audit R-1)
+        // Reads first: a spend that cannot land stops before the ~300k gas proof
+        // check (audit R-1, Kann I-05). Nothing below reverts on these again.
         if (spent[nullifier]) revert AlreadySpent();
+        if (newCommitments[0] == bytes32(0) || newCommitments[1] == bytes32(0)) revert ZeroCommitment();
+        if (
+            newCommitments[0] == newCommitments[1] ||
+            commitmentSeen[newCommitments[0]] ||
+            commitmentSeen[newCommitments[1]]
+        ) revert DuplicateCommitment();
         _requireTransferProof(proof, root, nullifier, newCommitments);
         spent[nullifier] = true;
 
         for (uint256 i = 0; i < 2; i++) {
-            if (newCommitments[i] == bytes32(0)) revert ZeroCommitment();
-            if (commitmentSeen[newCommitments[i]]) revert DuplicateCommitment();
             commitmentSeen[newCommitments[i]] = true;
             tree.insert(uint256(newCommitments[i]));
         }
@@ -448,6 +468,7 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
         emit Transferred(nullifier, newCommitments);
     }
 
+    /// @notice Cash out a note with no floor on what `to` receives.
     function unshield(
         bytes calldata proof,
         bytes32 root,
@@ -456,23 +477,82 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
         address to,
         uint256 amount
     ) external override nonReentrant {
-        if (to == address(0)) revert ZeroAddress();
-        if (amount == 0) revert InvalidAmount();
-        if (spent[nullifier]) revert AlreadySpent();
-        _requireUnshieldProof(proof, root, nullifier, asset, to, amount);
+        _unshield(proof, root, nullifier, asset, to, amount, 0);
+    }
+
+    /**
+     * @notice Cash out a note, reverting if `to` would get less than `minReceived`
+     *         after the fee in force when this runs (Kann L-02).
+     * @dev The proof covers the floor, so nobody holding a copy of the proof can
+     *      send it without one: see recipientInput().
+     */
+    function unshield(
+        bytes calldata proof,
+        bytes32 root,
+        bytes32 nullifier,
+        address asset,
+        address to,
+        uint256 amount,
+        uint256 minReceived
+    ) external nonReentrant {
+        _unshield(proof, root, nullifier, asset, to, amount, minReceived);
+    }
+
+    /**
+     * @notice The `recipient` public input an unshield proof must carry.
+     * @dev With no floor it is `to`, as on the live vault. With a floor it is a hash
+     *      of `to` and the floor. The circuit puts no range on `recipient` (it is any
+     *      field element, unshield.circom step 4), so this binds the floor into the
+     *      proof with no circuit change and no new ceremony. Bit 247 is always set
+     *      and nothing above it is, so the value is under the field size and can
+     *      never equal an address: a floored proof cannot pass as a plain one.
+     */
+    function recipientInput(address to, uint256 minReceived) public pure returns (uint256) {
+        if (minReceived == 0) return uint256(uint160(to));
+        return (uint256(keccak256(abi.encode(to, minReceived))) >> 8) | (1 << 247);
+    }
+
+    function _unshield(
+        bytes calldata proof,
+        bytes32 root,
+        bytes32 nullifier,
+        address asset,
+        address to,
+        uint256 amount,
+        uint256 minReceived
+    ) private {
+        uint256 fee = _checkUnshield(nullifier, asset, to, amount, minReceived);
+        _requireUnshieldProof(proof, root, nullifier, asset, recipientInput(to, minReceived), amount);
         spent[nullifier] = true;
 
-        if (deposited[asset] < amount) revert InsufficientPoolBalance();
         // The proof binds the full `amount`; the note is spent in full. The fee
         // stays in the pool as feesOwed (no call to the recipient here), and `to`
         // gets the rest. fee < amount always, since bps <= 1%.
-        uint256 fee = _withdrawFee(amount);
         deposited[asset] -= amount;
         if (fee != 0) feesOwed[asset] += fee;
         _pushAsset(asset, to, amount - fee);
 
         emit Unshielded(nullifier, asset, to, amount);
         if (fee != 0) emit WithdrawFee(nullifier, asset, fee);
+    }
+
+    /// @dev Everything an unshield can fail on short of the proof, before the proof
+    ///      runs (Kann I-05, audit R-1). Reads only. Returns the fee.
+    function _checkUnshield(
+        bytes32 nullifier,
+        address asset,
+        address to,
+        uint256 amount,
+        uint256 minReceived
+    ) private view returns (uint256 fee) {
+        if (to == address(0)) revert ZeroAddress();
+        // Paying the pool itself would spend the note and strand its value (Kann I-03).
+        if (to == address(this)) revert RecipientIsPool();
+        if (amount == 0) revert InvalidAmount();
+        if (spent[nullifier]) revert AlreadySpent();
+        if (deposited[asset] < amount) revert InsufficientPoolBalance();
+        fee = _withdrawFee(amount);
+        if (amount - fee < minReceived) revert BelowMinReceived(amount - fee, minReceived);
     }
 
     /// @dev floor(amount * bps / 10_000), rounding in the user's favour, split so
@@ -504,7 +584,7 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
         bytes32 root,
         bytes32 nullifier,
         address asset,
-        address to,
+        uint256 recipient,
         uint256 amount
     ) internal view {
         if (address(verifier) == address(0)) revert VerifierNotSet();
@@ -514,7 +594,7 @@ abstract contract ShieldPoolCore2 is IShieldPool, ChangeTimelock {
         inputs[1] = uint256(nullifier);
         inputs[2] = uint256(uint160(asset));
         inputs[3] = amount;
-        inputs[4] = uint256(uint160(to));
+        inputs[4] = recipient;
         if (!verifier.verify(proof, inputs)) revert InvalidProof();
     }
 
