@@ -31,6 +31,7 @@ import { LEGACY_DISCLOSURE } from "@/lib/disclosure";
 import { MAX_PROOF_TEXT, ProofInputError, verifyProofText, type ApiVerifyResult } from "@/lib/proofsServer";
 import { SharedCountUnavailable, hitRateLimit } from "./rateLimit";
 import { findSecret, secretWarning } from "./safety";
+import { HUNT_INPUT_MAX, countHuntStep, huntEnabled, huntMcpArg, huntSubject, mcpHuntFinal } from "@/lib/hunt";
 
 export const SITE = "https://www.gloam.trade";
 export const MCP_URL = `${SITE}/mcp`;
@@ -998,6 +999,27 @@ function connectFullAgent(args: Args): CallToolResult {
   });
 }
 
+/** Treasure hunt key tries per IP per hour (lib/hunt). */
+const HUNT_TRIES_PER_HOUR = 20;
+
+/**
+ * gloam_info with the treasure hunt's key (lib/hunt): how to put the prize link
+ * together, and its last piece. The argument is not in the tool's schema; any
+ * call without it, with the hunt off, or with a wrong key gets the usual
+ * answer, so a wrong key looks the same as no key.
+ */
+async function huntInfo(args: Args, ctx: ToolContext): Promise<Record<string, unknown> | null> {
+  if (!huntEnabled()) return null;
+  const value = args[huntMcpArg()];
+  if (typeof value !== "string" || !value.trim() || value.length > HUNT_INPUT_MAX) return null;
+  const tries = await hitRateLimit(ctx.ip, "hunt-mcp", HUNT_TRIES_PER_HOUR, Date.now(), 3600).catch(() => null);
+  if (!tries?.allowed) return null;
+  const final = mcpHuntFinal(value);
+  if (!final) return null;
+  await countHuntStep("mcp", huntSubject("ip", ctx.ip));
+  return { message: final.message, ...(final.piece ? { piece: final.piece } : {}) };
+}
+
 /** Runs a tool. Secrets are refused before any tool runs. */
 export async function callTool(name: string, rawArgs: unknown, ctx: ToolContext): Promise<CallToolResult> {
   const secret = findSecret(rawArgs);
@@ -1006,7 +1028,7 @@ export async function callTool(name: string, rawArgs: unknown, ctx: ToolContext)
   try {
     switch (name) {
       case "gloam_info":
-        return ok(info(ctx));
+        return ok((await huntInfo(args, ctx)) ?? info(ctx));
       case "gloam_networks":
         return ok(networks(args, ctx));
       case "gloam_vault_stats":
