@@ -2146,7 +2146,7 @@ function HuntPanel() {
         <Kpi label="Found the hidden page" value={r ? n(r.page) : "None"} sub="from the page source, piece 1" />
         <Kpi label="Solved the riddle" value={r ? n(r.riddle) : "None"} sub="on the hidden page, piece 2" />
         <Kpi label="Asked Glim" value={r ? n(r.glim) : "None"} sub="with the passphrase, piece 3" />
-        <Kpi label="Found the MCP key" value={r ? n(r.mcp) : "None"} sub="all four pieces, piece 4" />
+        <Kpi label="Got the prize link" value={r ? n(r.mcp) : "None"} sub="MCP key with pieces 1 to 3" />
         <Kpi label="Prize" value={prize} sub={prizeSub} />
       </section>
       <Panel title="Hunt">
@@ -2158,7 +2158,8 @@ function HuntPanel() {
             ["Hidden page", on(data.setup.page)],
             ["Glim passphrase", on(data.setup.glim)],
             ["MCP key", on(data.setup.mcp)],
-            ["All four pieces of the prize link", on(data.setup.pieces)],
+            ["Pieces 1 to 3", on(data.setup.pieces)],
+            ["Prize link", on(data.setup.prizeLink)],
             ["Prize check (nullifier)", on(data.setup.prizeCheck)],
           ]}
           empty="Nothing set"

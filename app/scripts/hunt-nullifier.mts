@@ -3,7 +3,8 @@
  * (lib/huntPrize). The nullifier lets the admin panel see when the prize is
  * claimed; it can't be used to claim it.
  *
- * Reads the claim link from standard input, so it never lands in shell history
+ * Takes either link form (short gloam.trade/c#..., long ...#claim=gloam1=...),
+ * the same text as HUNT_PRIZE_LINK. Reads it from standard input, so it never lands in shell history
  * or the process list, and sends nothing anywhere.
  *
  * Run from app/:  pbpaste | ../mcp/node_modules/.bin/tsx scripts/hunt-nullifier.mts

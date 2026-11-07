@@ -189,7 +189,7 @@ import {
   type TgUser,
 } from "./telegram";
 import { hitRateLimit } from "@/lib/mcpRemote/rateLimit";
-import { HUNT_INPUT_MAX, countHuntStep, glimHuntGroupReply, glimHuntReply, huntEnabled, huntSubject } from "@/lib/hunt";
+import { HUNT_INPUT_MAX, countHuntStep, glimHuntReply, huntEnabled, huntSubject } from "@/lib/hunt";
 import { isMainnetLive } from "@/lib/mainnet";
 
 /** t.me/gloamhq. TELEGRAM_GROUP_ID overrides it. */
@@ -1203,7 +1203,6 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
     await sendMessage(chatId, leakWarning(name, removed), { threadId, replyTo: removed ? undefined : msg.message_id });
     return;
   }
-  if (answerable && !edited && (await onHuntPassphrase(msg, from, "group", threadId))) return;
   const me = await getMe();
   // a call-channel post forwarded or quoted in from elsewhere ("80x move from our call")
   const outside = msg.forward_origin || msg.external_reply ? [text, msg.external_reply?.text, msg.external_reply?.caption, msg.quote?.text].filter(Boolean).join(" ") : "";
@@ -1542,33 +1541,29 @@ function deploymentSecrets(): string[] {
     .map(([, v]) => v!.trim());
 }
 
-/** Passphrase tries per person per hour in private, and replies to a right one. */
+/** Passphrase tries per person per hour, and replies to a right one. */
 const HUNT_TRIES_PER_HOUR = 30;
 const HUNT_REPLIES_PER_HOUR = 5;
 
 /**
- * The treasure hunt's passphrase (lib/hunt), from anyone: checked before any other
- * handling and any model call, and only ever matched exactly (case and spaces
- * aside). In private the next clue and its piece of the prize link come back; in the group the message is taken
- * down so the passphrase doesn't spread, with a note to send it privately. With
- * the hunt off, or for any other text, this does nothing and says nothing.
- * True when the message was handled here.
+ * The treasure hunt's passphrase (lib/hunt), in a private chat from anyone:
+ * checked before any other handling and any model call, and only ever matched
+ * exactly (case and spaces aside), at most HUNT_TRIES_PER_HOUR tries per person.
+ * A right one gets the next clue and its piece. The group is never checked: a
+ * right guess there is handled like any other message, the same as a wrong one,
+ * so the group can't be used to test guesses (no limit, and no answer that
+ * says which one was right). With the hunt off, or for any other text, this
+ * does nothing and says nothing. True when the message was handled here.
  */
-async function onHuntPassphrase(msg: TgMessage, from: TgUser, where: "private" | "group", threadId?: number): Promise<boolean> {
+async function onHuntPassphrase(msg: TgMessage, from: TgUser): Promise<boolean> {
   if (!huntEnabled()) return false;
   const raw = messageText(msg).trim();
   if (!raw || raw.length > HUNT_INPUT_MAX) return false;
-  const chatId = msg.chat.id;
-  if (where === "private" && !(await hitRateLimit(`tg:${from.id}`, "tg-hunt-try", HUNT_TRIES_PER_HOUR, Date.now(), 3600)).allowed) return false;
+  if (!(await hitRateLimit(`tg:${from.id}`, "tg-hunt-try", HUNT_TRIES_PER_HOUR, Date.now(), 3600)).allowed) return false;
   const reply = glimHuntReply(raw);
   if (!reply) return false;
-  if (where === "group") {
-    const removed = await deleteMessage(chatId, msg.message_id);
-    await sendMessage(chatId, glimHuntGroupReply(), { threadId, replyTo: removed ? undefined : msg.message_id });
-    return true;
-  }
   if (!(await hitRateLimit(`tg:${from.id}`, "tg-hunt", HUNT_REPLIES_PER_HOUR, Date.now(), 3600)).allowed) return true;
-  if (await sendMessage(chatId, reply)) await countHuntStep("glim", huntSubject("tg", from.id));
+  if (await sendMessage(msg.chat.id, reply)) await countHuntStep("glim", huntSubject("tg", from.id));
   return true;
 }
 
@@ -1640,7 +1635,7 @@ async function chatWithTeam(
 async function onPrivate(msg: TgMessage, c: BotConfig): Promise<void> {
   const from = msg.from;
   if (!from || from.is_bot) return;
-  if (await onHuntPassphrase(msg, from, "private")) return;
+  if (await onHuntPassphrase(msg, from)) return;
   const owner = isOwner(from, c);
   if (!owner && !isAdmin(from, c)) return;
   const chatId = msg.chat.id;

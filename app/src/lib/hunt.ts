@@ -2,12 +2,34 @@
  * The treasure hunt: a prize hidden across the site, Glim and the hosted MCP
  * server. Server only (no client component may import this file).
  *
- * The prize is a Gloam claim link the founder makes himself. The part of it
- * after "gloam1=" is split into four pieces, and each of the four steps gives
- * one (HUNT_FRAGMENT_1 to 4) with its clue: the home page source, the hidden
- * page's riddle, Glim's passphrase, the MCP key. Whoever puts the pieces
- * together in order and opens the link first takes the prize; the vault lets a
- * note be spent once, so only one claim ever works.
+ * The prize is a Gloam claim link the founder makes himself (HUNT_PRIZE_LINK,
+ * the short gloam.trade/c#... form or the long #claim= one). The first three
+ * steps (the home page source, the hidden page's riddle, Glim's passphrase)
+ * each hand out a piece with their clue (HUNT_FRAGMENT_1 to 3). A piece is a
+ * short random code, not a part of the link, so pieces say nothing about the
+ * prize. The last step, the MCP key, gives the whole link, and only to a call
+ * that also brings all three pieces in order. So every step is needed: the
+ * pieces without the key get nothing, and the key without the pieces only gets
+ * told to bring them. Whoever opens the link first takes the prize; the vault
+ * lets a note be spent once, so only one claim ever works.
+ *
+ * Earlier the link itself was cut into four pieces, one per step. Pieces 1 to 3
+ * then already held the whole note secret (the last piece was only the
+ * commitment and chain, which anyone can work out again), so the last step
+ * could be skipped. Never split the link again.
+ *
+ * Setting it up (all server environment variables):
+ *  1. Make the prize payment in the app and copy its claim link into
+ *     HUNT_PRIZE_LINK. Either link form works; it is handed out as it is.
+ *  2. Its nullifier, for the admin's "claimed yet?" check:
+ *     pbpaste | ../mcp/node_modules/.bin/tsx scripts/hunt-nullifier.mts
+ *     into HUNT_PRIZE_NULLIFIER.
+ *  3. Three pieces, letters and digits, 8 to 48 characters each, made fresh:
+ *     for i in 1 2 3; do openssl rand -hex 8; done
+ *     into HUNT_FRAGMENT_1, HUNT_FRAGMENT_2 and HUNT_FRAGMENT_3.
+ *  4. The clue that leads to the MCP step (HUNT_CLUE_4) names the key; the key
+ *     goes in HUNT_MCP_KEY. A right key without the pieces is told to call again
+ *     with them as "pieces" (HUNT_MCP_PIECES_ARG renames it).
  *
  * The code here is only the mechanism. Every piece of content (the texts, the
  * hidden page's path, the answer, Glim's passphrase, the MCP key, the pieces of
@@ -33,9 +55,12 @@ export type HuntStep = (typeof HUNT_STEPS)[number];
 const KEY_PREFIX = "gloam:hunt:v1:";
 /** Longest answer, passphrase or key the checks will read. */
 export const HUNT_INPUT_MAX = 200;
-/** How many pieces the prize link is split into: one per step. */
-export const HUNT_PIECES = 4;
-/** The network the prize link is on, unless HUNT_PRIZE_NET says otherwise. */
+/** How many pieces the hunt hands out: one for each step before the MCP key. */
+export const HUNT_PIECES = 3;
+/** A piece's length: long enough not to be guessed, short enough to copy. */
+const PIECE_MIN = 8;
+const PIECE_MAX = 48;
+/** The network the prize note is on, unless HUNT_PRIZE_NET says otherwise. */
 export const HUNT_DEFAULT_PRIZE_NET = "robinhood-mainnet";
 
 function env(name: string): string {
@@ -47,10 +72,17 @@ function text(name: string): string {
   return env(name).replace(/\\n/g, "\n");
 }
 
-/** A piece of the prize link: letters, digits and "=" only, as a claim link writes them. */
+/** Piece n (1 to 3): letters, digits and "=" only, 8 to 48 characters. Anything else is no piece. */
 export function huntFragment(n: number): string {
+  if (!Number.isInteger(n) || n < 1 || n > HUNT_PIECES) return "";
   const f = env(`HUNT_FRAGMENT_${n}`).replace(/\s+/g, "");
-  return /^[A-Za-z0-9=]+$/.test(f) ? f : "";
+  return f.length >= PIECE_MIN && f.length <= PIECE_MAX && /^[A-Za-z0-9=]+$/.test(f) ? f : "";
+}
+
+/** All three pieces in order, or null while any is missing. */
+function allPieces(): string[] | null {
+  const pieces = Array.from({ length: HUNT_PIECES }, (_, i) => huntFragment(i + 1));
+  return pieces.every(Boolean) ? pieces : null;
 }
 
 /** The line that hands out piece n. */
@@ -197,7 +229,11 @@ export function checkRiddleAnswer(guess: unknown): string | null {
 
 // ---------------------------------------------------------------- step 3: Glim
 
-/** Glim's reply (the next clue and the third piece) when someone sends the passphrase, or null (also when the hunt is off). */
+/**
+ * Glim's reply (the next clue and the third piece) when someone sends the
+ * passphrase in a private chat, or null (also when the hunt is off). The group
+ * is never checked, so it can't tell a right guess from a wrong one.
+ */
 export function glimHuntReply(message: string): string | null {
   if (!huntEnabled()) return null;
   const phrase = env("HUNT_GLIM_PASSPHRASE");
@@ -206,10 +242,6 @@ export function glimHuntReply(message: string): string | null {
   return matchesSecret(message, phrase) ? withPiece(reply, 3) : null;
 }
 
-/** What Glim says in the group to the passphrase, so the next clue is never posted there. */
-export function glimHuntGroupReply(): string {
-  return text("HUNT_GLIM_GROUP_REPLY") || "Send me that in a private message.";
-}
 
 // ---------------------------------------------------------------- step 4: the hosted MCP server
 
@@ -219,35 +251,84 @@ export function huntMcpArg(): string {
   return /^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(name) ? name : "code";
 }
 
-/** The network key the prize link is on (HUNT_PRIZE_NET, a plain key, else Robinhood Chain mainnet). */
+/** The network key the prize note is on, for the "claimed yet?" check (HUNT_PRIZE_NET, a plain key, else Robinhood Chain mainnet). */
 export function huntPrizeNet(): string {
   const net = env("HUNT_PRIZE_NET");
   return /^[a-z0-9-]{2,40}$/.test(net) ? net : HUNT_DEFAULT_PRIZE_NET;
 }
 
-/** How to put the link together, when HUNT_FINAL_INSTRUCTIONS doesn't say it in its own words. */
-export function defaultFinalInstructions(net = huntPrizeNet()): string {
+/** The gloam_info argument that carries the three pieces. */
+export function huntMcpPiecesArg(): string {
+  const name = env("HUNT_MCP_PIECES_ARG");
+  return /^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(name) && name !== huntMcpArg() ? name : "pieces";
+}
+
+/**
+ * The prize claim link (HUNT_PRIZE_LINK), or null when unset or not a claim
+ * link: an https link with a short body (/c#<letters and digits>) or a
+ * "#claim=" code.
+ */
+export function huntPrizeLink(): string | null {
+  const link = env("HUNT_PRIZE_LINK");
+  if (!/^https:\/\/[^\s#]+$/.test(link.split("#")[0] ?? "") || /\s/.test(link)) return null;
+  if (/\/c#[0-9A-Za-z]{20,}$/.test(link)) return link;
+  if (/#claim=gloam[0-9a-z]*[.=-][A-Za-z0-9_\-.=%]{20,}$/.test(link)) return link;
+  return null;
+}
+
+/**
+ * True when the text holds the three pieces in order (1, then 2, then 3), with
+ * anything between them: spaces, commas, "piece 1:" labels. An array of texts
+ * is read as one text. A text too long, or pieces out of order, never match.
+ */
+export function bringsPieces(value: unknown, pieces: string[]): boolean {
+  const parts = Array.isArray(value) ? value : [value];
+  if (!parts.length || parts.length > HUNT_PIECES * 2 || !parts.every((p) => typeof p === "string")) return false;
+  const s = (parts as string[]).join(" ");
+  if (!s.trim() || s.length > HUNT_INPUT_MAX) return false;
+  let from = 0;
+  for (const piece of pieces) {
+    const at = s.indexOf(piece, from);
+    if (at < 0) return false;
+    from = at + piece.length;
+  }
+  return true;
+}
+
+/** What a right key gets without all three pieces, in order. Says nothing about which piece is missing or wrong. */
+export function piecesNeededMessage(): string {
   return [
-    `That is the last of the ${HUNT_PIECES} pieces.`,
-    `Put them together in order, 1 then 2 then 3 then 4, with nothing between them, and add the result to the end of this link:`,
-    `https://www.gloam.trade/claim?net=${net}#claim=gloam1=`,
-    "Open the whole link and claim. Claiming needs no gas. Only the first claim works, so be quick.",
+    "That is the right key.",
+    `The prize link only comes with the ${HUNT_PIECES} pieces you found on the way.`,
+    `Call gloam_info again with the same key and "${huntMcpPiecesArg()}": piece 1, piece 2 and piece 3, in that order, separated by spaces.`,
   ].join("\n");
 }
 
-export type HuntFinal = { message: string; piece: { number: number; of: number; text: string } | null };
+/** What comes with the prize link, when HUNT_FINAL_INSTRUCTIONS doesn't say it in its own words. Works for both link forms: the link is handed out whole. */
+export function defaultFinalInstructions(): string {
+  return [
+    "That is every step. The prize link is below, whole: open it as it is and claim.",
+    "Claiming needs no gas. Only the first claim works, so be quick.",
+  ].join("\n");
+}
 
-/** The last step for the right MCP key: how to assemble the link, and the fourth piece. Null otherwise. */
-export function mcpHuntFinal(value: unknown): HuntFinal | null {
+export type HuntFinal = { message: string; link: string | null };
+
+/**
+ * The last step. A wrong key, or a step not set up (key, prize link or any
+ * piece missing): null, so the caller answers as usual. The right key without
+ * the three pieces in order: how to bring them, no link. The right key with
+ * them: the prize link, whole.
+ */
+export function mcpHuntFinal(value: unknown, pieces: unknown): HuntFinal | null {
   if (!huntEnabled()) return null;
   const key = env("HUNT_MCP_KEY");
-  if (!key) return null;
+  const link = huntPrizeLink();
+  const want = allPieces();
+  if (!key || !link || !want) return null;
   if (!matchesSecret(value, key)) return null;
-  const fragment = huntFragment(4);
-  return {
-    message: text("HUNT_FINAL_INSTRUCTIONS") || defaultFinalInstructions(),
-    piece: fragment ? { number: 4, of: HUNT_PIECES, text: fragment } : null,
-  };
+  if (!bringsPieces(pieces, want)) return { message: piecesNeededMessage(), link: null };
+  return { message: text("HUNT_FINAL_INSTRUCTIONS") || defaultFinalInstructions(), link };
 }
 
 // ---------------------------------------------------------------- progress
@@ -289,7 +370,8 @@ export function huntSetup(): Record<string, boolean> {
     page: Boolean(huntEnabled() && huntPagePath()),
     glim: Boolean(env("HUNT_GLIM_PASSPHRASE") && env("HUNT_CLUE_4")),
     mcp: Boolean(env("HUNT_MCP_KEY")),
-    pieces: [1, 2, 3, 4].every((n) => Boolean(huntFragment(n))),
+    pieces: Boolean(allPieces()),
+    prizeLink: Boolean(huntPrizeLink()),
     prizeCheck: Boolean(prizeNullifier()),
   };
 }
