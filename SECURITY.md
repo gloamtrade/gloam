@@ -1,6 +1,6 @@
 # Security notes (Gloam)
 
-Gloam runs on Robinhood Chain mainnet (`4663`), Tempo mainnet (`4217`), Base mainnet (`8453`) and Ethereum mainnet (`1`), with deposit limits, and with the testnets (`46630`, `42431`, Base Sepolia `84532` and Ethereum Sepolia `11155111`) next to them. The code was reviewed internally before mainnet (20 October 2026, no Critical or High findings open). Kann Audits reviewed the vault contracts (report, 1 November 2026: [gloam.trade/security](https://gloam.trade/security)) and found no Critical, High or Medium issues. The swap routers, circuits, app and relay were not part of that review.
+Gloam runs on Robinhood Chain mainnet (`4663`), Tempo mainnet (`4217`), Base mainnet (`8453`) and Ethereum mainnet (`1`), with deposit limits, and with the testnets (`46630`, `42431`, Base Sepolia `84532` and Ethereum Sepolia `11155111`) next to them. The code was reviewed internally before mainnet (20 October 2026, no Critical or High findings open). Kann Audits reviewed the vault contracts (report, 1 November 2026: [gloam.trade/security](https://gloam.trade/security)) and found no Critical, High or Medium issues. The swap routers, circuits, app and relay were not part of that review. The routers (GloamVaultSwap, GloamVaultSwap2, GloamVaultSwapV4, V4b, V4c, GloamVaultSwapTempo, GloamVaultSwapTempo2, SwapEscrow and SwapEscrow2) and VaultOwnerGuard have had internal review only, most recently on 7 November 2026; an outside review of them is being sourced.
 
 ## Secrets policy
 
