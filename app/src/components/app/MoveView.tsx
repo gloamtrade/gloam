@@ -3555,7 +3555,7 @@ export function MoveView() {
                 </h3>
                 <p className="mt-1 text-[13px] leading-relaxed text-mute">
                   Paste the claim link or payment code you were sent. Codes start
-                  with gloam2t, gloam1 or gloam1e. Claiming also secures it: the
+                  with gloam3, gloam1, gloam1e or gloam2t. Claiming also secures it: the
                   payment moves into a balance only you hold, so the person who
                   sent it can no longer take it back.
                 </p>
@@ -3569,7 +3569,7 @@ export function MoveView() {
                   rows={4}
                   spellCheck={false}
                   className="gl-input tnum mt-3 h-auto min-h-[108px] resize-none py-3 text-[13px] leading-relaxed"
-                  placeholder="gloam2t… or gloam1…"
+                  placeholder="gloam.trade/c#…, gloam3… or gloam1…"
                 />
                 {claimPreview && (
                   <div className="mt-2 rounded-xl bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-soft" aria-live="polite">

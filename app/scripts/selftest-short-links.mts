@@ -34,7 +34,7 @@ import {
 } from "@gloamtrade/sdk";
 import type { Address, Hex } from "viem";
 import { buildNotePackage, decodeNotePackage, encodeNotePackage, encodeNotePackageEncrypted, paymentCodeIn } from "../src/lib/notePackage";
-import { appClaimPath, claimLinkFor, codeFromHash, longClaimLinkFor, shortCodeFromHash } from "../src/lib/claimLink";
+import { appClaimPath, claimLinkFor, codeFromHash, longClaimLinkFor, shortCodeFor, shortCodeFromHash } from "../src/lib/claimLink";
 import { isClaimLink } from "../src/lib/funnel";
 import { NETWORK_KEYS, getNetwork, type NetworkKey } from "../src/lib/networks";
 import {
@@ -212,6 +212,67 @@ console.log(`claim links: long ${longMin}+ chars; short ${Math.min(...lengths.ma
   const body32 = encodeShortClaim(old32)!;
   assert.equal((await decodeShortClaim(body32)).commitment, c32, "secret form: same commitment");
   n += 1;
+}
+
+// ---------------------------------------------------------------- short codes in the app
+
+{
+  // What the app shows and copies as "the code": gloam3.<the short link's body> when the payment
+  // has a short link, else the full code. Pasted back anywhere, it opens to the same note.
+  const asset = "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168" as Address;
+  const { seed, secret } = randomNoteSeed();
+  const pack = buildNotePackage({
+    pool: getNetwork("robinhood-mainnet").pool!,
+    asset,
+    amountWei: "100000000",
+    secret: fieldToHex(secret),
+    commitment: fieldToHex(await noteCommitmentPoseidon(secret, 100_000_000n, asset)),
+    chainId: 4663,
+    seed,
+    note: "Rent",
+  });
+  const long = encodeNotePackage(pack);
+  const short = shortCodeFor(long, "robinhood-mainnet");
+  const link = claimLinkFor(long, "robinhood-mainnet", ORIGIN);
+  assert.match(short, /^gloam3\.[0-9A-Za-z]+$/, "a gloam3 code");
+  assert.equal(short.slice("gloam3.".length), link.slice(link.indexOf("#") + 1), "the same body as the short link");
+  assert.equal(shortCodeFor(long), short, "with no network, the code's own chain");
+  assert.equal(shortCodeFor(short, "robinhood-mainnet"), short, "a short code stays as it is");
+  assert.ok(short.length * 5 < long.length, `much shorter (${short.length} vs ${long.length})`);
+  console.log(`codes: long ${long.length} chars, short ${short.length}`);
+  n += 5;
+  // every way it can be pasted reads back to the very same note
+  for (const pasted of [short, short.replace(".", "="), `  ${short}\n`, `here you go: ${short} thanks`, link, `${ORIGIN}/claim#claim=${short.replace(".", "=")}`]) {
+    const code = paymentCodeIn(pasted);
+    const back = await decodeNotePackage(code);
+    assert.equal(back.secret, pack.secret, pasted);
+    assert.equal(back.commitment, pack.commitment, pasted);
+    assert.equal(back.amountWei, pack.amountWei, pasted);
+    assert.equal(back.asset.toLowerCase(), pack.asset.toLowerCase(), pasted);
+    assert.equal(back.pool.toLowerCase(), pack.pool.toLowerCase(), pasted);
+    assert.equal(back.chainId, 4663, pasted);
+    assert.equal(back.note, "Rent", pasted);
+    assert.equal(back.seed, seed, pasted);
+    n += 8;
+  }
+  // the long code still pastes too
+  assert.equal((await decodeNotePackage(paymentCodeIn(long))).commitment, pack.commitment);
+  assert.ok(isClaimLink(short), "the funnel counts a short code as a claim code");
+  n += 2;
+
+  // what can't be short keeps its full code: another network, no chain named, locked, sealed, an address
+  assert.equal(shortCodeFor(long, "tempo"), long, "a code shown on another network stays long, as its link does");
+  const { chainId: _c, ...noChain } = pack;
+  void _c;
+  const old = encodeNotePackage(noChain as typeof pack);
+  assert.equal(shortCodeFor(old, "robinhood-mainnet"), old, "a code that names no chain");
+  assert.equal(shortCodeFor(old), old);
+  const locked = await encodeNotePackageEncrypted(pack, "correct horse");
+  assert.equal(shortCodeFor(locked, "robinhood-mainnet"), locked, "a locked code");
+  for (const other of [`gloam2t.${"A".repeat(80)}`, `gloamr1.${"B".repeat(80)}`, "not a code"]) {
+    assert.equal(shortCodeFor(other, "robinhood-mainnet"), other, other);
+  }
+  n += 7;
 }
 
 // ---------------------------------------------------------------- request links

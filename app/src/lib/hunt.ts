@@ -74,9 +74,29 @@ export function huntEnabled(): boolean {
   return v === "1" || v === "true";
 }
 
-/** Lower case, with every space removed, so "Shielded Pool" and "shieldedpool" match. */
+/** Curly quotes and apostrophes, as phone keyboards type them, to straight ones. */
+function foldQuotes(s: string): string {
+  return s.replace(/[\u2018\u2019\u201A\u201B\u2032\u02BC\u0060\u00B4]/g, "'").replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"');
+}
+
+/**
+ * What a guess is compared as: NFKC, curly quotes folded to straight, lower
+ * case, then only letters (with their accents) and digits kept, from any
+ * script. Spaces, punctuation and symbols all go, so "Don’t trust, verify!",
+ * "don't trust verify" and "donttrustverify" are the same answer. A
+ * "sha256:<hex>" answer is the hash of exactly this string.
+ */
 export function normalizeGuess(input: string): string {
-  return input.normalize("NFKC").toLowerCase().replace(/\s+/g, "");
+  return foldQuotes(input.normalize("NFKC")).toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, "");
+}
+
+/**
+ * The form hashes were made over before punctuation was dropped (lower case,
+ * spaces removed, punctuation kept; quotes now folded), so a "sha256:" answer
+ * set then still matches.
+ */
+function legacyGuess(input: string): string {
+  return foldQuotes(input.normalize("NFKC")).toLowerCase().replace(/\s+/g, "");
 }
 
 function sha256(s: string): Buffer {
@@ -89,10 +109,13 @@ function sameDigest(a: Buffer, b: Buffer): boolean {
 }
 
 /**
- * Checks a guess against a server value, ignoring case and spaces. The value may
- * list several accepted answers split by "|", and each may be written plain or as
- * "sha256:<hex>" (the hash of the answer already lowered and with spaces removed),
- * so the plain answer need not sit in the environment at all.
+ * Checks a guess against a server value, ignoring case, spaces, punctuation and
+ * curly quotes (normalizeGuess). The value may list several accepted answers
+ * split by "|", and each may be written plain or as "sha256:<hex>", the hash
+ * of normalizeGuess(answer), so the plain answer need not sit in the
+ * environment at all. To make one (curly quotes are punctuation, so they go too):
+ *   node -e 'const s=process.argv[1].normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu,"");console.log("sha256:"+require("crypto").createHash("sha256").update(s).digest("hex"))' "Don't trust, verify"
+ * A hash made before punctuation was dropped (lower case, spaces removed) still matches.
  */
 export function matchesSecret(guess: unknown, configured: string): boolean {
   if (typeof guess !== "string" || !configured) return false;
@@ -100,14 +123,23 @@ export function matchesSecret(guess: unknown, configured: string): boolean {
   const g = normalizeGuess(guess);
   if (!g) return false;
   const digest = sha256(g);
+  const legacy = sha256(legacyGuess(guess));
   let hit = false;
   for (const raw of configured.split("|")) {
     const want = raw.trim();
     if (!want) continue;
     const hashed = /^sha256:([0-9a-f]{64})$/i.exec(want);
-    const target = hashed ? Buffer.from(hashed[1]!, "hex") : sha256(normalizeGuess(want));
-    // every alternative is checked, so a match early in the list takes no less time
-    if (sameDigest(digest, target)) hit = true;
+    if (hashed) {
+      const target = Buffer.from(hashed[1]!, "hex");
+      // both forms are compared every time, so the time taken says nothing about which one matched
+      const now = sameDigest(digest, target);
+      const before = sameDigest(legacy, target);
+      if (now || before) hit = true;
+      continue;
+    }
+    const w = normalizeGuess(want);
+    // an answer of only punctuation would match nothing sensible; it never matches
+    if (w && sameDigest(digest, sha256(w))) hit = true;
   }
   return hit;
 }

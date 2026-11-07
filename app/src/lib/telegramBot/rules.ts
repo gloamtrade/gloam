@@ -966,11 +966,12 @@ export function moderationAsk(text: string, command: string | null, tagged: bool
  *  - address: gloamr1.<key>, a Gloam address. Made to be shared.
  *  - sealed: gloam2t.<...>, a payment sealed to one Gloam address. Only that
  *    address's owner can open it, so it is safe to share.
- *  - plain: gloam1.<...>, a plain payment code. A bearer secret: whoever has
- *    it can claim the money.
+ *  - plain: gloam1.<...>, a plain payment code, or its short form
+ *    gloam3.<letters and digits>. A bearer secret: whoever has it can claim the money.
  *  - locked: gloam1e.<...>, a code locked with a phrase. The code plus the
  *    phrase claims it.
- *  - claim_link: ...#claim=<code>, as bearer as the plain code inside it.
+ *  - claim_link: ...#claim=<code>, as bearer as the plain code inside it, or
+ *    a short one, gloam.trade/c#<letters and digits> (the same payment).
  *  - request_link: ...#to=gloamr1...&amount=..., only says where to pay.
  * A "Scan to pay privately" QR holds an address or a request, so it is safe too.
  */
@@ -988,18 +989,25 @@ const CODE_LABEL: Record<CodeKind, string> = {
 const NOT_URL = String.raw`[^\s<>"'()\[\]]`;
 /** A link with #claim=<code> (or the encoded %23claim%3D), all of it. */
 const CLAIM_LINK_RE = new RegExp(`${NOT_URL}*?(?:#|%23)claim(?:=|%3D)([A-Za-z0-9_.%=-]{20,})${NOT_URL}*`, "gi");
+/**
+ * A short claim link: gloam.trade/c#<base62> (www., a scheme, "/c/" or %23 for
+ * the "#" all read), all of it. Only on gloam.trade: a lookalike host is left
+ * for the scam checks to see.
+ */
+const SHORT_CLAIM_LINK_RE = new RegExp(String.raw`(?<![A-Za-z0-9.-])(?:https?(?::|%3A)(?:\/|%2F){2})?(?:www\.)?gloam\.trade(?:\/|%2F)c(?:\/|%2F)?(?:#|%23)[0-9A-Za-z]{20,}${NOT_URL}*`, "gi");
 /** A payment request link: to=gloamr1... in the fragment or the query. */
 const REQUEST_LINK_RE = new RegExp(`${NOT_URL}*?[#?&]to(?:=|%3D)gloamr1\\.[A-Za-z0-9_-]{20,}${NOT_URL}*`, "gi");
 /** A bare code. Real ones run to dozens or hundreds of characters; "gloamr1." in a sentence is not one. */
 // Links write the dot after the prefix as "=" (older ones "-", launch-day ones "%2E"), so a code cut
 // from one is still caught.
-const RAW_CODE_RE = /(?<![A-Za-z0-9])gloam(r1|2t|1e|1)(?:[.=-]|%2[Ee])[A-Za-z0-9_=-]{20,}/g;
+// A short code (gloam3.<base62>, the same payment as a short claim link) is as bearer as a plain one.
+const RAW_CODE_RE = /(?<![A-Za-z0-9])gloam(r1|2t|1e|1|3)(?:[.=-]|%2[Ee])[A-Za-z0-9_=-]{20,}/g;
 /**
  * What a chat app leaves of a plain code it cut at "gloam1": the base64 JSON body ("eyJ..."), maybe
  * after "%2E", ".", "=" or "-". The claim box takes it as the code, so it is masked as one.
  */
 const BARE_BODY_RE = /(?<![A-Za-z0-9_-])(?:%2[Ee]|[.=-])?eyJ[A-Za-z0-9_-]{100,}/g;
-const RAW_KIND: Record<string, CodeKind> = { r1: "address", "2t": "sealed", "1e": "locked", "1": "plain" };
+const RAW_KIND: Record<string, CodeKind> = { r1: "address", "2t": "sealed", "1e": "locked", "1": "plain", "3": "plain" };
 
 /** What a claim link carries: a locked or sealed code keeps its own rules. */
 function claimLinkKind(inner: string): { kind: CodeKind; label: string } {
@@ -1022,6 +1030,12 @@ function sweepCodes(text: string, kinds: Set<CodeKind>, labels: boolean): string
       const k = claimLinkKind(inner);
       kinds.add(k.kind);
       return labels ? k.label : " ";
+    });
+  }
+  if (/gloam\.trade(?:\/|%2F)c/i.test(t)) {
+    t = t.replace(SHORT_CLAIM_LINK_RE, () => {
+      kinds.add("claim_link");
+      return labels ? CODE_LABEL.claim_link : " ";
     });
   }
   if (/to(?:=|%3D)gloamr1\./i.test(t)) {

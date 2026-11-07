@@ -25,7 +25,7 @@ export function withoutLookup(pathOrUrl: string): string {
 }
 
 /** A segment that could carry something private: a payment code, an address, a hash, a long number. */
-const SENSITIVE_SEGMENT = /gloam(?:r1|2t|1e|1)|0x[0-9a-f]{8,}|^[0-9a-f]{24,}$|^\d{6,}$/i;
+const SENSITIVE_SEGMENT = /gloam(?:r1|2t|1e|1|3)|0x[0-9a-f]{8,}|^[0-9a-f]{24,}$|^\d{6,}$/i;
 /** Readable slugs (blog posts, docs pages) are kept even when long. */
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 

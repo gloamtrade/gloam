@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { claimLinkFor } from "@/lib/claimLink";
+import { claimLinkFor, shortCodeFor } from "@/lib/claimLink";
 import { isClaimLink } from "@/lib/funnel";
 import { allNetworks } from "@/lib/networks";
 import type { Hex } from "viem";
@@ -163,9 +163,10 @@ export function SentLinks({
 
   async function copy(rec: SentLink) {
     try {
-      // a tappable link for plain claim codes; anything else as the code itself
+      // a tappable link for plain claim codes; anything else as the code itself,
+      // short (gloam3) when it can be (the stored code stays the full one)
       const net = allNetworks().find((n) => n.chainId === rec.chainId)?.key;
-      const text = net && isClaimLink(rec.code) ? claimLinkFor(rec.code, net, window.location.origin) : rec.code;
+      const text = net && isClaimLink(rec.code) ? claimLinkFor(rec.code, net, window.location.origin) : shortCodeFor(rec.code, net);
       await navigator.clipboard.writeText(text);
       setCopied(rec.id);
       window.setTimeout(() => setCopied((c) => (c === rec.id ? null : c)), 2000);

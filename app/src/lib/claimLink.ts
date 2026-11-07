@@ -30,17 +30,31 @@ export function longClaimLinkFor(code: string, networkKey: string, origin = "htt
 }
 
 /**
+ * The code to show and copy for a payment: gloam3.<the short link's body>
+ * when it can have a short link (same rule as claimLinkFor), else the code as
+ * it is. Worked out when shown, so what is stored (sent links, payroll runs)
+ * stays the full gloam1 code. Either form pastes back anywhere a code goes.
+ * With no network given, the code's own chain is used.
+ */
+export function shortCodeFor(code: string, networkKey?: string): string {
+  const body = shortBodyFor(code, networkKey);
+  return body ? SHORT_CLAIM_PREFIX + body : code;
+}
+
+/**
  * The short link body for a code, or null. A gloam3 code already is one. A
  * plain gloam1 code gets one when it names its chain and that chain is the
- * link's network; anything else (locked, sealed, older codes) keeps its long link.
+ * link's network (or, with none given, any chain); anything else (locked,
+ * sealed, older codes) keeps its long link.
  */
-function shortBodyFor(code: string, networkKey: string): string | null {
+function shortBodyFor(code: string, networkKey?: string): string | null {
   const c = codeFromLinkText(code.trim());
   if (c.startsWith(SHORT_CLAIM_PREFIX)) return c.slice(SHORT_CLAIM_PREFIX.length) || null;
   if (!c.startsWith("gloam1.")) return null;
   try {
     const pack = decodeSdkPackage(c);
-    if (pack.chainId === undefined || !isNetworkKey(networkKey) || getNetwork(networkKey).chainId !== pack.chainId) return null;
+    if (pack.chainId === undefined) return null;
+    if (networkKey !== undefined && (!isNetworkKey(networkKey) || getNetwork(networkKey).chainId !== pack.chainId)) return null;
     return encodeShortClaim(pack);
   } catch {
     return null;

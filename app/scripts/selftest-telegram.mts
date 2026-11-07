@@ -725,6 +725,9 @@ const PLAIN = `gloam1.${B}${B}`;
 const LOCKED = `gloam1e.${B}${B}`;
 const CLAIM = `https://gloam.trade/app/vault?tab=move&net=tempo#claim=${PLAIN}`;
 const CLAIM_LOCKED = `gloam.trade/app/vault?tab=move#claim=${encodeURIComponent(LOCKED)}`;
+/** A short claim link and its body (base62, as the app writes them). */
+const SHORT_BODY = "4Xk9Qm2Rt7Lp0Zc8Vb3Nh6Jd1Fs5Gw9Ky2Ue";
+const SHORT_CLAIM = `https://gloam.trade/c#${SHORT_BODY}`;
 const REQUEST = `https://gloam.trade/app/vault?tab=move&mode=pay#to=${ADDR}&amount=1250`;
 /** A plain code whose random body happens to hold 64 hex characters, or a ".io" ending where a domain's would. */
 const HEXCODE = `gloam1.${"ab".repeat(32)}-${B}`;
@@ -751,6 +754,62 @@ await test("codes: each format is told apart", () => {
   assert.equal(scanCodes(`${LOCKED} phrase is Gloam`).rest.trim(), "phrase is Gloam");
   for (const k of [["plain"], ["claim_link"]] as const) assert.ok(hasBearerCode(new Set(k)));
   for (const k of [["address"], ["sealed"], ["locked"], ["request_link"]] as const) assert.ok(!hasBearerCode(new Set(k)));
+});
+
+await test("codes: short claim links and gloam3 codes are bearer, masked like a long link", () => {
+  // a real short link, made the way the app makes one
+  const pack = buildNotePackage({
+    pool: "0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194",
+    asset: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+    amountWei: "25000000",
+    secret: `0x${"ab".repeat(31)}`,
+    // under the field prime, as a real commitment is
+    commitment: `0x${"12".repeat(32)}`,
+    chainId: 4663,
+  } as Parameters<typeof buildNotePackage>[0]);
+  const link = claimLinkFor(encodeNotePackage(pack), "robinhood-mainnet");
+  const body = link.slice(link.indexOf("#") + 1);
+  assert.ok(/\/c#[0-9A-Za-z]{20,}$/.test(link), link);
+  const kinds = (t: string) => [...scanCodes(t).kinds].sort();
+  for (const [label, form] of [
+    ["https and www", `https://www.gloam.trade/c#${body}`],
+    ["https", `https://gloam.trade/c#${body}`],
+    ["no scheme", `gloam.trade/c#${body}`],
+    ["www only", `www.gloam.trade/c#${body}`],
+    ["the # written %23", `https://gloam.trade/c%23${body}`],
+    ["a slash before the #", `gloam.trade/c/#${body}`],
+    ["capitals in the host", `HTTPS://Gloam.Trade/c#${body}`],
+    ["the app's in-app form", `https://gloam.trade/claim#claim=gloam3=${body}`],
+    ["a gloam3. code", `gloam3.${body}`],
+    ["a gloam3= code", `gloam3=${body}`],
+    ["a gloam3%2E code", `gloam3%2E${body}`],
+  ] as const) {
+    const scan = scanCodes(`can someone claim this? ${form} thanks`);
+    assert.ok(!scan.masked.includes(body.slice(0, 12)), `${label}: masked`);
+    assert.ok(!scan.rest.includes(body.slice(0, 12)), `${label}: gone from the rest`);
+    assert.ok(hasBearerCode(scan.kinds), `${label}: a bearer code`);
+    assert.ok(/^can someone claim this\? \[(?:claim link|plain payment code)\] thanks$/.test(scan.masked), `${label}: ${scan.masked}`);
+  }
+  assert.deepEqual(kinds(link), ["claim_link"]);
+  assert.equal(scanCodes(`here ${link} enjoy`).masked, "here [claim link] enjoy");
+  assert.equal(scanCodes(`here gloam3.${body}`).masked, "here [plain payment code]");
+  assert.equal(memoryText(`claim it: ${link}`), "claim it: [claim link]");
+  assert.equal(defanged(`claim it ${link}`), "claim it [claim link]");
+  assert.equal(scamReason(scanCodes(`claim your test payment: ${link}`).masked), null);
+  // the helper never repeats one
+  assert.equal(cleanReply(`Open ${link}`, policy), null);
+  assert.equal(cleanReply(`Claim it with gloam3.${body}`, policy), null);
+  // words about them, a lookalike host and a short tail are not codes
+  for (const t of [
+    "short links look like gloam.trade/c#...",
+    "gloam3.abc",
+    "go to gloam.trade/c and paste it",
+    "gloam.trade/claim?net=tempo",
+  ]) {
+    assert.equal(scanCodes(t).kinds.size, 0, t);
+  }
+  assert.ok(!scanCodes(`evilgloam.trade/c#${body}`).kinds.has("claim_link"), "a lookalike host is not ours");
+  assert.ok(!scanCodes(`gloam.trade.evil.xyz/c#${body}`).kinds.has("claim_link"), "nor one that only starts the same");
 });
 
 await test("codes: what a chat app leaves of a cut code is masked too, since the claim box takes it", () => {
@@ -2119,6 +2178,22 @@ await test("payment codes: one friendly heads-up a day, never a delete; addresse
   assert.equal(modelCalls().length, 0);
   const [mem] = await kv([["LRANGE", `gloam:tg:v1:thread:${GROUP}:${TOPIC.general}`, 0, -1]]);
   assert.ok(!JSON.stringify(mem).includes(B), "codes are kept as labels only");
+
+  // a short claim link gets the same heads-up as a long one, and is never deleted
+  const leo = user(84, "Leo");
+  await handleUpdate(upd(inTopic(TOPIC.general, `here you go ${SHORT_CLAIM}`, leo)));
+  assert.equal(deletes().length, 0);
+  assert.equal(sends().length, 5);
+  assert.ok(String(sends()[4]!.body.text).startsWith("Quick heads-up, Leo:"));
+  await handleUpdate(upd(inTopic(TOPIC.general, `and the code gloam3.${SHORT_BODY}`, leo)));
+  assert.equal(sends().length, 5, "once per person per day, short or long");
+  // a fresh person posting only a gloam3 code gets it too
+  await handleUpdate(upd(inTopic(TOPIC.general, `gloam3=${SHORT_BODY}`, user(83, "Mo"))));
+  assert.equal(sends().length, 6);
+  assert.equal(deletes().length, 0);
+  assert.equal(modelCalls().length, 0);
+  const [mem2] = await kv([["LRANGE", `gloam:tg:v1:thread:${GROUP}:${TOPIC.general}`, 0, -1]]);
+  assert.ok(!JSON.stringify(mem2).includes(SHORT_BODY), "short codes are kept as labels only");
 });
 
 await test("pictures: a screenshot with a question is read and answered", async () => {
