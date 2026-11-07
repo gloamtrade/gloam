@@ -3937,7 +3937,7 @@ await test("treasure hunt: only the exact passphrase gets the next clue and piec
   const phrase = `Words ${Math.random().toString(36).slice(2)} here`;
   const clue = `clue-${Math.random().toString(36).slice(2)}`;
   const hunter = user(7001, "Kemi", "kemi_k");
-  const piece = `P${Math.random().toString(36).slice(2)}=1x`;
+  const piece = `P${Math.random().toString(36).slice(2).padEnd(10, "0")}=1x`;
   const vars = ["HUNT_ENABLED", "HUNT_GLIM_PASSPHRASE", "HUNT_CLUE_4", "HUNT_FRAGMENT_3"];
   env.HUNT_GLIM_PASSPHRASE = phrase;
   env.HUNT_CLUE_4 = clue;
@@ -3963,7 +3963,7 @@ await test("treasure hunt: only the exact passphrase gets the next clue and piec
   await handleUpdate(upd(dm(hunter, `  ${phrase.toUpperCase().replace(/ /g, "   ")} `)));
   assert.equal(sends().length, 1);
   assert.equal(sends()[0]!.body.chat_id, hunter.id);
-  assert.equal(sends()[0]!.body.text, `${clue}\n\nPiece 3 of 4: ${piece}`);
+  assert.equal(sends()[0]!.body.text, `${clue}\n\nPiece 3 of 3: ${piece}`);
   assert.equal(modelCalls().length, 0);
 
   // the owner sending it gets the clue too, not a model chat
