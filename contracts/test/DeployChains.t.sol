@@ -8,6 +8,7 @@ import {DeployBaseSepolia} from "../script/DeployBaseSepolia.s.sol";
 import {DeployBaseMainnet} from "../script/DeployBaseMainnet.s.sol";
 import {DeployEthereumMainnet} from "../script/DeployEthereumMainnet.s.sol";
 import {DeployEthereumSepolia} from "../script/DeployEthereumSepolia.s.sol";
+import {DeployElysiumTestnet} from "../script/DeployElysiumTestnet.s.sol";
 
 interface IRun {
     function run() external;
@@ -21,7 +22,7 @@ interface IRun {
  */
 contract DeployChainsTest is Test {
     /// Chains a deploy could be pointed at by mistake: every Gloam chain, Ethereum's testnets, and the local chain.
-    uint256[] chains = [uint256(1), 4663, 46630, 4217, 42431, 8453, 84532, 11155111, 560048, 17000, 31337];
+    uint256[] chains = [uint256(1), 4663, 46630, 4217, 42431, 8453, 84532, 11155111, 99801, 99901, 560048, 17000, 31337];
 
     function _refusesAllBut(IRun script, uint256 own) internal {
         for (uint256 i = 0; i < chains.length; i++) {
@@ -50,6 +51,10 @@ contract DeployChainsTest is Test {
 
     function test_robinhood_mainnet_runs_only_on_4663() public {
         _refusesAllBut(IRun(address(new DeployRobinhoodMainnet())), 4663);
+    }
+
+    function test_elysium_testnet_runs_only_on_99801() public {
+        _refusesAllBut(IRun(address(new DeployElysiumTestnet())), 99801);
     }
 
     function test_tempo_mainnet_runs_only_on_4217() public {

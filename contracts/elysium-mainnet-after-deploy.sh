@@ -19,6 +19,8 @@ export PATH="$HOME/.foundry/bin:/Users/duke/.nvm/versions/node/v24.11.1/bin:$PAT
 : "${GUARD_CONTROLLER:?set GUARD_CONTROLLER, the guard controller the deploy named}"
 CHAIN=$ELYSIUM_CHAIN_ID
 NAME="Elysium mainnet"
+# Elysium mainnet's id is 99901 (Kinetiq's docs), the one packages/sdk/src/elysium.ts accepts.
+[ "$CHAIN" = 99901 ] || { echo "STOP: ELYSIUM_CHAIN_ID is $CHAIN; Elysium mainnet is 99901. For the testnet use elysium-testnet-after-deploy.sh." >&2; exit 1; }
 RUN=broadcast/DeployElysiumMainnet.s.sol/$CHAIN/run-latest.json
 MRUN=broadcast/DeployGloamPayMemo.s.sol/$CHAIN/run-latest.json
 OUT=deployments/elysium-mainnet.json
@@ -60,11 +62,13 @@ lc() { tr '[:upper:]' '[:lower:]' <<<"$1"; }
 same() { [ "$(lc "$1")" = "$(lc "$2")" ]; }
 call() { cast call "$@" --rpc-url "$RPC_URL"; }
 codehash() { cast code "$1" --rpc-url "$RPC_URL" | cast keccak; }
-# How often a piece of text appears in a file, and swapping it for another.
-count() { OFF="$2" perl -0ne '$c = () = /\Q$ENV{OFF}\E/g; print $c + 0' "$1"; }
-swap() { OFF="$2" ON="$3" perl -0pi -e 's/\Q$ENV{OFF}\E/$ENV{ON}/' "$1"; }
+# How often a piece of text appears in one block of the file (ELYSIUM_MAINNET's, not
+# ELYSIUM_TESTNET's, which has the same lines), and swapping it for another there.
+SDK_BLOCK=ELYSIUM_MAINNET
+count() { NAME="$SDK_BLOCK" OFF="$2" perl -0ne 'if (/(export const \Q$ENV{NAME}\E: ElysiumMainnetInput = \{.*?\n\};)/s) { my $b = $1; my $c = () = $b =~ /\Q$ENV{OFF}\E/g; print $c + 0 } else { print -1 }' "$1"; }
+swap() { NAME="$SDK_BLOCK" OFF="$2" ON="$3" perl -0pi -e 's/(export const \Q$ENV{NAME}\E: ElysiumMainnetInput = \{.*?\n\};)/my $b = $1; $b =~ s{\Q$ENV{OFF}\E}{$ENV{ON}}; $b/se' "$1"; }
 
-# The switch-on, as packages/sdk/src/elysium.ts reads before the deploy. Each line exactly once.
+# The switch-on, as ELYSIUM_MAINNET in packages/sdk/src/elysium.ts reads before the deploy. Each line exactly once there.
 POOL_OFF='  pool: null,'
 BLOCK_OFF='  deployBlock: null,'
 MEMO_OFF='  payMemo: null,'
