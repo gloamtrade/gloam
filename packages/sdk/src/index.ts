@@ -78,6 +78,7 @@ export * from "./x402Cashout.js";
 export * from "./receiveTag.js";
 export * from "./sweep.js";
 export * from "./requests.js";
+export * from "./shortLink.js";
 export * from "./incoming.js";
 export { PAYMENT_NOTE_MAX, cleanPaymentNote } from "./paymentNote.js";
 export * from "./relay.js";

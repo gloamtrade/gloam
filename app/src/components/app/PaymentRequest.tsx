@@ -17,7 +17,7 @@ import { shortAddress } from "@/lib/chain";
 import {
   REQUEST_NAME_MAX,
   REQUEST_NOTE_MAX,
-  buildPaymentRequestLink,
+  buildShortPaymentRequestLink,
   cleanRequestText,
   formatRequestAmount,
   isWalletRequest,
@@ -77,7 +77,7 @@ export function RequestPaymentCard({ tag }: { tag: string }) {
     }
     setAmountError(null);
     setCreated({
-      url: buildPaymentRequestLink(
+      url: buildShortPaymentRequestLink(
         { to: tag, network: network.key, asset, amount: r.value, note, name },
         window.location.origin
       ),

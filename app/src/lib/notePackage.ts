@@ -16,6 +16,7 @@ import type { Address, Hex } from "viem";
 import { NATIVE_ASSET } from "./shield";
 import { cleanPaymentNote } from "./paymentNote";
 import { codeFromLinkText } from "./claimLink";
+import { SHORT_CLAIM_PREFIX, decodeShortClaim, seedMakesSecret, shortClaimBodyIn } from "@gloamtrade/sdk";
 
 export type NotePackage = {
   v: 1;
@@ -36,6 +37,12 @@ export type NotePackage = {
    * older ones don't, and are matched on pool and asset as before.
    */
   chainId?: number;
+  /**
+   * The 16-byte seed (hex) the secret was made from, for payments made since
+   * short links (lib/claimLink): the short link carries the seed instead of the
+   * secret. `sd` in the compact form; older readers skip it.
+   */
+  seed?: Hex;
 };
 
 const PREFIX_PLAIN = "gloam1.";
@@ -81,6 +88,8 @@ export function buildNotePackage(args: {
   note?: string;
   /** The chain the payment is on: every new code names it. */
   chainId?: number;
+  /** The seed the secret was made from, when it was. Kept only when it makes the secret. */
+  seed?: Hex;
 }): NotePackage {
   const note = cleanPaymentNote(args.note);
   return {
@@ -95,6 +104,7 @@ export function buildNotePackage(args: {
     message: "Gloam payment, import under Move → Receive. Keep secret.",
     ...(note ? { note } : {}),
     ...(validChainId(args.chainId) ? { chainId: args.chainId } : {}),
+    ...(seedMakesSecret(args.seed, args.secret) ? { seed: args.seed } : {}),
   };
 }
 
@@ -125,6 +135,8 @@ function compactJson(pack: NotePackage): string {
     ...(validChainId(pack.chainId) ? { ch: pack.chainId } : {}),
     // Only when there is one, so a package without a note is byte-for-byte the old format.
     ...(note ? { n: note } : {}),
+    // The seed, only when it makes the secret (the SDK writes the same key).
+    ...(seedMakesSecret(pack.seed, pack.secret) ? { sd: pack.seed } : {}),
   });
 }
 
@@ -222,6 +234,12 @@ function noteOf(obj: Record<string, unknown>): { note?: string } {
   return note ? { note } : {};
 }
 
+/** The seed a code carries (`sd`), only when it makes the code's secret. */
+function seedOf(obj: Record<string, unknown>, secret: unknown): { seed?: Hex } {
+  const sd = obj.sd ?? obj.seed;
+  return typeof sd === "string" && typeof secret === "string" && seedMakesSecret(sd, secret) ? { seed: sd as Hex } : {};
+}
+
 /** Notes are range checked to < 2^128 in every Gloam circuit. */
 const AMOUNT_LIMIT = 1n << 128n;
 
@@ -254,6 +272,7 @@ function readFields(obj: Record<string, unknown>): NotePackage | null {
         commitment: String(obj.c || "0x") as Hex,
         ...noteOf(obj),
         ...chainOf(obj),
+        ...seedOf(obj, obj.k),
       };
     }
     return null;
@@ -270,6 +289,7 @@ function readFields(obj: Record<string, unknown>): NotePackage | null {
     message: obj.message ? String(obj.message) : undefined,
     ...noteOf(obj),
     ...chainOf(obj),
+    ...seedOf(obj, obj.secret || obj.k),
   };
 }
 
@@ -305,6 +325,21 @@ async function decodeCode(
   opts?: { tryTagDecrypt?: boolean }
 ): Promise<NotePackage> {
   const s = codeFromLinkText(code);
+
+  // A short claim link's code (gloam.trade/c#...): the commitment is worked out again.
+  if (s.startsWith(SHORT_CLAIM_PREFIX)) {
+    const f = await decodeShortClaim(s.slice(SHORT_CLAIM_PREFIX.length));
+    return buildNotePackage({
+      pool: f.pool,
+      asset: f.asset,
+      amountWei: f.amountWei,
+      secret: f.secret,
+      commitment: f.commitment,
+      note: f.note,
+      chainId: f.chainId,
+      seed: f.seed,
+    });
+  }
 
   // Pay-to-tag sealed package, only recipient’s receive key opens it
   if (s.startsWith("gloam2t.")) {
@@ -455,7 +490,8 @@ function repairLetterCase(body: string): string {
 /** A code inside a longer paste: up to the first character a code never has. */
 // A code, with the dot after its prefix ("gloam1.") or what links write
 // instead ("gloam1=", older "gloam1-"); lib/claimLink codeFromLinkText reads those back.
-const CODE_IN_TEXT = /gloam(?:2t|1e|1)[.=-][A-Za-z0-9_\-.=]+/;
+// A short claim link's code is "gloam3." and letters and digits.
+const CODE_IN_TEXT = /gloam(?:2t|1e|1|3)[.=-][A-Za-z0-9_\-.=]+/;
 
 /**
  * The payment code in whatever was pasted. People paste the whole claim link
@@ -467,6 +503,11 @@ const CODE_IN_TEXT = /gloam(?:2t|1e|1)[.=-][A-Za-z0-9_\-.=]+/;
 /** What was pasted, from the "#claim=" part on when there is one, with %-escapes undone. */
 function pastedText(input: string): string {
   let s = input.trim();
+  // A short claim link (…/c#<letters and digits>): read as its gloam3 code.
+  const short = s.search(/\/c(?:#|%23)[0-9A-Za-z]{8,}/);
+  if (short !== -1 && shortClaimBodyIn(s.slice(short))) {
+    return s.slice(short).replace(/^\/c(?:#|%23)/, "gloam3=");
+  }
   const hashAt = s.search(/(?:#|%23)claim(?:=|%3D)/i);
   if (hashAt !== -1) s = s.slice(hashAt).replace(/^(?:#|%23)claim(?:=|%3D)/i, "");
   if (s.includes("%")) {
