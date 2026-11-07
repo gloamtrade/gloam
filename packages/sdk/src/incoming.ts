@@ -43,7 +43,7 @@ import {
 } from "./receiveTag.js";
 import { POOL_STATE_ABI } from "./sweep.js";
 import { ethereumSepoliaPayMemo } from "./mainnet.js";
-import { elysiumMainnetConfig } from "./elysium.js";
+import { elysiumMainnetConfig, elysiumTestnetConfig } from "./elysium.js";
 
 /** A payment-message board: where payers post sealed payments for their payees to find. */
 export interface PayMemoBoard {
@@ -79,6 +79,9 @@ export const PAY_MEMO_BOARDS: Record<number, PayMemoBoard | null> = {
 // Elysium's, once its values and the board's are in (src/elysium.ts).
 const ELYSIUM = elysiumMainnetConfig();
 if (ELYSIUM?.payMemo) PAY_MEMO_BOARDS[ELYSIUM.chainId] = { address: ELYSIUM.payMemo.address, deployBlock: ELYSIUM.payMemo.deployBlock, emitsPoster: false };
+// And Elysium testnet's, once its pool and board are in.
+const ELYSIUM_TESTNET = elysiumTestnetConfig();
+if (ELYSIUM_TESTNET?.payMemo) PAY_MEMO_BOARDS[ELYSIUM_TESTNET.chainId] = { address: ELYSIUM_TESTNET.payMemo.address, deployBlock: ELYSIUM_TESTNET.payMemo.deployBlock, emitsPoster: false };
 
 function ethereumSepoliaBoard(): PayMemoBoard | null {
   const m = ethereumSepoliaPayMemo();

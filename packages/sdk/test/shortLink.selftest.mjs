@@ -9,7 +9,29 @@
  * Run after build:  node test/shortLink.selftest.mjs
  */
 import assert from "node:assert/strict";
-import {
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { keccak256 } from "viem";
+
+// Elysium: the empty config as shipped, then again in a child with placeholder
+// values put in before the SDK loads (the same way test/elysium.selftest does).
+const MODE = process.env.GLOAM_SELFTEST_SHORTLINK ?? "empty";
+const ELY = { chainId: 99901, pool: "0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194", usdc: "0x00000000000000000000000000000000000E1a5c" };
+const ELY_TEST = { chainId: 99801, pool: "0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194", usdc: "0x7D29d8047B905000459c0E80c34a26CeedcB47b2" };
+const elysium = await import("../dist/elysium.js");
+if (MODE === "filled") {
+  Object.assign(elysium.ELYSIUM_MAINNET, {
+    chainId: ELY.chainId,
+    rpcUrl: "https://rpc.elysium.example",
+    explorerUrl: "https://explorer.elysium.example",
+    usdc: ELY.usdc,
+    usdcDecimals: 6,
+    pool: ELY.pool,
+    deployBlock: 1_234n,
+  });
+  Object.assign(elysium.ELYSIUM_TESTNET, { pool: ELY_TEST.pool, deployBlock: 5_678n });
+}
+const {
   SHORT_LINK_WHERE,
   buildPaymentRequestLink,
   buildShortPaymentRequestLink,
@@ -29,7 +51,7 @@ import {
   seedToSecret,
   shortClaimLink,
   toBase62,
-} from "../dist/index.js";
+} = await import("../dist/index.js");
 
 let n = 0;
 const bytesOf = (h) => Uint8Array.from(h.slice(2).match(/../g).map((b) => parseInt(b, 16)));
@@ -106,4 +128,59 @@ for (const net of gloamNetworks()) {
   }
 }
 
-console.log(`shortLink selftest: ${n} checks passed`);
+// Elysium is id 45 (mainnet) and 46 (testnet), at the end of the table; each reserved until its values are in.
+assert.equal(SHORT_LINK_WHERE.length, 46, "44 places, then Elysium mainnet's USDC as 45 and its testnet's as 46");
+{
+  const usdg = encodeShortClaim({ pool: "0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194", asset: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", amountWei: "1000000", secret: fieldToHex(seedToSecret(new Uint8Array(16).fill(7))), seed: `0x${"07".repeat(16)}`, chainId: 4663 });
+  const raw = fromBase62(usdg);
+  assert.equal(raw[1], 1, "Robinhood Chain USDG is id 1");
+  // The same record, naming id 45, with its check made again.
+  const withId = (id) => {
+    const body = raw.slice(0, -1);
+    body[1] = id;
+    const check = Uint8Array.from(keccak256(body).slice(2, 4).match(/../g).map((b) => parseInt(b, 16)));
+    return toBase62(new Uint8Array([...body, ...check]));
+  };
+  const link45 = withId(45);
+  const link46 = withId(46);
+  if (MODE === "empty") {
+    assert.equal(elysium.elysiumMainnetConfig(), null, "Elysium's values are not in");
+    assert.equal(elysium.elysiumTestnetConfig(), null, "Elysium testnet's pool is not in");
+    const reserved = { chainId: 0, pool: "0x0000000000000000000000000000000000000000", asset: "0x0000000000000000000000000000000000000000" };
+    assert.deepEqual({ ...SHORT_LINK_WHERE[44] }, reserved, "id 45 is reserved");
+    assert.deepEqual({ ...SHORT_LINK_WHERE[45] }, reserved, "id 46 is reserved");
+    assert.throws(() => readShortClaim(link45), /cut off or damaged/, "a reserved id is refused");
+    assert.throws(() => readShortClaim(link46), /cut off or damaged/, "id 46 too");
+    assert.ok(!gloamNetworks().some((x) => x.key === "elysium-mainnet"), "no Elysium network");
+    // A link to the reserved place's chain 0 is never given id 45.
+    const zero = encodeShortClaim({ pool: "0x0000000000000000000000000000000000000000", asset: "0x0000000000000000000000000000000000000000", amountWei: "1", secret: fieldToHex(5n), chainId: 0 });
+    assert.ok(zero === null || fromBase62(zero)[1] !== 45, "chain 0 never reads as id 45");
+    n += 8;
+  } else {
+    const w = SHORT_LINK_WHERE[44];
+    assert.equal(w.chainId, ELY.chainId, "id 45 is Elysium");
+    assert.equal(w.pool, ELY.pool);
+    assert.equal(w.asset.toLowerCase(), ELY.usdc.toLowerCase(), "id 45 is Elysium's USDC");
+    const back = readShortClaim(link45);
+    assert.equal(back.chainId, ELY.chainId);
+    assert.equal(back.asset.toLowerCase(), ELY.usdc.toLowerCase(), "id 45 reads as Elysium's USDC");
+    assert.ok(gloamNetworks().some((x) => x.key === "elysium-mainnet"), "Elysium was in the round trips above");
+    const t = SHORT_LINK_WHERE[45];
+    assert.equal(t.chainId, ELY_TEST.chainId, "id 46 is Elysium testnet");
+    assert.equal(t.asset.toLowerCase(), ELY_TEST.usdc.toLowerCase(), "id 46 is its test USDC");
+    assert.equal(readShortClaim(link46).chainId, ELY_TEST.chainId, "id 46 reads as Elysium testnet");
+    assert.ok(gloamNetworks().some((x) => x.key === "elysium"), "Elysium testnet was in the round trips above");
+    n += 10;
+  }
+}
+
+if (MODE === "empty") {
+  const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], { env: { ...process.env, GLOAM_SELFTEST_SHORTLINK: "filled" }, encoding: "utf8" });
+  if (child.status !== 0) {
+    console.error(child.stdout, child.stderr);
+    assert.fail("the filled run failed");
+  }
+  process.stdout.write(child.stdout);
+  n++;
+}
+console.log(`shortLink selftest (${MODE}): ${n} checks passed`);
