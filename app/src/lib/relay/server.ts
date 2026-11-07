@@ -14,6 +14,8 @@
  *     plus, with GLOAM_RELAY_GAS_STATION=on, Borro's gas station factory's make
  *     and a wallet's own station's pump (lib/relay/gasStation): a request never
  *     names a target
+ *   - a spend's last send is kept on record, and the spend is not sent again while
+ *     that one may still land, however old its lock (assertEarlierSendSettled)
  *   - one request per spend at a time: a send or cash out takes a lock on its
  *     nullifier, shared across instances (lib/relay/inflight, Redis only: when
  *     Redis is set but not answering, or a production build has none, the
@@ -71,6 +73,8 @@ import {
   ContractFunctionRevertedError,
   HttpRequestError,
   TimeoutError,
+  TransactionNotFoundError,
+  TransactionReceiptNotFoundError,
   createPublicClient,
   createWalletClient,
   encodeFunctionData,
@@ -93,7 +97,7 @@ import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
 import { screenAddresses } from "@/lib/screeningServer";
 import { TIP403_RECEIVE_UNCHECKED_MESSAGE } from "@/lib/tip403";
 import { cashOutTargetProblem } from "@/lib/cashOutTarget";
-import { LockStoreDown, RECEIPT_WATCH_MS, forgetNonce, inSendLanes, inflightKey, isSwapEscrow, markSwapEscrow, relayStoreDown, releaseIfReverted, takeInflight, type InflightLock } from "@/lib/relay/inflight";
+import { LockStoreDown, RECEIPT_WATCH_MS, forgetNonce, inSendLanes, inflightKey, inflightTtlSec, isSwapEscrow, markSwapEscrow, readSent, recordSent, relayStoreDown, releaseIfReverted, takeInflight, type InflightLock, type SentRecord } from "@/lib/relay/inflight";
 import { jobKeyReady } from "@/lib/relay/jobSeal";
 import { datedOff } from "@/lib/relay/scheduled";
 import { WrongChainRpcError, serverTransport } from "@/lib/serverRpc";
@@ -838,6 +842,11 @@ type SubmitOpts = {
   /** How the send ended, once a receipt shows it. */
   onEnd?: (status: SendEnd["status"]) => Promise<void>;
   /**
+   * A transaction went out (with its hash) or may have (without): the relay account and
+   * nonce it carried. Awaited before the reply, and nothing it throws reaches the caller.
+   */
+  onSent?: (sent: SentRecord) => Promise<void>;
+  /**
    * Called once, when the checks, the dry run and the holds have passed and the
    * transaction is about to go out, with the call it carries (its target and
    * calldata). Never waited on, and nothing it does or throws can stop or slow the
@@ -1120,13 +1129,24 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
       chainNonce: () => pub.getTransactionCount({ address: a.address, blockTag: "pending" }),
     }));
     let usedLane: string | null = null;
+    // the account and nonce the send carried, for the spend's record (R4)
+    let carried: { from: Address; nonce: number } | null = null;
+    const noteSent = async (hash?: Hex) => {
+      if (!carried || !opts.onSent) return;
+      await opts.onSent({ ...carried, ...(hash ? { hash } : {}) }).catch((e: unknown) => {
+        console.warn("gloam_relay_sent_record_failed", JSON.stringify({ chainId: net.chainId, reason: e instanceof Error ? e.name : "error" }));
+      });
+    };
     for (let attempt = 0; attempt < 2; attempt++) {
+      carried = null;
       try {
         const out = await inSendLanes(lanes, (i, nonce) => {
           usedLane = lanes[i]!.id;
+          carried = { from: accounts[i]!.address, nonce };
           return send(padGas(gas), nonce, accounts[i]!);
         });
         if (!out) throw new RelayError(RELAY_BUSY_MESSAGE, 503, "busy");
+        await noteSent(out.value);
         followSend(net, out.value, holds, { ...opts, until: opts.watchUntil ?? started + RECEIPT_WATCH_WITHIN_MS });
         return out.value;
       } catch (e) {
@@ -1138,6 +1158,7 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
         const failure = sendFailure(e);
         if (failure.code === "maybe_sent") {
           mayBeOut = true;
+          await noteSent();
           opts.onMaybeSent?.();
           throw failure;
         }
@@ -1148,6 +1169,7 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
           continue;
         }
         mayBeOut = failure.code === "rpc";
+        if (mayBeOut) await noteSent();
         throw failure;
       }
     }
@@ -1235,9 +1257,11 @@ async function submitSpend(
   const { precheck, lockOn, afterDryRun, returning, onEnd, sender, screened, watchUntil, beforeBroadcast } = opts;
   const isSwap = call.kind === "swap" || call.kind === "swapV3";
   const nullifier = call.kind === "swapExit" ? call.args[1].nullifier : isSwap ? call.args[0].nullifier : call.args[2];
+  const key = inflightKey(net.chainId, lockOn ?? nullifier);
   let lock: Awaited<ReturnType<typeof takeInflight>>;
   try {
-    lock = await takeInflight(inflightKey(net.chainId, lockOn ?? nullifier));
+    // longer where a send can sit unmined (Ethereum): lib/relay/inflight inflightTtlSec
+    lock = await takeInflight(key, inflightTtlSec(net.chainId));
   } catch (e) {
     // never on memory in production: without Redis this spend is not sent at all
     if (e instanceof LockStoreDown) throw relayOff();
@@ -1246,6 +1270,8 @@ async function submitSpend(
   if (!lock) throw new RelayError(IN_FLIGHT_MESSAGE, 409, "in_flight");
   let keep = false;
   try {
+    // an earlier send of this spend that may still land is never sent again, however old the lock
+    await assertEarlierSendSettled(net, key);
     if (precheck) await precheck();
     else if (call.kind === "transfer" || call.kind === "unshield") await precheckSpend(net, call.args[1], nullifier);
     const hash = await submit(net, call, {
@@ -1260,11 +1286,67 @@ async function submitSpend(
       watchUntil,
       lock,
       beforeBroadcast,
+      onSent: (sent) => recordSent(key, sent),
     });
     keep = true;
     return hash;
   } finally {
     if (!keep) await lock.release();
+  }
+}
+
+/**
+ * Refuses a spend while its last send may still land (R4, 7 November 2026 router review).
+ * On Ethereum a send offers at most 1.5 times the gas ceiling, so it can sit unmined past
+ * its lock; a copy sent then would land second and revert at the relay's expense. The
+ * spend's last send is on record (recordSent), so before another goes out:
+ *
+ *   - a receipt for it, either way: settled. One that landed spent the note, and the spent
+ *     check after this refuses the copy; one that reverted left it free to move
+ *   - the node still has it, unmined: in flight, refused
+ *   - the node doesn't have it, or its hash was never known (a send that may have gone
+ *     out): its account's mined nonce has passed it, so it was dropped or replaced for
+ *     good, and settled; something waits at its nonce in the node's pool, refused; nothing
+ *     is at that nonce at all, so the node dropped it or never took it, and settled
+ *
+ * Anything that can't be read refuses the spend: nothing is sent.
+ */
+async function assertEarlierSendSettled(net: GloamNetwork, key: string): Promise<void> {
+  let sent: SentRecord | null;
+  try {
+    sent = await readSent(key);
+  } catch (e) {
+    if (e instanceof LockStoreDown) throw relayOff();
+    throw e;
+  }
+  if (!sent) return;
+  const pub = relayPublicClient(net);
+  const notFound = (e: unknown, kind: new (...args: never[]) => Error) =>
+    e instanceof kind || (e instanceof BaseError && e.walk((x) => x instanceof kind) !== null);
+  try {
+    if (sent.hash) {
+      const hash = sent.hash as Hex;
+      const receipt = await pub.getTransactionReceipt({ hash }).catch((e: unknown) => {
+        if (notFound(e, TransactionReceiptNotFoundError)) return null;
+        throw e;
+      });
+      if (receipt) return;
+      const pending = await pub.getTransaction({ hash }).catch((e: unknown) => {
+        if (notFound(e, TransactionNotFoundError)) return null;
+        throw e;
+      });
+      if (pending) throw new RelayError(IN_FLIGHT_MESSAGE, 409, "in_flight");
+    }
+    const from = sent.from as Address;
+    const [mined, pooled] = await Promise.all([
+      pub.getTransactionCount({ address: from, blockTag: "latest" }),
+      pub.getTransactionCount({ address: from, blockTag: "pending" }),
+    ]);
+    if (mined > sent.nonce) return;
+    if (pooled > sent.nonce) throw new RelayError(IN_FLIGHT_MESSAGE, 409, "in_flight");
+  } catch (e) {
+    if (e instanceof RelayError) throw e;
+    throw new RelayError("Could not check an earlier send of this payment. Try again shortly.", 503, "check_failed");
   }
 }
 

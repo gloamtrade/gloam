@@ -12,6 +12,10 @@
  *  - R3: one sender's sends that revert stop at its own share of the hourly cap, while
  *    its sends that land are never held back by it and other senders go on; scheduled
  *    cash outs hold as one sender against that share; the share is set by chain
+ *  - R4: a spend's lock lives longer on Ethereum, and once it has expired a spend whose
+ *    last send may still land is refused: one the node still holds, or something at its
+ *    nonce in the node's pool, with or without a hash. One that landed, was dropped or
+ *    was replaced is settled, and the spent check does the rest. A failed read sends nothing
  *
  * fetch is stubbed: the relay talks to an in-process fake chain, and the relay key is a
  * throwaway made here. Nothing reaches any host.
@@ -54,6 +58,7 @@ const {
   sendUnshieldNow,
 } = await import("../src/lib/relay/server");
 const { getNetwork } = await import("../src/lib/networks");
+const { DEFAULT_INFLIGHT_TTL_SEC, INFLIGHT_TTL_SEC, inflightKey, inflightTtlSec, readSent } = await import("../src/lib/relay/inflight");
 const { DEFAULT_REVERT_SHARE_PCT, SCHEDULED_SENDER, revertSharePct } = await import("../src/lib/relay/spendCap");
 
 let passed = 0;
@@ -99,6 +104,15 @@ const chain = {
   held: 0n,
   /** The vault's fee can't be read. */
   feeDown: false,
+  /** The relay account's mined and pending nonces. */
+  mined: 0,
+  pooled: 0,
+  /** The node still holds a send that has no receipt. */
+  nodeHas: true,
+  /** eth_getTransactionByHash fails. */
+  txReadFails: false,
+  /** The next raw send gets "already known": the node may hold it, and no hash comes back. */
+  sendMaybe: false,
 };
 /** The vault's payments to escrows the fake chain knows, by transaction hash. */
 const paidTxs = new Map<string, { address: string; topics: string[]; data: string }[]>();
@@ -117,7 +131,18 @@ function answer(r: RpcReq, chainId: number): unknown {
     case "eth_getBlockByNumber":
       return { ...BLOCK, baseFeePerGas: toHex(chain.gasPrice) };
     case "eth_getTransactionCount":
-      return "0x0";
+      return toHex(r.params?.[1] === "latest" ? chain.mined : r.params?.[1] === "pending" ? chain.pooled : 0);
+    case "eth_getTransactionByHash": {
+      if (chain.txReadFails) throw new Error("fake chain: transaction read failed");
+      const hash = String(r.params?.[0]);
+      const s = sends.find((x) => x.hash === hash);
+      if (!s || s.ending !== "none" || !chain.nodeHas) return null;
+      return {
+        hash, nonce: "0x0", blockHash: null, blockNumber: null, transactionIndex: null, from: `0x${"00".repeat(20)}`, to: `0x${"00".repeat(20)}`,
+        value: "0x0", gas: "0x1", maxFeePerGas: "0x1", maxPriorityFeePerGas: "0x1", input: "0x", type: "0x2", chainId: toHex(chainId), accessList: [],
+        v: "0x0", r: `0x${"01".repeat(32)}`, s: `0x${"01".repeat(32)}`, yParity: "0x0",
+      };
+    }
     case "eth_maxPriorityFeePerGas":
       return "0x1";
     case "eth_gasPrice":
@@ -128,6 +153,11 @@ function answer(r: RpcReq, chainId: number): unknown {
       if (chain.dryRun === "revert") throw new Error("execution reverted");
       return toHex(chain.dryRunGas);
     case "eth_sendRawTransaction": {
+      if (chain.sendMaybe) {
+        chain.sendMaybe = false;
+        sends.push({ hash: `0x${"ee".repeat(32)}`, ending: "none" });
+        throw new Error("already known");
+      }
       const hash = keccak256(toHex(`send-${sends.length}-${Date.now()}`));
       sends.push({ hash, ending: chain.next });
       return hash;
@@ -195,6 +225,11 @@ function fresh() {
   chain.feeBps = 50;
   chain.held = 0n;
   chain.feeDown = false;
+  chain.mined = 0;
+  chain.pooled = 0;
+  chain.nodeHas = true;
+  chain.txReadFails = false;
+  chain.sendMaybe = false;
   paidTxs.clear();
   resetSwapFloorReads();
   for (const k of Object.keys(process.env)) if (k.startsWith("GLOAM_RELAY_")) delete process.env[k];
@@ -468,6 +503,136 @@ await test("R3: the share is set by chain, or off", async () => {
   chain.next = "reverted";
   const r = await until(() => relayUnshield(rh, cashOut(), "198.51.100.35"), 25);
   assert.deepEqual(r, { sent: 25, refused: null });
+});
+
+// ---------------------------------------------------------------- R4
+
+const eth = getNetwork("ethereum-mainnet");
+const E_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as Address;
+let ethN = 0;
+function ethCashOut() {
+  ethN++;
+  return { proof, root, nullifier: h32(0xe0000 + ethN), asset: E_USDC, to: WALLET, amount: "1000000" };
+}
+/** fresh(), with a cash out's dry run as Ethereum sees one (its most is 1.2M). */
+function ethFresh() {
+  fresh();
+  chain.dryRunGas = 300_000n;
+}
+/** The nonce a spend's last send carried, from the relay's record of it. */
+async function nonceOf(chainId: number, nullifier: Hex): Promise<number> {
+  const rec = await readSent(inflightKey(chainId, nullifier));
+  assert.ok(rec, "the send is on record");
+  return rec.nonce;
+}
+/** Every spend lock on a chain runs out, as if its time had passed. */
+function expireLocks(chainId: number) {
+  const m = (globalThis as { __gloamRelayInflight?: Map<string, unknown> }).__gloamRelayInflight;
+  for (const k of [...(m?.keys() ?? [])]) if (k.startsWith(`gloam:relay:inflight:${chainId}:`)) m!.delete(k);
+}
+
+await test("R4: a spend's lock lives 15 minutes on Ethereum and 3 elsewhere, and is set by chain", () => {
+  assert.equal(inflightTtlSec(1, {}), 900);
+  assert.equal(DEFAULT_INFLIGHT_TTL_SEC[1], 900);
+  assert.equal(inflightTtlSec(4663, {}), INFLIGHT_TTL_SEC);
+  assert.equal(inflightTtlSec(8453, {}), 180);
+  assert.equal(inflightTtlSec(1, { GLOAM_RELAY_INFLIGHT_TTL_1: "3600" }), 3600);
+  assert.equal(inflightTtlSec(1, { GLOAM_RELAY_INFLIGHT_TTL_1: "5" }), 900, "too short keeps the default");
+  assert.equal(inflightTtlSec(1, { GLOAM_RELAY_INFLIGHT_TTL_1: "soon" }), 900);
+});
+
+await test("R4: a send stuck in the node's pool is never sent again after its lock expires; once it lands, the spent check refuses the copy", async () => {
+  ethFresh();
+  chain.next = "none";
+  const body = ethCashOut();
+  await relayUnshield(eth, body);
+  assert.equal(sends.length, 1);
+  await assert.rejects(relayUnshield(eth, body), isCode("in_flight"), "the lock holds it");
+  expireLocks(1);
+  chain.pooled = (await nonceOf(1, body.nullifier)) + 1;
+  await assert.rejects(relayUnshield(eth, body), isCode("in_flight"), "the node still has it: no second send");
+  assert.equal(sends.length, 1);
+  // it lands: the note is spent, and the copy is refused by the spent check
+  sends[0]!.ending = "success";
+  chain.spent.add(body.nullifier.toLowerCase());
+  chain.mined = chain.pooled;
+  expireLocks(1);
+  await assert.rejects(relayUnshield(eth, body), isCode("AlreadySpent"));
+  assert.equal(sends.length, 1);
+});
+
+await test("R4: a send that was dropped or replaced for good lets the spend go again", async () => {
+  ethFresh();
+  chain.next = "none";
+  const dropped = ethCashOut();
+  await relayUnshield(eth, dropped);
+  expireLocks(1);
+  // the node no longer has it, and nothing waits at its nonce
+  chain.nodeHas = false;
+  chain.next = "success";
+  assert.equal(typeof (await relayUnshield(eth, dropped)), "string");
+  assert.equal(sends.length, 2);
+
+  chain.next = "none";
+  chain.nodeHas = true;
+  const replaced = ethCashOut();
+  await relayUnshield(eth, replaced);
+  expireLocks(1);
+  chain.nodeHas = false;
+  // something else waits at its nonce: refused
+  const n = await nonceOf(1, replaced.nullifier);
+  chain.pooled = n + 1;
+  await assert.rejects(relayUnshield(eth, replaced), isCode("in_flight"));
+  // that nonce was mined by another send: this one can never land
+  chain.mined = n + 1;
+  chain.next = "success";
+  assert.equal(typeof (await relayUnshield(eth, replaced)), "string");
+  assert.equal(sends.length, 4);
+});
+
+await test("R4: a send that may have gone out with no hash is checked by its nonce", async () => {
+  ethFresh();
+  const body = ethCashOut();
+  chain.sendMaybe = true;
+  await assert.rejects(relayUnshield(eth, body), isCode("maybe_sent"));
+  expireLocks(1);
+  const n = await nonceOf(1, body.nullifier);
+  assert.equal((await readSent(inflightKey(1, body.nullifier)))?.hash, undefined, "no hash came back");
+  chain.pooled = n + 1;
+  await assert.rejects(relayUnshield(eth, body), isCode("in_flight"), "something waits at its nonce");
+  chain.pooled = n;
+  assert.equal(typeof (await relayUnshield(eth, body)), "string", "nothing at its nonce: the node never took it");
+  assert.equal(sends.length, 2);
+});
+
+await test("R4: a reverted send leaves the spend free, and a failed read sends nothing", async () => {
+  ethFresh();
+  chain.next = "reverted";
+  const body = ethCashOut();
+  await relayUnshield(eth, body);
+  await settled();
+  chain.next = "success";
+  assert.equal(typeof (await relayUnshield(eth, body)), "string", "the receipt shows the revert");
+  assert.equal(sends.length, 2);
+
+  chain.next = "none";
+  const other = ethCashOut();
+  await relayUnshield(eth, other);
+  expireLocks(1);
+  chain.txReadFails = true;
+  await assert.rejects(relayUnshield(eth, other), isCode("check_failed"));
+  assert.equal(sends.length, 3);
+});
+
+await test("R4: on a chain with no ceiling the same record holds a swap that is still pending", async () => {
+  fresh();
+  chain.next = "none";
+  const swap = rhSwap();
+  await relayVaultSwap(rh, swap);
+  expireLocks(4663);
+  chain.pooled = (await nonceOf(4663, swap.spend.nullifier)) + 1;
+  await assert.rejects(relayVaultSwap(rh, swap), isCode("in_flight"));
+  assert.equal(sends.length, 1);
 });
 
 console.log(`relay review: ${passed} passed`);
