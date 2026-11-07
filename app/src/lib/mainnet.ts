@@ -1,3 +1,5 @@
+import { ELYSIUM, ELYSIUM_LIVE_SINCE } from "./elysium";
+
 /**
  * Mainnet: the pools, the launch time, and whether mainnet is live.
  *
@@ -15,7 +17,12 @@
  * with its payment-message board next to it (DEPLOY-ETHEREUM-SEPOLIA.md).
  *
  * The block number can be written plain (12345678) or as a bigint (12345678n).
+ *
+ * Elysium mainnet is not in MAINNET_POOLS: its chain id was not public when it
+ * was added, so its values (pool included) live in lib/elysium.ts, behind
+ * NEXT_PUBLIC_ELYSIUM_ENABLED. It joins MAINNET_CHAINS below once it is on.
  */
+
 export const MAINNET_POOLS: Record<MainnetChainId, MainnetPoolInput> = {
   // Robinhood Chain mainnet (4663)
   4663: { pool: "0x39e28cde55cab798874746ac52cb4b5cc99a0194", deployBlock: 94_194_599 },
@@ -85,16 +92,28 @@ function checkedPool({ pool, deployBlock }: MainnetPoolInput, name: string): Mai
 /**
  * Every mainnet Gloam knows, in the order it names them, with or without a pool,
  * and the day its vault went live (written the way the copy writes dates).
+ * Elysium is last, and only while it is on (lib/elysium.ts).
  */
-export const MAINNET_CHAINS: readonly { chainId: MainnetChainId; name: string; liveSince: string }[] = [
+export const MAINNET_CHAINS: readonly { chainId: number; name: string; liveSince: string }[] = [
   { chainId: 4663, name: "Robinhood Chain", liveSince: "21 October 2026" },
   { chainId: 4217, name: "Tempo", liveSince: "21 October 2026" },
   { chainId: 8453, name: "Base", liveSince: "26 October 2026" },
   { chainId: 1, name: "Ethereum", liveSince: "26 October 2026" },
+  ...(ELYSIUM ? [{ chainId: ELYSIUM.chainId, name: "Elysium", liveSince: ELYSIUM_LIVE_SINCE }] : []),
 ];
 
+/** A MAINNET_CHAINS entry's pool: MAINNET_POOLS, or Elysium's from lib/elysium.ts. */
+export function mainnetChainPool(chainId: number): MainnetPool | null {
+  return chainPool(chainId);
+}
+
+function chainPool(chainId: number): MainnetPool | null {
+  if (ELYSIUM && chainId === ELYSIUM.chainId) return { pool: ELYSIUM.pool, deployBlock: ELYSIUM.deployBlock };
+  return chainId in MAINNET_POOLS ? mainnetPool(chainId as MainnetChainId) : null;
+}
+
 /** At least one mainnet pool is filled in. */
-export const MAINNET_CONFIGURED = MAINNET_CHAINS.some((c) => mainnetPool(c.chainId) !== null);
+export const MAINNET_CONFIGURED = MAINNET_CHAINS.some((c) => chainPool(c.chainId) !== null);
 
 /**
  * Mainnet is live once the launch time has passed and at least one pool is in.
@@ -111,7 +130,7 @@ export function isMainnetLive(now: number = Date.now()): boolean {
  * asks then).
  */
 export function liveMainnetNames(): string {
-  const names = MAINNET_CHAINS.filter((c) => mainnetPool(c.chainId)).map((c) => c.name);
+  const names = MAINNET_CHAINS.filter((c) => chainPool(c.chainId)).map((c) => c.name);
   if (!names.length) return "Robinhood Chain and Tempo";
   return joinNames(names);
 }
@@ -125,7 +144,7 @@ const COUNT_WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven"
 
 /** How many mainnets have a pool in: 4. Two, as announced, when none is in (only a test asks then). */
 export function liveMainnetCount(): number {
-  return MAINNET_CHAINS.filter((c) => mainnetPool(c.chainId)).length || 2;
+  return MAINNET_CHAINS.filter((c) => chainPool(c.chainId)).length || 2;
 }
 
 /** The same count as a word for copy: "four mainnets", "one mainnet". */
@@ -141,7 +160,7 @@ export function liveMainnetCountWords(): string {
 export function liveMainnetsByDay(): { names: string; since: string }[] {
   const days: { names: string[]; since: string }[] = [];
   for (const c of MAINNET_CHAINS) {
-    if (!mainnetPool(c.chainId)) continue;
+    if (!chainPool(c.chainId)) continue;
     const day = days.find((d) => d.since === c.liveSince);
     if (day) day.names.push(c.name);
     else days.push({ names: [c.name], since: c.liveSince });

@@ -46,10 +46,20 @@
  * GLOAM_RELAY_REVERT_SHARE_<chainId> sets the percent, or "off" for none.
  */
 import { parseEther } from "viem";
+import { ELYSIUM } from "../elysium";
 
 type Env = Record<string, string | undefined>;
 
-export const DEFAULT_HOURLY_SPEND: Readonly<Record<number, string>> = { 1: "0.05", 8453: "0.01", 4663: "0.02", 4217: "1" };
+export const DEFAULT_HOURLY_SPEND: Readonly<Record<number, string>> = {
+  1: "0.05",
+  8453: "0.01",
+  4663: "0.02",
+  4217: "1",
+  // Elysium, in HYPE, only while it is on (lib/elysium): a starting guess, sized like
+  // Base's. Check it against real gas on launch day (DEPLOY-ELYSIUM.md) and set
+  // GLOAM_RELAY_HOURLY_SPEND_<chainId> to change it without a deploy.
+  ...(ELYSIUM ? { [ELYSIUM.chainId]: "1" } : {}),
+};
 export const NEW_SEND_SHARE_PCT = 80n;
 /** Cash outs stop here. What is left above it is for refunds and exits only. */
 export const CASH_OUT_SHARE_PCT = 92n;

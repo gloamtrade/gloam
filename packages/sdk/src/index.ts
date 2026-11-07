@@ -60,6 +60,7 @@ export * from "./rates.js";
 export * from "./privacy.js";
 export * from "./constants.js";
 export * from "./mainnet.js";
+export * from "./elysium.js";
 export * from "./poseidon.js";
 export * from "./note.js";
 export * from "./merkle.js";

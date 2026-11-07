@@ -69,6 +69,8 @@ import {
   TEMPO_USDCE,
   TEMPO_USDT0,
   networkName as sdkNetworkName,
+  elysiumChainId,
+  mainnetNetwork,
 } from "@gloamtrade/sdk";
 import type { NetworkKey } from "./networks.js";
 
@@ -158,7 +160,16 @@ export const NETWORK_CHAIN_IDS: Record<NetworkKey, number> = {
   "tempo-mainnet": TEMPO_MAINNET_CHAIN_ID,
   "base-mainnet": BASE_MAINNET_CHAIN_ID,
   "ethereum-mainnet": ETHEREUM_MAINNET_CHAIN_ID,
+  // 0 until the SDK has Elysium's chain id (src/elysium.ts): a limit naming it is refused then.
+  "elysium-mainnet": elysiumChainId() ?? 0,
 };
+
+/** The chain id a limit's network names; refuses Elysium while the SDK has no chain id for it. */
+function networkChainId(key: NetworkKey): number {
+  const id = NETWORK_CHAIN_IDS[key];
+  if (!id) throw new Error(`${key} is not available in this version of @gloamtrade/mcp yet. Update the package.`);
+  return id;
+}
 
 // Testnet assets first: a symbol on both sides resolves to the testnet unless a network is named.
 export const KNOWN_ASSETS: KnownAsset[] = [
@@ -205,6 +216,8 @@ export const KNOWN_ASSETS: KnownAsset[] = [
   { symbol: "EURC", chainId: ETHEREUM_MAINNET_CHAIN_ID, address: ETHEREUM_EURC, decimals: 6, stable: true },
   { symbol: "ETH", chainId: ETHEREUM_MAINNET_CHAIN_ID, address: NATIVE_ASSET, decimals: 18, stable: false },
   { symbol: "BDX", chainId: ETHEREUM_MAINNET_CHAIN_ID, address: ETHEREUM_BDX, decimals: 9, stable: false },
+  // Elysium, once the SDK has its values: USDC only, after the others so a bare "USDC" keeps its old meaning.
+  ...(mainnetNetwork("elysium")?.assets ?? []).map((a) => ({ symbol: a.symbol, chainId: mainnetNetwork("elysium")!.chainId, address: a.address, decimals: a.decimals, stable: true })),
 ];
 
 /** "Robinhood Chain", "Tempo testnet" and so on; "any network" for a limit that names none. */
@@ -221,7 +234,7 @@ export function assetLabel(chainId: number, asset: Address): string {
 // ------------------------------------------------------------------ config shape
 
 const amount = z.union([z.string(), z.number()]).transform((v) => String(v).trim());
-const network = z.enum(["robinhood", "tempo", "base", "ethereum", "robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet"]);
+const network = z.enum(["robinhood", "tempo", "base", "ethereum", "robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet"]);
 
 const assetEntry = z
   .object({
@@ -317,7 +330,7 @@ export function resolveAgent(agent: string, raw: AgentConfig, source: string): A
     let chainId: number | null;
     let decimals: number;
     let symbol: string;
-    const wantChain = entry.network ? NETWORK_CHAIN_IDS[entry.network] : null;
+    const wantChain = entry.network ? networkChainId(entry.network) : null;
     if (isAddress(k)) {
       known = KNOWN_ASSETS.find(
         (a) => a.address.toLowerCase() === k.toLowerCase() && (wantChain == null || a.chainId === wantChain)
@@ -382,7 +395,7 @@ function resolveSwapTargets(raw: string[] | Record<string, { network?: z.infer<t
   const entries: [string, { network?: z.infer<typeof network> }][] = Array.isArray(raw) ? raw.map((k) => [k, {}]) : Object.entries(raw);
   return entries.map(([key, entry]) => {
     const k = key.trim();
-    const wantChain = entry.network ? NETWORK_CHAIN_IDS[entry.network] : null;
+    const wantChain = entry.network ? networkChainId(entry.network) : null;
     if (isAddress(k)) {
       const known = KNOWN_ASSETS.find((a) => a.address.toLowerCase() === k.toLowerCase() && (wantChain == null || a.chainId === wantChain));
       return { symbol: known?.symbol ?? `${k.slice(0, 6)}…${k.slice(-4)}`, address: k, chainId: wantChain ?? known?.chainId ?? null };

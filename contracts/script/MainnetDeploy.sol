@@ -13,6 +13,7 @@ import {TransferVerifierFinal} from "../src/verifiers/final/TransferVerifierFina
 import {TransferIVerifierFinal} from "../src/verifiers/final/TransferIVerifierFinal.sol";
 import {DualProofVerifier} from "../src/verifiers/DualProofVerifier.sol";
 import {KeyCheckProofs} from "./KeyCheckProofs.sol";
+import {VaultOwnerGuard} from "../src/VaultOwnerGuard.sol";
 
 /**
  * The mainnet deploy every chain shares, so Tempo and Robinhood Chain get the
@@ -76,10 +77,74 @@ abstract contract MainnetDeploy is DeployerBroadcast {
         (uint16 feeBps, address feeRecipient) = _readWithdrawFee();
 
         _startDeployerBroadcast();
-        (address dual, address shieldI) = _deployVerifiers();
+        (ShieldPoolPayments pool, address dual, address shieldI) = _deployAndWire(poseidon2, lim, feeBps, feeRecipient);
+        if (newOwner != address(0)) {
+            pool.transferOwnership(newOwner);
+        }
+        // FINAL STEP: end setup mode. Irreversible. Do all wiring ABOVE this line.
+        pool.endSetup();
+        vm.stopBroadcast();
+
+        _report(pool, poseidon2, dual, shieldI, lim.assets);
+    }
+
+    /**
+     * The guarded mainnet deploy (Elysium first): the same pool wired the same
+     * way, but its owner is a VaultOwnerGuard from the first block, so its proof
+     * checkers can never be replaced and its ownership can never move again
+     * (Kann I-02). Nothing changes for the chains above, which keep _deployMainnet.
+     *
+     * In the one broadcast, in this order: the verifiers and the key gate, the
+     * pool (at the same nonce as on every other chain), limits, the shield
+     * verifier, each asset, the fee, then the guard with the deployer as its
+     * first controller, the handoff to the guard, endSetup, the guard accepting
+     * the vault, and last the controller handed on to GUARD_CONTROLLER, who
+     * must call acceptController() on the guard. Until then the deployer can
+     * only do what the guard forwards (limits and the fee), never touch a
+     * verifier.
+     *
+     * Environment, on top of the list above:
+     *   GUARD_CONTROLLER      who runs the guard (a multisig). It must be a contract
+     *                         unless GUARD_CONTROLLER_EOA=1. Required.
+     *   NEW_OWNER             must be unset: the guard is the owner on this path.
+     */
+    function _deployMainnetGuarded(uint256 chainId, bool allowNative) internal {
+        require(block.chainid == chainId, "wrong chain for this script");
+        require(_envAddressOrZero("NEW_OWNER") == address(0), "NEW_OWNER must be unset: the guard owns this vault");
+
+        address poseidon2 = vm.envAddress("POSEIDON2");
+        require(poseidon2.code.length > 0, "POSEIDON2 has no code on this chain");
+        address controller = _readGuardController();
+        Limits memory lim = _readLimits(allowNative);
+        (uint16 feeBps, address feeRecipient) = _readWithdrawFee();
+        address deployer = _deployerAddress();
+
+        _startDeployerBroadcast();
+        (ShieldPoolPayments pool, address dual, address shieldI) = _deployAndWire(poseidon2, lim, feeBps, feeRecipient);
+        // The guard comes after the pool, so the pool keeps its address on every chain.
+        VaultOwnerGuard guard = new VaultOwnerGuard(address(pool), deployer);
+        pool.transferOwnership(address(guard));
+        // FINAL STEP of setup: irreversible. The guard refuses a vault still in setup.
+        pool.endSetup();
+        guard.acceptVaultOwnership();
+        if (controller != deployer) {
+            guard.transferController(controller);
+        }
+        vm.stopBroadcast();
+
+        _report(pool, poseidon2, dual, shieldI, lim.assets);
+        _reportGuard(pool, guard, deployer, controller);
+    }
+
+    /// @dev Verifiers, key gate, pool, limits, shield verifier, assets and fee, in the order every chain uses.
+    function _deployAndWire(address poseidon2, Limits memory lim, uint16 feeBps, address feeRecipient)
+        internal
+        returns (ShieldPoolPayments pool, address dual, address shieldI)
+    {
+        (dual, shieldI) = _deployVerifiers();
         // GATE 2: no pool until the verifiers on chain prove they hold the ceremony keys
         _requireCeremonyKeys(dual, shieldI);
-        ShieldPoolPayments pool = new ShieldPoolPayments(poseidon2, dual);
+        pool = new ShieldPoolPayments(poseidon2, dual);
         // Limits on before deposits can work at all (shieldBound needs the shield
         // verifier): with nothing listed yet every deposit is refused, so there is
         // never a block where the pool takes any asset in any amount.
@@ -91,14 +156,49 @@ abstract contract MainnetDeploy is DeployerBroadcast {
         if (feeRecipient != address(0)) {
             pool.setWithdrawFee(feeBps, feeRecipient);
         }
-        if (newOwner != address(0)) {
-            pool.transferOwnership(newOwner);
-        }
-        // FINAL STEP: end setup mode. Irreversible. Do all wiring ABOVE this line.
-        pool.endSetup();
-        vm.stopBroadcast();
+    }
 
-        _report(pool, poseidon2, dual, shieldI, lim.assets);
+    /// @dev GUARD_CONTROLLER is required, and must be a contract unless GUARD_CONTROLLER_EOA=1.
+    function _readGuardController() internal view returns (address controller) {
+        controller = _envAddressOrZero("GUARD_CONTROLLER");
+        require(controller != address(0), "set GUARD_CONTROLLER: who runs the guard (a multisig)");
+        require(
+            controller.code.length > 0 || vm.envOr("GUARD_CONTROLLER_EOA", uint256(0)) == 1,
+            "GUARD_CONTROLLER has no code: use a multisig, or set GUARD_CONTROLLER_EOA=1 to hand it to a plain key"
+        );
+    }
+
+    /// @dev An address from the environment; unset or empty reads as zero.
+    function _envAddressOrZero(string memory name) internal view returns (address) {
+        string memory raw = vm.envOr(name, string(""));
+        return bytes(raw).length > 0 ? vm.parseAddress(raw) : address(0);
+    }
+
+    /// @dev GATE 1 for the guard: read back from the chain, any mismatch fails the run.
+    function _reportGuard(ShieldPoolPayments pool, VaultOwnerGuard guard, address deployer, address controller)
+        internal
+        view
+    {
+        console2.log("VaultOwnerGuard", address(guard));
+        console2.log("guard controller", guard.controller());
+        console2.log("guard pending controller", guard.pendingController());
+        require(pool.owner() == address(guard), "the guard does not own the vault");
+        require(pool.pendingOwner() == address(0), "someone is offered the vault");
+        require(address(guard.vault()) == address(pool), "the guard names another vault");
+        require(guard.controller() == deployer, "the guard has an unexpected controller");
+        if (controller != deployer) {
+            require(guard.pendingController() == controller, "GUARD_CONTROLLER is not offered the guard");
+        } else {
+            require(guard.pendingController() == address(0), "the guard has a controller handover pending");
+        }
+        bytes memory setVerifier = abi.encodeWithSignature("setVerifier(address)", address(1));
+        bytes memory setShield = abi.encodeWithSignature("setShieldVerifier(address)", address(1));
+        require(!guard.isAllowedChange(setVerifier), "the guard allows setVerifier");
+        require(!guard.isAllowedChange(setShield), "the guard allows setShieldVerifier");
+        console2.log("Guard checks passed: the guard owns the vault, its proof checkers are fixed for good.");
+        if (guard.pendingController() != address(0)) {
+            console2.log("Next: GUARD_CONTROLLER must call acceptController() on the guard", guard.pendingController());
+        }
     }
 
     function _readLimits(bool allowNative) internal view returns (Limits memory lim) {

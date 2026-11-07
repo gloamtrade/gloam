@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { C } from "./docsCard";
-import { MAINNET_CHAINS, mainnetPool } from "./mainnet";
+import { MAINNET_CHAINS, mainnetChainPool } from "./mainnet";
 
 /**
  * The small drawings on the docs link cards, one per page, each built from a
@@ -143,11 +143,12 @@ const CHAIN_PILLS: Record<string, [label: string, mono: string]> = {
   Tempo: ["Tempo", "T"],
   Base: ["Base", "B"],
   Ethereum: ["Ethereum", "E"],
+  Elysium: ["Elysium", "EL"],
 };
 
 /** The mainnets with a pool in, as card pills (lib/mainnet.ts). */
 function liveChainPills(): [string, string][] {
-  return MAINNET_CHAINS.filter((c) => mainnetPool(c.chainId)).map((c) => CHAIN_PILLS[c.name] ?? [c.name, c.name.slice(0, 1)]);
+  return MAINNET_CHAINS.filter((c) => mainnetChainPool(c.chainId)).map((c) => CHAIN_PILLS[c.name] ?? [c.name, c.name.slice(0, 1)]);
 }
 
 /**

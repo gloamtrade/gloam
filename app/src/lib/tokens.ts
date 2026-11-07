@@ -1,3 +1,5 @@
+import { ELYSIUM, isElysiumChainId } from "./elysium";
+
 /**
  * Robinhood Chain testnet stock tokens (from public explorer / faucet).
  * Balances are real onchain. USD marks use live equity prices.
@@ -301,8 +303,18 @@ export const ETHEREUM_SEPOLIA_TOKENS: OnchainToken[] = [
 /** Native ETH, as a private swap lists it: the vault's address(0), on the chains that hold it. */
 export const NATIVE_ETH_TOKEN: OnchainToken = { id: "eth", symbol: "ETH", name: "Ether", address: "0x0000000000000000000000000000000000000000", decimals: 18, yahoo: "", kind: "token", coingecko: "ethereum" };
 
+/**
+ * Elysium mainnet: USDC only at launch, with the launch limits (500 per deposit,
+ * 25,000 in total), behind NEXT_PUBLIC_ELYSIUM_ENABLED (lib/elysium.ts). Its
+ * address and decimals come from there. HYPE, the gas coin, is not listed.
+ */
+export const ELYSIUM_MAINNET_TOKENS: OnchainToken[] = ELYSIUM
+  ? [{ id: "usdc", symbol: "USDC", name: "USD Coin", address: ELYSIUM.usdc, decimals: ELYSIUM.usdcDecimals, yahoo: "", kind: "stablecoin" }]
+  : [];
+
 /** ERC-20 tokens shieldable on a given chain (stablecoins first). */
 export function shieldTokensFor(chainId: number): OnchainToken[] {
+  if (isElysiumChainId(chainId)) return ELYSIUM_MAINNET_TOKENS;
   if (chainId === 11155111) return ETHEREUM_SEPOLIA_TOKENS;
   if (chainId === 4663) return RH_MAINNET_TOKENS;
   if (chainId === 4217) return TEMPO_MAINNET_TOKENS;
@@ -441,6 +453,8 @@ export function knownTokens(chainId?: number): OnchainToken[] {
  * isNativeAddable says so.
  */
 export function supportsNativeShield(chainId: number): boolean {
+  // Elysium's vault does not list HYPE.
+  if (isElysiumChainId(chainId)) return false;
   return chainId !== 42431 && chainId !== 4217;
 }
 

@@ -41,6 +41,14 @@ function ago(ts: number): string {
 
 /** The chain's own logo, by family, so a testnet shows its mainnet's mark. */
 function ChainMark({ net, size = 28 }: { net: GloamNetwork; size?: number }) {
+  if (net.family === "elysium") {
+    return (
+      <span className="relative inline-block shrink-0 overflow-hidden rounded-full" style={{ width: size, height: size }}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- small local logos */}
+        <img src="/brand/chains/elysium.svg" alt="" width={size} height={size} className="h-full w-full object-cover" />
+      </span>
+    );
+  }
   const id = { robinhood: 4663, tempo: 4217, base: 8453, ethereum: 1 }[net.family];
   const dark = id !== 4217;
   return (

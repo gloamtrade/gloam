@@ -121,10 +121,13 @@ export function topUpMinutes(count: number): number {
   return Math.ceil((count * SECONDS_PER_TOP_UP) / 60);
 }
 
-/** Whether the agent needs gas of its own here, in plain words. Tempo pays gas in stablecoins, so there it needs none. */
-export function agentGasLine(net: { family: string; label: string }): string | null {
+/**
+ * Whether the agent needs gas of its own here, in plain words, in the chain's gas
+ * coin (ETH, or HYPE on Elysium). Tempo pays gas in stablecoins, so there it needs none.
+ */
+export function agentGasLine(net: { family: string; label: string; primaryAsset?: { symbol: string } }): string | null {
   if (net.family === "tempo") return null;
-  return `The agent needs its own ETH for gas on ${net.label}. Top-ups send stablecoins only.`;
+  return `The agent needs its own ${net.primaryAsset?.symbol ?? "ETH"} for gas on ${net.label}. Top-ups send stablecoins only.`;
 }
 
 // ---------------------------------------------------------------- picking the note

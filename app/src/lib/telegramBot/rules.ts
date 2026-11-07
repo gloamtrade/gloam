@@ -9,6 +9,7 @@ import { english } from "viem/accounts";
 import { baseSepoliaPool, ethereumSepoliaPool, isMainnetLive, liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { COPYCAT_GLOAM, GLOAM_TOKEN } from "./knowledge";
 import type { TgMessage, TgPhotoSize, TgUser } from "./telegram";
+import { ELYSIUM } from "@/lib/elysium";
 
 /** Forum topics in t.me/gloamhq, by message_thread_id. General messages carry no thread id. */
 export const TOPIC = { general: 1, testers: 2, announcements: 3, help: 4, feedback: 5, buys: 798 } as const;
@@ -1274,6 +1275,7 @@ export function ownAddress(a: string): boolean {
   if (l === GLOAM_TOKEN.address.toLowerCase()) return true;
   if (baseSepoliaPool()?.pool.toLowerCase() === l) return true;
   if (ethereumSepoliaPool()?.pool.toLowerCase() === l) return true;
+  if (ELYSIUM?.pool.toLowerCase() === l) return true;
   return ([4663, 4217, 8453, 1] as const).some((id) => mainnetPool(id)?.pool.toLowerCase() === l);
 }
 
@@ -1591,6 +1593,8 @@ const CHAIN_NAMES: Record<number, string> = {
   8453: "Base mainnet",
   84532: "Base Sepolia testnet",
   11155111: "Ethereum Sepolia testnet",
+  // Elysium, only while it is on (lib/elysium.ts)
+  ...(ELYSIUM ? { [ELYSIUM.chainId]: "Elysium mainnet" } : {}),
 };
 
 /** Hand-add details for a chain the app can ask for. */
@@ -1603,16 +1607,18 @@ const CHAIN_DETAILS: Record<number, string> = {
   84532: "RPC https://sepolia.base.org, chain ID 84532, currency ETH.",
   1: "RPC https://ethereum-rpc.publicnode.com, chain ID 1, currency ETH.",
   11155111: "RPC https://ethereum-sepolia-rpc.publicnode.com, chain ID 11155111, currency ETH.",
+  ...(ELYSIUM ? { [ELYSIUM.chainId]: `RPC ${ELYSIUM.rpcUrl}, chain ID ${ELYSIUM.chainId}, currency HYPE.` } : {}),
 };
 
 /** The fix once mainnet is live: the wallet and the app can each be on a mainnet or a testnet. */
 function liveChainFix(name: string, m: ChainMismatch): string {
-  const mainnets = new Set<number>(([4663, 4217, 8453, 1] as const).filter((id) => mainnetPool(id)));
+  const mainnets = new Set<number>([...([4663, 4217, 8453, 1] as const).filter((id) => mainnetPool(id)), ...(ELYSIUM ? [ELYSIUM.chainId] : [])]);
   const want = `${chainLabel(m.want)} (${m.want})`;
   const tempo = m.want === 42431 || m.want === 4217;
   const base = m.want === 84532 || m.want === 8453;
   const ethereum = m.want === 11155111 || m.want === 1;
-  const button = tempo ? "Switch to Tempo" : base ? "Switch to Base" : ethereum ? "Switch to Ethereum" : "Switch to Robinhood Chain";
+  const elysium = ELYSIUM !== null && m.want === ELYSIUM.chainId;
+  const button = tempo ? "Switch to Tempo" : base ? "Switch to Base" : ethereum ? "Switch to Ethereum" : elysium ? "Switch to Elysium" : "Switch to Robinhood Chain";
   const twin: Record<number, number> = { 46630: 4663, 4663: 46630, 42431: 4217, 4217: 42431, 84532: 8453, 8453: 84532, 11155111: 1, 1: 11155111 };
   const tap = `tap "${button}" on the wallet button at the top of the app (or Settings > Network > Add to wallet), approve it in your wallet, then try again.`;
   // the wallet sits on the other side (mainnet or testnet) of the chain the app is set to

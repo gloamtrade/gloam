@@ -51,7 +51,7 @@
     "build": "node scripts/build.mjs",
     "prepublishOnly": "npm run typecheck && npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test scripts/test-spend-limits.mts scripts/test-notes.mts scripts/test-wallet-send.mts scripts/test-access-key.mts scripts/test-mpp.mts scripts/test-mainnet.mts scripts/test-base.mts scripts/test-ethereum.mts scripts/test-ethereum-sepolia.mts scripts/test-safe-fetch.mts scripts/test-wormhole.mts scripts/test-veya.mts scripts/test-veya-proof.mts scripts/test-veya-adversarial.mts scripts/test-plugin-pins.mts scripts/test-swaps.mts scripts/test-x402-cashout.mts",
+    "test": "tsx --test scripts/test-spend-limits.mts scripts/test-notes.mts scripts/test-wallet-send.mts scripts/test-access-key.mts scripts/test-mpp.mts scripts/test-mainnet.mts scripts/test-base.mts scripts/test-ethereum.mts scripts/test-elysium.mts scripts/test-ethereum-sepolia.mts scripts/test-safe-fetch.mts scripts/test-wormhole.mts scripts/test-veya.mts scripts/test-veya-proof.mts scripts/test-veya-adversarial.mts scripts/test-plugin-pins.mts scripts/test-swaps.mts scripts/test-x402-cashout.mts",
     "test:fork": "tsx --test --test-concurrency=1 --test-reporter=tap scripts/fork-send-receipts.mts",
     "authorize-access-key": "tsx scripts/authorize-access-key.mts",
     "demo:tempo": "tsx scripts/demo-tempo-agent.mts",
