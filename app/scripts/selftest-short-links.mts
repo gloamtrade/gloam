@@ -12,10 +12,15 @@
  *  - old links (gloam1=, gloam1-, %2E, a code with no chain) still read and keep the long form
  *  - request links: every network and token, Gloam address, 0x address, ENS
  *    name, amount, note, name and partner code read back exactly as the long link does
+ *  - a link whose "#" a chat app wrote as "%23" (or "%2523") is put back on the
+ *    404 page before anything else runs: the body leaves the address bar and
+ *    history, and /c#<body> opens; any other path is left alone
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-short-links.mts
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
 import {
   SHORT_LINK_WHERE,
   buildShortPaymentRequestLink as sdkShortRequest,
@@ -36,6 +41,7 @@ import type { Address, Hex } from "viem";
 import { buildNotePackage, decodeNotePackage, encodeNotePackage, encodeNotePackageEncrypted, paymentCodeIn } from "../src/lib/notePackage";
 import { appClaimPath, claimLinkFor, codeFromHash, longClaimLinkFor, shortCodeFor, shortCodeFromHash } from "../src/lib/claimLink";
 import { isClaimLink } from "../src/lib/funnel";
+import { RECOVER_SCRIPT, recoveredLink } from "../src/lib/mangledLink";
 import { NETWORK_KEYS, getNetwork, type NetworkKey } from "../src/lib/networks";
 import {
   buildPaymentRequestLink,
@@ -337,6 +343,54 @@ for (let i = 0; i < 20; i++) {
   assert.match(s.seed, /^0x[0-9a-f]{32}$/);
   assert.ok(s.secret > 0n && s.secret === seedToSecret(seedBytes(s.seed)));
   n += 2;
+}
+
+// A "#" written "%23": the body is in the path. The 404 page puts the link back before anything else runs.
+{
+  const claim = claimLinkFor(
+    encodeNotePackage(buildNotePackage({ pool: getNetwork("robinhood-mainnet").pool as Address, asset: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", amountWei: "1000000", secret: fieldToHex(randomNoteSeed().secret), commitment: fieldToHex(1n), chainId: 4663 })),
+    "robinhood-mainnet",
+    ORIGIN,
+  );
+  const body = fragOf(claim).slice(1);
+  const reqBody = fragOf(buildShortPaymentRequestLink({ to: (await generateReceiveKey()).tag, network: "robinhood-mainnet", asset: requestAssetsFor("robinhood-mainnet")[0]!, amount: "5" }, ORIGIN)).slice(1);
+  const mangled = (page: string, b: string, hash = "%23") => new URL(`${ORIGIN}/${page}${hash}${b}`).pathname;
+  for (const [path, want] of [
+    [mangled("c", body), `/c#${body}`],
+    [mangled("c", body, "%2523"), `/c#${body}`],
+    [mangled("c", body, "/%23"), `/c#${body}`],
+    [mangled("c", body, "%23%23"), `/c#${body}`],
+    [`${mangled("c", body)}/`, `/c#${body}`],
+    [mangled("r", reqBody), `/r#${reqBody}`],
+  ] as const) {
+    assert.equal(recoveredLink(path), want, path);
+    n++;
+  }
+  for (const path of ["/c", "/c/", "/r", "/claim", "/c%23", "/c%23short", `/c%23${body}/x`, `/x/c%23${body}`, `/cc%23${body}`, `/c%23${body}!`, "/docs/privacy-model", "/hunt/c%23abcdefghij"]) {
+    assert.equal(recoveredLink(path), null, path);
+    n++;
+  }
+
+  // the script, run as the browser runs it: body out of the address bar and history first, then /c#<body> opens
+  const run = (pathname: string) => {
+    const did: string[] = [];
+    const location = { pathname, replace: (u: string) => did.push(`replace ${u}`) };
+    const history = { replaceState: (_s: unknown, _t: string, u: string) => did.push(`replaceState ${u}`) };
+    vm.runInNewContext(RECOVER_SCRIPT, { location, history });
+    return did;
+  };
+  assert.deepEqual(run(mangled("c", body)), ["replaceState /", `replace /c#${body}`], "via / so /c#... is a new page load, not a fragment change");
+  assert.deepEqual(run(mangled("r", reqBody, "%2523")), ["replaceState /", `replace /r#${reqBody}`]);
+  assert.deepEqual(run("/no-such-page"), [], "any other 404 stays a 404");
+  assert.deepEqual(run(`/c%23${body}/x`), []);
+  // a browser that refuses replaceState is not stuck: nothing throws out of the script
+  vm.runInNewContext(RECOVER_SCRIPT, { location: { pathname: mangled("c", body), replace() {} }, history: { replaceState() { throw new Error("no"); } } });
+  // and what the /c page then reads is the same claim
+  assert.equal(shortCodeFromHash(`#${run(mangled("c", body))[1]!.split("#")[1]}`), shortCodeFromHash(`#${body}`));
+  // the 404 page runs it first
+  const notFound = readFileSync(new URL("../src/app/not-found.tsx", import.meta.url), "utf8");
+  assert.ok(/<div[^>]*>\s*\{\/\*[^]*?\*\/\}\s*<script dangerouslySetInnerHTML=\{\{ __html: RECOVER_SCRIPT \}\} \/>\s*<Header \/>/.test(notFound), "the 404 page's first element");
+  n += 7;
 }
 
 console.log(`selftest-short-links: ${n} checks passed`);

@@ -10,7 +10,7 @@
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-analytics-clean.mts
  */
 import assert from "node:assert/strict";
-import { cleanPath, cleanRef, withoutLookup } from "../src/lib/analyticsClean";
+import { analyticsUrl, cleanPath, cleanRef, withoutLookup } from "../src/lib/analyticsClean";
 
 let n = 0;
 const eq = (a: unknown, b: unknown, msg?: string) => {
@@ -53,6 +53,25 @@ eq(cleanPath("/order/12345678"), "/order/:redacted");
 eq(cleanPath("/x/gloam1%2EeyJ2IjoxLCJ0"), "/x/:redacted", "percent-encoded codes are caught too");
 eq(cleanPath("/x/gloam3=2Muuo9o8HGWzGgY6sVn"), "/x/:redacted", "a short code is caught too");
 eq(cleanPath("/c#2Muuo9o8HGWzGgY6sVnAweQDGXr2eLqVzrTBUdjXfzxFH2qsT2"), "/c", "a short claim link keeps only its page");
+
+// a short link whose "#" a chat app wrote as "%23": the body is in the path, and is cut there like a fragment
+const BODY = "2Muuo9o8HGWzGgY6sVnAweQDGXr2eLqVz";
+eq(cleanPath(`/c%23${BODY}`), "/c");
+eq(cleanPath(`/c%2523${BODY}`), "/c", "escaped twice");
+eq(cleanPath(`/c%252523${BODY}`), "/c", "and again");
+eq(cleanPath(`/r%23${BODY}`), "/r");
+eq(cleanPath(`https://gloam.trade/c%23${BODY}`), "/c");
+eq(cleanRef(`https://gloam.trade/c%23${BODY}`), "https://gloam.trade/c");
+// what the browser sends to Vercel Analytics and the first-party intake (VercelAnalytics beforeSend, lib/track)
+eq(analyticsUrl(`https://gloam.trade/c%23${BODY}`), "https://gloam.trade/c");
+eq(analyticsUrl(`https://gloam.trade/c%2523${BODY}`), "https://gloam.trade/c");
+eq(analyticsUrl(`https://www.gloam.trade/C%23${BODY}`), "https://www.gloam.trade/C");
+eq(analyticsUrl(`/c%23${BODY}`), "/c");
+eq(analyticsUrl(`https://www.gloam.trade/c#${BODY}`), "https://www.gloam.trade/c");
+eq(analyticsUrl("https://www.gloam.trade/claim?net=robinhood-mainnet#claim=gloam1=eyJ2"), "https://www.gloam.trade/claim");
+eq(analyticsUrl("https://www.gloam.trade/xray/vitalik.eth?x=1"), "https://www.gloam.trade/xray/:redacted");
+eq(analyticsUrl("https://www.gloam.trade/app/vault"), "https://www.gloam.trade/app/vault");
+eq(analyticsUrl("https://www.gloam.trade/docs/100%25-private"), "https://www.gloam.trade/docs/100%25-private", "a plain %25 is not a cut");
 
 // full URLs keep only their path; anything else is refused
 eq(cleanPath("https://www.gloam.trade/app/vault?tab=swap#x"), "/app/vault");
