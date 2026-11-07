@@ -96,7 +96,7 @@ import { LockStoreDown, RECEIPT_WATCH_MS, forgetNonce, inSendLanes, inflightKey,
 import { jobKeyReady } from "@/lib/relay/jobSeal";
 import { datedOff } from "@/lib/relay/scheduled";
 import { WrongChainRpcError, serverTransport } from "@/lib/serverRpc";
-import { SWAP_SEND_MARGIN_SECONDS, encodeRoute, escrowAddress, isKnownRoute, isSwapAsset, receiptPaysEscrow, swapExpired, swapRouterFor, vaultSwapAbi, vaultSwapRouter, vaultSwapV3Abi, type EscrowKey, type PoolKey } from "@/lib/vaultSwap";
+import { SWAP_SEND_MARGIN_SECONDS, encodeRoute, escrowAddress, isKnownRoute, isSwapAsset, receiptPaysEscrow, refundAmountFor, swapExpired, swapRouterFor, vaultFeeOf, vaultSwapAbi, vaultSwapRouter, vaultSwapV3Abi, type EscrowKey, type PoolKey } from "@/lib/vaultSwap";
 import { knownTokens } from "@/lib/tokens";
 import { GAS_HIGH_CODE, formatGwei, gasHighMessage, maxFeeCapWei, maxGasPriceWei as maxGasPriceWeiFor, readGas } from "@/lib/relay/gasCeiling";
 import { ETH_USD_FEED, FEED_MAX_AGE_SEC, ethUsdFeedAbi, hasSwapFloor, smallestSwapUsd, swapFloorMessage } from "@/lib/relay/swapFloor";
@@ -1443,6 +1443,7 @@ export async function relayVaultSwap(net: GloamNetwork, body: Record<string, unk
   });
   // a refund locks on its escrow, a swap on its nullifier
   const left = await pub.readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "spent", args: [spend.nullifier] });
+  await assertRefundRule(net, config.version, spend.amount, refund.amount, left);
   const unshieldTx = body.unshieldTx == null ? null : asBytes32(body.unshieldTx, "unshield transaction");
   let refunding = false;
   const precheck = async () => {
@@ -1495,14 +1496,50 @@ export async function relayVaultSwap(net: GloamNetwork, body: Record<string, unk
   );
 }
 
+/**
+ * The refund note must follow the rule the app and the SDK make it by (refundAmountFor), not
+ * only stay under the note (R2, 7 November 2026 router review). Through v1 and v2
+ * (GloamVaultSwapV4, V4b, GloamVaultSwapTempo: no exit) that is the note less 1%, the vault's
+ * highest possible fee. Through v3 (GloamVaultSwapV4c, GloamVaultSwapTempo2) it is the note
+ * less the vault's fee now and 0.1%. A v3 refund being finished (the note already spent) may
+ * also be anything up to what reached its escrow, the note less the fee now: the router's
+ * own limit, so a note made just before a fee change still comes back.
+ */
+async function assertRefundRule(net: GloamNetwork, version: 1 | 2 | 3, amount: bigint, refundAmount: bigint, refunding: boolean): Promise<void> {
+  let most: bigint;
+  if (version !== 3) {
+    most = refundAmountFor(amount);
+  } else {
+    const feeBps = await vaultFeeBpsNow(net);
+    most = refunding ? amount - vaultFeeOf(amount, feeBps) : refundAmountFor(amount, feeBps);
+  }
+  if (refundAmount > most) throw new RelayError("Invalid refund note.");
+}
+
+/** The vault's cash-out fee, kept a minute per chain. A fee that can't be read refuses the swap: nothing is sent. */
+const feeReads = new Map<number, { at: number; bps: number }>();
+async function vaultFeeBpsNow(net: GloamNetwork): Promise<number> {
+  const hit = feeReads.get(net.chainId);
+  if (hit && Date.now() - hit.at < FLOOR_TTL_MS) return hit.bps;
+  let bps: number;
+  try {
+    bps = Number(await relayPublicClient(net).readContract({ address: net.pool!, abi: withdrawFeeAbi, functionName: "withdrawFeeBps" }));
+  } catch {
+    throw new RelayError("Could not read the vault's fee. Try again shortly.", 503, "check_failed");
+  }
+  feeReads.set(net.chainId, { at: Date.now(), bps });
+  return bps;
+}
+
 /** The floor's inputs, read together and kept a minute, so a status poll and a swap share one read. */
 type FloorRead = { at: number; gasPriceWei: bigint; ethUsd: number; feeBps: number };
 const FLOOR_TTL_MS = 60_000;
 const floorReads = new Map<number, FloorRead>();
 
-/** Test hook: forget the kept reads. */
+/** Test hook: forget the kept reads (the floor's and the vault's fee). */
 export function resetSwapFloorReads(): void {
   floorReads.clear();
+  feeReads.clear();
 }
 
 const withdrawFeeAbi = [{ type: "function", name: "withdrawFeeBps", stateMutability: "view", inputs: [], outputs: [{ type: "uint16" }] }] as const;

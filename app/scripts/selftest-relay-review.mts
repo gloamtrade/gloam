@@ -5,6 +5,10 @@
  *    plain cash out (now, scheduled, or sent later by the scheduled run) or an exit to
  *    that escrow is refused before anything is sent. A cash out of the same note to a
  *    wallet still goes, and a swap that failed its dry run keeps nothing
+ *  - R2: a refund note follows the app's rule, not only the note's size: the note less 1%
+ *    through v1 and v2, the note less the vault's fee now and 0.1% through v3, refused
+ *    before the dry run otherwise. A v3 refund being finished may be up to what reached
+ *    its escrow, and a fee that can't be read sends nothing
  *
  * fetch is stubbed: the relay talks to an in-process fake chain, and the relay key is a
  * throwaway made here. Nothing reaches any host.
@@ -12,7 +16,7 @@
  * Run from app/:  ../mcp/node_modules/.bin/tsx --tsconfig tsconfig.json scripts/selftest-relay-review.mts
  */
 import assert from "node:assert/strict";
-import { keccak256, toFunctionSelector, toHex, type Address, type Hex } from "viem";
+import { keccak256, pad, toEventSelector, toFunctionSelector, toHex, type Address, type Hex } from "viem";
 import { generatePrivateKey } from "viem/accounts";
 
 delete process.env.UPSTASH_REDIS_REST_URL;
@@ -31,6 +35,8 @@ const {
   refundAmountFor,
   routesBetween,
   swapRouterFor,
+  UNSHIELDED_EVENT,
+  vaultFeeOf,
 } = await import("../src/lib/vaultSwap");
 type PoolKey = import("../src/lib/vaultSwap").PoolKey;
 const {
@@ -40,6 +46,7 @@ const {
   relayUnshield,
   relayVaultSwap,
   relayVaultSwapExit,
+  resetSwapFloorReads,
   sendUnshieldNow,
 } = await import("../src/lib/relay/server");
 const { getNetwork } = await import("../src/lib/networks");
@@ -85,7 +92,11 @@ const chain = {
   feeBps: 50,
   /** What an escrow holds of the swap's asset. */
   held: 0n,
+  /** The vault's fee can't be read. */
+  feeDown: false,
 };
+/** The vault's payments to escrows the fake chain knows, by transaction hash. */
+const paidTxs = new Map<string, { address: string; topics: string[]; data: string }[]>();
 /** Each send's hash and how it ended. */
 const sends: { hash: Hex; ending: Ending }[] = [];
 /** The calldata of each eth_call, for asserting what was read. */
@@ -118,6 +129,14 @@ function answer(r: RpcReq, chainId: number): unknown {
     }
     case "eth_getTransactionReceipt": {
       const hash = String(r.params?.[0]);
+      const paid = paidTxs.get(hash);
+      if (paid) {
+        return {
+          transactionHash: hash, transactionIndex: "0x0", blockHash: BLOCK.hash, blockNumber: "0x1", from: `0x${"00".repeat(20)}`, to: `0x${"00".repeat(20)}`,
+          cumulativeGasUsed: "0x1", gasUsed: "0x1", effectiveGasPrice: "0x1", contractAddress: null, logsBloom: BLOCK.logsBloom, status: "0x1", type: "0x2",
+          logs: paid.map((l, i) => ({ ...l, blockHash: BLOCK.hash, blockNumber: "0x1", logIndex: toHex(i), removed: false, transactionHash: hash, transactionIndex: "0x0" })),
+        };
+      }
       const s = sends.find((x) => x.hash === hash);
       if (!s || s.ending === "none") return null;
       return {
@@ -134,7 +153,10 @@ function answer(r: RpcReq, chainId: number): unknown {
       if (sel === SEL.spent) return word(chain.spent.has(`0x${data.slice(10, 74)}`.toLowerCase()));
       if (sel === SEL.isKnownRoot) return word(true);
       if (sel === SEL.commitmentSeen) return word(false);
-      if (sel === SEL.fee) return word(chain.feeBps);
+      if (sel === SEL.fee) {
+        if (chain.feeDown) throw new Error("fake chain: fee read failed");
+        return word(chain.feeBps);
+      }
       if (sel === SEL.balanceOf) return word(chain.held);
       throw new Error(`fake chain: eth_call ${sel}`);
     }
@@ -167,6 +189,9 @@ function fresh() {
   chain.next = "success";
   chain.feeBps = 50;
   chain.held = 0n;
+  chain.feeDown = false;
+  paidTxs.clear();
+  resetSwapFloorReads();
   (globalThis as { __gloamMcpRate?: Map<string, unknown> }).__gloamMcpRate?.clear();
 }
 
@@ -239,6 +264,13 @@ function cashOut(to: Address = WALLET) {
   return { proof, root, nullifier: h32(0xc0000 + cashN), asset: USDG, to, amount: "1000000" };
 }
 
+/** A receipt the fake chain will show: the vault paying this note out to `escrow`. */
+function vaultPaid(nullifier: Hex, asset: Address, escrow: Address, amount: bigint, vault: string): Hex {
+  const hash = keccak256(toHex(`unshield-${paidTxs.size}`));
+  paidTxs.set(hash, [{ address: vault, topics: [toEventSelector(UNSHIELDED_EVENT), nullifier, pad(asset, { size: 32 }), pad(escrow, { size: 32 })], data: word(amount) }]);
+  return hash;
+}
+
 // v3 on Base, for exits and v3 refund rules
 VAULT_SWAP_V3_LIVE[8453] = VAULT_SWAP_V3_ADDRESS[8453]!;
 VAULT_SWAP_ROUTERS[8453] = VAULT_SWAP_V3_ADDRESS[8453]!;
@@ -296,6 +328,64 @@ await test("R1: an exit to another swap's escrow is refused before it is checked
   await assert.rejects(relayVaultSwapExit(base, exit), isCode("vault_recipient"));
   assert.equal(reads.length, before, "refused before anything was read");
   assert.equal(sends.length, 1);
+});
+
+// ---------------------------------------------------------------- R2
+
+await test("R2: through v1 and v2 a refund note is at most the note less 1%", async () => {
+  fresh();
+  const amount = 20_000_000n;
+  await assert.rejects(relayVaultSwap(rh, rhSwap(amount, { refund: refundAmountFor(amount) + 1n })), (e: unknown) => isCode("bad_request")(e) && (e as Error).message === "Invalid refund note.");
+  await assert.rejects(relayVaultSwap(rh, rhSwap(amount, { refund: amount })), isCode("bad_request"), "the whole note, which the router alone would take");
+  assert.equal(sends.length, 0, "refused before the dry run");
+  assert.equal(typeof (await relayVaultSwap(rh, rhSwap(amount))), "string", "the app's own refund note goes");
+  assert.equal(typeof (await relayVaultSwap(rh, rhSwap(amount, { refund: refundAmountFor(amount) - 5n }))), "string", "and a smaller one");
+  assert.equal(sends.length, 2);
+  assert.ok(!reads.some((d) => d.startsWith(SEL.fee)), "v1 and v2 never read the vault's fee");
+});
+
+await test("R2: through v3 a new swap's refund note is at most the note less the vault's fee now and 0.1%", async () => {
+  fresh();
+  const amount = 100_000_000n;
+  chain.feeBps = 50;
+  const most = refundAmountFor(amount, 50);
+  assert.equal(most, amount - vaultFeeOf(amount, 50) - amount / 1_000n);
+  await assert.rejects(relayVaultSwap(base, baseSwap(amount, { refund: most + 1n })), isCode("bad_request"));
+  await assert.rejects(relayVaultSwap(base, baseSwap(amount, { refund: amount - vaultFeeOf(amount, 50) })), isCode("bad_request"), "without the 0.1%");
+  assert.equal(sends.length, 0);
+  assert.equal(typeof (await relayVaultSwap(base, baseSwap(amount, { refund: most }))), "string");
+  // the fee came down: the rule follows it
+  resetSwapFloorReads();
+  chain.feeBps = 25;
+  assert.equal(typeof (await relayVaultSwap(base, baseSwap(amount, { refund: refundAmountFor(amount, 25) }))), "string");
+  assert.equal(sends.length, 2);
+});
+
+await test("R2: a v3 refund being finished may be up to what reached its escrow, never more", async () => {
+  fresh();
+  const amount = 100_000_000n;
+  const vault = base.pool!;
+  // made at a 25 bps fee, which has since gone up to 30: still within what reached the escrow
+  const swap = baseSwap(amount, { refund: refundAmountFor(amount, 25) });
+  chain.feeBps = 30;
+  const escrow = escrowOf(swap, VAULT_SWAP_V3_ADDRESS[8453]!, baseRoute);
+  chain.spent.add(swap.spend.nullifier.toLowerCase());
+  chain.held = amount - vaultFeeOf(amount, 30);
+  const unshieldTx = vaultPaid(swap.spend.nullifier, B_USDC, escrow, amount, vault);
+  assert.equal(typeof (await relayVaultSwap(base, { ...swap, unshieldTx })), "string");
+  // one past what reached the escrow is refused
+  const over = baseSwap(amount, { refund: amount - vaultFeeOf(amount, 30) + 1n });
+  chain.spent.add(over.spend.nullifier.toLowerCase());
+  const overTx = vaultPaid(over.spend.nullifier, B_USDC, escrowOf(over, VAULT_SWAP_V3_ADDRESS[8453]!, baseRoute), amount, vault);
+  await assert.rejects(relayVaultSwap(base, { ...over, unshieldTx: overTx }), isCode("bad_request"));
+  assert.equal(sends.length, 1);
+});
+
+await test("R2: a vault fee that can't be read sends nothing", async () => {
+  fresh();
+  chain.feeDown = true;
+  await assert.rejects(relayVaultSwap(base, baseSwap()), isCode("check_failed"));
+  assert.equal(sends.length, 0);
 });
 
 console.log(`relay review: ${passed} passed`);

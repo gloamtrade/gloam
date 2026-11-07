@@ -538,7 +538,9 @@ await test("Base has no floor: a $1 swap goes out and the feed is never read", a
   fresh();
   const hash = await relayVaultSwap(base, { ...swapBody(B.USDC, B.USDT, usd(1), [BASE_SWAP_POOLS[2]!]), router: VAULT_SWAP_V3_ADDRESS[8453] });
   assert.ok(hash.startsWith("0x"));
-  assert.ok(!reads.includes(SEL.round) && !reads.includes(SEL.fee));
+  assert.ok(!reads.includes(SEL.round));
+  // the vault's fee is read once, for the refund note's rule (selftest-relay-review), never for a floor
+  assert.equal(reads.filter((r) => r === SEL.fee).length, 1);
 });
 
 await test("the relay's status names the floor on Ethereum and nowhere else", async () => {
