@@ -2,6 +2,7 @@ import { defineChain, zeroAddress, type Address, type Chain } from "viem";
 import { base, baseSepolia, mainnet as ethereum, sepolia } from "viem/chains";
 import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, mainnetPoolFor, type MainnetChainId } from "./mainnet.js";
 import type { HistoryRpc } from "./rpc.js";
+import { ELYSIUM_NATIVE_CURRENCY, elysiumChainId, elysiumMainnetConfig, type ElysiumMainnet } from "./elysium.js";
 
 /** Native ETH is represented as the zero address across the vault. */
 export const NATIVE_ASSET: Address = zeroAddress;
@@ -238,10 +239,11 @@ export type GloamNetworkKey =
   | "robinhood-mainnet"
   | "tempo-mainnet"
   | "base-mainnet"
-  | "ethereum-mainnet";
+  | "ethereum-mainnet"
+  | "elysium-mainnet";
 
-/** The chain a network runs on, testnet or mainnet. */
-export type GloamChainFamily = "robinhood" | "tempo" | "base" | "ethereum";
+/** The chain a network runs on, testnet or mainnet. Elysium has a mainnet only. */
+export type GloamChainFamily = "robinhood" | "tempo" | "base" | "ethereum" | "elysium";
 
 /** Robinhood Chain mainnet (4663). */
 export const RH_MAINNET_CHAIN: Chain = defineChain({
@@ -418,6 +420,31 @@ export const ETHEREUM_MAINNET_ASSETS: GloamAsset[] = [
   { symbol: "BDX", address: ETHEREUM_BDX, decimals: 9, depositLimit: bdxLimit },
 ];
 
+/**
+ * Elysium mainnet (Kinetiq's Hyperliquid L2, an Arbitrum Orbit chain, gas in
+ * HYPE), from the values in src/elysium.ts, or null until they are all in.
+ */
+export function elysiumMainnetChain(cfg: ElysiumMainnet | null = elysiumMainnetConfig()): Chain | null {
+  if (!cfg) return null;
+  return defineChain({
+    id: cfg.chainId,
+    name: "Elysium",
+    nativeCurrency: ELYSIUM_NATIVE_CURRENCY,
+    rpcUrls: { default: { http: [cfg.rpcUrl] } },
+    blockExplorers: { default: { name: "Elysium Explorer", url: cfg.explorerUrl } },
+  });
+}
+
+/**
+ * Elysium mainnet pool assets: USDC only at launch, with the launch limits every
+ * mainnet started on (500 per deposit, 25,000 in total), in USDC's own decimals.
+ * HYPE is not listed. readDepositLimit reads the live value.
+ */
+export function elysiumMainnetAssets(cfg: ElysiumMainnet | null = elysiumMainnetConfig()): GloamAsset[] {
+  if (!cfg) return [];
+  return [{ symbol: "USDC", address: cfg.usdc, decimals: cfg.usdcDecimals, depositLimit: { perDeposit: units(500n, cfg.usdcDecimals), total: units(25_000n, cfg.usdcDecimals) } }];
+}
+
 /** Base Sepolia pool assets: Circle's test USDC and EURC (500 / 25,000 each), and ETH (0.2 / 10). No USDT there. */
 export const BASE_SEPOLIA_ASSETS: GloamAsset[] = [
   { symbol: "USDC", address: BASE_SEPOLIA_USDC, decimals: 6, depositLimit: sepoliaStableLimit },
@@ -575,11 +602,40 @@ function buildMainnet(family: GloamChainFamily): GloamNetwork | null {
   };
 }
 
+/**
+ * Elysium mainnet, or null until every value in src/elysium.ts is in. Its pool
+ * is owned by a VaultOwnerGuard from the deploy, so its proof checkers can never
+ * be replaced. Native HYPE is not listed, so nativeShield is off.
+ */
+function buildElysium(): GloamNetwork | null {
+  const cfg = elysiumMainnetConfig();
+  const chain = elysiumMainnetChain(cfg);
+  if (!cfg || !chain) return null;
+  return {
+    key: "elysium-mainnet",
+    label: "Elysium",
+    chainId: cfg.chainId,
+    pool: cfg.pool,
+    deployBlock: cfg.deployBlock,
+    payMemo: cfg.payMemo?.address ?? null,
+    nativeShield: false,
+    family: "elysium",
+    testnet: false,
+    ceremony: "production",
+    chain,
+    rpcUrl: cfg.rpcUrl,
+    historyRpc: null,
+    explorerUrl: cfg.explorerUrl,
+    assets: elysiumMainnetAssets(cfg),
+  };
+}
+
 const MAINNETS: Partial<Record<GloamChainFamily, GloamNetwork | null>> = {
   robinhood: buildMainnet("robinhood"),
   tempo: buildMainnet("tempo"),
   base: buildMainnet("base"),
   ethereum: buildMainnet("ethereum"),
+  elysium: buildElysium(),
 };
 
 /**
@@ -651,6 +707,7 @@ export function mainnetNetwork(family: GloamChainFamily): GloamNetwork | null {
  * Ethereum Sepolia once each pool is filled in.
  */
 export function testnetNetwork(family: GloamChainFamily): GloamNetwork | null {
+  if (family === "elysium") return null;
   if (family === "base") return BASE_TESTNET;
   if (family === "ethereum") return ETHEREUM_TESTNET;
   return GLOAM_NETWORKS[family];
@@ -658,7 +715,7 @@ export function testnetNetwork(family: GloamChainFamily): GloamNetwork | null {
 
 /** Every network Gloam runs on right now: mainnets with a pool first, then the testnets. */
 export function gloamNetworks(): GloamNetwork[] {
-  const live = [MAINNETS.robinhood, MAINNETS.tempo, MAINNETS.base, MAINNETS.ethereum].filter((n): n is GloamNetwork => n !== null);
+  const live = [MAINNETS.robinhood, MAINNETS.tempo, MAINNETS.base, MAINNETS.ethereum, MAINNETS.elysium].filter((n): n is GloamNetwork => n !== null);
   return [
     ...live,
     GLOAM_NETWORKS.robinhood,
@@ -678,13 +735,17 @@ export function networkForChainId(chainId: number): GloamNetwork | undefined {
   return gloamNetworks().find((n) => n.chainId === chainId);
 }
 
-/** True for Robinhood Chain (4663), Tempo (4217), Base (8453) and Ethereum (1) mainnet, pool or not. */
+/**
+ * True for Robinhood Chain (4663), Tempo (4217), Base (8453) and Ethereum (1)
+ * mainnet, pool or not, and for Elysium once its chain id is filled in.
+ */
 export function isMainnetChainId(chainId: number): boolean {
   return (
     chainId === RH_MAINNET_CHAIN_ID ||
     chainId === TEMPO_MAINNET_CHAIN_ID ||
     chainId === BASE_MAINNET_CHAIN_ID ||
-    chainId === ETHEREUM_MAINNET_CHAIN_ID
+    chainId === ETHEREUM_MAINNET_CHAIN_ID ||
+    (elysiumChainId() !== null && chainId === elysiumChainId())
   );
 }
 
@@ -712,6 +773,7 @@ export function networkName(chainId: number): string {
   if (chainId === TEMPO_MAINNET_CHAIN_ID) return "Tempo";
   if (chainId === BASE_MAINNET_CHAIN_ID) return "Base";
   if (chainId === ETHEREUM_MAINNET_CHAIN_ID) return "Ethereum";
+  if (elysiumChainId() !== null && chainId === elysiumChainId()) return "Elysium";
   if (chainId === RH_TESTNET_CHAIN_ID) return "Robinhood Chain testnet";
   if (chainId === TEMPO_TESTNET_CHAIN_ID) return "Tempo testnet";
   if (chainId === BASE_SEPOLIA_CHAIN_ID) return "Base testnet";
