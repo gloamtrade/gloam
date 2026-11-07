@@ -220,8 +220,10 @@ export default function DocsPrivateSwapsPage() {
         <li>
           <strong>Price buffer, 0.5% on Robinhood Chain and 0.1% on Tempo.</strong>{" "}
           The swap asks for a little less than the quote, so a small price move
-          before it lands does not make it fail. Whatever the trade does not use
-          goes to the Gloam treasury.
+          before it lands does not make it fail. On Robinhood Chain that means
+          every swap is planned to leave about 0.5% of its input unspent.
+          Whatever the trade does not use is not returned to you: it goes to
+          the Gloam treasury.
           {NEW_CHAINS.length > 0 && ` On ${and(NEW_CHAINS)} it is 0.1% between two dollar stablecoins and 0.5% otherwise.`}
         </li>
         <li>
@@ -429,7 +431,9 @@ export default function DocsPrivateSwapsPage() {
         <li>
           <strong>Not part of the external review.</strong>{" "}
           <Link href="/security">Kann Audits</Link> reviewed the vault contracts,
-          not the routers. The routers have only had internal review.
+          not the routers. The routers have had internal review only, most
+          recently on 7 November 2026. An outside review of them is being
+          sourced.
         </li>
       </ul>
       <p>

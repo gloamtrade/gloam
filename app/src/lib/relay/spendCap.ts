@@ -33,6 +33,17 @@
  * GLOAM_RELAY_IP_SENDS_<chainId> sets how many sends one IP may ask for in 10 minutes
  * on a chain with a lower limit than the relay's own, or "off" for none. Payment
  * messages don't count, and a browser proves each send first, so a payroll stays under it.
+ *
+ * What reverts has a share of its own per sender (R3, 7 November 2026 router review): a
+ * send that reverts on chain burns the relay's gas and brings nothing back, and apart from
+ * Ethereum's swap budgets only the hourly cap stood in its way. Each send holds what it
+ * could cost against its sender's revert share too, and keeps it counted only if it
+ * reverts (or no receipt was seen): the larger of REVERT_SHARE_PCT of the cap and
+ * REVERT_SENDS sends like it at today's gas, never past MAX_SENDER_SHARE_PCT. It applies
+ * to every kind of send, refunds and exits included where there is no swap floor (where
+ * there is one, its own budgets apply). Scheduled cash outs keep no IP, so they all hold
+ * as one sender, SCHEDULED_SENDER, against both this share and the sender share.
+ * GLOAM_RELAY_REVERT_SHARE_<chainId> sets the percent, or "off" for none.
  */
 import { parseEther } from "viem";
 
@@ -56,6 +67,11 @@ export const BACK_SENDS = 5n;
 /** Payment messages outside the relay's paid message budget may hold this share of the cap between them. */
 export const MEMO_SPEND_SHARE_PCT = 20n;
 export const DEFAULT_IP_SENDS: Readonly<Record<number, number>> = { 1: 120 };
+/** A sender's sends that revert may burn this share of the cap an hour, or REVERT_SENDS like the one being held if that is more. */
+export const DEFAULT_REVERT_SHARE_PCT = 10;
+export const REVERT_SENDS = 20n;
+/** Who every scheduled cash out holds as: jobs keep no IP, so they share one sender. No ":" (lib/mcpRemote/rateLimit reads that as IPv6). */
+export const SCHEDULED_SENDER = "later|scheduled";
 export const DEFAULT_SENDER_SHARE_PCT = 40;
 /**
  * Chains that charge for posting a transaction to Ethereum on top of its gas. A send
@@ -108,4 +124,17 @@ export function senderSharePct(chainId: number, env: Env = process.env): number 
     warnOnce(name);
   }
   return DEFAULT_SENDER_SHARE_PCT;
+}
+
+/** The share of the cap one sender's reverted sends may burn in an hour, in percent, or null for none. */
+export function revertSharePct(chainId: number, env: Env = process.env): number | null {
+  const name = `GLOAM_RELAY_REVERT_SHARE_${chainId}`;
+  const raw = env[name]?.trim();
+  if (raw?.toLowerCase() === "off") return null;
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isSafeInteger(n) && n > 0 && n <= 100) return n;
+    warnOnce(name);
+  }
+  return DEFAULT_REVERT_SHARE_PCT;
 }

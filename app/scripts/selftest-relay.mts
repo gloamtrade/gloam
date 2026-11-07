@@ -280,6 +280,9 @@ function answer(r: RpcReq): { result?: unknown; error?: { code: number; message:
       if (sel === SEL.commitmentSeen) return { result: word(chain.seen) };
       return { error: { code: -32000, message: `fake chain: unknown call ${sel}` } };
     }
+    // the fake node keeps no pending transactions: one without a receipt is gone (relay/server assertEarlierSendSettled)
+    case "eth_getTransactionByHash":
+      return { result: null };
     case "eth_getTransactionReceipt":
       if (chain.receipt === "error") return { error: { code: -32000, message: "fake chain: receipt read failed" } };
       return { result: chain.receipt === "none" ? null : receiptFor(String(r.params?.[0]), chain.receipt) };

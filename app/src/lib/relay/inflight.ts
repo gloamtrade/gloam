@@ -23,6 +23,11 @@
  * move. A copy sent after that takes the lock and faces the dry run like any
  * new request, so there is still at most one send of a spend out at a time. A
  * timeout, a dropped request or a send whose outcome is unknown never drops it.
+ *
+ * A lock still expires, and on Ethereum a send can sit unmined past it (it offers at
+ * most 1.5 times the gas ceiling). So each spend's last send (its relay account, nonce
+ * and hash) is kept for a day (recordSent), and the relay checks it before sending that
+ * spend again: not while it may still land (lib/relay/server assertEarlierSendSettled).
  */
 import { randomUUID } from "crypto";
 import { redisConfigured } from "@/lib/tractionStore";
@@ -35,6 +40,29 @@ import { redisConfigured } from "@/lib/tractionStore";
  * the dry run and the send, each behind a 20 to 30 s RPC timeout.
  */
 export const INFLIGHT_TTL_SEC = 180;
+
+/**
+ * Per chain, where a send can sit unmined longer: on Ethereum a send offers at most 1.5
+ * times the gas ceiling (lib/relay/gasCeiling), so a rising base fee can leave it waiting
+ * for many blocks. The lock is only the first guard: a spend's last send is kept on record
+ * (recordSent) and checked before any new one (lib/relay/server), however old the lock.
+ */
+export const DEFAULT_INFLIGHT_TTL_SEC: Readonly<Record<number, number>> = { 1: 900 };
+const INFLIGHT_TTL_MIN = 60;
+const INFLIGHT_TTL_MAX = 86_400;
+
+/**
+ * How long a spend's lock lives on `chainId`, in seconds. GLOAM_RELAY_INFLIGHT_TTL_<chainId>
+ * sets it (60 to 86,400); anything else keeps the default.
+ */
+export function inflightTtlSec(chainId: number, env: Record<string, string | undefined> = process.env): number {
+  const raw = env[`GLOAM_RELAY_INFLIGHT_TTL_${chainId}`]?.trim();
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isSafeInteger(n) && n >= INFLIGHT_TTL_MIN && n <= INFLIGHT_TTL_MAX) return n;
+  }
+  return DEFAULT_INFLIGHT_TTL_SEC[chainId] ?? INFLIGHT_TTL_SEC;
+}
 
 const PREFIX = "gloam:relay:inflight:";
 const MEM_MAX_KEYS = 10_000;
@@ -183,6 +211,102 @@ export async function takeInflight(
     store: "memory",
     release: async () => memRelease(key, token),
   };
+}
+
+// ---------------------------------------------------------------- kept records
+
+/**
+ * A small value kept in the relay's store with an expiry: Redis when set, memory only
+ * with none outside production (as the lock). Throws LockStoreDown otherwise, so a
+ * caller never reads "no record" when the store simply did not answer.
+ */
+const memRecords = new Map<string, { value: string; exp: number }>();
+
+async function keepRecord(key: string, value: string, ttlSec: number): Promise<void> {
+  const store = lockStore();
+  if (store === "none") {
+    relayStoreDown("no redis in a production build");
+    throw new LockStoreDown("no redis");
+  }
+  if (store === "memory") {
+    if (memRecords.size > MEM_MAX_KEYS) {
+      const now = Date.now();
+      for (const [k, v] of memRecords) if (v.exp <= now) memRecords.delete(k);
+    }
+    memRecords.set(key, { value, exp: Date.now() + ttlSec * 1000 });
+    return;
+  }
+  try {
+    await redis(["SET", key, value, "EX", ttlSec]);
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : "redis failed";
+    relayStoreDown(reason);
+    throw new LockStoreDown(reason);
+  }
+}
+
+async function readRecord(key: string): Promise<string | null> {
+  const store = lockStore();
+  if (store === "none") {
+    relayStoreDown("no redis in a production build");
+    throw new LockStoreDown("no redis");
+  }
+  if (store === "memory") {
+    const hit = memRecords.get(key);
+    return hit && hit.exp > Date.now() ? hit.value : null;
+  }
+  try {
+    const raw = await redis(["GET", key]);
+    return typeof raw === "string" ? raw : null;
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : "redis failed";
+    relayStoreDown(reason);
+    throw new LockStoreDown(reason);
+  }
+}
+
+/**
+ * A swap's escrow, kept once the relay is asked to send the swap (lib/relay/server). The
+ * swap's unshield proof names the escrow as `to`, and anyone who saw the swap (a reverted
+ * one stays on chain, proofs and all) can hand that proof to the relay as a plain cash out:
+ * the money then waits at the escrow and the relay pays for a refund too. The vault keeps
+ * every root, so that proof stays good as long as the note is unspent, hence a long life.
+ */
+const ESCROW_PREFIX = "gloam:relay:escrow:";
+export const SWAP_ESCROW_TTL_SEC = 400 * 86_400;
+
+export async function markSwapEscrow(chainId: number, escrow: string, ttlSec = SWAP_ESCROW_TTL_SEC): Promise<void> {
+  await keepRecord(`${ESCROW_PREFIX}${chainId}:${escrow.toLowerCase()}`, "1", ttlSec);
+}
+
+/** Whether `address` is a swap escrow the relay was asked to send. Throws LockStoreDown when the store can't say. */
+export async function isSwapEscrow(chainId: number, address: string): Promise<boolean> {
+  return (await readRecord(`${ESCROW_PREFIX}${chainId}:${address.toLowerCase()}`)) !== null;
+}
+
+/**
+ * A spend's last send: the relay account, its nonce and (when the node answered) the hash.
+ * Kept under the spend's lock key long after the lock itself, so a copy that comes once
+ * the lock expired is checked against it: never sent again while that one may still land.
+ */
+export type SentRecord = { from: string; nonce: number; hash?: string };
+const SENT_PREFIX = "gloam:relay:sent:";
+export const SENT_TTL_SEC = 24 * 3600;
+
+export async function recordSent(lockKey: string, sent: SentRecord, ttlSec = SENT_TTL_SEC): Promise<void> {
+  await keepRecord(SENT_PREFIX + lockKey, JSON.stringify(sent), ttlSec);
+}
+
+export async function readSent(lockKey: string): Promise<SentRecord | null> {
+  const raw = await readRecord(SENT_PREFIX + lockKey);
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as Partial<SentRecord>;
+    if (typeof v.from !== "string" || !Number.isSafeInteger(v.nonce)) return null;
+    return { from: v.from, nonce: v.nonce!, ...(typeof v.hash === "string" ? { hash: v.hash } : {}) };
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------- after the send

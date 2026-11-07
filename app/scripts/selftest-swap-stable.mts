@@ -455,6 +455,10 @@ function fresh() {
   delete process.env.GLOAM_RELAY_HOURLY_SPEND_8453;
   delete process.env.GLOAM_RELAY_IP_SENDS_1;
   delete process.env.GLOAM_RELAY_SENDER_SHARE_1;
+  // The revert share has its own self-test (selftest-relay-review). These cases pin the cap and
+  // the other shares with sends whose receipts nobody sees, which the revert share counts as
+  // reverts, so it would stop them first.
+  for (const id of [1, 8453, 4663]) process.env[`GLOAM_RELAY_REVERT_SHARE_${id}`] = "off";
   resetSwapFloorReads();
   resetGasReads();
 }
@@ -538,7 +542,9 @@ await test("Base has no floor: a $1 swap goes out and the feed is never read", a
   fresh();
   const hash = await relayVaultSwap(base, { ...swapBody(B.USDC, B.USDT, usd(1), [BASE_SWAP_POOLS[2]!]), router: VAULT_SWAP_V3_ADDRESS[8453] });
   assert.ok(hash.startsWith("0x"));
-  assert.ok(!reads.includes(SEL.round) && !reads.includes(SEL.fee));
+  assert.ok(!reads.includes(SEL.round));
+  // the vault's fee is read once, for the refund note's rule (selftest-relay-review), never for a floor
+  assert.equal(reads.filter((r) => r === SEL.fee).length, 1);
 });
 
 await test("the relay's status names the floor on Ethereum and nowhere else", async () => {

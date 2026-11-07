@@ -45,7 +45,8 @@ const REVIEWED = [
 ];
 
 const NOT_REVIEWED = [
-  "Swap routers: GloamVaultSwap, V4, V4b, Tempo and SwapEscrow. These have only had internal review",
+  "Swap routers: GloamVaultSwap, GloamVaultSwap2, GloamVaultSwapV4, V4b and V4c, GloamVaultSwapTempo and GloamVaultSwapTempo2, with SwapEscrow and SwapEscrow2. These have had internal review only, most recently on 7 November 2026. An outside review of them is being sourced",
+  "VaultOwnerGuard",
   "GloamPayMemo",
   "Generated verifiers",
   "Circuits",
