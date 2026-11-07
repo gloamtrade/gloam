@@ -4,6 +4,7 @@ import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { mainnetPool } from "@/lib/mainnet";
+import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_LIVE_SINCE } from "@/lib/elysium";
 
 /** Base and Ethereum mainnet show as live once their pools are in (lib/mainnet.ts). */
 const BASE_LIVE = mainnetPool(8453) !== null;
@@ -64,7 +65,7 @@ export default function DocsProductPage() {
           {
             n: "●",
             title: "Mainnet",
-            body: `Live on Robinhood Chain and Tempo since 21 October 2026, 13:00 UTC${LATER ? `, and on ${LATER} since 26 October 2026` : ""}, on the same vault, the final ceremony keys and deposit limits. Direct deposits and private payments are free; a cash out costs 0.5%.`,
+            body: `Live on Robinhood Chain and Tempo since 21 October 2026, 13:00 UTC${LATER ? `, and on ${LATER} since 26 October 2026` : ""}${ELYSIUM ? `, and on Elysium since ${ELYSIUM_LIVE_SINCE}` : ""}, on the same vault, the final ceremony keys and deposit limits. Direct deposits and private payments are free; a cash out costs 0.5%.`,
           },
           {
             n: "●",
@@ -74,7 +75,7 @@ export default function DocsProductPage() {
           {
             n: "●",
             title: "Shield",
-            body: `Mainnet: USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO on Robinhood Chain; USDC.e, pathUSD, USDT0 and OUSD on Tempo${BASE_LIVE ? "; USDC, EURC, USDT and ETH on Base" : ""}${ETHEREUM_LIVE ? "; USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum" : ""}, under deposit limits. Testnet: also test ETH and Robinhood Chain stock tokens.`,
+            body: `Mainnet: USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO on Robinhood Chain; USDC.e, pathUSD, USDT0 and OUSD on Tempo${BASE_LIVE ? "; USDC, EURC, USDT and ETH on Base" : ""}${ETHEREUM_LIVE ? "; USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum" : ""}${ELYSIUM ? "; USDC on Elysium" : ""}, under deposit limits. Testnet: also test ETH and Robinhood Chain stock tokens.`,
           },
           {
             n: "●",
@@ -141,6 +142,18 @@ export default function DocsProductPage() {
             title: "Base and Ethereum",
             body: `The mainnet vault and final keys, on Base and Ethereum. Their testnets, Base Sepolia (since 24 October) and Ethereum Sepolia (since 25 October), are live.${BASE_LIVE && ETHEREUM_LIVE ? " Base and Ethereum mainnet are live too." : LATER ? ` ${LATER} mainnet is live too; the other is next.` : " Base and Ethereum mainnet are next."}`,
           },
+          // Elysium, only while NEXT_PUBLIC_ELYSIUM_ENABLED is on: coming until its values are in, then live.
+          ...(ELYSIUM_FLAG
+            ? [
+                {
+                  n: ELYSIUM ? "●" : "○",
+                  title: "Elysium",
+                  body: ELYSIUM
+                    ? `The mainnet vault and final keys on Elysium, live since ${ELYSIUM_LIVE_SINCE}: USDC only, gas in HYPE. Private swaps and bringing money over are not on Elysium yet.`
+                    : "Coming: the mainnet vault and final keys on Elysium, USDC first, gas in HYPE.",
+                },
+              ]
+            : []),
         ]}
       />
 

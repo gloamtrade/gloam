@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { XrayLookup, XrayLookupError } from "@/app/api/xray/route";
 import { AppLink } from "@/components/AppLink";
 import { TokenLogo } from "@/components/app/TokenLogo";
+import { chainLogoSrc } from "@/lib/chainLogo";
 import { SealedField } from "@/components/ui/SealedField";
 import { formatUsdCompact } from "@/lib/markets";
 import type { XrayBalances, XrayHolding } from "@/lib/xray/balances";
@@ -84,9 +85,9 @@ function HoldingRow({ h }: { h: XrayHolding }) {
         <TokenLogo id={h.id} symbol={h.symbol} size={28} />
         <span className="absolute -bottom-1 -right-1 h-4 w-4 overflow-hidden rounded-full border border-surface bg-surface">
           {/* eslint-disable-next-line @next/next/no-img-element -- small local logos */}
-          <img src={`/brand/chains/${h.chainId}.png`} alt="" width={14} height={14} className="h-full w-full object-cover dark:hidden" />
+          <img src={chainLogoSrc(h.chainId)} alt="" width={14} height={14} className="h-full w-full object-cover dark:hidden" />
           {/* eslint-disable-next-line @next/next/no-img-element -- small local logos */}
-          <img src={`/brand/chains/${h.chainId}-dark.png`} alt="" width={14} height={14} className="hidden h-full w-full object-cover dark:block" />
+          <img src={chainLogoSrc(h.chainId, true)} alt="" width={14} height={14} className="hidden h-full w-full object-cover dark:block" />
         </span>
       </span>
       <span className="min-w-0 flex-1">

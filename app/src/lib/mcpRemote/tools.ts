@@ -15,6 +15,7 @@ import { parseUnits, type Address } from "viem";
 import { swapMainnets, swapRouterFor, vaultSwapRouter } from "@/lib/vaultSwap";
 import { SWAP_PUBLIC_LINE, SWAP_QUOTE_PER_MINUTE, SwapQuoteError, quoteSwapServer, type SwapQuote } from "@/lib/swapQuote";
 import { knownTokens } from "@/lib/tokens";
+import { redactRpcUrl } from "@gloamtrade/sdk";
 import { formatGwei, maxGasPriceWei } from "@/lib/relay/gasCeiling";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
 import {
@@ -72,6 +73,8 @@ function optString(args: Args, key: string, max: number): string | undefined {
 const BASE_TESTNET = NETWORK_KEYS.includes("base");
 /** So is Ethereum Sepolia. */
 const ETHEREUM_TESTNET = NETWORK_KEYS.includes("ethereum");
+/** Elysium testnet, once its switch is on and its pool is in (lib/elysium). */
+const ELYSIUM_TESTNET_ON = NETWORK_KEYS.includes("elysium");
 
 /** The network names a caller may pass: the testnets, then each mainnet once its pool is in. */
 const NETWORK_CHOICES: NetworkKey[] = [
@@ -111,6 +114,7 @@ const TESTNET_PROP_TEXT = `Gloam network: ${andList([
   '"robinhood" (Robinhood Chain testnet)',
   ...(BASE_TESTNET ? ['"base" (Base Sepolia testnet)'] : []),
   ...(ETHEREUM_TESTNET ? ['"ethereum" (Ethereum Sepolia testnet)'] : []),
+  ...(ELYSIUM_TESTNET_ON ? ['"elysium" (Elysium testnet: test USDC; gas in HYPE)'] : []),
 ]).replace(/ and (?=[^,]*$)/, " or ")}.`;
 
 const MAINNET_PROP_TEXT: Partial<Record<NetworkKey, string>> = {
@@ -144,6 +148,7 @@ const TESTNET_CHOICES_TEXT = andList([
   '"robinhood" (Robinhood Chain testnet)',
   ...(BASE_TESTNET ? ['"base" (Base Sepolia)'] : []),
   ...(ETHEREUM_TESTNET ? ['"ethereum" (Ethereum Sepolia)'] : []),
+  ...(ELYSIUM_TESTNET_ON ? ['"elysium" (Elysium testnet)'] : []),
 ]).replace(/ and (?=[^,]*$)/, " or ");
 
 const NETWORK_PROP = {
@@ -219,7 +224,7 @@ export const TOOLS: Tool[] = [
     name: "gloam_networks",
     title: "Networks and assets",
     description: MAINNET_ENABLED
-      ? `The networks Gloam runs on, mainnets first, with each vault (pool) address, the private swap routers (${swapMainnets()} mainnet), the assets you can deposit (on mainnet: ${MAINNET_DEPOSITS_TEXT}; on testnet: OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain, and more on Base Sepolia and Ethereum Sepolia), explorers, RPCs and the testnet faucets.`
+      ? `The networks Gloam runs on, mainnets first, with each vault (pool) address, the private swap routers (${swapMainnets()} mainnet), the assets you can deposit (on mainnet: ${MAINNET_DEPOSITS_TEXT}; on testnet: OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain, and more on Base Sepolia and Ethereum Sepolia${ELYSIUM_TESTNET_ON ? ", and test USDC on Elysium testnet" : ""}), explorers, RPCs and the testnet faucets.`
       : "The networks Gloam runs on, with each vault (pool) address, the assets you can deposit (OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain), explorers, RPCs and faucets.",
     inputSchema: {
       type: "object",
@@ -388,7 +393,8 @@ function networkView(key: NetworkKey, origin: string) {
     testnet: n.chain.testnet === true,
     status: n.status,
     note: n.note,
-    rpc: n.chain.rpcUrls.default.http[0] ?? null,
+    // Shown redacted: an Elysium RPC from the env may carry an API key (lib/elysium).
+    rpc: n.chain.rpcUrls.default.http[0] ? redactRpcUrl(n.chain.rpcUrls.default.http[0]) : null,
     // Where the RPC above keeps only recent blocks (Ethereum Sepolia): read logs and
     // state older than recentBlocks from historyRpc, and everything else from rpc.
     ...(n.historyRpc

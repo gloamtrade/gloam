@@ -19,7 +19,17 @@ import { encodePacked, keccak256, type Hex } from "viem";
  * pending block about 1.5 s early. A wallet send's registration there could be
  * copied from it, so only relay-sent link payments count there.
  */
-export const PUBLIC_MEMPOOL_CHAINS: readonly number[] = [1, 11155111, 8453, 84532];
+export const PUBLIC_MEMPOOL_CHAINS: readonly number[] = [
+  1,
+  11155111,
+  8453,
+  84532,
+  // Elysium mainnet and testnet: treated as public until its sequencer is checked
+  // not to show a pending transaction before its block (it is an Orbit chain like
+  // Robinhood Chain, which does not). Relay-sent link payments still count there.
+  99901,
+  99801,
+];
 
 export const LINK_CODE_LENGTH = 20;
 const CODE_RE = new RegExp(`^[A-Za-z0-9]{${LINK_CODE_LENGTH}}$`);

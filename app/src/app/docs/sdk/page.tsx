@@ -3,6 +3,7 @@ import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { swapMainnets } from "@/lib/vaultSwap";
+import { ELYSIUM, ELYSIUM_TESTNET } from "@/lib/elysium";
 
 const MAINNETS = liveMainnetNames();
 
@@ -12,8 +13,10 @@ const MAINNET_IDS = [
   "Tempo 4217",
   ...(mainnetPool(8453) ? ["Base 8453"] : []),
   ...(mainnetPool(1) ? ["Ethereum 1"] : []),
+  // Elysium, only while it is on (lib/elysium.ts)
+  ...(ELYSIUM ? [`Elysium ${ELYSIUM.chainId}`] : []),
 ].join(", ");
-const MAINNET_CHAIN_IDS = [4663, 4217, ...(mainnetPool(8453) ? [8453] : []), ...(mainnetPool(1) ? [1] : [])].join(" · ");
+const MAINNET_CHAIN_IDS = [4663, 4217, ...(mainnetPool(8453) ? [8453] : []), ...(mainnetPool(1) ? [1] : []), ...(ELYSIUM ? [ELYSIUM.chainId] : [])].join(" · ");
 
 export const metadata: Metadata = {
   title: "SDK",
@@ -29,7 +32,7 @@ export default function DocsSdkPage() {
       glance={[
         { label: "Package", value: "@gloamtrade/sdk" },
         { label: "Runtime", value: "browser + node" },
-        { label: "Chains", value: `Mainnet ${MAINNET_CHAIN_IDS}, testnet 46630 · 42431 · 84532 · 11155111` },
+        { label: "Chains", value: `Mainnet ${MAINNET_CHAIN_IDS}, testnet 46630 · 42431 · 84532 · 11155111${ELYSIUM_TESTNET ? " · 99801" : ""}` },
         { label: "Proofs", value: "Groth16 + Poseidon" },
       ]}
       quickLinks={[

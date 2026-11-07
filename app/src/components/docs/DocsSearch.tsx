@@ -14,6 +14,8 @@ import {
 } from "react";
 import { FLAT_DOCS_NAV, DOCS_NAV, findDocHeading, slugify } from "./DocsNav";
 import { CloseIcon, HashIcon, Kbd, PageIcon, SearchIcon, useIsMac } from "./docsUi";
+import { liveMainnetCountWords, liveMainnetNames } from "@/lib/mainnet";
+import { ELYSIUM_FLAG, ELYSIUM_TESTNET_FLAG } from "@/lib/elysium";
 
 /* ------------------------------------------------------------------ */
 /* Static index: the nav list plus a hand-written description, a few   */
@@ -322,16 +324,18 @@ const PAGE_META: Record<string, PageMeta> = {
     ],
   },
   "/docs/chain": {
-    description: "Robinhood Chain, Tempo, Base and Ethereum mainnet, and their testnets: chain IDs, RPCs, pools, assets and deposit limits.",
-    keywords: ["robinhood", "tempo", "base", "base sepolia", "chain id", "rpc", "network", "mainnet", "testnet", "4663", "4217", "8453", "46630", "42431", "84532", "1", "ethereum", "explorer", "pool address", "deposit limits", "deposit limit", "usdg", "usdc.e", "usdt0", "usdc", "eurc", "usdt", "pyusd", "gas", "gloam token", "relayer", "fees", "swap router", "treasury", "ethereum sepolia", "sepolia", "11155111"],
+    description: `${liveMainnetNames()} mainnet, and their testnets: chain IDs, RPCs, pools, assets and deposit limits.`,
+    keywords: ["robinhood", "tempo", "base", "base sepolia", "chain id", "rpc", "network", "mainnet", "testnet", "4663", "4217", "8453", "46630", "42431", "84532", "1", "ethereum", "explorer", "pool address", "deposit limits", "deposit limit", "usdg", "usdc.e", "usdt0", "usdc", "eurc", "usdt", "pyusd", "gas", "gloam token", "relayer", "fees", "swap router", "treasury", "ethereum sepolia", "sepolia", "11155111", ...(ELYSIUM_FLAG || ELYSIUM_TESTNET_FLAG ? ["elysium", "hype", "hyperliquid", "99801"] : [])],
     headings: [
-      "Four mainnets, one shielded pool design",
+      `${liveMainnetCountWords().replace(/^./, (c) => c.toUpperCase())}, one shielded pool design`,
       "Mainnet",
       "Robinhood Chain",
       "Tempo",
       "Base",
       "Ethereum",
       "Ethereum Sepolia",
+      ...(ELYSIUM_FLAG ? ["Elysium"] : []),
+      ...(ELYSIUM_TESTNET_FLAG ? ["Elysium testnet"] : []),
       "Switching networks in the app",
       "Honest status",
     ],

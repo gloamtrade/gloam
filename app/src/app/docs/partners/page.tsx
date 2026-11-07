@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
+import { ELYSIUM } from "@/lib/elysium";
 import { SWAP_REF_MAX, SWAP_REF_WORDS, swapNetworks } from "@/lib/swapLink";
 
 /** Where a swap link fills in a swap now (lib/swapLink): the docs follow each network's switch. */
@@ -20,7 +21,7 @@ const ERRORS: [string, number | string, string][] = [
   ["rate_limited", 429, "Over 300 requests in a minute for this key. Retry-After says when to retry."],
   ["invalid_json", 400, "The body is not a JSON object."],
   ["bad_request", 400, "A relay field is malformed (proof, root, nullifier, commitments, asset, to, amount, memo). Relayed memos are capped at 2,048 bytes."],
-  ["network", 400, "chainId is not a network the relay serves (4663, 4217, 8453 or 1 on mainnet; 46630, 42431, 84532 or 11155111 on testnet)."],
+  ["network", 400, `chainId is not a network the relay serves (${ELYSIUM ? `4663, 4217, 8453, 1 or ${ELYSIUM.chainId}` : "4663, 4217, 8453 or 1"} on mainnet; 46630, 42431, 84532 or 11155111 on testnet).`],
   ["bad_action", 400, "action is not transfer, unshield, memo, swap or swapExit."],
   ["no_swap, swap_router, swap_asset, same_asset, BadRoute", 400, "Private swaps are not live on that network, or the router, an asset or the route is not one Gloam knows there."],
   ["SwapExpired, swap_router_old", 409, "The swap's time ran out, or it was made for an earlier router. Get a new quote and prove again."],
@@ -685,6 +686,7 @@ https://gloam.trade/app/vault?tab=swap#from=0x5fc5360D0400a0Fd4f2af552ADD042D716
           transaction can&apos;t be read before its block (Robinhood Chain, Tempo
           and their testnets). On Ethereum and Base, where pending transactions
           are public early, only payments sent through the relay count to links.
+          {ELYSIUM ? " Elysium counts the same way for now, until it is checked that its sequencer shows nothing early." : ""}
         </li>
         <li>
           <strong>What counts:</strong> Gloam reads each transaction on its chain
@@ -698,7 +700,7 @@ https://gloam.trade/app/vault?tab=swap#from=0x5fc5360D0400a0Fd4f2af552ADD042D716
           the transaction. One exception: a payment whose transaction failed on
           chain can be sent again by anyone holding its proof. Sent again through
           the relay, it counts to the first code tied to that payment, which is the
-          resender&apos;s if the failed send had none (on Ethereum and Base, always
+          resender&apos;s if the failed send had none (on Ethereum and Base{ELYSIUM ? " and Elysium" : ""}, always
           the resender&apos;s).
         </li>
         <li>

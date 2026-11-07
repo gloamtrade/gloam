@@ -37,8 +37,8 @@ const LOGOS: Record<ChainFamily, string> = {
   tempo: "/brand/logos/tempo.svg",
   base: "/brand/chains/8453.png",
   ethereum: "/brand/chains/1.png",
-  // A plain stand-in until Elysium's own mark is added (DEPLOY-ELYSIUM.md)
-  elysium: "/brand/chains/elysium.svg",
+  // Elysium's mark, its official avatar circle-cropped
+  elysium: "/brand/chains/elysium.png",
 };
 
 type Side = "mainnet" | "testnet";

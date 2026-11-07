@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ELYSIUM_ENABLED } from "@/lib/elysium";
 import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
@@ -71,6 +72,7 @@ export default function DocsPrivateSwapsPage() {
         the relay. Sending one from your own wallet would put your wallet right
         next to the swap, so the app does not offer it.
       </p>
+      {ELYSIUM_ENABLED && <p>Private swaps are not on Elysium yet: there is no swap router there.</p>}
 
       <h2 id="pairs">What you can swap</h2>
       <div className="overflow-x-auto">

@@ -2,7 +2,7 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { createPublicClient, formatUnits, parseAbi, type Address, type ContractFunctionParameters, type PublicClient } from "viem";
 import { normalize } from "viem/ens";
-import { getNetwork, type GloamNetwork, type NetworkKey } from "@/lib/networks";
+import { NETWORK_KEYS, getNetwork, type GloamNetwork, type NetworkKey } from "@/lib/networks";
 import { loadPrices, type Prices } from "@/lib/onchainMetrics";
 import { serverTransport } from "@/lib/serverRpc";
 import { erc20BalanceOfAbi, isDollarStable, type OnchainToken } from "@/lib/tokens";
@@ -21,8 +21,18 @@ import { holdableTokens } from "@/lib/vaultAssets";
  * (a viem error carries the request).
  */
 
-/** Robinhood Chain first: its read has to work. Base and Ethereum add to the total when they answer. */
-const CHAINS: NetworkKey[] = ["robinhood-mainnet", "base-mainnet", "ethereum-mainnet"];
+/**
+ * Robinhood Chain first: its read has to work. Base and Ethereum add to the
+ * total when they answer, and Elysium (an Orbit chain with Multicall3, read the
+ * same way) once it is a network (lib/elysium.ts). Tempo has no gas coin and
+ * reads differently, so it is not here.
+ */
+const CHAINS: NetworkKey[] = [
+  "robinhood-mainnet",
+  "base-mainnet",
+  "ethereum-mainnet",
+  ...(NETWORK_KEYS.includes("elysium-mainnet") ? (["elysium-mainnet"] as const) : []),
+];
 const REQUIRED: NetworkKey = "robinhood-mainnet";
 
 const ROBINHOOD_CHAIN_ID = 4663;
@@ -181,9 +191,13 @@ export function balancesFrom(reads: readonly ChainRead[], missed: readonly strin
   const holdings: XrayHolding[] = [];
   for (const { n, tokens, native, raw } of reads) {
     const chain = { chainId: n.chainId, chain: n.label };
-    if (native > 0n) {
+    if (native > 0n && n.primaryAsset.symbol === "ETH") {
       const units = Number(formatUnits(native, 18));
       holdings.push({ id: "eth", symbol: "ETH", ...chain, amount: formatUnits(native, 18), usd: prices?.ethUsd != null ? units * prices.ethUsd : null });
+    } else if (native > 0n) {
+      // Another gas coin (HYPE on Elysium): shown, not priced, so not in the total.
+      const sym = n.primaryAsset.symbol;
+      holdings.push({ id: sym.toLowerCase(), symbol: sym, ...chain, amount: formatUnits(native, n.primaryAsset.decimals), usd: null });
     }
     tokens.forEach((t, i) => {
       const v = raw[i];

@@ -104,8 +104,10 @@ export function elysiumConnectSources(env = process.env) {
   let url = env.NEXT_PUBLIC_ELYSIUM_RPC_URL?.trim() || null;
   if (!url) {
     try {
+      // Only ELYSIUM_MAINNET's block: the file's ELYSIUM_TESTNET has an rpcUrl too.
       const src = readFileSync(new URL("../packages/sdk/src/elysium.ts", import.meta.url), "utf8");
-      url = /^\s*rpcUrl:\s*"(https:\/\/[^"]+)",\s*$/m.exec(src)?.[1] ?? null;
+      const block = /export const ELYSIUM_MAINNET\b[^{]*\{([\s\S]*?)\n\};/.exec(src)?.[1] ?? "";
+      url = /^\s*rpcUrl:\s*"(https:\/\/[^"]+)",\s*$/m.exec(block)?.[1] ?? null;
     } catch {
       url = null;
     }
@@ -118,7 +120,33 @@ export function elysiumConnectSources(env = process.env) {
   }
 }
 
-export const CSP_CONNECT_SOURCES = ["'self'", ...GLOAM_RPCS, ...elysiumConnectSources(), ...ORIGIN_RPCS, ...SOLANA_RPCS, ...SERVICES];
+/**
+ * Elysium testnet's RPCs, only while NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED is on:
+ * Kinetiq's and Conduit's (packages/sdk/src/elysium.ts), and
+ * NEXT_PUBLIC_ELYSIUM_TESTNET_RPC_URL's origin if it is set.
+ */
+export function elysiumTestnetConnectSources(env = process.env) {
+  if (!/^(1|true|on|yes)$/i.test((env.NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED ?? "").trim())) return [];
+  const out = ["https://testnet-rpc.elysium.kinetiq.xyz", "https://rpc-elysium-testnet.t.conduit.xyz"];
+  try {
+    const custom = env.NEXT_PUBLIC_ELYSIUM_TESTNET_RPC_URL?.trim();
+    const u = custom ? new URL(custom) : null;
+    if (u && u.protocol === "https:" && !out.includes(u.origin)) out.push(u.origin);
+  } catch {
+    // not a URL: lib/elysium.ts fails the build on it
+  }
+  return out;
+}
+
+export const CSP_CONNECT_SOURCES = [
+  "'self'",
+  ...GLOAM_RPCS,
+  ...elysiumConnectSources(),
+  ...elysiumTestnetConnectSources(),
+  ...ORIGIN_RPCS,
+  ...SOLANA_RPCS,
+  ...SERVICES,
+];
 
 const FRAMES = ["'self'", "https://*.walletconnect.org", "https://*.walletconnect.com", "https://*.turnkey.com", "https://wallet.tempo.xyz"];
 

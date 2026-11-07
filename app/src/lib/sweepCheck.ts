@@ -21,7 +21,7 @@
  */
 import { parseAbiItem, type Address, type Hex } from "viem";
 import { getLogsSafe } from "./logRange";
-import { ELYSIUM_LOG_RANGE, isElysiumChainId } from "./elysium";
+import { ELYSIUM_LOG_RANGE, isElysiumFamilyChainId } from "./elysium";
 
 const TRANSFER = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
 
@@ -57,8 +57,9 @@ function lookback(chainId: number): { chunk: bigint; chunks: number } {
   if (chainId === 4217 || chainId === 42431) return { chunk: BigInt(100_000), chunks: 4 };
   if (chainId === 8453 || chainId === 84532) return { chunk: BigInt(50_000), chunks: 4 };
   if (chainId === 1) return { chunk: BigInt(10_000), chunks: 4 };
-  // Elysium: its RPC's own range (lib/elysium), four reads.
-  if (isElysiumChainId(chainId)) return { chunk: ELYSIUM_LOG_RANGE, chunks: 4 };
+  // Elysium, mainnet and testnet: its RPC's range (lib/elysium, 1,000,000 blocks by
+  // default, about 28 hours at 100 ms), four reads: about 4.6 days, like the others.
+  if (isElysiumFamilyChainId(chainId)) return { chunk: ELYSIUM_LOG_RANGE, chunks: 4 };
   // Ethereum Sepolia: 12-second blocks, so one 50,000-block read covers about a week.
   if (chainId === 11155111) return { chunk: BigInt(50_000), chunks: 1 };
   return { chunk: BigInt(5_000_000), chunks: 1 };

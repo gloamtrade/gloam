@@ -9,7 +9,7 @@ import { english } from "viem/accounts";
 import { baseSepoliaPool, ethereumSepoliaPool, isMainnetLive, liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { COPYCAT_GLOAM, GLOAM_TOKEN } from "./knowledge";
 import type { TgMessage, TgPhotoSize, TgUser } from "./telegram";
-import { ELYSIUM } from "@/lib/elysium";
+import { ELYSIUM, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET } from "@/lib/elysium";
 
 /** Forum topics in t.me/gloamhq, by message_thread_id. General messages carry no thread id. */
 export const TOPIC = { general: 1, testers: 2, announcements: 3, help: 4, feedback: 5, buys: 798 } as const;
@@ -1595,6 +1595,7 @@ const CHAIN_NAMES: Record<number, string> = {
   11155111: "Ethereum Sepolia testnet",
   // Elysium, only while it is on (lib/elysium.ts)
   ...(ELYSIUM ? { [ELYSIUM.chainId]: "Elysium mainnet" } : {}),
+  ...(ELYSIUM_TESTNET ? { [ELYSIUM_TESTNET.chainId]: "Elysium testnet" } : {}),
 };
 
 /** Hand-add details for a chain the app can ask for. */
@@ -1607,7 +1608,8 @@ const CHAIN_DETAILS: Record<number, string> = {
   84532: "RPC https://sepolia.base.org, chain ID 84532, currency ETH.",
   1: "RPC https://ethereum-rpc.publicnode.com, chain ID 1, currency ETH.",
   11155111: "RPC https://ethereum-sepolia-rpc.publicnode.com, chain ID 11155111, currency ETH.",
-  ...(ELYSIUM ? { [ELYSIUM.chainId]: `RPC ${ELYSIUM.rpcUrl}, chain ID ${ELYSIUM.chainId}, currency HYPE.` } : {}),
+  ...(ELYSIUM ? { [ELYSIUM.chainId]: `RPC ${ELYSIUM_RPC_DISPLAY}, chain ID ${ELYSIUM.chainId}, currency HYPE.` } : {}),
+  ...(ELYSIUM_TESTNET ? { [ELYSIUM_TESTNET.chainId]: `RPC ${ELYSIUM_TESTNET.rpcUrl}, chain ID ${ELYSIUM_TESTNET.chainId}, currency HYPE.` } : {}),
 };
 
 /** The fix once mainnet is live: the wallet and the app can each be on a mainnet or a testnet. */
@@ -1617,9 +1619,20 @@ function liveChainFix(name: string, m: ChainMismatch): string {
   const tempo = m.want === 42431 || m.want === 4217;
   const base = m.want === 84532 || m.want === 8453;
   const ethereum = m.want === 11155111 || m.want === 1;
-  const elysium = ELYSIUM !== null && m.want === ELYSIUM.chainId;
+  const elysium = (ELYSIUM !== null && m.want === ELYSIUM.chainId) || (ELYSIUM_TESTNET !== null && m.want === ELYSIUM_TESTNET.chainId);
   const button = tempo ? "Switch to Tempo" : base ? "Switch to Base" : ethereum ? "Switch to Ethereum" : elysium ? "Switch to Elysium" : "Switch to Robinhood Chain";
-  const twin: Record<number, number> = { 46630: 4663, 4663: 46630, 42431: 4217, 4217: 42431, 84532: 8453, 8453: 84532, 11155111: 1, 1: 11155111 };
+  const twin: Record<number, number> = {
+    46630: 4663,
+    4663: 46630,
+    42431: 4217,
+    4217: 42431,
+    84532: 8453,
+    8453: 84532,
+    11155111: 1,
+    1: 11155111,
+    // Elysium, when both sides are on
+    ...(ELYSIUM && ELYSIUM_TESTNET ? { [ELYSIUM.chainId]: ELYSIUM_TESTNET.chainId, [ELYSIUM_TESTNET.chainId]: ELYSIUM.chainId } : {}),
+  };
   const tap = `tap "${button}" on the wallet button at the top of the app (or Settings > Network > Add to wallet), approve it in your wallet, then try again.`;
   // the wallet sits on the other side (mainnet or testnet) of the chain the app is set to
   const otherSide = twin[m.want] === m.wallet && (mainnets.has(m.wallet) || mainnets.has(m.want));

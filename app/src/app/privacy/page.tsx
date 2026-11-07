@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { liveMainnetNames } from "@/lib/mainnet";
 import Link from "next/link";
 import { LegalLayout } from "@/components/LegalLayout";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
@@ -430,8 +431,8 @@ export default function PrivacyPage() {
         <li>Telegram: runs the group and delivers its messages to Glim.</li>
         <li>Chainalysis: sanctions checks, when we turn them on.</li>
         <li>
-          The RPC nodes and explorers of each network Gloam runs on, on
-          Robinhood Chain, Tempo, Base and Ethereum, and Tempo&apos;s fee
+          The RPC nodes and explorers of each network Gloam runs on, on{" "}
+          {liveMainnetNames()}, and Tempo&apos;s fee
           sponsor when you use Tempo Wallet on the testnet.
         </li>
         <li>

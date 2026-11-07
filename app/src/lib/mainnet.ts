@@ -169,6 +169,17 @@ export function liveMainnetsByDay(): { names: string; since: string }[] {
 }
 
 /**
+ * The live mainnets by the day each went live, as words: "Robinhood Chain and
+ * Tempo since 21 October 2026, Base and Ethereum since 26 October 2026", with
+ * Elysium after them while it is on.
+ */
+export function liveMainnetsSinceText(): string {
+  return liveMainnetsByDay()
+    .map((d) => `${d.names} since ${d.since}`)
+    .join(", ");
+}
+
+/**
  * Launch time, shared by the countdown page, the site banner, the homepage
  * link and Glim. Wednesday 21 October 2026, 13:00 UTC (14:00 WAT).
  */

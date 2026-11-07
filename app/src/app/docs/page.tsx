@@ -4,6 +4,7 @@ import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram, PoolPicture } from "@/components/docs/FlowDiagram";
 import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
+import { ELYSIUM_ENABLED } from "@/lib/elysium";
 
 /** The mainnets with a pool in, as words: "Robinhood Chain and Tempo" until Base and Ethereum are in. */
 const MAINNETS = liveMainnetNames();
@@ -106,14 +107,15 @@ export default function DocsOverviewPage() {
           limits
         </li>
         <li>
-          Send public balances: ETH and every token listed on the network
+          Send public balances: ETH{ELYSIUM_ENABLED ? " (HYPE on Elysium)" : ""} and every token listed on the network
         </li>
         <li>
           Shield into the vault: USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO
           on Robinhood Chain mainnet;
           USDC.e, pathUSD, USDT0 and OUSD on Tempo mainnet;
           {BASE_LIVE ? " USDC, EURC, USDT and ETH on Base mainnet;" : ""}
-          {ETHEREUM_LIVE ? " USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum mainnet;" : ""} test
+          {ETHEREUM_LIVE ? " USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum mainnet;" : ""}
+          {ELYSIUM_ENABLED ? " USDC on Elysium mainnet;" : ""} test
           ETH, stock tokens and stablecoins on the testnets
         </li>
         <li>

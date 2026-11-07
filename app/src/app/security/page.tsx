@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ELYSIUM_ENABLED } from "@/lib/elysium";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Footer } from "@/components/Footer";
@@ -188,6 +189,8 @@ export default function SecurityPage() {
           <p className="mt-10 max-w-[60ch] text-[15px] leading-relaxed text-mute">
             The 10 reviewed files have not changed on main since that commit. The deployed vault has identical bytecode
             on Robinhood Chain, Tempo, Base and Ethereum.
+            {ELYSIUM_ENABLED &&
+              " Elysium's vault went live after the review. It is built from the same reviewed files, and its owner is a VaultOwnerGuard from the deploy, which the review did not cover."}
           </p>
           <Link href="/verify#contracts" className="gl-arrowlink mt-5">
             Check the contracts <span aria-hidden>→</span>

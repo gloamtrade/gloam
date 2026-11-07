@@ -10,6 +10,7 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { shortAddress } from "@/lib/chain";
 import { getNetwork, isNetworkKey, type GloamNetwork } from "@/lib/networks";
+import { ELYSIUM_LOGO } from "@/lib/chainLogo";
 import type { NetworkMetrics, RecentRow } from "@/lib/onchainMetrics";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 
@@ -45,7 +46,7 @@ function ChainMark({ net, size = 28 }: { net: GloamNetwork; size?: number }) {
     return (
       <span className="relative inline-block shrink-0 overflow-hidden rounded-full" style={{ width: size, height: size }}>
         {/* eslint-disable-next-line @next/next/no-img-element -- small local logos */}
-        <img src="/brand/chains/elysium.svg" alt="" width={size} height={size} className="h-full w-full object-cover" />
+        <img src={ELYSIUM_LOGO} alt="" width={size} height={size} className="h-full w-full object-cover" />
       </span>
     );
   }

@@ -704,7 +704,9 @@ const SEND_GAS_MOST: Partial<Record<Call["kind"], bigint>> = {
   swapV3: 2_600_000n,
   swapExit: 400_000n,
 };
-const GAS_MOST_FACTOR: Readonly<Record<number, bigint>> = { 4663: 4n, 46630: 4n };
+// Elysium (99901, testnet 99801) is an Arbitrum Orbit chain like Robinhood Chain: its
+// estimates carry a parent-chain (HyperEVM) cost too, so it gets the same room.
+const GAS_MOST_FACTOR: Readonly<Record<number, bigint>> = { 4663: 4n, 46630: 4n, 99901: 4n, 99801: 4n };
 export const GAS_TOO_MUCH_MESSAGE = "This costs more gas than the relay pays. Send from your wallet.";
 
 export function sendGasMost(chainId: number, kind: Call["kind"]): bigint | null {

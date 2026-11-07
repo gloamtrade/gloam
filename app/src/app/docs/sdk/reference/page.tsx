@@ -3,6 +3,7 @@ import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { mainnetPool } from "@/lib/mainnet";
 import { swapMainnets } from "@/lib/vaultSwap";
+import { ELYSIUM } from "@/lib/elysium";
 
 /** Mainnets whose pool is not in yet (lib/mainnet.ts): "Base mainnet and Ethereum" until their deploys. */
 const NOT_YET = [mainnetPool(8453) ? null : "Base mainnet", mainnetPool(1) ? null : "Ethereum"].filter(Boolean).join(" and ");
@@ -76,7 +77,8 @@ export default function DocsSdkReferencePage() {
               <td>
                 <code>chain</code> is <code>&quot;robinhood&quot;</code>,{" "}
                 <code>&quot;tempo&quot;</code>, <code>&quot;base&quot;</code>{" "}
-                (0.3.0) or <code>&quot;ethereum&quot;</code> (0.4.0). A mainnet{" "}
+                (0.3.0), <code>&quot;ethereum&quot;</code> (0.4.0)
+                {ELYSIUM ? <> or <code>&quot;elysium&quot;</code></> : null}. A mainnet{" "}
                 <code>GloamNetwork</code>, or <code>null</code> until its pool is
                 published{NOT_YET ? ` (${NOT_YET}: not yet)` : ""}
               </td>
@@ -98,6 +100,18 @@ export default function DocsSdkReferencePage() {
               </td>
               <td>Every network Gloam runs on right now: mainnets with a pool first, then the testnets</td>
             </tr>
+            {ELYSIUM && (
+              <tr>
+                <td>
+                  <code>elysiumMainnetConfig()</code>
+                </td>
+                <td>
+                  Elysium mainnet&apos;s values (chain id, RPC, explorer, USDC, pool and deploy block) from{" "}
+                  <code>ELYSIUM_MAINNET</code>, checked, or <code>null</code> while any is missing. Gas is HYPE;
+                  the pool takes USDC only. <code>elysiumChainId()</code> gives the chain id alone
+                </td>
+              </tr>
+            )}
             <tr>
               <td>
                 <code>getGloamNetwork(key)</code>
@@ -105,7 +119,9 @@ export default function DocsSdkReferencePage() {
               <td>
                 One network by key: <code>&quot;robinhood-mainnet&quot;</code>,{" "}
                 <code>&quot;tempo-mainnet&quot;</code>, <code>&quot;base-mainnet&quot;</code>,{" "}
-                <code>&quot;ethereum-mainnet&quot;</code>, <code>&quot;robinhood&quot;</code>,{" "}
+                <code>&quot;ethereum-mainnet&quot;</code>,{" "}
+                {ELYSIUM ? <><code>&quot;elysium-mainnet&quot;</code>, </> : null}
+                <code>&quot;robinhood&quot;</code>,{" "}
                 <code>&quot;tempo&quot;</code>, <code>&quot;base&quot;</code> or{" "}
                 <code>&quot;ethereum&quot;</code>; null while its pool is not in
               </td>
@@ -783,7 +799,8 @@ fieldToBytes32(field: bigint | string): Hex`}</code>
       <p>
         Mainnet (<code>4663</code>, <code>4217</code>
         {mainnetPool(8453) ? <>, <code>8453</code></> : null}
-        {mainnetPool(1) ? <>, <code>1</code></> : null}) runs
+        {mainnetPool(1) ? <>, <code>1</code></> : null}
+        {ELYSIUM ? <>, <code>{ELYSIUM.chainId}</code> (Elysium)</> : null}) runs
         on the final ceremony keys, with deposit limits and a
         0.5% cash-out fee. The Robinhood Chain and Tempo testnets (
         <code>46630</code>, <code>42431</code>) run on dev-ceremony keys with
