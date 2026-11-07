@@ -41,8 +41,9 @@ export type NetworkKey =
   | "robinhood-mainnet"
   | "tempo-mainnet"
   | "base-mainnet"
-  | "ethereum-mainnet";
-export type ChainFamily = "robinhood" | "tempo" | "base" | "ethereum";
+  | "ethereum-mainnet"
+  | "elysium-mainnet";
+export type ChainFamily = "robinhood" | "tempo" | "base" | "ethereum" | "elysium";
 
 export interface McpNetwork {
   key: NetworkKey;
@@ -81,9 +82,11 @@ const NATIVE = {
   tempo: { name: "US Dollar", symbol: "USD", decimals: 18 },
   base: { name: "Ether", symbol: "ETH", decimals: 18 },
   ethereum: { name: "Ether", symbol: "ETH", decimals: 18 },
+  // Elysium, Kinetiq's Hyperliquid L2: gas in HYPE (mainnet only, once the SDK has its values)
+  elysium: { name: "HYPE", symbol: "HYPE", decimals: 18 },
 } as const;
 
-const CHAIN_NAMES: Record<ChainFamily, string> = { robinhood: "Robinhood Chain", tempo: "Tempo", base: "Base", ethereum: "Ethereum" };
+const CHAIN_NAMES: Record<ChainFamily, string> = { robinhood: "Robinhood Chain", tempo: "Tempo", base: "Base", ethereum: "Ethereum", elysium: "Elysium" };
 
 /** A testnet's name: "Base Sepolia Testnet", "Ethereum Sepolia Testnet", "Tempo Testnet". */
 function testnetName(family: ChainFamily): string {
@@ -161,6 +164,8 @@ export const MCP_MAINNETS: McpNetwork[] = [
   fromSdk(mainnetNetwork("tempo")),
   fromSdk(mainnetNetwork("base")),
   fromSdk(mainnetNetwork("ethereum")),
+  // Elysium: once every value in the SDK's src/elysium.ts is in (chain id, RPC, USDC, pool)
+  fromSdk(mainnetNetwork("elysium")),
 ].filter((n): n is McpNetwork => n !== null);
 
 /** Base Sepolia, once the SDK has its pool; null before. */
@@ -186,6 +191,7 @@ export const ALL_NETWORK_KEYS: readonly NetworkKey[] = [
   "tempo-mainnet",
   "base-mainnet",
   "ethereum-mainnet",
+  "elysium-mainnet",
   "robinhood",
   "tempo",
   "base",
