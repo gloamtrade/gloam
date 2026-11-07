@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { MAINNET_CHAINS, liveMainnetNames } from "@/lib/mainnet";
+import { ELYSIUM_ENABLED, ELYSIUM_TESTNET } from "@/lib/elysium";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 
@@ -58,7 +60,7 @@ export default function DocsIntegratePage() {
         { label: "Tool pack", value: "examples/agent-kit-tools" },
         { label: "Engine", value: "GloamAgent, on @gloamtrade/sdk" },
         { label: "x402", value: "gloam-private and gloam-cashout, next to exact" },
-        { label: "Networks", value: "Robinhood Chain, Tempo, Base, Ethereum" },
+        { label: "Networks", value: MAINNET_CHAINS.map((c) => c.name).join(", ") },
       ]}
       quickLinks={[
         { href: PACK, label: "Tool pack source" },
@@ -462,9 +464,10 @@ export async function verifyGloamCashout(args: {
         </li>
         <li>Deposits and private payments are free. A cash out costs 0.5%.</li>
         <li>
-          Mainnets: Robinhood Chain, Tempo, Base and Ethereum, with
-          deposit limits (50,000 of a stablecoin per deposit). Every network
-          has a testnet; see <Link href="/docs/chain">Networks</Link>.
+          Mainnets: {liveMainnetNames()}, with deposit limits (50,000 of a
+          stablecoin per deposit{ELYSIUM_ENABLED ? "; 500 USDC on Elysium" : ""}).{" "}
+          {ELYSIUM_ENABLED && !ELYSIUM_TESTNET ? "Every network but Elysium has a testnet" : "Every network has a testnet"}; see{" "}
+          <Link href="/docs/chain">Networks</Link>.
         </li>
         <li>
           Privacy grows with the number of notes in a vault, so a quick deposit

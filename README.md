@@ -6,7 +6,7 @@
 
 [gloam.trade](https://gloam.trade) · [App](https://gloam.trade/app) · [Verify a proof](https://gloam.trade/verify) · [Research report and deck](https://gloam.trade/pitch) · [How Gloam compares](https://gloam.trade/docs/compare) · [Docs](https://gloam.trade/docs) · [Whitepaper](https://gloam.trade/whitepaper) · [@gloamtrade](https://x.com/gloamtrade)
 
-**Live on mainnet:** Robinhood Chain `4663` · Tempo `4217` · Base `8453` · Ethereum `1` · real ZK proofs, no mock fills
+**Live on mainnet:** Robinhood Chain `4663` · Tempo `4217` · Base `8453` · Ethereum `1` · Elysium coming · real ZK proofs, no mock fills
 
 </div>
 
@@ -45,7 +45,7 @@ All three share one core: a Poseidon note scheme, a depth-20 incremental Merkle 
 
 ## Mainnet
 
-Gloam is live on Robinhood Chain mainnet (`4663`) and Tempo mainnet (`4217`) since Wednesday 21 October 2026, 13:00 UTC, and on Base mainnet (`8453`) and Ethereum mainnet (`1`) since 26 October 2026. The vault has the same address on all four, `0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194`. It was reviewed internally before launch (20 October 2026, no Critical or High findings open), and an independent review on 23 October found no new exploitable contract flaw and eight app issues, and fixes in each of the areas it named were merged by 24 October. Kann Audits reviewed the vault contracts (report, 1 November 2026: [gloam.trade/security](https://gloam.trade/security)) and found no Critical, High or Medium issues; the swap routers, circuits, app and relay were not part of it.
+Gloam is live on Robinhood Chain mainnet (`4663`) and Tempo mainnet (`4217`) since Wednesday 21 October 2026, 13:00 UTC, and on Base mainnet (`8453`) and Ethereum mainnet (`1`) since 26 October 2026. Elysium mainnet support is coming (below). The vault has the same address on all four, `0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194`. It was reviewed internally before launch (20 October 2026, no Critical or High findings open), and an independent review on 23 October found no new exploitable contract flaw and eight app issues, and fixes in each of the areas it named were merged by 24 October. Kann Audits reviewed the vault contracts (report, 1 November 2026: [gloam.trade/security](https://gloam.trade/security)) and found no Critical, High or Medium issues; the swap routers, circuits, app and relay were not part of it.
 
 | | Robinhood Chain `4663` | Tempo `4217` | Base `8453` | Ethereum `1` |
 | --- | --- | --- | --- | --- |
@@ -88,7 +88,7 @@ Everything here runs on all four mainnets unless the row says otherwise.
 | **Agent spending limits** | Live (MCP) | The owner sets each agent's assets, per-payment and per-day caps, allowed recipients, tools and expiry. Every spend is checked and logged before it is proved or signed; no limits means no spending. Note secrets stay in an encrypted store inside the server and the agent only sees handles. Enforced by the MCP server, off-chain. `gloam_get_limits`, `gloam_get_spending_report`. [Config](./mcp/README.md#spending-limits) |
 | **Hosted MCP server** | Live | Paste `https://www.gloam.trade/mcp` into Claude (Settings, Connectors, Add custom connector), ChatGPT, Cursor or any MCP client; nothing to install. Read and plan only: networks and assets, vault stats, payment request links, proof checks, deposit plans and MPP how-to. It never signs and refuses anything that looks like a key or note secret; for signing, the local server (`npx -y @gloamtrade/mcp`). [Docs](https://gloam.trade/docs/agents#connect-by-url) |
 | **Transparency page** | Live | [`/transparency`](https://gloam.trade/transparency) shows what anyone can see about the vault on each network: what it holds, counts of deposits, private transfers, cash-outs and payment messages, and recent public activity, read straight from public nodes |
-| **Private swaps** | Live | The next router (`GloamVaultSwapV4c`: native ETH notes, stablecoin swaps on Base and Ethereum, an exit for a refund that can't land) is built and not deployed: [DEPLOY-ROUTER.md](DEPLOY-ROUTER.md). Swap straight from the private balance in Vault > Swap: on Robinhood Chain, router v2 (`GloamVaultSwapV4b`) swaps the 29 tokens it lists, stock tokens and ETH (as WETH) included, over allowlisted Uniswap v4 pools; on Tempo, USDC.e, pathUSD, USDT0 and OUSD (Tempo's stablecoin exchange). One relayed transaction unshields one note to a one-time CREATE2 escrow (`SwapEscrow`), buys an exact output, and shields it back as a new note. Who swapped, which note paid and where the output goes next stay private; the tokens and amounts are public. If someone sends the unshield step alone, the swap fails safely and 99% of the note comes back as a refund note. The v1 routers have no owner, admin or upgrade, and v1 on Robinhood Chain stays for refunds. Router v2's owner can only add a pool after a public 3-day delay, or remove one; pools for AI and ORBIO are queued for 3 November. [Docs](https://gloam.trade/docs/private-swaps) |
+| **Private swaps** | Live (not on Elysium yet, its support is coming without them) | The next router (`GloamVaultSwapV4c`: native ETH notes, stablecoin swaps on Base and Ethereum, an exit for a refund that can't land) is built and not deployed: [DEPLOY-ROUTER.md](DEPLOY-ROUTER.md). Swap straight from the private balance in Vault > Swap: on Robinhood Chain, router v2 (`GloamVaultSwapV4b`) swaps the 29 tokens it lists, stock tokens and ETH (as WETH) included, over allowlisted Uniswap v4 pools; on Tempo, USDC.e, pathUSD, USDT0 and OUSD (Tempo's stablecoin exchange). One relayed transaction unshields one note to a one-time CREATE2 escrow (`SwapEscrow`), buys an exact output, and shields it back as a new note. Who swapped, which note paid and where the output goes next stay private; the tokens and amounts are public. If someone sends the unshield step alone, the swap fails safely and 99% of the note comes back as a refund note. The v1 routers have no owner, admin or upgrade, and v1 on Robinhood Chain stays for refunds. Router v2's owner can only add a pool after a public 3-day delay, or remove one; pools for AI and ORBIO are queued for 3 November. [Docs](https://gloam.trade/docs/private-swaps) |
 | **Sealed trade** | Retired | `sealedSwap` was the first private trade design. It stays off on every network (the mainnet pool has no swap code at all), after audit H1 (solvency) and a rate overflow found on 2026-10-11 (ZK-1). Private swaps replaced it |
 
 Every private action is proof-gated on-chain. No mock fills, no theatrical privacy. If a path cannot be both private and solvent yet, it waits. See [`contracts/audit/H1-SWAP-SOLVENCY.md`](./contracts/audit/H1-SWAP-SOLVENCY.md).
@@ -132,6 +132,15 @@ Ethereum mainnet (`1`) is the fourth chain, live since 26 October 2026, on the s
 - **Contracts.** Vault `0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194` (deploy block `26276183`) and payment-message board `0x8699D015087dE6D25d55d5ceB63b34b9d773f135`. Addresses: [`contracts/deployments/ethereum-mainnet.json`](./contracts/deployments/ethereum-mainnet.json).
 
 Runbook: [`DEPLOY-ETHEREUM.md`](./DEPLOY-ETHEREUM.md).
+
+## Elysium: coming
+
+Elysium mainnet support is coming. Elysium is Kinetiq's Hyperliquid L2 (an Arbitrum Orbit chain, gas in HYPE); the coming support is the same vault (`ShieldPoolPayments`, the final keys, deposit limits, the 0.5% cash-out fee), born owned by a `VaultOwnerGuard`, with USDC only at first, on Elysium mainnet (chain id `99901`) and on Elysium testnet (`99801`, a testnet on the final keys like Base Sepolia), both coming.
+
+- **Coming, behind a flag.** The app, relay, hosted MCP, Glim and docs show Elysium only once `NEXT_PUBLIC_ELYSIUM_ENABLED=1` and every value in `packages/sdk/src/elysium.ts` is in (coming on launch day); the SDK, local MCP and plugins show it once a release has those values.
+- **Not coming with it yet.** Private swaps and the bridge (Relay) are not on Elysium yet; gas there, once support is in (coming), is paid in HYPE.
+
+Runbook: [`DEPLOY-ELYSIUM.md`](./DEPLOY-ELYSIUM.md) (Elysium support, coming).
 
 ## Ethereum Sepolia: testnet live
 

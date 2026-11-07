@@ -2,18 +2,19 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { swapMainnets } from "@/lib/vaultSwap";
+import { liveMainnetNames } from "@/lib/mainnet";
 
 export const metadata: Metadata = {
   title: "Agents",
   description:
-    "Give an AI agent private payments on Robinhood Chain, Tempo, Base and Ethereum: shield, pay, and disclose end to end via @gloamtrade/sdk and the @gloamtrade/mcp server, under policy.",
+    `Give an AI agent private payments on ${liveMainnetNames()}: shield, pay, and disclose end to end via @gloamtrade/sdk and the @gloamtrade/mcp server, under policy.`,
 };
 
 export default function DocsAgentsPage() {
   return (
     <DocsLayout
       title="Build a private agent"
-      lede="Give an AI agent private payments on Robinhood Chain, Tempo, Base and Ethereum. It holds, pays and gets paid with amounts and payees hidden, proves what it holds when asked, and signs under policy."
+      lede={`Give an AI agent private payments on ${liveMainnetNames()}. It holds, pays and gets paid with amounts and payees hidden, proves what it holds when asked, and signs under policy.`}
       glance={[
         { label: "SDK", value: "@gloamtrade/sdk" },
         { label: "Server", value: "@gloamtrade/mcp (MCP)" },

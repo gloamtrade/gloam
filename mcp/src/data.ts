@@ -1,3 +1,5 @@
+import { mainnetNetwork } from "@gloamtrade/sdk";
+
 /**
  * Self-contained facts the MCP server answers with, so it has no runtime
  * dependency on the web app. CHAIN is the Robinhood Chain TESTNET, where the
@@ -12,13 +14,15 @@ export const CHAIN = {
   explorer: "https://explorer.testnet.chain.robinhood.com",
 } as const;
 
+/** Elysium mainnet, once the SDK has every value for it (src/elysium.ts); null before, and nothing here names it. */
+const ELYSIUM = mainnetNetwork("elysium");
+
 /**
  * Honest privacy posture. The MCP server never claims more than the protocol
  * delivers today (this mirrors Gloam's threat-model honesty).
  */
 export const PRIVACY_STATUS = {
-  network:
-    "Mainnet on Robinhood Chain and Tempo since 21 October 2026, and on Base and Ethereum since 26 October 2026. The testnets stay up.",
+  network: `Mainnet on Robinhood Chain and Tempo since 21 October 2026, and on Base and Ethereum since 26 October 2026${ELYSIUM ? ", and on Elysium (gas in HYPE)" : ""}. The testnets stay up.`,
   provingKeys:
     "Mainnet verifies the final keys of the 13-contributor trusted setup (drand round 6561386, release ceremony-final). The testnets use single-party dev keys. This server proves with the set of the network it pays on.",
   live: [
@@ -32,8 +36,7 @@ export const PRIVACY_STATUS = {
   notLive: ["the old sealed trade"],
   review:
     "The contracts and circuits were reviewed internally before launch, with no Critical or High findings open. Kann Audits reviewed the vault contracts (report, 1 November 2026: gloam.trade/security) and found no Critical, High or Medium issues. The swap routers, circuits, app, relay, this server and the SDK were not part of that review.",
-  mainnetLimits:
-    "Deposit limits: 50,000 per deposit and 2,500,000 in total for each stablecoin, 20 and 1,000 for ETH on Base and Ethereum, 2,500,000 and 25,000,000 for GLOAM. Private payments and cash outs are never limited. Raising a limit or adding an asset waits a public 3-day timelock; the owner can lower limits or close deposits at once.",
+  mainnetLimits: `Deposit limits: 50,000 per deposit and 2,500,000 in total for each stablecoin, 20 and 1,000 for ETH on Base and Ethereum, 2,500,000 and 25,000,000 for GLOAM${ELYSIUM ? ", 500 and 25,000 for USDC on Elysium" : ""}. Private payments and cash outs are never limited. Raising a limit or adding an asset waits a public 3-day timelock; the owner can lower limits or close deposits at once.`,
   fees: "Direct deposits and private payments are free. Cashing out costs 0.5%.",
   operator:
     "No admin withdraw: notes leave the pool only with an unshield proof. The pool owner is one wallet at launch (a multisig is planned). The Gloam relay, run by the team, only submits already-proven transactions and pays gas; it cannot move or redirect money.",

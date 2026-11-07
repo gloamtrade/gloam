@@ -8,6 +8,7 @@ import {ShieldPoolPayments} from "../src/ShieldPoolPayments.sol";
 import {IVerifier} from "../src/interfaces/IVerifier.sol";
 import {VaultOwnerGuard} from "../src/VaultOwnerGuard.sol";
 import {DeployElysiumMainnet} from "../script/DeployElysiumMainnet.s.sol";
+import {DeployElysiumTestnet} from "../script/DeployElysiumTestnet.s.sol";
 import {KeyCheckProofs} from "../script/KeyCheckProofs.sol";
 import {MockERC20} from "./MockERC20.sol";
 
@@ -38,7 +39,7 @@ abstract contract ElysiumDeploySteps is Test {
     using stdJson for string;
 
     /// Where Elysium mainnet is pretended to be: its real id was not public yet.
-    uint256 constant ELYSIUM_ID = 999_999;
+    uint256 constant ELYSIUM_ID = 99_901;
     address constant E_DEPLOYER = 0x891E74a11abC5D0eC2EE855B2BD521fF9D18F411;
     address constant E_TREASURY = 0xB3900ac9350903218e4c7597bAb0f008F01B30B8;
     address constant E_OWNER = 0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8;
@@ -48,6 +49,9 @@ abstract contract ElysiumDeploySteps is Test {
     address constant CANON_POOL = 0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194;
     address constant CANON_DUAL = 0x1421353d471dF6C847713aee391Db38978fE714a;
     address constant CANON_SHIELD_I = 0x69Fa6d2De0A66dA718DF022cEe98485AfDb03465;
+    /// Elysium testnet: its chain id and Kinetiq's test USDC (packages/sdk/src/elysium.ts).
+    uint256 constant ELYSIUM_TESTNET_ID = 99801;
+    address constant E_TESTNET_USDC = 0x7D29d8047B905000459c0E80c34a26CeedcB47b2;
 
     function _elysiumSteps() internal {
         uint256 snap = vm.snapshotState();
@@ -59,7 +63,77 @@ abstract contract ElysiumDeploySteps is Test {
         snap = vm.snapshotState();
         _elysiumDeployToWallet();
         vm.revertToState(snap);
+        snap = vm.snapshotState();
+        _elysiumTestnetRefusals();
+        vm.revertToState(snap);
+        snap = vm.snapshotState();
+        _elysiumTestnetDeploy();
+        vm.revertToState(snap);
         _elysiumEnvClear();
+    }
+
+    /// Elysium testnet's settings (elysium-testnet-env.sh): test USDC only, at Base Sepolia's testnet limits.
+    function _elysiumTestnetEnv(address controller, bool controllerIsWallet) internal {
+        _elysiumEnv(controller, controllerIsWallet);
+        vm.chainId(ELYSIUM_TESTNET_ID);
+        vm.etch(E_TESTNET_USDC, address(new MockERC20()).code);
+        vm.setEnv("ELYSIUM_CHAIN_ID", "99801");
+        vm.setEnv("LIMIT_ASSETS", vm.toString(E_TESTNET_USDC));
+    }
+
+    /// The testnet script stops before it sends anything when a setting is off.
+    function _elysiumTestnetRefusals() internal {
+        ControllerWallet multisig = new ControllerWallet();
+        _elysiumTestnetEnv(address(multisig), false);
+        _elysiumPoseidon();
+        DeployElysiumTestnet s = new DeployElysiumTestnet();
+        assertEq(s.ELYSIUM_TESTNET(), 99801, "the testnet id, fixed");
+
+        // Only on 99801: Elysium mainnet (99901) and every other chain are refused.
+        uint256[10] memory others = [uint256(99901), 1, 4663, 4217, 8453, 46630, 42431, 84532, 11155111, 31337];
+        for (uint256 i = 0; i < others.length; i++) {
+            vm.chainId(others[i]);
+            vm.expectRevert(bytes("wrong chain for this script"));
+            s.run();
+        }
+        vm.chainId(ELYSIUM_TESTNET_ID);
+
+        vm.setEnv("NEW_OWNER", vm.toString(E_OWNER));
+        vm.expectRevert(bytes("NEW_OWNER must be unset: the guard owns this vault"));
+        s.run();
+        vm.setEnv("NEW_OWNER", "");
+
+        vm.setEnv("GUARD_CONTROLLER", "");
+        vm.expectRevert(bytes("set GUARD_CONTROLLER: who runs the guard (a multisig)"));
+        s.run();
+        vm.setEnv("GUARD_CONTROLLER", vm.toString(address(multisig)));
+
+        // USDC only: native test HYPE is never listed here.
+        vm.setEnv("LIMIT_ASSETS", string.concat(vm.toString(E_TESTNET_USDC), ",", vm.toString(address(0))));
+        vm.setEnv("LIMIT_PER_DEPOSIT", "500000000,1000000000000000000");
+        vm.setEnv("LIMIT_TOTAL", "25000000000,10000000000000000000");
+        vm.expectRevert(bytes("this chain has no native coin to list"));
+        s.run();
+
+        assertEq(vm.getNonce(E_DEPLOYER), 1, "nothing sent past PoseidonT3");
+    }
+
+    /// The testnet deploy: the same vault at the same address, born guarded, test USDC at 500 / 25,000.
+    function _elysiumTestnetDeploy() internal {
+        ControllerWallet multisig = new ControllerWallet();
+        _elysiumTestnetEnv(address(multisig), false);
+        address poseidon = _elysiumPoseidon();
+        new DeployElysiumTestnet().run();
+
+        ShieldPoolPayments pool = ShieldPoolPayments(payable(CANON_POOL));
+        _checkElysiumPoolFor(pool, poseidon, E_TESTNET_USDC);
+        VaultOwnerGuard guard = VaultOwnerGuard(pool.owner());
+        assertEq(address(guard.vault()), address(pool), "the guard names this vault");
+        assertEq(guard.controller(), E_DEPLOYER, "the deployer runs it until the multisig accepts");
+        assertEq(guard.pendingController(), address(multisig), "the multisig is offered the guard");
+        multisig.exec(address(guard), abi.encodeCall(VaultOwnerGuard.acceptController, ()));
+        assertEq(guard.controller(), address(multisig));
+        _checkGuardHoldsFor(pool, guard, address(multisig), true, E_TESTNET_USDC);
     }
 
     /// DEPLOY-ELYSIUM.md's settings, from the deployer with no key in the environment.
@@ -111,10 +185,17 @@ abstract contract ElysiumDeploySteps is Test {
         vm.expectRevert(bytes("set ELYSIUM_CHAIN_ID: Elysium mainnet's chain id"));
         s.run();
 
-        // The id names another chain than the RPC it runs on.
+        // Any id but Elysium mainnet's (99901) is refused.
         vm.setEnv("ELYSIUM_CHAIN_ID", "999998");
+        vm.expectRevert(bytes("ELYSIUM_CHAIN_ID must be 99901, Elysium mainnet's"));
+        s.run();
+
+        // The id names another chain than the RPC it runs on.
+        vm.chainId(999_998);
+        vm.setEnv("ELYSIUM_CHAIN_ID", "99901");
         vm.expectRevert(bytes("wrong chain for this script"));
         s.run();
+        vm.chainId(ELYSIUM_ID);
 
         // Elysium's testnet, unless a rehearsal there is asked for.
         vm.chainId(99801);
@@ -196,6 +277,10 @@ abstract contract ElysiumDeploySteps is Test {
     }
 
     function _checkElysiumPool(ShieldPoolPayments pool, address poseidon) internal view {
+        _checkElysiumPoolFor(pool, poseidon, E_USDC);
+    }
+
+    function _checkElysiumPoolFor(ShieldPoolPayments pool, address poseidon, address usdc) internal view {
         assertGt(address(pool).code.length, 0, "the vault at its address on every other chain");
         assertEq(address(pool.poseidon2()), poseidon);
         assertEq(address(pool.verifier()), CANON_DUAL, "DualProofVerifier at its usual address");
@@ -204,7 +289,7 @@ abstract contract ElysiumDeploySteps is Test {
         assertFalse(pool.setupMode(), "setup ended");
         assertEq(pool.withdrawFeeBps(), 50, "0.5% cash-out fee");
         assertEq(pool.feeRecipient(), E_TREASURY, "fee to the treasury");
-        (uint128 per, uint128 total) = pool.depositLimit(E_USDC);
+        (uint128 per, uint128 total) = pool.depositLimit(usdc);
         assertEq(per, 500e6, "500 USDC per deposit");
         assertEq(total, 25_000e6, "25,000 USDC in total");
         (per, total) = pool.depositLimit(address(0));
@@ -233,6 +318,16 @@ abstract contract ElysiumDeploySteps is Test {
     function _checkGuardHolds(ShieldPoolPayments pool, VaultOwnerGuard guard, address controller, bool viaWallet)
         internal
     {
+        _checkGuardHoldsFor(pool, guard, controller, viaWallet, E_USDC);
+    }
+
+    function _checkGuardHoldsFor(
+        ShieldPoolPayments pool,
+        VaultOwnerGuard guard,
+        address controller,
+        bool viaWallet,
+        address usdc
+    ) internal {
         address evil = address(0xBAD);
         bytes memory setVerifier = abi.encodeCall(ShieldPoolCore.setVerifier, (evil));
         bytes memory setShield = abi.encodeCall(ShieldPoolCore.setShieldVerifier, (evil));
@@ -271,7 +366,7 @@ abstract contract ElysiumDeploySteps is Test {
         assertEq(pool.owner(), address(guard));
 
         // What the guard is for still works: queue a limit raise, lower the fee at once.
-        bytes memory raise = abi.encodeCall(ShieldPoolCore.setDepositLimit, (E_USDC, uint128(1_000e6), uint128(50_000e6)));
+        bytes memory raise = abi.encodeCall(ShieldPoolCore.setDepositLimit, (usdc, uint128(1_000e6), uint128(50_000e6)));
         _asController(guard, controller, viaWallet, abi.encodeCall(VaultOwnerGuard.queueChange, (raise)));
         _asController(guard, controller, viaWallet, abi.encodeCall(VaultOwnerGuard.lowerWithdrawFee, (uint16(25))));
         assertEq(pool.withdrawFeeBps(), 25);

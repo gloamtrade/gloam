@@ -24,12 +24,14 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const MODE = process.env.GLOAM_SELFTEST_ELYSIUM ?? "off";
-const CHAIN_ID = 990_001;
+const CHAIN_ID = 99_901;
 const POOL = "0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194";
 const USDC = "0x00000000000000000000000000000000000E1a5c";
 const RPC = "https://rpc.elysium.example/v1";
 
 for (const k of Object.keys(process.env)) if (k.startsWith("NEXT_PUBLIC_ELYSIUM_")) delete process.env[k];
+// Another mainnet's id fails loudly too, now that Elysium's (99901) is known.
+if (MODE === "wrongid") process.env.NEXT_PUBLIC_ELYSIUM_ENABLED = "1";
 delete process.env.UPSTASH_REDIS_REST_URL;
 delete process.env.UPSTASH_REDIS_REST_TOKEN;
 if (MODE === "coming" || MODE === "on" || MODE === "bad") process.env.NEXT_PUBLIC_ELYSIUM_ENABLED = "1";
@@ -46,6 +48,20 @@ if (MODE === "on" || MODE === "bad") {
 globalThis.fetch = (async (url: unknown) => {
   throw new Error(`selftest-elysium: no network calls allowed (${String(url)})`);
 }) as typeof fetch;
+
+if (MODE === "wrongid") {
+  process.env.NEXT_PUBLIC_ELYSIUM_CHAIN_ID = "990001";
+  Object.assign(process.env, {
+    NEXT_PUBLIC_ELYSIUM_RPC_URL: RPC,
+    NEXT_PUBLIC_ELYSIUM_EXPLORER_URL: "https://explorer.elysium.example",
+    NEXT_PUBLIC_ELYSIUM_USDC: USDC,
+    NEXT_PUBLIC_ELYSIUM_POOL: POOL,
+    NEXT_PUBLIC_ELYSIUM_DEPLOY_BLOCK: "1234",
+  });
+  await assert.rejects(import("../src/lib/elysium"), /must be 99901/);
+  console.log("selftest-elysium (wrongid): ok (a chain id other than 99901 fails the build)");
+  process.exit(0);
+}
 
 if (MODE === "bad") {
   await assert.rejects(import("../src/lib/elysium"), /testnet/);
@@ -125,7 +141,7 @@ if (MODE === "off" || MODE === "coming") {
   const usdc = tokens.shieldTokensFor(CHAIN_ID);
   ok(usdc.length === 1 && usdc[0]!.symbol === "USDC" && usdc[0]!.address === USDC && usdc[0]!.decimals === 6, "on: USDC only");
   ok(!tokens.supportsNativeShield(CHAIN_ID), "on: HYPE can't be added privately");
-  ok(walkTuning(CHAIN_ID, e.logRange).span === 50_000n, "on: tree reads at the RPC's range");
+  ok(walkTuning(CHAIN_ID, e.logRange).span === 1_000_000n, "on: tree reads at the RPC's range (1,000,000 blocks at 100 ms)");
   ok(networkForChain(CHAIN_ID).key === "elysium-mainnet", "on: the relay serves it");
   ok(hourlySpendWei(CHAIN_ID, {}) === 10n ** 18n, "on: the relay's hourly cap is 1 HYPE by default");
   ok(CSP_CONNECT_SOURCES.includes("https://rpc.elysium.example"), "on: the CSP allows its RPC");
@@ -142,7 +158,7 @@ if (MODE === "off" || MODE === "coming") {
 }
 
 if (MODE === "off") {
-  for (const mode of ["coming", "on", "bad"]) {
+  for (const mode of ["coming", "on", "bad", "wrongid"]) {
     const child = spawnSync(process.execPath, [...process.execArgv, fileURLToPath(import.meta.url)], {
       env: { ...process.env, GLOAM_SELFTEST_ELYSIUM: mode },
       encoding: "utf8",

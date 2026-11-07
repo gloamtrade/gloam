@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
-import { mainnetPool } from "@/lib/mainnet";
+import { joinNames, mainnetPool } from "@/lib/mainnet";
+import { ELYSIUM, ELYSIUM_LIVE_SINCE } from "@/lib/elysium";
 
 /** Base and Ethereum mainnet move from "still ahead" to live once their pools are in (lib/mainnet.ts). */
 const BASE_LIVE = mainnetPool(8453) !== null;
 const ETHEREUM_LIVE = mainnetPool(1) !== null;
-const LATER = [BASE_LIVE ? "Base (8453)" : null, ETHEREUM_LIVE ? "Ethereum (1)" : null].filter(Boolean).join(" and ");
+const LATER = joinNames([BASE_LIVE ? "Base (8453)" : null, ETHEREUM_LIVE ? "Ethereum (1)" : null, ELYSIUM ? `Elysium (${ELYSIUM.chainId})` : null].filter((n): n is string => n !== null));
 
 export const metadata: Metadata = {
   title: "Production gate",
@@ -61,7 +62,7 @@ export default function DocsProductionPage() {
           {
             n: "4",
             title: "Mainnet deploy (done)",
-            body: "New ShieldPoolPayments pools on Robinhood Chain and Tempo mainnet (21 October 2026), then Base and Ethereum mainnet (26 October 2026): payments only, no sealed swap. The app proves with the final keys there.",
+            body: `New ShieldPoolPayments pools on Robinhood Chain and Tempo mainnet (21 October 2026), then Base and Ethereum mainnet (26 October 2026)${ELYSIUM ? `, then Elysium mainnet (${ELYSIUM_LIVE_SINCE}), owned by a VaultOwnerGuard from its deploy` : ""}: payments only, no sealed swap. The app proves with the final keys there.`,
           },
           {
             n: "5",

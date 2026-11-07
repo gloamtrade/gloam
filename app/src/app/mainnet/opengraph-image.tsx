@@ -10,9 +10,9 @@ export const contentType = "image/png";
 
 const asset = (f: string) => join(process.cwd(), "src/assets/og", f);
 
-/** One line under the title: with all four mainnets in it runs long, so it steps down a size instead of wrapping under the etching. */
+/** One line under the title: with four or five mainnets in it runs long, so it steps down a size (two with Elysium) instead of wrapping under the etching. */
 const LINE = `Private payments on ${liveMainnetNames()}`;
-const LINE_SIZE = LINE.length > 48 ? 32 : 38;
+const LINE_SIZE = LINE.length > 64 ? 28 : LINE.length > 48 ? 32 : 38;
 
 /** Mainnet share card: the home card, saying mainnet is live and on which chains. */
 export default async function OpenGraphImage() {

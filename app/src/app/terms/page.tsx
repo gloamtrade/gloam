@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { liveMainnetNames } from "@/lib/mainnet";
 import Link from "next/link";
 import { LegalLayout } from "@/components/LegalLayout";
 
@@ -45,7 +46,7 @@ export default function TermsPage() {
       <h2>2. Experimental software</h2>
       <p>
         Gloam is early-stage software for interacting with blockchain
-        networks, including Robinhood Chain, Tempo, Base and Ethereum. Features
+        networks, including {liveMainnetNames()}. Features
         such as private balances, private payments, payroll, proofs and
         private swaps may be incomplete, unavailable, or change without notice. Stock tokens are on
         testnet only. A private swap trades on a public exchange, so its tokens

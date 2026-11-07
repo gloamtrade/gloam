@@ -12,9 +12,10 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  * replaced and its ownership can never move (Kann I-02). See
  * MainnetDeploy._deployMainnetGuarded.
  *
- * The chain id is read from ELYSIUM_CHAIN_ID because the mainnet id was not
- * public when this was written. 99801, the reported testnet id, is refused
- * unless ELYSIUM_ALLOW_TESTNET=1 (a rehearsal there).
+ * The chain id is read from ELYSIUM_CHAIN_ID and must be 99901, Elysium
+ * mainnet's (Kinetiq's docs). 99801, the testnet, is refused unless
+ * ELYSIUM_ALLOW_TESTNET=1 (a rehearsal there; DeployElysiumTestnet is the
+ * testnet's own script).
  *
  * The USER runs this. It is NOT executed by CI or by any agent. Runbook: DEPLOY-ELYSIUM.md.
  *
@@ -65,8 +66,10 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  * acceptController() on the guard, if it is not the deployer.
  */
 contract DeployElysiumMainnet is MainnetDeploy {
-    /// @notice Elysium's testnet, as reported. Refused unless ELYSIUM_ALLOW_TESTNET=1.
+    /// @notice Elysium's testnet. Refused unless ELYSIUM_ALLOW_TESTNET=1.
     uint256 constant ELYSIUM_TESTNET = 99801;
+    /// @notice Elysium mainnet's chain id (0x1863d), from Kinetiq's docs.
+    uint256 constant ELYSIUM_MAINNET = 99901;
 
     function run() external {
         uint256 chainId = vm.envOr("ELYSIUM_CHAIN_ID", uint256(0));
@@ -76,6 +79,7 @@ contract DeployElysiumMainnet is MainnetDeploy {
             "ELYSIUM_CHAIN_ID is the Elysium testnet: set ELYSIUM_ALLOW_TESTNET=1 for a rehearsal there"
         );
         require(!_isOtherGloamChain(chainId), "ELYSIUM_CHAIN_ID is another Gloam chain, not Elysium");
+        require(chainId == ELYSIUM_MAINNET || chainId == ELYSIUM_TESTNET, "ELYSIUM_CHAIN_ID must be 99901, Elysium mainnet's");
         _deployMainnetGuarded(chainId, true);
     }
 

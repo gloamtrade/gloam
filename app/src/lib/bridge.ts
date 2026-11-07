@@ -111,6 +111,10 @@ export const BRIDGE_DESTINATIONS: Partial<Record<ChainFamily, BridgeDestination>
     chain: "Ethereum",
     token: { symbol: "USDC", address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6, logo: "/brand/tokens/usdc.png" },
   },
+  // Elysium: not yet. No live Relay route into Elysium USDC has been checked, so
+  // there is no bridge in there and the app shows no bridge panel on Elysium. Add
+  // an entry here (from lib/elysium.ts) once a live Relay quote into it works, and
+  // drop the "not on Elysium yet" lines in Glim and /docs/chain and /docs/bridge.
 };
 
 /** The chains money can come from into `destChainId`: every listed chain but that one. */

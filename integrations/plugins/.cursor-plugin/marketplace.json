@@ -4,13 +4,13 @@
     "name": "Gloam"
   },
   "metadata": {
-    "description": "Gloam plugins for private agent payments on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet."
+    "description": "Gloam plugins for private agent payments on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet (Elysium support coming)."
   },
   "plugins": [
     {
       "name": "gloam",
       "source": "plugins/gloam",
-      "description": "Private stablecoin payments for agents on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet: pay x402 and MPP resources, shield, get paid, with onchain spending limits.",
+      "description": "Private stablecoin payments for agents on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet (Elysium support coming): pay x402 and MPP resources, shield, get paid, with onchain spending limits.",
       "category": "Finance",
       "tags": ["gloam", "tempo", "payments", "privacy", "x402", "mpp", "mcp", "stablecoins"]
     }

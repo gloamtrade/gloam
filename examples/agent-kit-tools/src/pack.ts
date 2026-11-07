@@ -42,6 +42,7 @@ import {
   cleanPaymentNote,
   encodeRequirements,
   gloamCashoutProblem,
+  getGloamNetwork,
   gloamReadTransport,
   isReceiveTag,
   normalizeRequestAmount,
@@ -90,7 +91,7 @@ export interface GloamEngine {
 }
 
 export interface GloamToolPackOptions extends Omit<GloamAgentOptions, "sender" | "network"> {
-  /** Network key: robinhood-mainnet, tempo-mainnet, base-mainnet, ethereum-mainnet, or a testnet. Default GLOAM_NETWORK. */
+  /** Network key: robinhood-mainnet, tempo-mainnet, base-mainnet, ethereum-mainnet, elysium-mainnet (once the SDK has its values), or a testnet. Default GLOAM_NETWORK. */
   network?: string;
   /** The kit's wallet. Default: GLOAM_AGENT_PRIVATE_KEY from env. It is wrapped so it signs only approved previews. */
   sender?: CallSender;
@@ -192,7 +193,10 @@ export function createGloamToolPack(opts: GloamToolPackOptions = {}): GloamToolP
     engine = opts.engine;
   } else {
     const key = opts.network?.trim() || env.GLOAM_NETWORK?.trim();
-    if (!key) throw new Error("Name the network: robinhood-mainnet, tempo-mainnet, base-mainnet or ethereum-mainnet (or a testnet), as `network` or GLOAM_NETWORK.");
+    if (!key) {
+      const mainnets = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", ...(getGloamNetwork("elysium-mainnet") ? ["elysium-mainnet"] : [])];
+      throw new Error(`Name the network: ${mainnets.slice(0, -1).join(", ")} or ${mainnets[mainnets.length - 1]} (or a testnet), as \`network\` or GLOAM_NETWORK.`);
+    }
     const network = resolveNetwork(key, { rpc: opts.rpc || env.GLOAM_RPC_URL, env });
     const chain: Chain = { ...network.chain, rpcUrls: { default: { http: [network.rpc] } } };
     const historyRpc = network.rpc === network.rpcUrl ? network.historyRpc : null;

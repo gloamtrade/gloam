@@ -1,7 +1,8 @@
 /**
  * Gloam network registry: the runtime source of truth for every chain the
  * product can point at. Four testnets (Robinhood Chain testnet, Tempo
- * Moderato, Base Sepolia and Ethereum Sepolia) and their four mainnets.
+ * Moderato, Base Sepolia and Ethereum Sepolia) and their four mainnets, plus
+ * Elysium mainnet and testnet behind their switches (lib/elysium.ts).
  *
  * Everything chain-specific (chain object, shielded pool, deploy block, hash
  * scheme, native + stable assets, explorer links) hangs off one `GloamNetwork`
@@ -15,12 +16,19 @@
  * then it is left out of NETWORK_KEYS, isNetworkKey, allNetworks and everything
  * built on them (selector, API, relay, MCP, proofs), as if it did not exist.
  *
- * Elysium mainnet is the fifth mainnet, with no testnet here. It is behind
+ * Elysium mainnet (99901) is the fifth mainnet. It is behind
  * NEXT_PUBLIC_ELYSIUM_ENABLED and its values (lib/elysium.ts): until both are
- * in it is hidden the same way.
+ * in it is hidden the same way. Its testnet (99801, key "elysium") has its own
+ * switch, NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED, and needs its pool in.
  */
 import { defineChain, type Address, type Chain } from "viem";
-import { ETHEREUM_SEPOLIA_HISTORY_RPC, type HistoryRpc } from "@gloamtrade/sdk";
+import {
+  ELYSIUM_MULTICALL3,
+  ELYSIUM_TESTNET as SDK_ELYSIUM_TESTNET,
+  ELYSIUM_TESTNET_RPC_FALLBACK,
+  ETHEREUM_SEPOLIA_HISTORY_RPC,
+  type HistoryRpc,
+} from "@gloamtrade/sdk";
 import { base, baseSepolia, mainnet as ethereum, sepolia } from "viem/chains";
 import { robinhood, robinhoodTestnet } from "./chain";
 import type { CeremonyKind } from "./circuitArtifacts";
@@ -30,7 +38,7 @@ import {
   type HashScheme,
 } from "./config";
 import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, isMainnetLive, mainnetPool } from "./mainnet";
-import { ELYSIUM, ELYSIUM_CHAIN_ID, ELYSIUM_LOG_RANGE } from "./elysium";
+import { ELYSIUM, ELYSIUM_CHAIN_ID, ELYSIUM_LOG_RANGE, ELYSIUM_TESTNET } from "./elysium";
 
 export type NetworkKey =
   | "robinhood"
@@ -41,9 +49,10 @@ export type NetworkKey =
   | "tempo-mainnet"
   | "base-mainnet"
   | "ethereum-mainnet"
-  | "elysium-mainnet";
+  | "elysium-mainnet"
+  | "elysium";
 
-/** The chain a network runs on, testnet or mainnet: wallets, fees and logos follow it. Elysium has a mainnet only. */
+/** The chain a network runs on, testnet or mainnet: wallets, fees and logos follow it. */
 export type ChainFamily = "robinhood" | "tempo" | "base" | "ethereum" | "elysium";
 
 /**
@@ -59,7 +68,7 @@ export type ElysiumChainId = number & { readonly __chain?: "elysium" };
  * narrow `chainId` to the configured ids. Mainnet ids are only registered with
  * wagmi once their pool is filled in (lib/wagmi.ts).
  */
-export type GloamChainId = 46630 | 42431 | 84532 | 11155111 | 4663 | 4217 | 8453 | 1 | ElysiumChainId;
+export type GloamChainId = 46630 | 42431 | 84532 | 11155111 | 4663 | 4217 | 8453 | 1 | 99801 | ElysiumChainId;
 
 /** Whether a network is deployed and safe for real shield/spend writes. */
 export type NetworkStatus = "live" | "planned";
@@ -275,6 +284,25 @@ export const elysiumMainnet = defineChain({
   blockExplorers: {
     default: { name: "Elysium Explorer", url: ELYSIUM?.explorerUrl ?? "https://elysium.invalid" },
   },
+});
+
+/**
+ * Elysium testnet (99801): Kinetiq's published RPCs (theirs, then Conduit's) and
+ * explorer, gas in HYPE. Always defined; only a network once its pool is in and
+ * NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED is on (lib/elysium.ts).
+ */
+export const elysiumTestnet = defineChain({
+  id: 99801,
+  name: "Elysium Testnet",
+  nativeCurrency: { name: "HYPE", symbol: "HYPE", decimals: 18 },
+  rpcUrls: {
+    default: { http: [ELYSIUM_TESTNET?.rpcUrl ?? SDK_ELYSIUM_TESTNET.rpcUrl!, ELYSIUM_TESTNET_RPC_FALLBACK] },
+  },
+  blockExplorers: {
+    default: { name: "Elysium Testnet Explorer", url: SDK_ELYSIUM_TESTNET.explorerUrl! },
+  },
+  contracts: { multicall3: { address: ELYSIUM_MULTICALL3 } },
+  testnet: true,
 });
 
 /**
@@ -572,6 +600,35 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     explorerTx: (hash) => `${elysiumMainnet.blockExplorers.default.url}/tx/${hash}`,
     explorerAddress: (addr) => `${elysiumMainnet.blockExplorers.default.url}/address/${addr}`,
   },
+  // Elysium testnet (99801), run like Base Sepolia: the mainnet vault, born guarded,
+  // on the ceremony's final keys, test USDC only, gas in HYPE (not listed). Hidden
+  // until NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED is on and its pool is in (lib/elysium.ts).
+  elysium: {
+    key: "elysium",
+    label: "Elysium",
+    family: "elysium",
+    testnet: true,
+    stocks: false,
+    paymentsPool: true,
+    chain: elysiumTestnet,
+    chainId: elysiumTestnet.id,
+    historyRpc: null,
+    pool: ELYSIUM_TESTNET?.pool ?? null,
+    deployBlock: ELYSIUM_TESTNET?.deployBlock ?? null,
+    ceremony: "production",
+    // Blocks every ~100 ms; its RPCs cap a call at 10,000 logs, not at a range (checked 7 Nov 2026)
+    logRange: ELYSIUM_LOG_RANGE,
+    hashScheme: "poseidon",
+    primaryAsset: { symbol: "HYPE", address: null, decimals: 18 },
+    stableAssets: [],
+    status: "live",
+    payMemo: ELYSIUM_TESTNET?.payMemo
+      ? { address: ELYSIUM_TESTNET.payMemo.address, deployBlock: ELYSIUM_TESTNET.payMemo.deployBlock, emitsPoster: false }
+      : null,
+    note: "Elysium testnet: private USDC payments on the mainnet vault.",
+    explorerTx: (hash) => `${elysiumTestnet.blockExplorers.default.url}/tx/${hash}`,
+    explorerAddress: (addr) => `${elysiumTestnet.blockExplorers.default.url}/address/${addr}`,
+  },
 };
 
 const hasPool = (k: NetworkKey) => NETWORKS[k].pool !== null && NETWORKS[k].deployBlock !== null;
@@ -579,8 +636,8 @@ const hasPool = (k: NetworkKey) => NETWORKS[k].pool !== null && NETWORKS[k].depl
 /** Mainnets whose pool is filled in, Robinhood Chain first. Empty before deploy day. */
 const MAINNET_KEYS: NetworkKey[] = (["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet"] as const).filter(hasPool);
 
-/** The testnets: Robinhood Chain and Tempo, then Base Sepolia and Ethereum Sepolia once each pool is filled in. */
-const TESTNET_KEYS: NetworkKey[] = ["robinhood", "tempo", ...(["base", "ethereum"] as const).filter(hasPool)];
+/** The testnets: Robinhood Chain and Tempo, then Base Sepolia, Ethereum Sepolia and Elysium testnet once each pool is filled in (Elysium's behind its switch too). */
+const TESTNET_KEYS: NetworkKey[] = ["robinhood", "tempo", ...(["base", "ethereum", "elysium"] as const).filter(hasPool)];
 
 /** True once at least one mainnet pool is filled in: the app then labels mainnet and testnet. */
 export const MAINNET_ENABLED = MAINNET_KEYS.length > 0;

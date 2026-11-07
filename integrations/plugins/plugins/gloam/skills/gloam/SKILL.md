@@ -19,6 +19,7 @@ Each chain has a mainnet and a testnet, and tools take a `network`:
   Deposits are capped at 50,000 of a stablecoin (20 ETH, 2,500,000 GLOAM) per deposit.
   Direct deposits and private payments are free;
   cashing out costs 0.5%.
+- `elysium-mainnet` (Elysium, USDC only, gas in HYPE) and `elysium` (Elysium testnet) are coming: use them only if `gloam_info` lists them.
 - `tempo`, `robinhood`, `base` (Base Sepolia) and `ethereum` (Ethereum Sepolia) are the testnets.
 
 `gloam_info` lists the networks this server has and its default. Always say which network a payment

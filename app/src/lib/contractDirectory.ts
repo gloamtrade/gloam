@@ -17,7 +17,7 @@
 import { getAddress, isAddressEqual, parseAbi, zeroAddress, type Address, type PublicClient } from "viem";
 import { getNetwork, isNetworkKey, networkName, type GloamNetwork, type NetworkKey } from "./networks";
 import { swapRoutersOn } from "./vaultSwap";
-import { ELYSIUM_FLAG } from "./elysium";
+import { ELYSIUM_FLAG, ELYSIUM_TESTNET_FLAG } from "./elysium";
 
 /**
  * Owner of every mainnet vault, and of Base Sepolia's and Ethereum Sepolia's.
@@ -113,7 +113,14 @@ const MAINNET_ORDER: readonly NetworkKey[] = [
   // Only while its flag is on (lib/elysium): with the flag off it is not named at all.
   ...(ELYSIUM_FLAG ? (["elysium-mainnet"] as const) : []),
 ];
-const TESTNET_ORDER: readonly NetworkKey[] = ["robinhood", "tempo", "base", "ethereum"];
+const TESTNET_ORDER: readonly NetworkKey[] = [
+  "robinhood",
+  "tempo",
+  "base",
+  "ethereum",
+  // Elysium testnet, only while its own switch is on: listed as next until its pool is in.
+  ...(ELYSIUM_TESTNET_FLAG ? (["elysium"] as const) : []),
+];
 
 /** What a network is called here: "Base" on mainnet, "Base Sepolia testnet", "Tempo Moderato testnet". */
 export function directoryName(n: GloamNetwork): string {

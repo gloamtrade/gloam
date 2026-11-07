@@ -41,7 +41,8 @@ const short = (s: string, n = 10) => (s.length > 2 * n + 1 ? `${s.slice(0, n)}�
 const step = (title: string) => console.log(`\n── ${title}`);
 
 // ── network ────────────────────────────────────────────────────────────────
-// Base ("base-mainnet", and "base" for Base Sepolia) and Ethereum ("ethereum-mainnet") work once the SDK has their pools.
+// Base ("base-mainnet", and "base" for Base Sepolia) and Ethereum ("ethereum-mainnet") work once the SDK has their pools;
+// Elysium ("elysium-mainnet", USDC, gas in HYPE) once it has Elysium's values (coming).
 const NETWORK_KEYS: GloamNetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "robinhood", "tempo", "base"];
 const networkKey = (process.env.GLOAM_NETWORK?.trim() || "tempo") as GloamNetworkKey;
 if (!NETWORK_KEYS.includes(networkKey)) {

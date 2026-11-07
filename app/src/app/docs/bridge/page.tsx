@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ELYSIUM_ENABLED } from "@/lib/elysium";
 import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
@@ -16,7 +17,7 @@ export default function DocsBridgePage() {
   return (
     <DocsLayout
       title="Deposit from another chain"
-      lede="Pay in from the chain your money is already on. Gloam's bridge runs on Relay and lands your money as the vault's stablecoin: USDG on Robinhood Chain, USDC on Tempo, Base and Ethereum."
+      lede={`Pay in from the chain your money is already on. Gloam's bridge runs on Relay and lands your money as the vault's stablecoin: USDG on Robinhood Chain, USDC on Tempo, Base and Ethereum.${ELYSIUM_ENABLED ? " It does not bring money into Elysium yet." : ""}`}
       glance={[
         { label: "From", value: "Bitcoin, Solana, Tron, 22 EVM" },
         { label: "Lands as", value: "USDG or USDC" },

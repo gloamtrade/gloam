@@ -70,7 +70,7 @@ key can never be authorized again; run step 2 again for a new one.
 
 ## 3. Other setups
 
-- Raw key (no onchain cap, and the only option on Robinhood Chain, Base and Ethereum): set `GLOAM_AGENT_PRIVATE_KEY`
+- Raw key (no onchain cap, and the only option on Robinhood Chain, Base and Ethereum, and on Elysium once its support, coming, is in): set `GLOAM_AGENT_PRIVATE_KEY`
   to a funded key, plus `GLOAM_NOTE_KEY` (`openssl rand -hex 32`), `GLOAM_NETWORK`, and off-chain
   limits (`GLOAM_LIMIT_ASSETS`, `GLOAM_LIMIT_MAX_PER_PAYMENT`, `GLOAM_LIMIT_MAX_PER_DAY`,
   `GLOAM_LIMIT_RECIPIENTS`, and `GLOAM_LIMIT_NETWORK` for mainnet assets) in `~/.gloam/agent.env`.

@@ -35,6 +35,14 @@
  *
  * WHERE only ever grows: an id, once given, means the same vault and token
  * forever, or links already sent would open as something else.
+ *
+ * Id 45 is Elysium mainnet's USDC and id 46 Elysium testnet's, read from
+ * src/elysium.ts (ELYSIUM_MAINNET and ELYSIUM_TESTNET: chain id, pool and USDC).
+ * Their pools were not deployed when the ids were given, so until every value
+ * of a network is in, its id is reserved: nothing writes it and a record that
+ * names it is refused. A link to Elysium made before then is written out in
+ * full (id 0). Only the SDK's own file decides them, never an app's env, so
+ * every reader agrees on what ids 45 and 46 mean.
  */
 
 import { getAddress, keccak256, type Address, type Hex } from "viem";
@@ -42,6 +50,7 @@ import { FIELD_PRIME, NATIVE_ASSET } from "./constants.js";
 import { noteCommitmentPoseidon } from "./note.js";
 import { fieldToHex, hexToField } from "./poseidon.js";
 import { cleanPaymentNote, cleanText, PAYMENT_NOTE_MAX } from "./paymentNote.js";
+import { elysiumMainnetConfig, elysiumTestnetConfig } from "./elysium.js";
 
 // ── the fixed table: (chain, vault, token) -> small id ─────────────────────────
 
@@ -57,6 +66,23 @@ export interface ShortLinkPlace {
 }
 
 const at = (chainId: number, pool: Address, asset: Address): ShortLinkPlace => ({ chainId, pool, asset });
+
+const ZERO: Address = "0x0000000000000000000000000000000000000000";
+
+/** A reserved id: chain 0 matches no network, and reading it is refused. */
+const RESERVED: ShortLinkPlace = Object.freeze({ chainId: 0, pool: ZERO, asset: ZERO });
+
+/** Elysium mainnet's USDC (id 45) once every value in src/elysium.ts is in, else reserved. */
+function elysiumUsdc(): ShortLinkPlace {
+  const cfg = elysiumMainnetConfig();
+  return cfg ? at(cfg.chainId, cfg.pool, cfg.usdc) : RESERVED;
+}
+
+/** Elysium testnet's USDC (id 46) once ELYSIUM_TESTNET's pool is in, else reserved. */
+function elysiumTestnetUsdc(): ShortLinkPlace {
+  const cfg = elysiumTestnetConfig();
+  return cfg ? at(cfg.chainId, cfg.pool, cfg.usdc) : RESERVED;
+}
 
 /**
  * Id n is WHERE[n - 1]. Append only: never reorder, remove or edit an entry.
@@ -116,6 +142,10 @@ export const SHORT_LINK_WHERE: readonly ShortLinkPlace[] = Object.freeze([
   at(46630, RH_TESTNET_VAULT, "0x1FBE1a0e43594b3455993B5dE5Fd0A7A266298d0"), // 42 PLTR
   at(46630, RH_TESTNET_VAULT, "0x3b8262A63d25f0477c4DDE23F83cfe22Cb768C93"), // 43 NFLX
   at(46630, RH_TESTNET_VAULT, "0x71178BAc73cBeb415514eB542a8995b82669778d"), // 44 AMD
+  // Elysium mainnet: USDC, from src/elysium.ts; reserved until its values are in
+  elysiumUsdc(), // 45 USDC
+  // Elysium testnet (99801): test USDC, from src/elysium.ts; reserved until its pool is in
+  elysiumTestnetUsdc(), // 46 USDC
 ]);
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -123,7 +153,7 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 /** The table id for a place, or 0 when it is not in the table. `pool` null matches any vault (requests). */
 function whereId(chainId: number, pool: string | null, asset: string): number {
   const i = SHORT_LINK_WHERE.findIndex(
-    (w) => w.chainId === chainId && same(w.asset, asset) && (pool === null || same(w.pool, pool))
+    (w) => w.chainId > 0 && w.chainId === chainId && same(w.asset, asset) && (pool === null || same(w.pool, pool))
   );
   return i + 1;
 }
@@ -339,7 +369,8 @@ function readWhere(r: Reader, withPool: boolean): { chainId: number; pool: Addre
   const id = Number(r.varint());
   if (id > 0) {
     const w = SHORT_LINK_WHERE[id - 1];
-    if (!w) throw new Error("where");
+    // A reserved id (Elysium's, before its values are in) is refused, never read as chain 0.
+    if (!w || w.chainId <= 0) throw new Error("where");
     return { chainId: w.chainId, pool: withPool ? w.pool : null, asset: w.asset };
   }
   const chainId = Number(r.varint());

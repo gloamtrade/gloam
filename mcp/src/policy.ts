@@ -69,7 +69,7 @@ import {
   TEMPO_USDCE,
   TEMPO_USDT0,
   networkName as sdkNetworkName,
-  elysiumChainId,
+  testnetNetwork,
   mainnetNetwork,
 } from "@gloamtrade/sdk";
 import type { NetworkKey } from "./networks.js";
@@ -160,8 +160,10 @@ export const NETWORK_CHAIN_IDS: Record<NetworkKey, number> = {
   "tempo-mainnet": TEMPO_MAINNET_CHAIN_ID,
   "base-mainnet": BASE_MAINNET_CHAIN_ID,
   "ethereum-mainnet": ETHEREUM_MAINNET_CHAIN_ID,
-  // 0 until the SDK has Elysium's chain id (src/elysium.ts): a limit naming it is refused then.
-  "elysium-mainnet": elysiumChainId() ?? 0,
+  // 0 until the SDK has every Elysium value (src/elysium.ts): a limit naming it is refused then.
+  "elysium-mainnet": mainnetNetwork("elysium")?.chainId ?? 0,
+  // Elysium testnet (99801): 0 until the SDK has its pool.
+  elysium: testnetNetwork("elysium")?.chainId ?? 0,
 };
 
 /** The chain id a limit's network names; refuses Elysium while the SDK has no chain id for it. */
@@ -190,6 +192,8 @@ export const KNOWN_ASSETS: KnownAsset[] = [
   { symbol: "PYUSD", chainId: ETHEREUM_SEPOLIA_CHAIN_ID, address: ETHEREUM_SEPOLIA_PYUSD, decimals: 6, stable: true },
   { symbol: "EURC", chainId: ETHEREUM_SEPOLIA_CHAIN_ID, address: ETHEREUM_SEPOLIA_EURC, decimals: 6, stable: true },
   { symbol: "ETH", chainId: ETHEREUM_SEPOLIA_CHAIN_ID, address: NATIVE_ASSET, decimals: 18, stable: false },
+  // Elysium testnet, once the SDK has its pool: test USDC only, after the other testnets so a bare "USDC" keeps its old meaning.
+  ...(testnetNetwork("elysium")?.assets ?? []).map((a) => ({ symbol: a.symbol, chainId: testnetNetwork("elysium")!.chainId, address: a.address, decimals: a.decimals, stable: true })),
   // Mainnet: exactly what the mainnet pools list.
   { symbol: "USDG", chainId: RH_MAINNET_CHAIN_ID, address: RH_MAINNET_USDG, decimals: 6, stable: true },
   { symbol: "GLOAM", chainId: RH_MAINNET_CHAIN_ID, address: GLOAM_TOKEN, decimals: 18, stable: false },
@@ -234,7 +238,7 @@ export function assetLabel(chainId: number, asset: Address): string {
 // ------------------------------------------------------------------ config shape
 
 const amount = z.union([z.string(), z.number()]).transform((v) => String(v).trim());
-const network = z.enum(["robinhood", "tempo", "base", "ethereum", "robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet"]);
+const network = z.enum(["robinhood", "tempo", "base", "ethereum", "robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "elysium"]);
 
 const assetEntry = z
   .object({
@@ -494,7 +498,7 @@ export function loadPolicy(env: Record<string, string | undefined>, readFile: (p
         mode: "invalid",
         agent,
         source,
-        error: `GLOAM_LIMIT_NETWORK "${limitNetwork}" is not a Gloam network. Use robinhood-mainnet, tempo-mainnet, base-mainnet, ethereum-mainnet, robinhood, tempo, base or ethereum.`,
+        error: `GLOAM_LIMIT_NETWORK "${limitNetwork}" is not a Gloam network. Use robinhood-mainnet, tempo-mainnet, base-mainnet, ethereum-mainnet, ${mainnetNetwork("elysium") ? "elysium-mainnet, " : ""}robinhood, tempo, base${testnetNetwork("elysium") ? ", ethereum or elysium" : " or ethereum"}.`,
       };
     }
     const assetKeys = list(env.GLOAM_LIMIT_ASSETS ?? "");

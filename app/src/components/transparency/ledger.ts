@@ -120,7 +120,17 @@ const LEDGER_SPAN: Record<number, bigint> = { 46630: 1_000_000n, 4663: 500_000n 
  * node a block behind the one that gave the head, and returns nothing for
  * blocks it doesn't have yet; reading to the very head would mark them read.
  */
-const HEAD_LAG: Record<number, bigint> = { 46630: 20n, 4663: 20n, 84532: 20n, 8453: 20n, 1: 2n, 11155111: 4n };
+const HEAD_LAG: Record<number, bigint> = {
+  46630: 20n,
+  4663: 20n,
+  84532: 20n,
+  8453: 20n,
+  1: 2n,
+  11155111: 4n,
+  // Elysium mainnet and testnet: blocks every ~100 ms, so 20 blocks is about 2 s.
+  99901: 20n,
+  99801: 20n,
+};
 const FRESH_MS = 30_000;
 const CACHE_PREFIX = "gloam_transparency_v1";
 

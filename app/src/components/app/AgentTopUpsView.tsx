@@ -8,6 +8,7 @@
  * cash out, and only where the money came from stays private.
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ELYSIUM_ENABLED } from "@/lib/elysium";
 import { CASH_OUT_FEE_BPS } from "@gloamtrade/sdk";
 import { isAddress, type Address } from "viem";
 import { useReadContract } from "wagmi";
@@ -466,7 +467,7 @@ export function AgentTopUpsView() {
       <div className="gl-card max-w-[640px] p-5 sm:p-7">
         <h2 className="t-title">Agent top-ups</h2>
         <p className="mt-2 text-[14px] leading-relaxed text-soft">{DATED_OFF_MESSAGE}</p>
-        <p className="mt-2 text-[14px] leading-relaxed text-mute">They work on Robinhood Chain, Tempo and Base.</p>
+        <p className="mt-2 text-[14px] leading-relaxed text-mute">They work on {ELYSIUM_ENABLED ? "Robinhood Chain, Tempo, Base and Elysium" : "Robinhood Chain, Tempo and Base"}.</p>
         <button type="button" className="btn btn-ghost mt-5" onClick={() => setNetworkKey("base-mainnet")}>
           Switch to Base
         </button>

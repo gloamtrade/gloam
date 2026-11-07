@@ -4,7 +4,7 @@ Private payments for the [Machine Payments Protocol](https://mpp.dev) (MPP).
 
 MPP is HTTP 402 done properly: a server answers `WWW-Authenticate: Payment …`, the client pays and retries with `Authorization: Payment …`, and gets a `Payment-Receipt`. Every method so far (tempo, evm, stripe, solana) settles in public, so the ledger shows which agent paid which service, how much, how often.
 
-This package adds the **`gloam`** method. A charge is paid with a private transfer inside a Gloam shielded pool on Tempo, Robinhood Chain, Base or Ethereum, on mainnet or testnet:
+This package adds the **`gloam`** method. A charge is paid with a private transfer inside a Gloam shielded pool on Tempo, Robinhood Chain, Base or Ethereum, on mainnet or testnet (Elysium mainnet support is coming):
 
 - the payment note is sealed to the payee's receive tag, so only the payee can open it;
 - the server checks it binds the price, that it is the payment output of a `Transferred` event in the official pool, and that the credential is bound to this exact challenge;
@@ -120,6 +120,8 @@ Base: `"base"` (Base Sepolia `84532`, test USDC by default, also EURC and ETH, o
 
 Ethereum too (0.3.0): `"ethereum-mainnet"` (Ethereum `1`, USDC by default, also USDT, USDG, PYUSD, EURC and ETH), live since 26 October 2026, works the same way with SDK 0.4.1 or later. Its testnet is Ethereum Sepolia, below.
 
+Elysium is coming: `"elysium-mainnet"` (Elysium mainnet, USDC only, gas in HYPE, final keys) and `"elysium"` (Elysium testnet `99801`, test USDC) are known to this package, and are coming in a build whose SDK has Elysium's values. Until then each is refused with a plain error.
+
 Ethereum Sepolia: `"ethereum"` (`11155111`, test USDC by default, also USDG, PYUSD, EURC and ETH, on the final keys) is known to 0.3.0 and works with SDK 0.4.0, which has its pool (deployed 25 October 2026). Built with an older SDK it is refused with a plain error.
 
 ### The chain reader must say which chain it reads
@@ -132,7 +134,7 @@ Gloam's vault has one address on every chain, and ETH is `0x0` on all of them. A
 
 ## Status
 
-Mainnet on Tempo, Robinhood Chain, Base and Ethereum (Base and Ethereum need a build with SDK 0.4.1 or later), payments only, with the trusted setup's final keys and deposit limits on the pools; reviewed internally before launch, and Kann Audits reviewed the vault contracts (report, 1 November 2026: gloam.trade/security) and found no Critical, High or Medium issues. The testnets stay up.
+Mainnet on Tempo, Robinhood Chain, Base and Ethereum (Base and Ethereum need a build with SDK 0.4.1 or later; Elysium support is coming), payments only, with the trusted setup's final keys and deposit limits on the pools; reviewed internally before launch, and Kann Audits reviewed the vault contracts (report, 1 November 2026: gloam.trade/security) and found no Critical, High or Medium issues. The testnets stay up.
 
 ## Tests
 

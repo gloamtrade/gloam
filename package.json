@@ -2,7 +2,7 @@
   "name": "gloam",
   "private": true,
   "version": "0.1.0",
-  "description": "Private stablecoin payments for people, teams and AI agents on Robinhood Chain, Tempo, Base and Ethereum. Private by default, provable on demand.",
+  "description": "Private stablecoin payments for people, teams and AI agents on Robinhood Chain, Tempo, Base and Ethereum (Elysium support coming). Private by default, provable on demand.",
   "scripts": {
     "dev": "pnpm --filter @gloam/app dev",
     "dev:app": "pnpm --filter @gloam/app dev",

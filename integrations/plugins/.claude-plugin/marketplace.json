@@ -1,7 +1,7 @@
 {
   "name": "gloam",
   "metadata": {
-    "description": "Gloam plugins for AI agents: private stablecoin payments on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet, with spending limits the agent cannot lift."
+    "description": "Gloam plugins for AI agents: private stablecoin payments on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet (Elysium support coming), with spending limits the agent cannot lift."
   },
   "owner": {
     "name": "Gloam"
@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "gloam",
-      "description": "Private stablecoin payments for agents on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet: pay x402 and MPP resources, shield, get paid, with onchain spending limits.",
+      "description": "Private stablecoin payments for agents on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet (Elysium support coming): pay x402 and MPP resources, shield, get paid, with onchain spending limits.",
       "source": "./plugins/gloam",
       "category": "finance",
       "homepage": "https://gloam.trade/docs/agents"

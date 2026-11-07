@@ -23,6 +23,9 @@ import {
   getGloamNetwork,
   gloamNetworks,
   isMainnetChainId,
+  elysiumMainnetConfig,
+  ELYSIUM_TESTNET,
+  ELYSIUM_TESTNET_CHAIN_ID,
   networkForChainId,
   networkName,
   BASE_EURC,
@@ -69,7 +72,7 @@ export type GloamMode = "push" | "pull";
 export const GLOAM_MODES: readonly GloamMode[] = ["push", "pull"];
 
 export interface GloamChargeMethodDetails {
-  /** Chain the shielded pool lives on: Tempo 4217 or Robinhood Chain 4663 (mainnet), Tempo Moderato 42431 or Robinhood Chain testnet 46630; Base 8453, Base Sepolia 84532 and Ethereum 1 once their pools are in. */
+  /** Chain the shielded pool lives on: Tempo 4217 or Robinhood Chain 4663 (mainnet), Tempo Moderato 42431 or Robinhood Chain testnet 46630; Base 8453, Base Sepolia 84532 and Ethereum 1 once their pools are in; Elysium mainnet once the SDK has its values. */
   chainId: number;
   /** The Gloam pool the transfer settles through. Clients and servers accept only the official pool for chainId. */
   pool: Address;
@@ -198,12 +201,27 @@ export function assetDecimals(currency: Address): number | undefined {
     ETHEREUM_SEPOLIA_EURC,
   ];
   if (sixes.some((a) => c === lc(a))) return 6;
+  // Elysium's USDC, once the SDK has its values: its own decimals, read on chain at launch.
+  const ely = elysiumMainnetConfig();
+  if (ely && c === lc(ely.usdc)) return ely.usdcDecimals;
+  // Elysium testnet's USDC: its address and decimals are Kinetiq's published ones.
+  if (ELYSIUM_TESTNET.usdc && c === lc(ELYSIUM_TESTNET.usdc)) return ELYSIUM_TESTNET.usdcDecimals;
   return undefined;
 }
 
 /** Known assets, for labels only (never for matching: matching is by address). */
 export function assetSymbol(chainId: number, currency: Address): string {
   const c = lc(currency);
+  const ely = elysiumMainnetConfig();
+  // Elysium's gas coin is HYPE, and its vault takes USDC only.
+  if (ely && chainId === ely.chainId) {
+    if (c === lc(NATIVE_ASSET)) return "HYPE";
+    if (c === lc(ely.usdc)) return "USDC";
+  }
+  if (chainId === ELYSIUM_TESTNET_CHAIN_ID) {
+    if (c === lc(NATIVE_ASSET)) return "HYPE";
+    if (ELYSIUM_TESTNET.usdc && c === lc(ELYSIUM_TESTNET.usdc)) return "USDC";
+  }
   if (c === lc(NATIVE_ASSET)) return "ETH";
   if (c === lc(TEMPO_PATHUSD)) return isMainnetChainId(chainId) ? "pathUSD" : "PathUSD";
   if (c === lc(TEMPO_OUSD)) return "OUSD";
@@ -219,7 +237,7 @@ export function assetSymbol(chainId: number, currency: Address): string {
   return "TOKEN";
 }
 
-/** The network names a charge takes: "tempo-mainnet", "robinhood-mainnet", "tempo", "robinhood", and "base-mainnet" / "base" / "ethereum-mainnet" / "ethereum" (Ethereum Sepolia) once their pools are in. */
+/** The network names a charge takes: "tempo-mainnet", "robinhood-mainnet", "tempo", "robinhood", and "base-mainnet" / "base" / "ethereum-mainnet" / "ethereum" (Ethereum Sepolia) once their pools are in; "elysium-mainnet" and "elysium" (Elysium testnet) once the SDK has Elysium's values. */
 export type GloamChargeNetwork = GloamNetworkKey;
 
 // ── building and parsing requests ─────────────────────────────────────────────
@@ -232,7 +250,9 @@ export interface BuildChargeRequestParams {
   /**
    * "tempo-mainnet" or "robinhood-mainnet" (mainnet), "tempo" or "robinhood"
    * (the testnets), or a chain id. "base-mainnet", "base" (Base Sepolia) and
-   * "ethereum" (Ethereum Sepolia) work once the SDK has their pools. Default
+   * "ethereum" (Ethereum Sepolia) work once the SDK has their pools, and
+   * "elysium-mainnet" and "elysium" (its testnet; USDC, gas in HYPE) once it
+   * has Elysium's values. Default
    * "tempo" (Tempo testnet), as in 0.0.x.
    */
   network?: GloamChargeNetwork | number;
@@ -274,6 +294,8 @@ export function resolveNetwork(network: BuildChargeRequestParams["network"] = "t
   }
   const net = getGloamNetwork(network);
   if (!net) {
+    if (network === "elysium-mainnet") throw new Error("Elysium mainnet is not live in this version of @gloamtrade/sdk yet. Update it once it is.");
+    if (network === "elysium") throw new Error("Elysium testnet is not live in this version of @gloamtrade/sdk yet. Update it once it is.");
     const id = PUBLISHED_POOL_CHAINS[network];
     throw new Error(
       id !== undefined

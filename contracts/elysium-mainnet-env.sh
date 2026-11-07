@@ -1,7 +1,7 @@
 # Elysium mainnet deploy settings (DEPLOY-ELYSIUM.md, step 2).
-# Set these four first, then source it from contracts/:
-#   export ELYSIUM_CHAIN_ID=...     Elysium mainnet's chain id (Kinetiq's docs)
-#   export RPC_URL=...              an Elysium mainnet RPC
+# Set these three first, then source it from contracts/:
+#   export RPC_URL=...              an Elysium mainnet RPC (a keyed one is fine here: it stays in
+#                                   this shell, e.g. https://elysium-mainnet.g.alchemy.com/v2/<key>)
 #   export ELYSIUM_USDC=0x...       USDC on Elysium (Kinetiq's or Circle's docs)
 #   export GUARD_CONTROLLER=0x...   who runs the vault's owner guard: a multisig, or the
 #                                   owner wallet 0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8
@@ -9,6 +9,12 @@
 #   source elysium-mainnet-env.sh
 # The key is read hidden, so it lands in no file and no shell history.
 [ -f foundry.toml ] && [ -f script/DeployElysiumMainnet.s.sol ] || { echo "STOP: source this from the contracts/ folder."; return 1 2>/dev/null || exit 1; }
+# Elysium mainnet is 99901 (0x1863d, Kinetiq's docs); 99801 only for a rehearsal (ELYSIUM_ALLOW_TESTNET=1).
+export ELYSIUM_CHAIN_ID="${ELYSIUM_CHAIN_ID:-99901}"
+if [ "$ELYSIUM_CHAIN_ID" != 99901 ] && [ "$ELYSIUM_CHAIN_ID" != 99801 ]; then
+  echo "STOP: ELYSIUM_CHAIN_ID is $ELYSIUM_CHAIN_ID; Elysium mainnet is 99901."
+  return 1 2>/dev/null || exit 1
+fi
 _missing=""
 for _v in ELYSIUM_CHAIN_ID RPC_URL ELYSIUM_USDC GUARD_CONTROLLER; do
   [ -n "${!_v:-}" ] || _missing="$_missing $_v"

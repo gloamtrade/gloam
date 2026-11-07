@@ -1,4 +1,4 @@
-import { ELYSIUM, isElysiumChainId } from "./elysium";
+import { ELYSIUM, ELYSIUM_TESTNET, isElysiumChainId, isElysiumFamilyChainId, isElysiumTestnetChainId } from "./elysium";
 
 /**
  * Robinhood Chain testnet stock tokens (from public explorer / faucet).
@@ -312,9 +312,18 @@ export const ELYSIUM_MAINNET_TOKENS: OnchainToken[] = ELYSIUM
   ? [{ id: "usdc", symbol: "USDC", name: "USD Coin", address: ELYSIUM.usdc, decimals: ELYSIUM.usdcDecimals, yahoo: "", kind: "stablecoin" }]
   : [];
 
+/**
+ * Elysium testnet (99801): Kinetiq's test USDC only, behind
+ * NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED (lib/elysium.ts). HYPE is not listed.
+ */
+export const ELYSIUM_TESTNET_TOKENS: OnchainToken[] = ELYSIUM_TESTNET
+  ? [{ id: "usdc", symbol: "USDC", name: "USD Coin", address: ELYSIUM_TESTNET.usdc, decimals: ELYSIUM_TESTNET.usdcDecimals, yahoo: "", kind: "stablecoin" }]
+  : [];
+
 /** ERC-20 tokens shieldable on a given chain (stablecoins first). */
 export function shieldTokensFor(chainId: number): OnchainToken[] {
   if (isElysiumChainId(chainId)) return ELYSIUM_MAINNET_TOKENS;
+  if (isElysiumTestnetChainId(chainId)) return ELYSIUM_TESTNET_TOKENS;
   if (chainId === 11155111) return ETHEREUM_SEPOLIA_TOKENS;
   if (chainId === 4663) return RH_MAINNET_TOKENS;
   if (chainId === 4217) return TEMPO_MAINNET_TOKENS;
@@ -453,8 +462,8 @@ export function knownTokens(chainId?: number): OnchainToken[] {
  * isNativeAddable says so.
  */
 export function supportsNativeShield(chainId: number): boolean {
-  // Elysium's vault does not list HYPE.
-  if (isElysiumChainId(chainId)) return false;
+  // Elysium's vaults (mainnet and testnet) do not list HYPE.
+  if (isElysiumFamilyChainId(chainId)) return false;
   return chainId !== 42431 && chainId !== 4217;
 }
 

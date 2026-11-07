@@ -8,6 +8,7 @@ import { ClaimSafetyLine } from "@/components/app/ClaimSafetyLine";
 import { appClaimPath, codeFromHash, shortCodeFromHash } from "@/lib/claimLink";
 import { countLinkOpened, isClaimLink } from "@/lib/funnel";
 import { NETWORK_KEYS, getNetwork, isNetworkKey, type NetworkKey } from "@/lib/networks";
+import { liveMainnetNames } from "@/lib/mainnet";
 import { decodeNotePackage, isEncryptedPackage, paymentCodeIn } from "@/lib/notePackage";
 import { inWalletBrowser } from "@/lib/passkey";
 import { relayFor } from "@/lib/relay/client";
@@ -329,7 +330,7 @@ export default function ClaimPage() {
             ? `This link is on ${realNet.label} mainnet.`
             : net
               ? "This link is on a testnet."
-              : "Gloam runs on Robinhood Chain, Tempo, Base and Ethereum."}{" "}
+              : `Gloam runs on ${liveMainnetNames()}.`}{" "}
           <Link href="/docs/private-pay" className="underline underline-offset-4">
             How private payments work
           </Link>

@@ -22,7 +22,7 @@ import {
   mainnetChainPool,
   mainnetPool,
 } from "@/lib/mainnet";
-import { ELYSIUM, ELYSIUM_FLAG } from "@/lib/elysium";
+import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET } from "@/lib/elysium";
 import { VAULT_SWAP_V2_ROUTER, swapV3Live } from "@/lib/vaultSwap";
 import { voteFacts } from "@/lib/vote/glim";
 
@@ -343,12 +343,18 @@ function ethereumFacts(): string | null {
  * the live facts. With the flag off it says nothing about Elysium.
  */
 export function elysiumFacts(): string | null {
-  if (!ELYSIUM_FLAG) return null;
+  if (!ELYSIUM_FLAG) {
+    // The testnet alone (its own switch): only that, and nothing about mainnet.
+    const t = elysiumTestnetFacts();
+    return t ? ["ELYSIUM TESTNET", t].join("\n") : null;
+  }
   const head = "ELYSIUM (overrides any line below that names fewer mainnets)";
   const noTie = "Gloam has no partnership with Kinetiq or Hyperliquid; never say or suggest one.";
+  const testnet = elysiumTestnetFacts();
   if (!ELYSIUM) {
     return [
       head,
+      ...(testnet ? [testnet] : []),
       `- Elysium is Kinetiq's Hyperliquid L2, with HYPE as its gas coin. Gloam support for Elysium is coming, planned for the day Elysium mainnet launches. It is not live yet: never say it is, and never give a date or time; news comes in Announcements and on X @gloamtrade. ${noTie}`,
     ].join("\n");
   }
@@ -357,8 +363,19 @@ export function elysiumFacts(): string | null {
     head,
     `- Elysium mainnet (chain ID ${e.chainId}): live, joined after the 21 October launch. Elysium is Kinetiq's Hyperliquid L2. The vault takes USDC only: 500 per deposit and 25,000 in total. Gas on Elysium is paid in HYPE, not ETH; HYPE itself can't be added privately. Same 0.5% cash-out fee as the other mainnets, same final keys. ${noTie}`,
     "- Elysium's vault is owned by a guard contract from the day it was deployed: nobody, the Gloam team included, can ever change its proof checkers. Limits and the fee still change only with three days of public notice, and can be lowered at once.",
-    `- There are no private swaps on Elysium and Bring money over (the bridge) does not bring money into Elysium yet; never give a date. In the network selector it shows as Elysium, with Mainnet beside it. Details, if someone adds the chain by hand: RPC ${e.rpcUrl}, chain ID ${e.chainId}, currency HYPE, explorer ${e.explorerUrl}.`,
+    `- There are no private swaps on Elysium and Bring money over (the bridge) does not bring money into Elysium yet; never give a date. In the network selector it shows as Elysium, with Mainnet beside it. Details, if someone adds the chain by hand: RPC ${ELYSIUM_RPC_DISPLAY}, chain ID ${e.chainId}, currency HYPE, explorer ${e.explorerUrl}.`,
+    ...(testnet ? [testnet] : []),
   ].join("\n");
+}
+
+/**
+ * Elysium testnet (99801), only while NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED is on
+ * and its pool is in (lib/elysium.ts). Null otherwise.
+ */
+function elysiumTestnetFacts(): string | null {
+  const t = ELYSIUM_TESTNET;
+  if (!t) return null;
+  return `- Elysium testnet (chain ID ${t.chainId}): a Gloam testnet like Base Sepolia, on the mainnet vault and its final keys, with test USDC only. Gas is HYPE from Elysium's testnet. In the network selector it shows as Elysium, with Testnet beside it. Add it by hand: RPC ${t.rpcUrl}, chain ID ${t.chainId}, currency HYPE, explorer ${t.explorerUrl}. Gloam has no partnership with Kinetiq or Hyperliquid; never say or suggest one.`;
 }
 
 /** The mainnets that joined after the 21 October launch, with a pool in: "Base", "Base and Ethereum". */

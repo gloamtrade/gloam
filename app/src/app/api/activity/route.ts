@@ -28,6 +28,8 @@ function explorerFor(chainId: string | null): string | null | "bad" {
   if (chainId === "11155111" && NETWORK_KEYS.includes("ethereum")) return null;
   // Elysium, once on (lib/elysium): read from the chain; its explorer's API is not known yet.
   if (ELYSIUM && chainId === String(ELYSIUM.chainId) && NETWORK_KEYS.includes("elysium-mainnet")) return null;
+  // Elysium testnet too, once on.
+  if (chainId === "99801" && NETWORK_KEYS.includes("elysium")) return null;
   return "bad";
 }
 

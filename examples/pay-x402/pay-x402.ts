@@ -84,7 +84,8 @@ const shieldBoundAbi = [
 
 // ── network ──────────────────────────────────────────────────────────────────
 
-// Base ("base-mainnet", and "base" for Base Sepolia) and Ethereum ("ethereum-mainnet") work once the SDK has their pools.
+// Base ("base-mainnet", and "base" for Base Sepolia) and Ethereum ("ethereum-mainnet") work once the SDK has their pools;
+// Elysium ("elysium-mainnet", USDC, gas in HYPE) once it has Elysium's values (coming).
 const NETWORK_KEYS: GloamNetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "robinhood", "tempo", "base"];
 const isNative = (a: GloamAsset) => a.address.toLowerCase() === NATIVE_ASSET.toLowerCase();
 
