@@ -197,7 +197,11 @@ export function checkRiddleAnswer(guess: unknown): string | null {
 
 // ---------------------------------------------------------------- step 3: Glim
 
-/** Glim's reply (the next clue and the third piece) when someone sends the passphrase, or null (also when the hunt is off). */
+/**
+ * Glim's reply (the next clue and the third piece) when someone sends the
+ * passphrase in a private chat, or null (also when the hunt is off). The group
+ * is never checked, so it can't tell a right guess from a wrong one.
+ */
 export function glimHuntReply(message: string): string | null {
   if (!huntEnabled()) return null;
   const phrase = env("HUNT_GLIM_PASSPHRASE");
@@ -206,10 +210,6 @@ export function glimHuntReply(message: string): string | null {
   return matchesSecret(message, phrase) ? withPiece(reply, 3) : null;
 }
 
-/** What Glim says in the group to the passphrase, so the next clue is never posted there. */
-export function glimHuntGroupReply(): string {
-  return text("HUNT_GLIM_GROUP_REPLY") || "Send me that in a private message.";
-}
 
 // ---------------------------------------------------------------- step 4: the hosted MCP server
 

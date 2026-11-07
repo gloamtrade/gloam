@@ -57,7 +57,6 @@ const HUNT_VARS = [
   "HUNT_CLUE_3",
   "HUNT_GLIM_PASSPHRASE",
   "HUNT_CLUE_4",
-  "HUNT_GLIM_GROUP_REPLY",
   "HUNT_MCP_ARG",
   "HUNT_MCP_KEY",
   "HUNT_FINAL_INSTRUCTIONS",
@@ -320,7 +319,6 @@ await test("Glim's passphrase: exact match only, case and spaces aside", () => {
   delete env.HUNT_CLUE_4;
   assert.equal(hunt.glimHuntReply(PHRASE), null, "no reply text, no reply");
   env.HUNT_CLUE_4 = "clue four";
-  assert.equal(hunt.glimHuntGroupReply(), "Send me that in a private message.");
 });
 
 await test("the MCP step: hidden argument, usual answer for a wrong key, the last step for the right one", async () => {

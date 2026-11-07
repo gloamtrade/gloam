@@ -3932,13 +3932,13 @@ await test("nothing was ever sent outside the group or the team's private chats"
 });
 
 // After the check above on purpose: the treasure hunt is the one reply a stranger's DM can get.
-await test("treasure hunt: only the exact passphrase gets the next clue and piece, in private, before any model call; off by default", async () => {
+await test("treasure hunt: only the exact passphrase gets the next clue and piece, in private only, before any model call; off by default", async () => {
   const env = process.env as Record<string, string | undefined>;
   const phrase = `Words ${Math.random().toString(36).slice(2)} here`;
   const clue = `clue-${Math.random().toString(36).slice(2)}`;
   const hunter = user(7001, "Kemi", "kemi_k");
   const piece = `P${Math.random().toString(36).slice(2)}=1x`;
-  const vars = ["HUNT_ENABLED", "HUNT_GLIM_PASSPHRASE", "HUNT_CLUE_4", "HUNT_GLIM_GROUP_REPLY", "HUNT_FRAGMENT_3"];
+  const vars = ["HUNT_ENABLED", "HUNT_GLIM_PASSPHRASE", "HUNT_CLUE_4", "HUNT_FRAGMENT_3"];
   env.HUNT_GLIM_PASSPHRASE = phrase;
   env.HUNT_CLUE_4 = clue;
   env.HUNT_FRAGMENT_3 = piece;
@@ -3972,13 +3972,26 @@ await test("treasure hunt: only the exact passphrase gets the next clue and piec
   assert.ok(String(sends()[0]!.body.text).startsWith(clue));
   assert.equal(modelCalls().length, 0);
 
-  // in the group: taken down so it doesn't spread, a note to send it privately, never the clue
+  // in the group it is never checked: the right passphrase is handled exactly like a wrong guess,
+  // so the group can't be used to test guesses, and the clue never goes there
+  const seen = async (text: string) => {
+    reset();
+    await handleUpdate(upd(inTopic(TOPIC.general, text, user(7002, "Lade"))));
+    return { deletes: deletes().length, sends: groupSends().map((x) => x.body.text), leaked: calls.some((c) => JSON.stringify(c.body).includes(clue) || JSON.stringify(c.body).includes(piece)) };
+  };
+  const right = await seen(phrase);
+  const wrong = await seen(`Words ${Math.random().toString(36).slice(2)} here`);
+  assert.equal(right.deletes, 0, "not taken down: that would say it was right");
+  assert.equal(right.deletes, wrong.deletes);
+  assert.deepEqual(right.sends, wrong.sends, "the same answer as a wrong guess");
+  assert.equal(right.leaked, false);
+  assert.equal(wrong.leaked, false);
+  // private tries are limited per person: past the limit even the right passphrase gets nothing
   reset();
-  await handleUpdate(upd(inTopic(TOPIC.general, phrase, user(7002, "Lade"))));
-  assert.equal(deletes().length, 1);
-  assert.equal(groupSends().length, 1);
-  assert.equal(groupSends()[0]!.body.text, "Send me that in a private message.");
-  assert.equal(calls.some((c) => JSON.stringify(c.body).includes(clue) || JSON.stringify(c.body).includes(piece)), false);
+  const guesser = user(7003, "Tobi", "tobi_t");
+  for (let i = 0; i < 30; i++) await handleUpdate(upd(dm(guesser, `guess ${i}`)));
+  await handleUpdate(upd(dm(guesser, phrase)));
+  assert.equal(sends().length, 0, "past the try limit the right passphrase gets nothing");
   assert.equal(modelCalls().length, 0);
 
   // the passphrase is in no prompt the model ever sees
