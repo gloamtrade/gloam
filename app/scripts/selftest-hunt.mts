@@ -13,11 +13,14 @@
  *  - the hidden page: only the configured path renders (a visit is counted),
  *    every other path 404s; a wrong answer gets nothing, the right one returns
  *    the next clue, tries are rate limited per IP
- *  - the MCP step: a wrong key gets the usual gloam_info, the right one the last
- *    step (how to put the link together); the argument is not in the schema
- *  - the prize link's four pieces: one per step, in order, and put together
- *    they make the claim link back; its nullifier is worked out as a claim
- *    does, and the admin's "claimed yet?" check reads only that
+ *  - the MCP step: a wrong key gets the usual gloam_info, the right key alone
+ *    only how to bring the pieces, the right key with pieces 1 to 3 in order
+ *    the prize link, whole; neither argument is in the schema
+ *  - every step is needed: the three pieces are random codes that hold
+ *    nothing of the prize (the same pieces open any prize link), so whoever
+ *    has them but not the key gets nothing; the link handed out opens as the
+ *    note, in short or long form, and its nullifier (also worked out from a
+ *    short link, a %23 one or its body alone) is what the admin's check reads
  *  - progress is counted per step as distinct people, and nothing in a client
  *    component imports lib/hunt
  *
@@ -63,7 +66,8 @@ const HUNT_VARS = [
   "HUNT_FRAGMENT_1",
   "HUNT_FRAGMENT_2",
   "HUNT_FRAGMENT_3",
-  "HUNT_FRAGMENT_4",
+  "HUNT_MCP_PIECES_ARG",
+  "HUNT_PRIZE_LINK",
   "HUNT_PRIZE_NET",
   "HUNT_PRIZE_NULLIFIER",
 ];
@@ -81,8 +85,9 @@ const { default: HuntPage } = await import("../src/app/hunt/[slug]/page");
 const { prizeState } = await import("../src/lib/huntPrize");
 const { nullifierOfClaimLink } = await import("../src/lib/huntNullifier");
 const { buildNotePackage, encodeNotePackage } = await import("../src/lib/notePackage");
-const { longClaimLinkFor } = await import("../src/lib/claimLink");
+const { claimLinkFor, longClaimLinkFor, shortCodeFor } = await import("../src/lib/claimLink");
 const { paymentNullifier } = await import("../src/lib/sentLinks");
+const { fieldToHex, noteCommitmentPoseidon } = await import("@gloamtrade/sdk");
 
 let passed = 0;
 async function test(name: string, fn: () => void | Promise<void>) {
@@ -152,7 +157,7 @@ await test("off by default: nothing renders, nothing resolves, nothing answers",
     assert.equal(hunt.huntRiddle(), null);
     assert.equal(hunt.checkRiddleAnswer(ANSWER), null);
     assert.equal(hunt.glimHuntReply(PHRASE), null);
-    assert.equal(hunt.mcpHuntFinal(KEY), null);
+    assert.equal(hunt.mcpHuntFinal(KEY, "a b c"), null);
     assert.equal((await post({ answer: ANSWER })).status, 404);
     const r = await info({ code: KEY });
     assert.equal(r.isError, false);
@@ -321,104 +326,197 @@ await test("Glim's passphrase: exact match only, case and spaces aside", () => {
   env.HUNT_CLUE_4 = "clue four";
 });
 
-await test("the MCP step: hidden argument, usual answer for a wrong key, the last step for the right one", async () => {
+/** A throwaway prize note, made the way the app makes one, as a short or long claim link. */
+async function prizeNote(form: "short" | "long") {
+  const asset = "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168";
+  const amount = 100_000_000n;
+  const secret = fieldToHex(BigInt(`0x${randomBytes(30).toString("hex")}`));
+  const commitment = fieldToHex(await noteCommitmentPoseidon(BigInt(secret), amount, asset));
+  const code = encodeNotePackage(
+    buildNotePackage({ pool: "0x39e28cde55cab798874746ac52cb4b5cc99a0194", asset, amountWei: amount.toString(), secret, commitment, chainId: 4663 }),
+  );
+  const link = form === "short" ? claimLinkFor(code, "robinhood-mainnet") : longClaimLinkFor(code, "robinhood-mainnet");
+  return { code, link, secret, commitment, nullifier: await paymentNullifier(secret, commitment) };
+}
+
+const newPieces = () => [0, 1, 2].map(() => randomBytes(8).toString("hex"));
+const setPieces = (pieces: string[]) => pieces.forEach((f, i) => (env[`HUNT_FRAGMENT_${i + 1}`] = ` ${f}\n`));
+
+await test("the MCP step: hidden arguments, the usual answer for a wrong key, the pieces asked for, then the prize link", async () => {
   const gi = TOOLS.find((t) => t.name === "gloam_info")!;
-  assert.deepEqual(gi.inputSchema.properties, {}, "the argument is not in the schema");
+  assert.deepEqual(gi.inputSchema.properties, {}, "neither argument is in the schema");
   assert.equal(JSON.stringify(TOOLS).includes(KEY), false);
 
+  const prize = await prizeNote("short");
+  const PIECES = newPieces();
+  delete env.HUNT_FINAL_INSTRUCTIONS;
   const plain = await info({});
   assert.ok(typeof plain.json.what === "string");
-  for (const args of [{ code: "wrong" }, { code: 5 }, { other: KEY }, { code: `${KEY} ` + "x" }]) {
+
+  // off until the key, the prize link and all three pieces are set
+  env.HUNT_PRIZE_LINK = prize.link;
+  assert.deepEqual((await info({ code: KEY, pieces: PIECES.join(" ") }, freshIp())).json, plain.json, "no pieces set: off");
+  setPieces(PIECES);
+  delete env.HUNT_PRIZE_LINK;
+  assert.deepEqual((await info({ code: KEY, pieces: PIECES.join(" ") }, freshIp())).json, plain.json, "no prize link set: off");
+  for (const bad of ["https://www.gloam.trade/c", "https://www.gloam.trade/claim?net=x#claim=", "http://www.gloam.trade/c#2Muuo9o8HGWzGgY6sVnAweQDGXr", "gloam.trade/c#2Muuo9o8HGWzGgY6sVnAweQDGXr", `${prize.link} x`]) {
+    env.HUNT_PRIZE_LINK = bad;
+    assert.equal(hunt.huntPrizeLink(), null, bad);
+  }
+  env.HUNT_PRIZE_LINK = prize.link;
+  assert.equal(hunt.huntPrizeLink(), prize.link);
+
+  for (const args of [{ code: "wrong", pieces: PIECES.join(" ") }, { code: 5 }, { other: KEY }, { pieces: PIECES.join(" ") }, { code: `${KEY} ` + "x" }]) {
     const r = await info(args, freshIp());
     assert.deepEqual(r.json, plain.json, JSON.stringify(args));
   }
-  // with no text of its own, the default says how to put the link together
-  delete env.HUNT_FINAL_INSTRUCTIONS;
-  const right = await info({ code: KEY.toUpperCase() }, "203.0.113.50");
-  assert.deepEqual(Object.keys(right.json), ["message"], "no piece set, no piece");
-  const msg = String(right.json.message);
-  assert.ok(msg.includes("https://www.gloam.trade/claim?net=robinhood-mainnet#claim=gloam1="), msg);
-  assert.ok(msg.includes("1 then 2 then 3 then 4") && msg.includes("no gas"), msg);
-  assert.equal((await hunt.readHuntProgress())!.mcp, 1);
-  env.HUNT_PRIZE_NET = "robinhood";
-  assert.ok(String((await info({ code: KEY }, freshIp())).json.message).includes("claim?net=robinhood#claim=gloam1="));
-  env.HUNT_PRIZE_NET = "Bad Net!";
-  assert.equal(hunt.huntPrizeNet(), "robinhood-mainnet", "a bad network falls back to the default");
-  delete env.HUNT_PRIZE_NET;
-  env.HUNT_FINAL_INSTRUCTIONS = "Put it together.\\nGo.";
-  assert.equal((await info({ code: KEY }, freshIp())).json.message, "Put it together.\nGo.");
 
-  // the argument name can be changed
+  // the right key alone: how to bring the pieces, no link, not counted
+  const bare = await info({ code: KEY.toUpperCase() }, freshIp());
+  assert.deepEqual(Object.keys(bare.json), ["message"]);
+  const ask = String(bare.json.message);
+  assert.ok(ask.includes('"pieces"') && ask.includes("piece 1, piece 2 and piece 3"), ask);
+  assert.equal(JSON.stringify(bare.json).includes(prize.link.split("#")[1]!), false);
+  assert.equal((await hunt.readHuntProgress())!.mcp, 0);
+
+  // missing, partial, wrong or out of order: the same answer, which says nothing about which piece is off
+  const [p1, p2, p3] = PIECES as [string, string, string];
+  for (const pieces of [
+    undefined,
+    "",
+    5,
+    null,
+    `${p1} ${p2}`,
+    `${p2} ${p1} ${p3}`,
+    `${p1} ${p3} ${p2}`,
+    `${p1} ${p2} ${p3.slice(1)}`,
+    `${p1} ${p2} ${"0".repeat(16)}`,
+    [p1, p2, 7],
+    [p1, p2],
+    `${p1} ${p2} ${p3} ${"x".repeat(200)}`,
+  ]) {
+    const r = await info({ code: KEY, pieces }, freshIp());
+    assert.deepEqual(r.json, bare.json, JSON.stringify(pieces));
+  }
+  assert.equal((await hunt.readHuntProgress())!.mcp, 0);
+
+  // all three in order, with any separators: the link, whole, counted
+  const kinds = [`${p1} ${p2} ${p3}`, `${p1},${p2},${p3}`, `piece 1: ${p1}\npiece 2: ${p2}\npiece 3: ${p3}`, [p1, p2, p3], `${p1}${p2}${p3}`];
+  for (const pieces of kinds) {
+    const r = await info({ code: KEY, pieces }, freshIp());
+    assert.deepEqual(Object.keys(r.json), ["message", "link"], JSON.stringify(pieces));
+    assert.equal(r.json.link, prize.link);
+  }
+  assert.equal((await hunt.readHuntProgress())!.mcp, kinds.length, "one per person who got the link");
+
+  // the default words work for either link form: nothing to put together, the link comes whole
+  const msg = String((await info({ code: KEY, pieces: PIECES }, freshIp())).json.message);
+  assert.equal(msg, hunt.defaultFinalInstructions());
+  assert.ok(msg.includes("whole") && msg.includes("no gas"), msg);
+  assert.equal(/gloam1=|add the result|put them together/i.test(msg), false, msg);
+  env.HUNT_FINAL_INSTRUCTIONS = "Here it is.\\nGo.";
+  assert.deepEqual((await info({ code: KEY, pieces: PIECES }, freshIp())).json, { message: "Here it is.\nGo.", link: prize.link });
+  delete env.HUNT_FINAL_INSTRUCTIONS;
+
+  // the argument names can be changed
   env.HUNT_MCP_ARG = "invite";
-  assert.ok(typeof (await info({ code: KEY }, freshIp())).json.what === "string");
-  assert.ok(typeof (await info({ invite: KEY }, freshIp())).json.message === "string");
+  env.HUNT_MCP_PIECES_ARG = "found";
+  assert.ok(typeof (await info({ code: KEY, pieces: PIECES }, freshIp())).json.what === "string");
+  assert.equal((await info({ invite: KEY, pieces: PIECES }, freshIp())).json.link, undefined, "pieces under the old name are not read");
+  assert.equal((await info({ invite: KEY, found: PIECES }, freshIp())).json.link, prize.link);
   env.HUNT_MCP_ARG = "bad name!";
+  env.HUNT_MCP_PIECES_ARG = "code";
   assert.equal(hunt.huntMcpArg(), "code", "a bad name falls back to the default");
+  assert.equal(hunt.huntMcpPiecesArg(), "pieces", "the pieces can't share the key's argument");
   delete env.HUNT_MCP_ARG;
+  delete env.HUNT_MCP_PIECES_ARG;
 
   // a key that looks like a secret is refused before any tool runs, as always
   const hex = await callTool("gloam_info", { code: "ab".repeat(32) }, { origin: "https://www.gloam.trade", ip: freshIp() });
   assert.equal(hex.isError, true);
 });
 
-await test("MCP key tries are rate limited per IP: past the limit even the right key gets the usual answer", async () => {
+await test("MCP key tries are rate limited per IP: past the limit even the right key and pieces get the usual answer", async () => {
   const ip = "203.0.113.60";
+  const pieces = [1, 2, 3].map((n) => hunt.huntFragment(n));
+  assert.ok(pieces.every(Boolean) && hunt.huntPrizeLink());
   for (let i = 0; i < 20; i++) await info({ code: `try ${i}` }, ip);
-  const r = await info({ code: KEY }, ip);
-  assert.ok(typeof r.json.what === "string" && !("message" in r.json));
+  const r = await info({ code: KEY, pieces }, ip);
+  assert.ok(typeof r.json.what === "string" && !("message" in r.json) && !("link" in r.json));
 });
 
-await test("the prize link: one piece per step, in order, and together they make the link back", async () => {
-  // a throwaway note, made the way the app makes a claim link
-  const secret = `0x${"0".repeat(2)}${randomBytes(30).toString("hex")}` as `0x${string}`;
-  const commitment = `0x${"0".repeat(2)}${randomBytes(30).toString("hex")}` as `0x${string}`;
-  const code = encodeNotePackage(
-    buildNotePackage({ pool: "0x39e28cde55cab798874746ac52cb4b5cc99a0194", asset: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", amountWei: "100000000", secret, commitment, chainId: 4663 }),
-  );
-  // the prize is a long link: its final step adds the pieces after "#claim=gloam1="
-  const link = longClaimLinkFor(code, "robinhood-mainnet");
-  const prefix = "https://www.gloam.trade/claim?net=robinhood-mainnet#claim=gloam1=";
-  assert.ok(link.startsWith(prefix), link);
-  const body = link.slice(prefix.length);
-  assert.ok(/^[A-Za-z0-9=]+$/.test(body));
-  const q = Math.ceil(body.length / 4);
-  const parts = [0, 1, 2, 3].map((i) => body.slice(i * q, (i + 1) * q));
-  parts.forEach((f, i) => (env[`HUNT_FRAGMENT_${i + 1}`] = ` ${f}\n`));
-  // a piece with other characters is not a piece
-  assert.equal(hunt.huntFragment(9), "");
-  env.HUNT_FRAGMENT_9 = "abc def!";
-  assert.equal(hunt.huntFragment(9), "");
-  delete env.HUNT_FRAGMENT_9;
+await test("every step is needed: pieces 1 to 3 hold nothing of the prize, and only the key with them gets the link", async () => {
+  // a piece is a plain code: letters, digits and "=", 8 to 48 characters, and only 1 to 3
+  for (const [v, ok] of [["abc def!", false], ["short", false], ["a".repeat(49), false], ["a".repeat(48), true], [" abcd1234\n", true]] as const) {
+    env.HUNT_FRAGMENT_1 = v;
+    assert.equal(Boolean(hunt.huntFragment(1)), ok, v);
+  }
+  env.HUNT_FRAGMENT_4 = "abcd1234";
+  assert.equal(hunt.huntFragment(4), "", "there is no piece 4: the last step is the key");
+  delete env.HUNT_FRAGMENT_4;
 
-  // step 1: after the comment, or where a text says {fragment}
-  env.HUNT_SOURCE_COMMENT = "Look closer.";
-  env.HUNT_CONSOLE_MESSAGE = "Hello.";
-  assert.deepEqual(hunt.huntSourceClue(), { comment: `Look closer.\n\nPiece 1 of 4: ${parts[0]}`, console: "Hello." });
-  env.HUNT_CONSOLE_MESSAGE = "Hello. {fragment}";
-  assert.deepEqual(hunt.huntSourceClue(), { comment: "Look closer.", console: `Hello. ${parts[0]}` });
-  env.HUNT_SOURCE_COMMENT = "";
-  env.HUNT_CONSOLE_MESSAGE = "Hello.";
-  assert.deepEqual(hunt.huntSourceClue(), { comment: "", console: `Hello.\n\nPiece 1 of 4: ${parts[0]}` });
-  const one = hunt.huntSourceClue()!.console.split(": ").pop()!;
+  for (const form of ["short", "long"] as const) {
+    const prize = await prizeNote(form);
+    assert.ok(form === "short" ? /^https:\/\/www\.gloam\.trade\/c#[0-9A-Za-z]{20,}$/.test(prize.link) : prize.link.includes("#claim=gloam1="), prize.link);
+    env.HUNT_PRIZE_LINK = prize.link;
+    const PIECES = newPieces();
+    setPieces(PIECES);
 
-  // step 2: the riddle's answer
-  const r2 = (await (await post({ answer: ANSWER }, freshIp())).json()) as { data: { next: string } };
-  assert.ok(r2.data.next.startsWith("Next: talk to the bot."));
-  const two = r2.data.next.split("Piece 2 of 4: ")[1]!;
-  // step 3: Glim
-  const three = hunt.glimHuntReply(PHRASE)!.split("Piece 3 of 4: ")[1]!;
-  // step 4: the MCP key
-  const r4 = await info({ code: KEY }, freshIp());
-  assert.deepEqual(r4.json.piece, { number: 4, of: 4, text: parts[3] });
-  const four = (r4.json.piece as { text: string }).text;
+    // the hunter's way: a piece from each of the first three steps
+    env.HUNT_SOURCE_COMMENT = "Look closer.";
+    env.HUNT_CONSOLE_MESSAGE = "Hello.";
+    assert.deepEqual(hunt.huntSourceClue(), { comment: `Look closer.\n\nPiece 1 of 3: ${PIECES[0]}`, console: "Hello." });
+    env.HUNT_CONSOLE_MESSAGE = "Hello. {fragment}";
+    assert.deepEqual(hunt.huntSourceClue(), { comment: "Look closer.", console: `Hello. ${PIECES[0]}` });
+    env.HUNT_SOURCE_COMMENT = "";
+    env.HUNT_CONSOLE_MESSAGE = "Hello.";
+    const one = hunt.huntSourceClue()!.console.split("Piece 1 of 3: ")[1]!;
+    const r2 = (await (await post({ answer: ANSWER }, freshIp())).json()) as { data: { next: string } };
+    assert.ok(r2.data.next.startsWith("Next: talk to the bot."));
+    const two = r2.data.next.split("Piece 2 of 3: ")[1]!;
+    const three = hunt.glimHuntReply(PHRASE)!.split("Piece 3 of 3: ")[1]!;
+    const found = [one, two, three];
+    assert.deepEqual(found, PIECES);
 
-  const assembled = prefix + one + two + three + four;
-  assert.equal(assembled, link, "the four pieces in order make the claim link");
-  assert.notEqual(prefix + two + one + three + four, link, "order matters");
-  // and the link opens: its nullifier is the one a claim spends
-  assert.equal(await nullifierOfClaimLink(assembled), await paymentNullifier(secret, commitment));
-  assert.equal(await nullifierOfClaimLink(code), await paymentNullifier(secret, commitment), "a bare code works too");
+    // pieces 1 to 3 hold nothing of the prize: no part of the link or its secret, and no 6 characters in a row of its body
+    const body = prize.link.slice(prize.link.indexOf("#") + 1);
+    const secretHex = prize.secret.slice(2);
+    for (const piece of found) {
+      assert.equal(prize.link.includes(piece) || secretHex.includes(piece.toLowerCase()), false);
+      for (let i = 0; i + 6 <= piece.length; i++) assert.equal(body.includes(piece.slice(i, i + 6)), false, `${form}: ${piece}`);
+    }
+    // put together every way the old split allowed, they are no claim code
+    for (const guess of [found.join(""), `gloam1=${found.join("")}`, `gloam3=${found.join("")}`, `https://www.gloam.trade/c#${found.join("")}`]) {
+      await assert.rejects(nullifierOfClaimLink(guess), guess);
+    }
+    // and the same pieces open any other prize: they were made apart from it, so they can't say what it is
+    const other = await prizeNote(form);
+    env.HUNT_PRIZE_LINK = other.link;
+    assert.equal((await info({ code: KEY, pieces: found.join(" ") }, freshIp())).json.link, other.link);
+    env.HUNT_PRIZE_LINK = prize.link;
+
+    // the pieces without the key: the usual gloam_info, nothing of the prize
+    const plain = await info({});
+    for (const args of [{ pieces: found.join(" ") }, { code: found.join(" ") }, { code: found[2], pieces: found.join(" ") }]) {
+      assert.deepEqual((await info(args, freshIp())).json, plain.json, JSON.stringify(args));
+    }
+    // the key without the pieces: no link
+    assert.equal((await info({ code: KEY }, freshIp())).json.link, undefined);
+
+    // the key with all three: the link, which opens as the prize note and spends its nullifier
+    const r4 = await info({ code: KEY, pieces: found.join(" ") }, freshIp());
+    assert.equal(r4.json.link, prize.link);
+    assert.equal(await nullifierOfClaimLink(String(r4.json.link)), prize.nullifier, form);
+  }
+
+  // the nullifier script reads every form a short link turns up in
+  const short = await prizeNote("short");
+  const body = short.link.slice(short.link.indexOf("#") + 1);
+  for (const text of [short.link, short.link.replace("#", "%23"), `  ${short.link}\n`, body, shortCodeFor(short.code, "robinhood-mainnet"), short.code]) {
+    assert.equal(await nullifierOfClaimLink(text), short.nullifier, text);
+  }
   await assert.rejects(nullifierOfClaimLink("https://www.gloam.trade/claim?net=robinhood-mainnet#claim="));
+  await assert.rejects(nullifierOfClaimLink(body.slice(0, -3)), "a cut body is refused");
 });
 
 await test("prize check: only with a nullifier, claimed is kept, a failed read is unknown", async () => {
@@ -449,11 +547,13 @@ await test("prize check: only with a nullifier, claimed is kept, a failed read i
 
 await test("the admin view says what is set up, never what it holds", async () => {
   const setup = hunt.huntSetup();
-  assert.deepEqual(setup, { enabled: true, source: true, page: true, glim: true, mcp: true, pieces: true, prizeCheck: true });
+  assert.deepEqual(setup, { enabled: true, source: true, page: true, glim: true, mcp: true, pieces: true, prizeLink: true, prizeCheck: true });
   const all = JSON.stringify({ setup, progress: await hunt.readHuntProgress() });
-  for (const s of [KEY, PHRASE, ANSWER, PATH, env.HUNT_FRAGMENT_1!.trim(), env.HUNT_FRAGMENT_2!.trim(), env.HUNT_PRIZE_NULLIFIER!]) assert.equal(all.includes(s), false);
-  delete env.HUNT_FRAGMENT_4;
+  for (const s of [KEY, PHRASE, ANSWER, PATH, env.HUNT_FRAGMENT_1!.trim(), env.HUNT_FRAGMENT_2!.trim(), env.HUNT_FRAGMENT_3!.trim(), env.HUNT_PRIZE_LINK!, env.HUNT_PRIZE_NULLIFIER!]) assert.equal(all.includes(s), false);
+  delete env.HUNT_FRAGMENT_3;
   assert.equal(hunt.huntSetup().pieces, false);
+  delete env.HUNT_PRIZE_LINK;
+  assert.equal(hunt.huntSetup().prizeLink, false);
 });
 
 await test("no client component imports lib/hunt, so nothing of it reaches the browser", () => {

@@ -31,7 +31,7 @@ import { LEGACY_DISCLOSURE } from "@/lib/disclosure";
 import { MAX_PROOF_TEXT, ProofInputError, verifyProofText, type ApiVerifyResult } from "@/lib/proofsServer";
 import { SharedCountUnavailable, hitRateLimit } from "./rateLimit";
 import { findSecret, secretWarning } from "./safety";
-import { HUNT_INPUT_MAX, countHuntStep, huntEnabled, huntMcpArg, huntSubject, mcpHuntFinal } from "@/lib/hunt";
+import { HUNT_INPUT_MAX, countHuntStep, huntEnabled, huntMcpArg, huntMcpPiecesArg, huntSubject, mcpHuntFinal } from "@/lib/hunt";
 
 export const SITE = "https://www.gloam.trade";
 export const MCP_URL = `${SITE}/mcp`;
@@ -1010,10 +1010,11 @@ function connectFullAgent(args: Args): CallToolResult {
 const HUNT_TRIES_PER_HOUR = 20;
 
 /**
- * gloam_info with the treasure hunt's key (lib/hunt): how to put the prize link
- * together, and its last piece. The argument is not in the tool's schema; any
- * call without it, with the hunt off, or with a wrong key gets the usual
- * answer, so a wrong key looks the same as no key.
+ * gloam_info with the treasure hunt's key (lib/hunt). With the three pieces
+ * from the earlier steps, in order, it answers with the prize link, whole;
+ * without them, only how to bring them. Neither argument is in the tool's
+ * schema; any call without the key, with the hunt off, or with a wrong key gets
+ * the usual answer, so a wrong key looks the same as no key.
  */
 async function huntInfo(args: Args, ctx: ToolContext): Promise<Record<string, unknown> | null> {
   if (!huntEnabled()) return null;
@@ -1021,10 +1022,11 @@ async function huntInfo(args: Args, ctx: ToolContext): Promise<Record<string, un
   if (typeof value !== "string" || !value.trim() || value.length > HUNT_INPUT_MAX) return null;
   const tries = await hitRateLimit(ctx.ip, "hunt-mcp", HUNT_TRIES_PER_HOUR, Date.now(), 3600).catch(() => null);
   if (!tries?.allowed) return null;
-  const final = mcpHuntFinal(value);
+  const final = mcpHuntFinal(value, args[huntMcpPiecesArg()]);
   if (!final) return null;
+  if (!final.link) return { message: final.message };
   await countHuntStep("mcp", huntSubject("ip", ctx.ip));
-  return { message: final.message, ...(final.piece ? { piece: final.piece } : {}) };
+  return { message: final.message, link: final.link };
 }
 
 /** Runs a tool. Secrets are refused before any tool runs. */
