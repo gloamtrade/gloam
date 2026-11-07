@@ -57,7 +57,7 @@ type MetricsPayload = {
   error?: string;
 };
 
-type Tab = "overview" | "revenue" | "relay" | "users" | "events" | "partners" | "testers" | "updates" | "bugs" | "votes";
+type Tab = "overview" | "revenue" | "relay" | "users" | "events" | "partners" | "testers" | "updates" | "bugs" | "votes" | "hunt";
 
 /** The two views: mainnet or the testnets. Never mixed. */
 type Env = "mainnet" | "testnet";
@@ -601,6 +601,7 @@ export function AdminDashboard() {
     ["updates", "Email updates"],
     ["bugs", "Bug reports"],
     ["votes", "Votes"],
+    ["hunt", "Hunt"],
   ];
   const liveRelay = relay && "enabled" in relay && relay.enabled ? relay : null;
   // The public edges only: deposits and cash-outs carry amounts on chain; private payments never do.
@@ -1083,6 +1084,7 @@ export function AdminDashboard() {
         {shown === "updates" && <UpdatesPanel />}
         {shown === "bugs" && <BugsPanel />}
         {shown === "votes" && <VotesPanel />}
+        {shown === "hunt" && <HuntPanel />}
 
         <p className="tnum text-[12px] text-mute">
           Generated {data?.generatedAt ?? "not yet"} ·{" "}
@@ -2067,6 +2069,104 @@ function UpdatesPanel() {
         <p className="text-[13px] leading-relaxed text-mute">
           The CSV has each email, the day it joined and where, plus its unsubscribe link for the bottom of an update. Emails
           are kept alone: no wallet, address or IP is stored with them. Store: {data.backend}.
+        </p>
+      </Panel>
+    </>
+  );
+}
+
+type HuntData = {
+  backend: string;
+  setup: Record<string, boolean>;
+  reached: { page: number; riddle: number; glim: number; mcp: number } | null;
+  prize: "claimed" | "unclaimed" | "unknown" | "unchecked";
+};
+
+const PRIZE_TEXT: Record<HuntData["prize"], [string, string]> = {
+  claimed: ["Claimed", "the prize note is spent on chain"],
+  unclaimed: ["Not yet", "the prize note is unspent on chain"],
+  unknown: ["Unknown", "the chain didn't answer just now"],
+  unchecked: ["Not checked", "set HUNT_PRIZE_NULLIFIER to check"],
+};
+
+/** The treasure hunt: how many people reached each step, and whether the prize is claimed. Counts only; the clues stay in the server's settings. */
+function HuntPanel() {
+  const [data, setData] = useState<HuntData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/admin/hunt", { credentials: "include", cache: "no-store" });
+        const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: HuntData; error?: { message?: string } } | null;
+        if (!live) return;
+        if (!res.ok || !json?.ok || !json.data) {
+          setErr(json?.error?.message ?? `Hunt failed (${res.status})`);
+          return;
+        }
+        setErr(null);
+        setData(json.data);
+      } catch {
+        if (live) setErr("Network error loading the hunt");
+      }
+    };
+    void load();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, ADMIN_REFRESH_MS);
+    return () => {
+      live = false;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  if (err) {
+    return (
+      <p className="rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger" role="alert">
+        {err}
+      </p>
+    );
+  }
+  if (!data) {
+    return (
+      <p className="flex items-center gap-2.5 rounded-xl bg-surface px-4 py-3 text-[14px] text-mute" role="status">
+        <span className="livedot h-2 w-2 rounded-full bg-foreground/60" />
+        Loading the hunt
+      </p>
+    );
+  }
+  const r = data.reached;
+  const solved = r ? [r.riddle, r.glim, r.mcp].filter((v) => v > 0).length : 0;
+  const on = (v: boolean | undefined) => (v ? "Set" : "Not set");
+  const [prize, prizeSub] = PRIZE_TEXT[data.prize] ?? PRIZE_TEXT.unknown;
+  return (
+    <>
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <Kpi label="Found the hidden page" value={r ? n(r.page) : "None"} sub="from the page source, piece 1" />
+        <Kpi label="Solved the riddle" value={r ? n(r.riddle) : "None"} sub="on the hidden page, piece 2" />
+        <Kpi label="Asked Glim" value={r ? n(r.glim) : "None"} sub="with the passphrase, piece 3" />
+        <Kpi label="Found the MCP key" value={r ? n(r.mcp) : "None"} sub="all four pieces, piece 4" />
+        <Kpi label="Prize" value={prize} sub={prizeSub} />
+      </section>
+      <Panel title="Hunt">
+        <DataTable
+          headers={["Part", "State"]}
+          rows={[
+            ["Hunt", data.setup.enabled ? "On" : "Off"],
+            ["Page source clue", on(data.setup.source)],
+            ["Hidden page", on(data.setup.page)],
+            ["Glim passphrase", on(data.setup.glim)],
+            ["MCP key", on(data.setup.mcp)],
+            ["All four pieces of the prize link", on(data.setup.pieces)],
+            ["Prize check (nullifier)", on(data.setup.prizeCheck)],
+          ]}
+          empty="Nothing set"
+          minWidth={420}
+        />
+        <p className="mt-4 text-[13px] leading-relaxed text-mute">
+          {r ? `${n(solved)} of 3 clues solved by someone so far. ` : ""}
+          Counts are distinct people per step, estimated, from a one-way hash: no addresses or accounts are kept. The home page clue is fixed at build time, so redeploy after changing it. Store: {data.backend}.
         </p>
       </Panel>
     </>
