@@ -102,6 +102,7 @@ import {
   networkByKey,
   networkByChainId,
   tempoAccessNetwork,
+  MCP_MAINNETS,
   MCP_NETWORKS,
   NETWORK_KEYS,
   type McpNetwork,
@@ -356,6 +357,12 @@ const LEGACY_WARNING =
   "GLOAM_EXPOSE_NOTE_SECRETS=1 is set: note secrets are passed to and from the agent. Anyone who reads a secret can spend that money, and spending limits cannot stop that. Turn it off unless you are migrating old notes.";
 
 /** Build a Gloam MCP server. Pass deps to test it without a chain. */
+/** "Robinhood Chain, Tempo, Base and Ethereum", plus Elysium once the SDK has its values. */
+function mainnetChainNames(): string {
+  const names = ["Robinhood Chain", "Tempo", "Base", "Ethereum", ...(MCP_MAINNETS.some((n) => n.family === "elysium") ? ["Elysium"] : [])];
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 /** ", 20 and 1,000 for ETH on Base and Ethereum" for the chains in this build that list ETH. */
 function ethNativeLimitText(): string {
   const chains = [...new Set(allNetworks().filter((n) => n.family === "base" || n.family === "ethereum").map((n) => (n.family === "base" ? "Base" : "Ethereum")))];
@@ -453,7 +460,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
     },
     async () =>
       text({
-        what: "Gloam is private stablecoin payments for people and AI agents on Robinhood Chain, Tempo, Base and Ethereum. Hold a private balance, pay and get paid without putting amounts or counterparties on the public chain, and prove one fact to one reader when needed.",
+        what: `Gloam is private stablecoin payments for people and AI agents on ${mainnetChainNames()}. Hold a private balance, pay and get paid without putting amounts or counterparties on the public chain, and prove one fact to one reader when needed.`,
         whyAgentsCareMost:
           "Agents pay for tools and data all day. On a public chain every payment shows who it pays, how much and how often, which leaks the agent's whole strategy. Gloam keeps those payments private.",
         networks: allNetworks().map((n) => ({

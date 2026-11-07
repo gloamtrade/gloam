@@ -42,7 +42,8 @@ export type NetworkKey =
   | "tempo-mainnet"
   | "base-mainnet"
   | "ethereum-mainnet"
-  | "elysium-mainnet";
+  | "elysium-mainnet"
+  | "elysium";
 export type ChainFamily = "robinhood" | "tempo" | "base" | "ethereum" | "elysium";
 
 export interface McpNetwork {
@@ -82,7 +83,7 @@ const NATIVE = {
   tempo: { name: "US Dollar", symbol: "USD", decimals: 18 },
   base: { name: "Ether", symbol: "ETH", decimals: 18 },
   ethereum: { name: "Ether", symbol: "ETH", decimals: 18 },
-  // Elysium, Kinetiq's Hyperliquid L2: gas in HYPE (mainnet only, once the SDK has its values)
+  // Elysium, Kinetiq's Hyperliquid L2: gas in HYPE (mainnet and testnet, once the SDK has their values)
   elysium: { name: "HYPE", symbol: "HYPE", decimals: 18 },
 } as const;
 
@@ -174,6 +175,9 @@ export const MCP_BASE_TESTNET: McpNetwork | null = fromSdk(testnetNetwork("base"
 /** Ethereum Sepolia, once the SDK has its pool; null before. */
 export const MCP_ETHEREUM_TESTNET: McpNetwork | null = fromSdk(testnetNetwork("ethereum"));
 
+/** Elysium testnet (99801, gas in HYPE, test USDC), once the SDK has its pool; null before. */
+export const MCP_ELYSIUM_TESTNET: McpNetwork | null = fromSdk(testnetNetwork("elysium"));
+
 /** Every network this build can use: mainnets first, then the testnets. */
 export function allNetworks(): McpNetwork[] {
   return [
@@ -182,6 +186,7 @@ export function allNetworks(): McpNetwork[] {
     MCP_NETWORKS.tempo,
     ...(MCP_BASE_TESTNET ? [MCP_BASE_TESTNET] : []),
     ...(MCP_ETHEREUM_TESTNET ? [MCP_ETHEREUM_TESTNET] : []),
+    ...(MCP_ELYSIUM_TESTNET ? [MCP_ELYSIUM_TESTNET] : []),
   ];
 }
 
@@ -196,6 +201,7 @@ export const ALL_NETWORK_KEYS: readonly NetworkKey[] = [
   "tempo",
   "base",
   "ethereum",
+  "elysium",
 ];
 
 /** The network keys this build offers, for tool schemas (mainnets first). */

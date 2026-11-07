@@ -17,6 +17,8 @@ with options, one getter per `GameFunction`, and `getWorker()`.
 | `base` (default) | Base Sepolia, testnet | USDC, EURC, ETH |
 | `robinhood-mainnet` | Robinhood Chain, mainnet | USDG, GLOAM, PONS, CASHCAT; ETH, AI, ORBIO and GRIFT once each limit lands |
 | `base-mainnet` | Base, mainnet, once Gloam's Base vault is live | USDC, EURC, USDT, ETH |
+| `elysium-mainnet` | Elysium, mainnet: coming, once the SDK has its values (gas in HYPE) | USDC |
+| `elysium` | Elysium testnet (99801): coming, once the SDK has its pool (gas in HYPE) | Test USDC |
 
 The same vault address on each: `0x39e28cde55cab798874746ac52cb4b5cc99a0194`.
 Mainnet has deposit limits (50,000 of a stablecoin per deposit).

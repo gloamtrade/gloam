@@ -7,8 +7,10 @@
  * that matter here: Base Sepolia ("base", a testnet on the mainnet pool and
  * final keys), Base mainnet ("base-mainnet", once its pool is in the SDK) and
  * Robinhood Chain mainnet ("robinhood-mainnet"). Tempo and the Robinhood Chain
- * testnet work too. A network whose pool this SDK version does not have is
- * refused, never guessed.
+ * testnet work too, and Ethereum. Elysium mainnet ("elysium-mainnet": USDC
+ * only, gas in HYPE) and its testnet ("elysium", 99801) work once the SDK has
+ * their values. A network whose pool
+ * this SDK version does not have is refused, never guessed.
  */
 import { getGloamNetwork, type GloamAsset, type GloamNetwork, type GloamNetworkKey } from "@gloamtrade/sdk";
 import type { Address } from "viem";
@@ -24,6 +26,8 @@ export const NETWORK_KEYS: readonly NetworkKey[] = [
   "tempo",
   "ethereum-mainnet",
   "ethereum",
+  "elysium-mainnet",
+  "elysium",
 ];
 
 export interface PluginNetwork extends GloamNetwork {
@@ -50,6 +54,10 @@ export function resolveNetwork(key: string, opts: { rpc?: string; env?: Record<s
     throw new Error(`"${key}" is not a Gloam network. Use one of: ${NETWORK_KEYS.join(", ")}.`);
   }
   const net = getGloamNetwork(key);
+  if (!net && (key === "elysium-mainnet" || key === "elysium")) {
+    const which = key === "elysium" ? "Elysium testnet" : "Elysium mainnet";
+    throw new Error(`${which} is not live in this version of @gloamtrade/sdk yet. Update the package once it is, or pick one of: ${NETWORK_KEYS.filter((k) => getGloamNetwork(k)).join(", ")}.`);
+  }
   if (!net) {
     throw new Error(
       `${key} has no Gloam pool in this version of @gloamtrade/sdk yet. Update the package, or pick one of: ${NETWORK_KEYS.filter((k) => getGloamNetwork(k)).join(", ")}.`
