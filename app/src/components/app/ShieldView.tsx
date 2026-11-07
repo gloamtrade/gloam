@@ -386,7 +386,8 @@ export function ShieldView() {
   const walletBalance = selectedToken
     ? (tokenBal as bigint | undefined)
     : ethBal?.value;
-  const symbol = selectedToken?.symbol ?? "ETH";
+  // The chain's own gas coin (HYPE on Elysium), never a hardcoded "ETH".
+  const symbol = selectedToken?.symbol ?? network.primaryAsset.symbol;
   const decimals = selectedToken?.decimals ?? 18;
 
   const mark = selectedToken
@@ -596,7 +597,7 @@ export function ShieldView() {
     if (!selectedToken && ethBal) {
       // value is at most the balance here (checked above), so this also catches the whole balance
       if (value > ethBal.value - 50_000_000_000_000n) {
-        return "Leave a little ETH for gas.";
+        return `Leave a little ${network.primaryAsset.symbol} for gas.`;
       }
     }
     return null;

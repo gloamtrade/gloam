@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 /**
  * The Content-Security-Policy Gloam is moving towards. It is sent as
  * Content-Security-Policy-Report-Only (next.config.ts): browsers report what it
@@ -91,7 +93,32 @@ const SERVICES = [
   "https://va.vercel-scripts.com",
 ];
 
-export const CSP_CONNECT_SOURCES = ["'self'", ...GLOAM_RPCS, ...ORIGIN_RPCS, ...SOLANA_RPCS, ...SERVICES];
+/**
+ * Elysium mainnet's RPC, only while NEXT_PUBLIC_ELYSIUM_ENABLED is on: from
+ * NEXT_PUBLIC_ELYSIUM_RPC_URL, else the rpcUrl written in the SDK's config
+ * (packages/sdk/src/elysium.ts), the same order lib/elysium.ts reads them in.
+ * Its origin only. Empty while the flag is off or no RPC is set.
+ */
+export function elysiumConnectSources(env = process.env) {
+  if (!/^(1|true|on|yes)$/i.test((env.NEXT_PUBLIC_ELYSIUM_ENABLED ?? "").trim())) return [];
+  let url = env.NEXT_PUBLIC_ELYSIUM_RPC_URL?.trim() || null;
+  if (!url) {
+    try {
+      const src = readFileSync(new URL("../packages/sdk/src/elysium.ts", import.meta.url), "utf8");
+      url = /^\s*rpcUrl:\s*"(https:\/\/[^"]+)",\s*$/m.exec(src)?.[1] ?? null;
+    } catch {
+      url = null;
+    }
+  }
+  try {
+    const u = url ? new URL(url) : null;
+    return u && u.protocol === "https:" ? [u.origin] : [];
+  } catch {
+    return [];
+  }
+}
+
+export const CSP_CONNECT_SOURCES = ["'self'", ...GLOAM_RPCS, ...elysiumConnectSources(), ...ORIGIN_RPCS, ...SOLANA_RPCS, ...SERVICES];
 
 const FRAMES = ["'self'", "https://*.walletconnect.org", "https://*.walletconnect.com", "https://*.turnkey.com", "https://wallet.tempo.xyz"];
 

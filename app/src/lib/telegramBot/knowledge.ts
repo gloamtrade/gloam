@@ -19,8 +19,10 @@ import {
   liveMainnetCountWords,
   liveMainnetNames,
   liveMainnetsByDay,
+  mainnetChainPool,
   mainnetPool,
 } from "@/lib/mainnet";
+import { ELYSIUM, ELYSIUM_FLAG } from "@/lib/elysium";
 import { VAULT_SWAP_V2_ROUTER, swapV3Live } from "@/lib/vaultSwap";
 import { voteFacts } from "@/lib/vote/glim";
 
@@ -334,9 +336,34 @@ function ethereumFacts(): string | null {
   ].join("\n");
 }
 
+/**
+ * What Glim knows about Elysium (Kinetiq's Hyperliquid L2), only while
+ * NEXT_PUBLIC_ELYSIUM_ENABLED is on (lib/elysium.ts). With the flag on but the
+ * vault not in yet, support is coming, worded as coming; once every value is in,
+ * the live facts. With the flag off it says nothing about Elysium.
+ */
+export function elysiumFacts(): string | null {
+  if (!ELYSIUM_FLAG) return null;
+  const head = "ELYSIUM (overrides any line below that names fewer mainnets)";
+  const noTie = "Gloam has no partnership with Kinetiq or Hyperliquid; never say or suggest one.";
+  if (!ELYSIUM) {
+    return [
+      head,
+      `- Elysium is Kinetiq's Hyperliquid L2, with HYPE as its gas coin. Gloam support for Elysium is coming, planned for the day Elysium mainnet launches. It is not live yet: never say it is, and never give a date or time; news comes in Announcements and on X @gloamtrade. ${noTie}`,
+    ].join("\n");
+  }
+  const e = ELYSIUM;
+  return [
+    head,
+    `- Elysium mainnet (chain ID ${e.chainId}): live, joined after the 21 October launch. Elysium is Kinetiq's Hyperliquid L2. The vault takes USDC only: 500 per deposit and 25,000 in total. Gas on Elysium is paid in HYPE, not ETH; HYPE itself can't be added privately. Same 0.5% cash-out fee as the other mainnets, same final keys. ${noTie}`,
+    "- Elysium's vault is owned by a guard contract from the day it was deployed: nobody, the Gloam team included, can ever change its proof checkers. Limits and the fee still change only with three days of public notice, and can be lowered at once.",
+    `- There are no private swaps on Elysium and Bring money over (the bridge) does not bring money into Elysium yet; never give a date. In the network selector it shows as Elysium, with Mainnet beside it. Details, if someone adds the chain by hand: RPC ${e.rpcUrl}, chain ID ${e.chainId}, currency HYPE, explorer ${e.explorerUrl}.`,
+  ].join("\n");
+}
+
 /** The mainnets that joined after the 21 October launch, with a pool in: "Base", "Base and Ethereum". */
 export function laterMainnets(): string[] {
-  return [mainnetPool(8453) ? "Base" : null, mainnetPool(1) ? "Ethereum" : null].filter((n): n is string => n !== null);
+  return [mainnetPool(8453) ? "Base" : null, mainnetPool(1) ? "Ethereum" : null, ELYSIUM ? "Elysium" : null].filter((n): n is string => n !== null);
 }
 
 /** The day the later mainnets went live ("26 October 2026"), or null when none is in or they joined on different days. */
@@ -484,7 +511,7 @@ function liveSwaps(): [string, string][] {
   const laterSince = laterMainnetsSince();
   const rh = mainnetPool(4663) !== null;
   const usdc = [mainnetPool(8453) ? "Base" : null, mainnetPool(1) ? "Ethereum" : null].filter((n): n is string => n !== null);
-  const mainnetIds = MAINNET_CHAINS.filter((c) => mainnetPool(c.chainId)).map((c) => `${c.name} ${c.chainId}`);
+  const mainnetIds = MAINNET_CHAINS.filter((c) => mainnetChainPool(c.chainId)).map((c) => `${c.name} ${c.chainId}`);
   return [
     [
       "- The app is on testnet for now, with development proving keys. Mainnet is coming on both Tempo and Robinhood Chain. The trusted-setup ceremony for mainnet is done (13 contributors). Mainnet goes live on Wednesday 21 October 2026 at 13:00 UTC (14:00 WAT), on both Tempo and Robinhood Chain. The live countdown is at gloam.trade/mainnet: when someone asks when mainnet is, give the time in UTC and send them there. That is the only date and time you may give. Never give any other, and never say mainnet is live until the team announces it; until then the app is testnet. Launch news comes in Announcements and on X @gloamtrade.",
@@ -584,11 +611,13 @@ export function knowledgeBlock(testingOpen: boolean, live: boolean = isMainnetLi
   const base = baseFacts();
   const ethereum = ethereumFacts();
   const sepolia = ethereumSepoliaFacts();
+  const elysium = elysiumFacts();
   const block = [
     ABOUT.trim(),
     ...(base ? [base] : []),
     ...(ethereum ? [ethereum] : []),
     ...(sepolia ? [sepolia] : []),
+    ...(elysium ? [elysium] : []),
     TOKEN.trim(),
     ...[voteFacts()].filter((v): v is string => v !== null),
     CRYPTO_TALK.trim(),

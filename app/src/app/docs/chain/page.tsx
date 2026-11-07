@@ -7,6 +7,7 @@ import { DEFAULT_MAX_GAS_GWEI } from "@/lib/relay/gasCeiling";
 import { getNetwork } from "@/lib/networks";
 import { VAULT_SWAP_ROUTERS, swapMainnets, swapV3Live } from "@/lib/vaultSwap";
 import { GLOAM_OWNER, GLOAM_RELAYERS, GLOAM_TREASURY, MAINNET_POSEIDON_T3 } from "@/lib/contractDirectory";
+import { ELYSIUM, ELYSIUM_FLAG } from "@/lib/elysium";
 
 export const metadata: Metadata = {
   title: "Networks",
@@ -784,6 +785,65 @@ export default function DocsNetworksPage() {
           claim links and proofs work as on the other chains.
         </li>
       </ul>
+
+      {ELYSIUM_FLAG && (
+        <>
+          <h2 id="elysium">Elysium</h2>
+          {ELYSIUM ? (
+            <>
+              <p>
+                Elysium is Kinetiq&apos;s Hyperliquid L2, an Arbitrum Orbit chain
+                that settles to HyperEVM, with HYPE as its gas coin. Gloam on
+                Elysium mainnet is the same vault as on the other mainnets:{" "}
+                <code>ShieldPoolPayments</code>, the ceremony&apos;s final keys,
+                deposit limits and the 0.5% cash-out fee. One thing is new: its
+                owner is a <code>VaultOwnerGuard</code> from the deploy itself, so
+                its proof checkers can never be replaced and its ownership can
+                never move. There is no Gloam testnet on Elysium.
+              </p>
+              <ul>
+                <li>
+                  <strong>Chain ID</strong>, {ELYSIUM.chainId}
+                </li>
+                <li>
+                  <strong>RPC</strong>, <code>{ELYSIUM.rpcUrl}</code>
+                </li>
+                <li>
+                  <strong>Explorer</strong>, <code>{ELYSIUM.explorerUrl}</code>
+                </li>
+                <li>
+                  <strong>Pool</strong>, <code>{ELYSIUM.pool}</code>, from block{" "}
+                  <code>{ELYSIUM.deployBlock.toString()}</code>
+                </li>
+                <li>
+                  <strong>Payment-message board</strong>,{" "}
+                  {ELYSIUM.payMemo ? <code>{ELYSIUM.payMemo.address}</code> : <>Not deployed yet</>}
+                </li>
+                <li>
+                  <strong>Assets</strong>, USDC ({ELYSIUM.usdcDecimals} decimals). HYPE, the gas
+                  coin, is not listed.
+                </li>
+                <li>
+                  <strong>Deposit limits</strong>, 500 USDC per deposit and 25,000 in total at
+                  launch, raised only through the vault&apos;s 3-day timelock
+                </li>
+                <li>
+                  <strong>Not on Elysium yet.</strong> Private swaps, and bringing money over
+                  into Elysium.
+                </li>
+              </ul>
+            </>
+          ) : (
+            <p>
+              Coming. Elysium is Kinetiq&apos;s Hyperliquid L2, with HYPE as its gas
+              coin. Gloam plans to support Elysium mainnet from the day it
+              launches, on the same vault and keys as the other mainnets, with
+              USDC first. It is not live yet, so the app does not offer it. Its
+              chain ID, RPC, pool and assets go here once the vault is deployed.
+            </p>
+          )}
+        </>
+      )}
 
       <h2>Switching networks in the app</h2>
       <p>

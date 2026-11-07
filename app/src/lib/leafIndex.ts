@@ -18,6 +18,7 @@
  */
 
 import { parseAbi, parseEventLogs, type AbiEvent, type Address, type Hex, type Log, type PublicClient } from "viem";
+import { isElysiumChainId } from "./elysium";
 
 export const POOL_INSERT_ABI = parseAbi([
   "event Shielded(bytes32 indexed commitment, address indexed asset, uint256 amount, uint256 leafIndex, address indexed from)",
@@ -157,6 +158,8 @@ export function walkTuning(chainId: number, logRange: bigint): WalkTuning {
   if (chainId === 84532 || chainId === 8453) return { span: logRange, parallel: 3, spacingMs: 120 };
   // Ethereum reads through MEV Blocker, 10,000 blocks a read (any range under 10,000 logs).
   if (chainId === 1) return { span: logRange, parallel: 3, spacingMs: 120 };
+  // Elysium (Arbitrum Orbit, behind its flag): its RPC's own range (lib/elysium), spaced like Base.
+  if (isElysiumChainId(chainId)) return { span: logRange, parallel: 3, spacingMs: 120 };
   // Ethereum Sepolia: publicnode at the head, Tenderly's gateway for blocks older than
   // 9,000 (lib/readTransport); both take 50,000 blocks a read.
   if (chainId === 11155111) return { span: logRange, parallel: 3, spacingMs: 120 };
