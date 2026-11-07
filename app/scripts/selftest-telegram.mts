@@ -3856,4 +3856,63 @@ await test("nothing was ever sent outside the group or the team's private chats"
   for (const x of everySend) assert.ok(x.body.chat_id === GROUP || teamChats.has(Number(x.body.chat_id)), String(x.body.chat_id));
 });
 
+// After the check above on purpose: the treasure hunt is the one reply a stranger's DM can get.
+await test("treasure hunt: only the exact passphrase gets the next clue and piece, in private, before any model call; off by default", async () => {
+  const env = process.env as Record<string, string | undefined>;
+  const phrase = `Words ${Math.random().toString(36).slice(2)} here`;
+  const clue = `clue-${Math.random().toString(36).slice(2)}`;
+  const hunter = user(7001, "Kemi", "kemi_k");
+  const piece = `P${Math.random().toString(36).slice(2)}=1x`;
+  const vars = ["HUNT_ENABLED", "HUNT_GLIM_PASSPHRASE", "HUNT_CLUE_4", "HUNT_GLIM_GROUP_REPLY", "HUNT_FRAGMENT_3"];
+  env.HUNT_GLIM_PASSPHRASE = phrase;
+  env.HUNT_CLUE_4 = clue;
+  env.HUNT_FRAGMENT_3 = piece;
+
+  // off: the passphrase is just another stranger's DM, so no reply at all
+  reset();
+  delete env.HUNT_ENABLED;
+  await handleUpdate(upd(dm(hunter, phrase)));
+  assert.equal(sends().length, 0);
+  await handleUpdate(upd(inTopic(TOPIC.general, phrase, hunter)));
+  assert.equal(deletes().length, 0, "off: nothing in the group changes");
+
+  env.HUNT_ENABLED = "true";
+  // anything but the exact passphrase from a stranger: still silence, and no model call
+  reset();
+  for (const text of [`${phrase} please`, "where is the prize?", "treasure hunt", "/start"]) await handleUpdate(upd(dm(hunter, text)));
+  assert.equal(sends().length, 0);
+  assert.equal(modelCalls().length, 0);
+
+  // the passphrase, in other case and spacing: the clue, to that person only, and no model call
+  reset();
+  await handleUpdate(upd(dm(hunter, `  ${phrase.toUpperCase().replace(/ /g, "   ")} `)));
+  assert.equal(sends().length, 1);
+  assert.equal(sends()[0]!.body.chat_id, hunter.id);
+  assert.equal(sends()[0]!.body.text, `${clue}\n\nPiece 3 of 4: ${piece}`);
+  assert.equal(modelCalls().length, 0);
+
+  // the owner sending it gets the clue too, not a model chat
+  reset();
+  await handleUpdate(upd(dm(OWNER, phrase)));
+  assert.ok(String(sends()[0]!.body.text).startsWith(clue));
+  assert.equal(modelCalls().length, 0);
+
+  // in the group: taken down so it doesn't spread, a note to send it privately, never the clue
+  reset();
+  await handleUpdate(upd(inTopic(TOPIC.general, phrase, user(7002, "Lade"))));
+  assert.equal(deletes().length, 1);
+  assert.equal(groupSends().length, 1);
+  assert.equal(groupSends()[0]!.body.text, "Send me that in a private message.");
+  assert.equal(calls.some((c) => JSON.stringify(c.body).includes(clue) || JSON.stringify(c.body).includes(piece)), false);
+  assert.equal(modelCalls().length, 0);
+
+  // the passphrase is in no prompt the model ever sees
+  for (const text of [systemPrompt({ persona: "Glim", testingOpen: false, admins: [], mainnetLive: true }), teamSystemPrompt({ persona: "Glim", testingOpen: false, admins: [] }), knowledgeBlock(false, true)]) {
+    assert.equal(text.includes(phrase), false);
+    assert.equal(text.includes(clue), false);
+    assert.equal(text.includes(piece), false);
+  }
+  for (const v of vars) delete env[v];
+});
+
 console.log(`\ntelegram: ${passed} passed`);
