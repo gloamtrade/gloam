@@ -51,6 +51,8 @@ eq(cleanPath("/r/3f1a9b77c2d84e0f9a1b2c3d4e5f6a7b"), "/r/:redacted");
 eq(cleanPath("/k/AbC123xYz789QwErTy456UiOp0LkJhGf"), "/k/:redacted", "mixed-case blobs are ids, not slugs");
 eq(cleanPath("/order/12345678"), "/order/:redacted");
 eq(cleanPath("/x/gloam1%2EeyJ2IjoxLCJ0"), "/x/:redacted", "percent-encoded codes are caught too");
+eq(cleanPath("/x/gloam3=2Muuo9o8HGWzGgY6sVn"), "/x/:redacted", "a short code is caught too");
+eq(cleanPath("/c#2Muuo9o8HGWzGgY6sVnAweQDGXr2eLqVzrTBUdjXfzxFH2qsT2"), "/c", "a short claim link keeps only its page");
 
 // full URLs keep only their path; anything else is refused
 eq(cleanPath("https://www.gloam.trade/app/vault?tab=swap#x"), "/app/vault");
