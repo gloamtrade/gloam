@@ -37,7 +37,7 @@ import { IssuerPolicyRow } from "./IssuerPolicyRow";
 import { noteCommitmentPoseidon, noteNullifierPoseidon } from "@/lib/notePoseidon";
 import { fieldToHex, hexToField } from "@/lib/poseidon";
 import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
-import type { SweepResult } from "@gloamtrade/sdk";
+import { randomNoteSeed, type SweepResult } from "@gloamtrade/sdk";
 
 import {
   buildNotePackage,
@@ -1503,12 +1503,14 @@ export function MoveView() {
       if (!path) throw new Error("Could not read your private balance. Refresh and try again.");
 
       setStatus("Proving your payment privately…");
+      // The payee's secret is made from a 16-byte seed, so the claim link can be short (lib/claimLink).
       const w = await buildTransferWitness({
         secretHex: selected.secret,
         amountIn: BigInt(selected.amountWei),
         amountPay,
         asset: selected.asset,
         path: path as PoseidonMerklePath,
+        paySeed: randomNoteSeed().seed,
       });
       if (w.blocker) throw new Error(w.blocker);
 
@@ -1562,6 +1564,7 @@ export function MoveView() {
         commitment: w.paymentNote.commitment,
         note: payNote,
         chainId: network.chainId,
+        seed: w.paymentNote.seed,
       });
       setSentNote(pack.note ?? null);
       payTrack.current = { chainId: network.chainId, request: Boolean(request), note: Boolean(pack.note) };

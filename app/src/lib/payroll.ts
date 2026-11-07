@@ -31,7 +31,7 @@
  */
 import type { Address, Hex, PublicClient } from "viem";
 import { claimLinkFor } from "./claimLink";
-import { fieldToHex, hexToField, noteCommitmentPoseidon, noteNullifierPoseidon, randomSecretField } from "@gloamtrade/sdk";
+import { fieldToHex, hexToField, noteCommitmentPoseidon, noteNullifierPoseidon, randomNoteSeed, randomSecretField } from "@gloamtrade/sdk";
 import { buildTransferWitness, type TransferWitness } from "@/lib/proverTransfer";
 import { fieldToBytes32, proveTransferInBrowser } from "@/lib/proveClient";
 import { syncShieldTree, type SyncedTree } from "@/lib/treeSync";
@@ -927,12 +927,14 @@ async function payRow(
       if (note) {
         const path = (await tree!.pathForLeaf(note.leafIndex!)) as PoseidonMerklePath | null;
         if (!path) throw new Error("Could not read the vault. Try again.");
+        // A seed for the payee's secret, so a link row's claim link is short (lib/claimLink).
         w = await buildTransferWitness({
           secretHex: note.secret,
           amountIn: BigInt(note.amountWei),
           amountPay: amount,
           asset: batch.asset,
           path,
+          paySeed: randomNoteSeed().seed,
         });
         if (w.blocker) throw new Error(w.blocker);
       } else {
@@ -949,6 +951,7 @@ async function payRow(
           commitment: w.paymentNote.commitment,
           note: row.note,
           chainId: batch.chainId,
+          seed: w.paymentNote.seed,
         });
         const plain = encodeNotePackage(pack);
         const ticket = row.kind === "gloam" ? await encryptTicketForTag(plain, row.recipient) : plain;

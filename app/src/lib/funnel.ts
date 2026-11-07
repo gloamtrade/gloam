@@ -56,7 +56,7 @@ function save(v: Local) {
 
 /** A plain claim link or code, the kind anyone can claim (a payment sealed to an address is not one). */
 export function isClaimLink(code: string): boolean {
-  return /gloam1e?[.=-][A-Za-z0-9_-]/.test(code);
+  return /gloam(?:1e?|3)[.=-][A-Za-z0-9_-]/.test(code);
 }
 
 /** A short local fingerprint of a code, so opening the same link twice counts once. Never sent anywhere. */

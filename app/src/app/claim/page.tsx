@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { SealedField } from "@/components/ui/SealedField";
 import { SealDots } from "@/components/ui/SealDots";
 import { ClaimSafetyLine } from "@/components/app/ClaimSafetyLine";
-import { appClaimPath, codeFromHash } from "@/lib/claimLink";
+import { appClaimPath, codeFromHash, shortCodeFromHash } from "@/lib/claimLink";
 import { countLinkOpened, isClaimLink } from "@/lib/funnel";
 import { NETWORK_KEYS, getNetwork, isNetworkKey, type NetworkKey } from "@/lib/networks";
 import { decodeNotePackage, isEncryptedPackage, paymentCodeIn } from "@/lib/notePackage";
@@ -13,9 +13,11 @@ import { inWalletBrowser } from "@/lib/passkey";
 import { relayFor } from "@/lib/relay/client";
 import { WALLETCONNECT_ENABLED } from "@/lib/walletConnect";
 import { formatAssetLabel } from "@/lib/shield";
+import { SHORT_CLAIM_PREFIX, readShortClaim } from "@gloamtrade/sdk";
 
 /**
- * Where a claim link lands (gloam.trade/claim?net=...#claim=<code>). Phone
+ * Where a claim link lands (gloam.trade/c#<code>, or the older
+ * gloam.trade/claim?net=...#claim=<code>; /c renders this page). Phone
  * first: what was sent, one button into the app to claim it, and what to
  * expect. The code stays in the fragment, so it never reaches a server; this
  * page only reads it in the browser.
@@ -38,7 +40,11 @@ async function readyView(code: string, linkNet: NetworkKey): Promise<View | "dam
   const locked = isEncryptedPackage(code);
   if (!locked) {
     try {
-      const pack = await decodeNotePackage(code);
+      // A short link's fields read without the commitment, so this page never
+      // loads Poseidon; the claim screen works it out.
+      const pack = code.startsWith(SHORT_CLAIM_PREFIX)
+        ? readShortClaim(code.slice(SHORT_CLAIM_PREFIX.length))
+        : await decodeNotePackage(code);
       amount = formatAssetLabel(pack.amountWei, pack.asset);
       note = pack.note;
       // A code that names its chain is on that network, whatever ?net= says (a chat app can cut it off).
@@ -92,7 +98,9 @@ export default function ClaimPage() {
     const readLink = async () => {
       const n = ++reads.current;
       const current = () => !cancelled && n === reads.current;
-      const code = codeFromHash(window.location.hash);
+      const code =
+        codeFromHash(window.location.hash) ??
+        (/^\/c\/?$/.test(window.location.pathname) ? shortCodeFromHash(window.location.hash) : null);
       const q = new URLSearchParams(window.location.search).get("net");
       const known = isNetworkKey(q) ? q : null;
       const net: NetworkKey = known ?? "tempo";
