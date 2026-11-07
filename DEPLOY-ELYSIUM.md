@@ -1,7 +1,10 @@
 # Deploy Gloam to Elysium
 
 Launch-day runbook for Elysium mainnet, Kinetiq's Hyperliquid L2 (Arbitrum Orbit,
-settles to HyperEVM, gas in HYPE, one sequencer at launch). You run it with your own
+settles to HyperEVM 999, gas in HYPE, blocks about every 100 ms, one sequencer at
+launch). Mainnet is chain id **99901** (0x1863d), already in the SDK file; its public
+RPC, explorer and USDC are published at launch. The testnet (99801) has its own
+section at the end and can be deployed now. You run it with your own
 keys; no agent and no CI deploys it. Elysium mainnet launches Sunday 9 November 2026.
 
 Same vault as every other mainnet (`ShieldPoolPayments`, the ceremony's final keys,
@@ -23,8 +26,8 @@ reads it too, and each value can be overridden on Vercel by its
 
 | Value | Who fills it | From |
 | --- | --- | --- |
-| `chainId` | you | Kinetiq's docs; `cast chain-id --rpc-url <RPC>` must agree. Not 99801 (testnet). |
-| `rpcUrl` | you | A public https RPC that answers `eth_getLogs` |
+| `chainId` | in already | 99901, Kinetiq's docs; `cast chain-id --rpc-url <RPC>` must agree. Anything else fails the build. |
+| `rpcUrl` | you | A public https RPC that answers `eth_getLogs`, with **no API key in it** (the file is public and ships on npm; a keyed URL there throws). A keyed RPC, like Kinetiq's recommended `https://elysium-mainnet.g.alchemy.com/v2/{API_KEY}`, goes only in Vercel's `NEXT_PUBLIC_ELYSIUM_RPC_URL` (then in the browser bundle, so restrict the key to gloam.trade) or the server-only `GLOAM_RPC_URL_99901`. Pages, Glim and the MCP show it as `.../v2/{API_KEY}`. |
 | `explorerUrl` | you | The block explorer, no trailing slash |
 | `usdc` (+ `usdcDecimals` if not 6) | you | Kinetiq's or Circle's docs, checked on chain |
 | `pool`, `deployBlock`, `payMemo`, `payMemoBlock` | `elysium-mainnet-after-deploy.sh` | the deploy |
@@ -33,8 +36,8 @@ Plus, for the deploy only: `GUARD_CONTROLLER`, the multisig that will run the gu
 
 ## Check first (stop if any fails)
 
-- [ ] **Chain id** from Kinetiq's docs matches `cast chain-id --rpc-url $RPC_URL`, and is not 99801.
-- [ ] **RPC** answers `eth_getLogs` over a wide range: `cast logs --from-block 0 --to-block 50000 --rpc-url $RPC_URL` returns or errors with its limit. If its limit is under 50,000 blocks, set `NEXT_PUBLIC_ELYSIUM_LOG_RANGE` to it.
+- [ ] **Chain id** `cast chain-id --rpc-url $RPC_URL` is 99901.
+- [ ] **RPC** answers `eth_getLogs` over a wide range. Blocks come every ~100 ms (about 860,000 a day), and the app reads 1,000,000 blocks per call by default: `cast logs --from-block <head-1000000> --to-block latest --address 0xcA11bde05977b3631167028862bE2a173976CA11 --rpc-url $RPC_URL` must answer. The testnet's public RPCs cap a call at 10,000 logs, not at a range (the app splits on that error). A keyed plan with a range cap: set `NEXT_PUBLIC_ELYSIUM_LOG_RANGE` to it.
 - [ ] **USDC**: `cast call $ELYSIUM_USDC 'symbol()(string)'` is `USDC`, `decimals()(uint8)` is noted (6 expected), and the address is the one Circle or Kinetiq publish (one source says it is backed by native USDC on HyperEVM: confirm which contract is the canonical one, not a bridged look-alike). Check it has no transfer fee (the vault refuses fee-on-transfer tokens).
 - [ ] **Orbit precompiles behave like Robinhood Chain's**: `cast call 0x0000000000000000000000000000000000000064 'arbChainID()(uint256)' --rpc-url $RPC_URL` returns the chain id, and `cast block latest --rpc-url $RPC_URL` shows normal block numbers and timestamps.
 - [ ] **Gas in HYPE**: `cast gas-price` and the deploy-gas line from `elysium-mainnet-env.sh` (creating `ShieldVerifierFinal`, about 390k gas elsewhere, a little more on Orbit). Far above that means the parent-chain data cost is high: add `--gas-estimate-multiplier` as below.
@@ -53,7 +56,7 @@ From `contracts/` in a fresh worktree of `main`.
    Send nothing from the deployer itself.
 2. **Settings.**
    ```bash
-   export ELYSIUM_CHAIN_ID=<id> RPC_URL=<rpc> ELYSIUM_USDC=<usdc> GUARD_CONTROLLER=<safe>
+   export RPC_URL=<rpc> ELYSIUM_USDC=<usdc> GUARD_CONTROLLER=<safe>   # ELYSIUM_CHAIN_ID defaults to 99901
    # export GUARD_CONTROLLER_EOA=1   # only if GUARD_CONTROLLER is a plain wallet
    source elysium-mainnet-env.sh
    ```
@@ -92,11 +95,11 @@ From `contracts/` in a fresh worktree of `main`.
    Reads only. Stops at the first thing off; if all is right it writes
    `deployments/elysium-mainnet.json` and the pool, block and memo board into
    `packages/sdk/src/elysium.ts`.
-8. **Fill the rest of `packages/sdk/src/elysium.ts`**: `chainId`, `rpcUrl`,
-   `explorerUrl`, `usdc` (and `usdcDecimals`). Then from the repo root:
+8. **Fill the rest of `packages/sdk/src/elysium.ts`**: `rpcUrl` (public, no key),
+   `explorerUrl`, `usdc` (and `usdcDecimals`); `chainId` is 99901 already. Then from the repo root:
    ```bash
    (cd packages/sdk && npm test) && (cd mcp && npm test)
-   (cd app && npx tsc --noEmit && NEXT_PUBLIC_ELYSIUM_ENABLED=1 ../mcp/node_modules/.bin/tsx scripts/selftest-elysium.mts)
+   (cd app && npx tsc --noEmit && ../mcp/node_modules/.bin/tsx scripts/selftest-elysium.mts && ../mcp/node_modules/.bin/tsx scripts/selftest-elysium-everywhere.mts)
    ```
    Branch, commit, PR, merge as usual.
 9. **Verify the source.** On Sourcify if it lists Elysium, else the explorer's own
@@ -107,15 +110,52 @@ From `contracts/` in a fresh worktree of `main`.
     `NEXT_PUBLIC_ELYSIUM_RPC_URL`, so the CSP allows it even if you override the
     file), optionally `GLOAM_RELAY_HOURLY_SPEND_<chainId>` (default 1 HYPE an hour)
     and `GLOAM_RPC_URL_<chainId>` (a private RPC for the server). Redeploy. Then
-    the network selector, relay, remote MCP, /verify, Glim and /docs/chain all show
-    Elysium. A wrong value fails the build instead of going live.
+    Elysium everywhere the app lists its chains: the network selector, the
+    chain counts and lists in the copy ("five mainnets"), /docs (chain, SDK,
+    reference, integrate, product, production, bridge and swaps notes), /stats,
+    /transparency, /verify, /security, /disclosures, the whitepaper, the docs
+    search, OG images, the admin network tabs and chain cards, the partner
+    quickstart, Wallet X-ray, the relay, scheduled cash outs, agent top-ups, the
+    remote MCP and Glim, each with Elysium's own mark (`public/brand/chains/elysium.png`)
+    and gas in HYPE. `scripts/selftest-elysium-everywhere.mts` checks the lists
+    both ways and fails on any ungated line of Elysium copy. A wrong value fails
+    the build instead of going live.
 
 Setting the flag before step 8 (no values yet) shows Elysium as "coming" in Glim,
 /docs/chain#elysium and /verify, and nothing else. Leave it off until you want that.
 
+### Static copy (it can't read the flag)
+
+READMEs, npm and plugin manifests, SKILL.md files, server.json, AGENTS.md and the
+contracts docs say Elysium support is "coming". Every such line says "coming" on
+the same line, so after the flag is on:
+
+```bash
+git grep -n Elysium -- ':!app/src' ':!videos' | grep coming
+```
+
+and switch each to "live" (keep Robinhood Chain, Tempo, Base and Ethereum first,
+Elysium last, no partnership wording). Then release `@gloamtrade/sdk` and
+`@gloamtrade/mcp` with the values in (pnpm publish), so the SDK docs the app now
+shows match what npm installs.
+
+### Not on Elysium yet (on purpose)
+
+- **Bring money over (Relay):** `BRIDGE_DESTINATIONS` in `app/src/lib/bridge.ts` has no
+  Elysium entry ("not yet"): no live Relay quote into Elysium USDC has been checked.
+  Add one there once it has, and drop the "not on Elysium yet" lines in Glim,
+  /docs/chain, /docs/bridge and the README.
+- **Private swaps:** no router on Elysium (`VAULT_SWAP_ROUTERS`, "not yet"). The SDK,
+  MCP and app refuse a swap there by name.
+- **Partner links:** Elysium is in `PUBLIC_MEMPOOL_CHAINS` (`app/src/lib/partnerCode.ts`),
+  so only relay-sent link payments count there until it is checked that its sequencer
+  shows nothing before a block. Take it out after that check.
+- **Turnkey gas sponsorship:** Turnkey's gas station does not list Elysium, so a Gloam
+  wallet there pays its own HYPE.
+
 ## Before you announce
 
-- [ ] Replace `app/public/brand/chains/elysium.svg` (a plain stand-in) with Elysium's official mark.
+- [x] Elysium's official mark is in: `app/public/brand/chains/elysium.png` (its avatar, circle-cropped), used for both networks.
 - [ ] One small deposit, private send and cash out in the app, with gas shown in HYPE.
 - [ ] The relayer pays for a relayed send; check its HYPE balance after.
 - [ ] No partnership wording anywhere: Gloam supports Elysium, nothing more.
@@ -126,3 +166,29 @@ Setting the flag before step 8 (no values yet) shows Elysium as "coming" in Glim
 - Do not set `NEW_OWNER`: the script refuses it, the guard is the owner.
 - Do not reuse the deployer for anything before step 5 is done.
 - Do not point the script at 99801 unless rehearsing (`ELYSIUM_ALLOW_TESTNET=1`).
+
+## Elysium testnet (99801), now
+
+Kinetiq's published testnet values are in `ELYSIUM_TESTNET` (`packages/sdk/src/elysium.ts`)
+and were checked on chain on 7 November 2026: chain id 0x185d9, RPC
+`https://testnet-rpc.elysium.kinetiq.xyz` (and Conduit's `https://rpc-elysium-testnet.t.conduit.xyz`),
+explorer `https://elysium.kinetiq.xyz/testnet-explorer`, test USDC
+`0x7D29d8047B905000459c0E80c34a26CeedcB47b2` (symbol USDC, 6 decimals), WHYPE
+`0xCD57F65c2B0e5881CFC2E609F7CD53b746E1F234` (not a pool asset), Multicall3 at its usual
+address, `eth_getLogs` over 20,000,000 blocks with a 10,000-log cap, about 110 ms a block.
+
+It runs like Base Sepolia: the mainnet vault born guarded, the final keys, test USDC
+only (500 / 25,000), the 0.5% cash-out fee. Network key `elysium`, behind its own switch
+`NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED` and its pool.
+
+1. Fund the deployer and relayer with testnet HYPE.
+2. From `contracts/`: `export GUARD_CONTROLLER=<safe or owner wallet>` (plus
+   `GUARD_CONTROLLER_EOA=1` for a wallet), then `source elysium-testnet-env.sh`
+   (RPC defaults to Kinetiq's; it refuses any chain but 99801).
+3. PoseidonT3, then `forge script script/DeployElysiumTestnet.s.sol:DeployElysiumTestnet --rpc-url $RPC_URL`
+   (dry run), then the same with `--broadcast --slow`. Memo board as in step 5 above.
+4. `./elysium-testnet-after-deploy.sh` writes `deployments/elysium-testnet.json` and the
+   pool, block and memo into `ELYSIUM_TESTNET`.
+5. Tests as in step 8, PR, merge; on Vercel set `NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED=1`.
+   The testnet shows as Elysium with Testnet beside it. Gloam has no faucet there:
+   test HYPE and USDC come from Kinetiq.
