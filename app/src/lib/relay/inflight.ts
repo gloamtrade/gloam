@@ -185,6 +185,77 @@ export async function takeInflight(
   };
 }
 
+// ---------------------------------------------------------------- kept records
+
+/**
+ * A small value kept in the relay's store with an expiry: Redis when set, memory only
+ * with none outside production (as the lock). Throws LockStoreDown otherwise, so a
+ * caller never reads "no record" when the store simply did not answer.
+ */
+const memRecords = new Map<string, { value: string; exp: number }>();
+
+async function keepRecord(key: string, value: string, ttlSec: number): Promise<void> {
+  const store = lockStore();
+  if (store === "none") {
+    relayStoreDown("no redis in a production build");
+    throw new LockStoreDown("no redis");
+  }
+  if (store === "memory") {
+    if (memRecords.size > MEM_MAX_KEYS) {
+      const now = Date.now();
+      for (const [k, v] of memRecords) if (v.exp <= now) memRecords.delete(k);
+    }
+    memRecords.set(key, { value, exp: Date.now() + ttlSec * 1000 });
+    return;
+  }
+  try {
+    await redis(["SET", key, value, "EX", ttlSec]);
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : "redis failed";
+    relayStoreDown(reason);
+    throw new LockStoreDown(reason);
+  }
+}
+
+async function readRecord(key: string): Promise<string | null> {
+  const store = lockStore();
+  if (store === "none") {
+    relayStoreDown("no redis in a production build");
+    throw new LockStoreDown("no redis");
+  }
+  if (store === "memory") {
+    const hit = memRecords.get(key);
+    return hit && hit.exp > Date.now() ? hit.value : null;
+  }
+  try {
+    const raw = await redis(["GET", key]);
+    return typeof raw === "string" ? raw : null;
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : "redis failed";
+    relayStoreDown(reason);
+    throw new LockStoreDown(reason);
+  }
+}
+
+/**
+ * A swap's escrow, kept once the relay is asked to send the swap (lib/relay/server). The
+ * swap's unshield proof names the escrow as `to`, and anyone who saw the swap (a reverted
+ * one stays on chain, proofs and all) can hand that proof to the relay as a plain cash out:
+ * the money then waits at the escrow and the relay pays for a refund too. The vault keeps
+ * every root, so that proof stays good as long as the note is unspent, hence a long life.
+ */
+const ESCROW_PREFIX = "gloam:relay:escrow:";
+export const SWAP_ESCROW_TTL_SEC = 400 * 86_400;
+
+export async function markSwapEscrow(chainId: number, escrow: string, ttlSec = SWAP_ESCROW_TTL_SEC): Promise<void> {
+  await keepRecord(`${ESCROW_PREFIX}${chainId}:${escrow.toLowerCase()}`, "1", ttlSec);
+}
+
+/** Whether `address` is a swap escrow the relay was asked to send. Throws LockStoreDown when the store can't say. */
+export async function isSwapEscrow(chainId: number, address: string): Promise<boolean> {
+  return (await readRecord(`${ESCROW_PREFIX}${chainId}:${address.toLowerCase()}`)) !== null;
+}
+
 // ---------------------------------------------------------------- after the send
 
 const RECEIPT_POLL_MS = 1_000;

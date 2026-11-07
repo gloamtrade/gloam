@@ -27,7 +27,8 @@
  *     proof, a spent note or a stale root costs the relay nothing
  *   - no cash out to the vault itself, the memo board, a token contract, a
  *     swap router or the zero address (lib/cashOutTarget), which would strand
- *     the money
+ *     the money, nor to a swap's escrow the relay was asked to send a swap to
+ *     (assertNotSwapEscrow): a swap's unshield is only ever sent as its swap
  *   - memos only for commitments the pool has actually inserted, and no larger
  *     than a real sealed ticket needs (RELAY_MEMO_MAX_BYTES)
  *   - sanctions screening of every public recipient (a cash out's `to`) before
@@ -91,7 +92,7 @@ import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
 import { screenAddresses } from "@/lib/screeningServer";
 import { TIP403_RECEIVE_UNCHECKED_MESSAGE } from "@/lib/tip403";
 import { cashOutTargetProblem } from "@/lib/cashOutTarget";
-import { LockStoreDown, RECEIPT_WATCH_MS, forgetNonce, inSendLanes, inflightKey, relayStoreDown, releaseIfReverted, takeInflight, type InflightLock } from "@/lib/relay/inflight";
+import { LockStoreDown, RECEIPT_WATCH_MS, forgetNonce, inSendLanes, inflightKey, isSwapEscrow, markSwapEscrow, relayStoreDown, releaseIfReverted, takeInflight, type InflightLock } from "@/lib/relay/inflight";
 import { jobKeyReady } from "@/lib/relay/jobSeal";
 import { datedOff } from "@/lib/relay/scheduled";
 import { WrongChainRpcError, serverTransport } from "@/lib/serverRpc";
@@ -607,6 +608,39 @@ export function asMemo(v: unknown): Hex {
 export function assertCashOutTarget(net: Pick<GloamNetwork, "chainId" | "pool" | "payMemo">, to: Address): void {
   const problem = cashOutTargetProblem(to, net);
   if (problem) throw new RelayError(problem, 400, "vault_recipient");
+}
+
+export const CASH_OUT_TO_ESCROW_MESSAGE = "This address is a private swap's escrow. The relay sends money there only as part of its swap. Pick another address.";
+
+/**
+ * Refuses a cash out (or an exit) to a swap's escrow (R1, 7 November 2026 router review).
+ * A swap's unshield proof names its escrow as `to`, so anyone holding the swap's proofs (a
+ * reverted swap leaves them on chain) could hand that proof to the relay as a plain cash
+ * out: the relay would pay to move the money to the escrow, and then again for the refund.
+ * Escrows are CREATE2 addresses with no code before or after their swap, so nothing on
+ * chain tells one from a fresh wallet: the relay keeps every escrow it is asked to send a
+ * swap to (relayVaultSwap) and checks against that. A cash out to a wallet or an allowed
+ * contract is untouched. Nothing is sent when the store can't say (relay_off).
+ */
+export async function assertNotSwapEscrow(net: Pick<GloamNetwork, "chainId">, to: Address): Promise<void> {
+  let escrow: boolean;
+  try {
+    escrow = await isSwapEscrow(net.chainId, to);
+  } catch (e) {
+    if (e instanceof LockStoreDown) throw relayOff();
+    throw e;
+  }
+  if (escrow) throw new RelayError(CASH_OUT_TO_ESCROW_MESSAGE, 400, "vault_recipient");
+}
+
+/** Keeps a swap's escrow before anything about the swap is sent (assertNotSwapEscrow). */
+async function keepSwapEscrow(net: GloamNetwork, escrow: Address): Promise<void> {
+  try {
+    await markSwapEscrow(net.chainId, escrow);
+  } catch (e) {
+    if (e instanceof LockStoreDown) throw relayOff();
+    throw e;
+  }
 }
 
 // ---------------------------------------------------------------- submit
@@ -1243,6 +1277,8 @@ async function unshieldCall(net: GloamNetwork, body: Record<string, unknown>): P
   const to = asAddress(body.to, "recipient");
   const amount = asAmount(body.amount);
   assertCashOutTarget(net, to);
+  // a swap's own unshield, sent alone, is the swap's business, never a cash out's
+  await assertNotSwapEscrow(net, to);
   // The recipient and amount are public inputs of the unshield proof, so the
   // relay cannot change where the money goes.
   const call = { kind: "unshield", args: [proof, root, nullifier, asset, to, amount] } as const;
@@ -1446,7 +1482,12 @@ export async function relayVaultSwap(net: GloamNetwork, body: Record<string, unk
       returning: () => refunding,
       // a refund holds against its sender's refund budget, never its send share
       sender: () => sender,
-      afterDryRun: (gasLimit) => (refunding ? holdWaiting(net, spend.asset, refund.amount, gasLimit) : holdSwap(net, gasLimit)),
+      // once its proofs passed the dry run, and before they go out where anyone can read them:
+      // from then on a plain cash out to this escrow is refused
+      afterDryRun: async (gasLimit) => {
+        await keepSwapEscrow(net, escrow);
+        return refunding ? holdWaiting(net, spend.asset, refund.amount, gasLimit) : holdSwap(net, gasLimit);
+      },
       onEnd: (status) => noteEnded(net, refunding ? `refund|${escrow}` : spend.nullifier, status),
       // a refund is never a link's swap: no binding for it
       beforeBroadcast: (tx) => (refunding ? undefined : hooks.beforeBroadcast?.(tx)),
@@ -1612,6 +1653,7 @@ export async function relayVaultSwapExit(net: GloamNetwork, body: Record<string,
   if (!isSwapAsset(net.chainId, asset, config.address)) throw new RelayError("This asset cannot be swapped here.", 400, "swap_asset");
   const to = asAddress(body.to, "recipient");
   assertCashOutTarget(net, to);
+  await assertNotSwapEscrow(net, to);
   if (typeof body.signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(body.signature)) throw new RelayError("Invalid exit signature.");
   const k = (body.key ?? {}) as Record<string, unknown>;
   const key: Required<EscrowKey> = {
