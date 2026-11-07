@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from "react";
 import { useNetwork } from "@/components/app/NetworkProvider";
-import { appClaimPath, claimLinkFor } from "@/lib/claimLink";
+import { appClaimPath, claimLinkFor, shortCodeFor } from "@/lib/claimLink";
 import { isClaimLink } from "@/lib/funnel";
 
 export function PaymentTicketShare({
@@ -39,8 +39,11 @@ export function PaymentTicketShare({
   // A tappable link: plain claim codes open the claim page, anything else opens the app's claim screen.
   const origin = typeof window === "undefined" ? "https://www.gloam.trade" : window.location.origin;
   const link = isAddr ? null : isClaimLink(code) ? claimLinkFor(code, networkKey, origin) : `${origin}${appClaimPath(code, networkKey)}`;
+  // The code people see and copy: the short gloam3 form when the payment has a
+  // short link (the same body), else the full code. Both paste back in Claim.
+  const shown = isAddr ? code : shortCodeFor(code, networkKey);
 
-  const qrText = link ?? code;
+  const qrText = link ?? shown;
   const qrDataUrl = qr?.text === qrText ? qr.url : null;
   const qrError = qr?.text === qrText ? qr.error : null;
 
@@ -81,7 +84,7 @@ export function PaymentTicketShare({
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(code);
+      await navigator.clipboard.writeText(shown);
       onSaved?.();
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -91,7 +94,7 @@ export function PaymentTicketShare({
   }
 
   function downloadTxt() {
-    const blob = new Blob([code], { type: "text/plain;charset=utf-8" });
+    const blob = new Blob([shown], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -109,8 +112,8 @@ export function PaymentTicketShare({
         text: code.startsWith("gloamr1.")
           ? `My Gloam address. Paste it in Gloam under Pay privately to send me money.\n\n${code}`
           : locked
-          ? `I sent you a private payment on Gloam${amountLabel ? ` (${amountLabel})` : ""}. It's locked: I'll send you the phrase separately. Tap to claim it:\n\n${link ?? code}`
-          : `I sent you a private payment on Gloam${amountLabel ? ` (${amountLabel})` : ""}. Tap to claim it:\n\n${link ?? code}`,
+          ? `I sent you a private payment on Gloam${amountLabel ? ` (${amountLabel})` : ""}. It's locked: I'll send you the phrase separately. Tap to claim it:\n\n${link ?? shown}`
+          : `I sent you a private payment on Gloam${amountLabel ? ` (${amountLabel})` : ""}. Tap to claim it:\n\n${link ?? shown}`,
       });
       onSaved?.();
       setShared(true);
@@ -179,7 +182,7 @@ export function PaymentTicketShare({
 
           {!isAddress && (
             <div className="tnum mt-3 max-h-24 overflow-y-auto break-all rounded-xl bg-panel px-3 py-2.5 text-[12px] leading-relaxed text-mute">
-              {code}
+              {shown}
             </div>
           )}
 
