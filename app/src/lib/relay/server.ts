@@ -45,8 +45,9 @@
  *   - a refund or an exit goes only for an escrow the vault paid: the unshield's
  *     receipt must show it, for that note and that amount
  *   - an hourly spend cap per chain across every kind of send, with a part kept for
- *     cash outs, refunds and exits, the last of it for refunds and exits alone, and
- *     a share of it for each sender (lib/relay/spendCap)
+ *     cash outs, refunds and exits, the last of it for refunds and exits alone, a
+ *     share of it for each sender, and a smaller share for each sender's sends that
+ *     revert; scheduled cash outs hold as one sender (lib/relay/spendCap)
  *   - per-sender and per-network rate limits, shared across instances (the
  *     network cap counts only transactions actually sent: a send refused after
  *     its slot was taken gives the slot back), and a few relayed payment
@@ -109,8 +110,11 @@ import {
   MEMO_SPEND_SHARE_PCT,
   NEW_SEND_SHARE_PCT,
   PAYROLL_SENDS,
+  REVERT_SENDS,
+  SCHEDULED_SENDER,
   hourlySpendWei,
   ipSendsLimit,
+  revertSharePct,
   senderSharePct,
 } from "@/lib/relay/spendCap";
 import { GAS_STATION_CHAIN_ID, GAS_STATION_FACTORY, gasStationAbi, gasStationFactoryAbi, readStationState } from "@/lib/gasStation";
@@ -397,6 +401,7 @@ export const NOTE_WAIT_MESSAGE = "This balance can't try that again yet. Your mo
 export const SPEND_CAP_MESSAGE = "The relay has reached its limit for this hour on this network. Try again later or send from your wallet.";
 export const SENDER_SHARE_MESSAGE = "You've reached your share of the relay for this hour on this network. Try again later or send from your wallet.";
 export const BACK_SHARE_MESSAGE = "You've reached your share of the relay's refunds and exits for this hour on this network. Try again later.";
+export const REVERT_SHARE_MESSAGE = "Too many of your relayed sends failed on chain this hour on this network. Try again later or send from your wallet.";
 
 export const MEMO_BUSY_MESSAGE =
   "The relay can't post more payment messages on this network right now. Try again later, or send the heads-up from your wallet.";
@@ -961,12 +966,14 @@ async function holdSpend(
   const margin = L1_FEE_MARGIN_PCT[net.chainId] ?? 0n;
   const amount = gwei((gasLimit * price * (100n + margin)) / 100n);
   const keeps = (end: SendEnd) => gwei(end.gasUsed * (end.priceWei || price) + end.extraWei);
+  // a revert share keeps only what a revert burned (or a send nobody saw land)
+  const keepsReverted = (end: SendEnd) => (end.status === "reverted" ? keeps(end) : 0);
   const holds: Hold[] = [];
   // limits in the units holds are counted in (gwei, rounded up per send)
-  const hold = async (owner: string, bucket: string, limit: number, refused: () => RelayError) => {
+  const hold = async (owner: string, bucket: string, limit: number, refused: () => RelayError, keepsAfter: Hold["keeps"] = keeps) => {
     let held: Hold | null;
     try {
-      held = await takeHold(owner, bucket, amount, limit, keeps);
+      held = await takeHold(owner, bucket, amount, limit, keepsAfter);
     } catch (e) {
       // the shared store failed part way: what was already held goes back (if the store answers)
       await dropHolds(holds);
@@ -1001,6 +1008,16 @@ async function holdSpend(
       for (const sender of opts.senders) {
         await hold(sender, `relay-spend-sender-${net.chainId}`, limit, () => new RelayError(SENDER_SHARE_MESSAGE, 429, "spend_cap"));
       }
+    }
+  }
+  // what reverts, per sender (lib/relay/spendCap): every kind of send, refunds and exits too
+  // where no swap floor gives them budgets of their own
+  const revertPct = opts.tier === "back" && hasSwapFloor(net.chainId) ? null : revertSharePct(net.chainId);
+  if (revertPct !== null && opts.senders.length) {
+    const share = gwei((cap * BigInt(revertPct)) / 100n);
+    const limit = Math.min(Math.max(share, gwei(REVERT_SENDS * dryRunGas * now)), Math.max(gwei((cap * MAX_SENDER_SHARE_PCT) / 100n), share));
+    for (const sender of opts.senders) {
+      await hold(sender, `relay-spend-revert-${net.chainId}`, limit, () => new RelayError(REVERT_SHARE_MESSAGE, 429, "spend_cap"), keepsReverted);
     }
   }
   const part = opts.tier === "back" ? 100n : opts.tier === "cashout" ? CASH_OUT_SHARE_PCT : NEW_SEND_SHARE_PCT;
@@ -1315,10 +1332,12 @@ export async function checkUnshieldForLater(net: GloamNetwork, body: Record<stri
 
 /**
  * Sends a scheduled cash out now, through the same checks and lock as any relayed one.
- * `watchUntil` ends the receipt watch inside the run's own time.
+ * `watchUntil` ends the receipt watch inside the run's own time. A job keeps no IP, so
+ * every scheduled cash out holds as one sender (SCHEDULED_SENDER) against the sender share
+ * and the revert share: jobs whose sends revert can't burn more of the cap than one IP.
  */
 export async function sendUnshieldNow(net: GloamNetwork, body: Record<string, unknown>, opts: { watchUntil?: number } = {}): Promise<Hex> {
-  return submitSpend(net, await unshieldCall(net, body), { screened: true, watchUntil: opts.watchUntil });
+  return submitSpend(net, await unshieldCall(net, body), { screened: true, watchUntil: opts.watchUntil, sender: () => SCHEDULED_SENDER });
 }
 
 /**

@@ -9,6 +9,9 @@
  *    through v1 and v2, the note less the vault's fee now and 0.1% through v3, refused
  *    before the dry run otherwise. A v3 refund being finished may be up to what reached
  *    its escrow, and a fee that can't be read sends nothing
+ *  - R3: one sender's sends that revert stop at its own share of the hourly cap, while
+ *    its sends that land are never held back by it and other senders go on; scheduled
+ *    cash outs hold as one sender against that share; the share is set by chain
  *
  * fetch is stubbed: the relay talks to an in-process fake chain, and the relay key is a
  * throwaway made here. Nothing reaches any host.
@@ -41,6 +44,7 @@ const {
 type PoolKey = import("../src/lib/vaultSwap").PoolKey;
 const {
   CASH_OUT_TO_ESCROW_MESSAGE,
+  REVERT_SHARE_MESSAGE,
   RelayError,
   checkUnshieldForLater,
   relayUnshield,
@@ -50,6 +54,7 @@ const {
   sendUnshieldNow,
 } = await import("../src/lib/relay/server");
 const { getNetwork } = await import("../src/lib/networks");
+const { DEFAULT_REVERT_SHARE_PCT, SCHEDULED_SENDER, revertSharePct } = await import("../src/lib/relay/spendCap");
 
 let passed = 0;
 async function test(name: string, fn: () => void | Promise<void>) {
@@ -192,6 +197,7 @@ function fresh() {
   chain.feeDown = false;
   paidTxs.clear();
   resetSwapFloorReads();
+  for (const k of Object.keys(process.env)) if (k.startsWith("GLOAM_RELAY_")) delete process.env[k];
   (globalThis as { __gloamMcpRate?: Map<string, unknown> }).__gloamMcpRate?.clear();
 }
 
@@ -386,6 +392,82 @@ await test("R2: a vault fee that can't be read sends nothing", async () => {
   chain.feeDown = true;
   await assert.rejects(relayVaultSwap(base, baseSwap()), isCode("check_failed"));
   assert.equal(sends.length, 0);
+});
+
+// ---------------------------------------------------------------- R3
+
+/** Sends until one is refused or `most` went, letting each receipt settle its holds. */
+async function until(send: () => Promise<unknown>, most: number) {
+  let sent = 0;
+  for (; sent < most; sent++) {
+    const r = await send().catch((e: unknown) => e);
+    if (typeof r !== "string") return { sent, refused: (r as Error).message };
+    await settled();
+  }
+  return { sent, refused: null as string | null };
+}
+
+/**
+ * Robinhood Chain at 0.02 gwei with a 0.002 cap: a send holds 1.95M gas (39,000 gwei), and one
+ * that reverts keeps the 1.5M it burned (30,000). 10% of the cap is 200,000 gwei, under 20 sends'
+ * dry-run gas (600,000), so a sender's reverts stop after 19.
+ */
+function revertSetup() {
+  fresh();
+  process.env.GLOAM_RELAY_HOURLY_SPEND_4663 = "0.002";
+  chain.gasUsed = 1_500_000n;
+}
+
+await test("R3: one sender's reverted sends stop at its own share; another sender still goes", async () => {
+  revertSetup();
+  chain.next = "reverted";
+  const A = "198.51.100.31";
+  const a = await until(() => relayUnshield(rh, cashOut(), A), 60);
+  assert.deepEqual(a, { sent: 19, refused: REVERT_SHARE_MESSAGE });
+  // the cap and the sender share are far from used up: the revert share stopped it
+  assert.equal(typeof (await relayUnshield(rh, cashOut(), "198.51.100.32")), "string", "another IP still sends");
+  // a partner account no admin approved shares its IP's share
+  await assert.rejects(relayUnshield(rh, cashOut(), ["partner:ptr_new0001", A]), (e: unknown) => (e as Error).message === REVERT_SHARE_MESSAGE);
+});
+
+await test("R3: sends that land give their hold back, so a sender whose sends land is never stopped by it", async () => {
+  revertSetup();
+  chain.next = "success";
+  const r = await until(() => relayUnshield(rh, cashOut(), "198.51.100.33"), 30);
+  assert.deepEqual(r, { sent: 30, refused: null }, "half again what its reverts could use");
+});
+
+await test("R3: a send nobody saw land stays counted, as one that reverted", async () => {
+  revertSetup();
+  chain.next = "none";
+  // each holds 39,001 gwei until a receipt shows: 15 fit under 600,000
+  const r = await until(() => relayUnshield(rh, cashOut(), "198.51.100.36"), 30);
+  assert.deepEqual(r, { sent: 15, refused: REVERT_SHARE_MESSAGE });
+});
+
+await test("R3: scheduled cash outs hold as one sender, so reverting jobs can't burn the cap", async () => {
+  revertSetup();
+  chain.next = "reverted";
+  const jobs = await until(() => sendUnshieldNow(rh, cashOut()), 60);
+  assert.deepEqual(jobs, { sent: 19, refused: REVERT_SHARE_MESSAGE });
+  // the refusal is a spend_cap, which a scheduled job treats as "try again later"
+  await assert.rejects(sendUnshieldNow(rh, cashOut()), isCode("spend_cap"));
+  assert.equal(typeof (await relayUnshield(rh, cashOut(), "198.51.100.34")), "string", "a cash out sent now still goes");
+  assert.equal(SCHEDULED_SENDER.includes(":"), false, "no colon: rate limit keys read one as IPv6");
+});
+
+await test("R3: the share is set by chain, or off", async () => {
+  assert.equal(revertSharePct(4663, {}), DEFAULT_REVERT_SHARE_PCT);
+  assert.equal(revertSharePct(4663, { GLOAM_RELAY_REVERT_SHARE_4663: "5" }), 5);
+  assert.equal(revertSharePct(4663, { GLOAM_RELAY_REVERT_SHARE_4663: "off" }), null);
+  assert.equal(revertSharePct(4663, { GLOAM_RELAY_REVERT_SHARE_4663: "lots" }), DEFAULT_REVERT_SHARE_PCT, "a value that isn't a number keeps the default");
+  assert.equal(revertSharePct(4663, { GLOAM_RELAY_REVERT_SHARE_4663: "101" }), DEFAULT_REVERT_SHARE_PCT);
+  // off: reverts are held only by the sender share and the cap
+  revertSetup();
+  process.env.GLOAM_RELAY_REVERT_SHARE_4663 = "off";
+  chain.next = "reverted";
+  const r = await until(() => relayUnshield(rh, cashOut(), "198.51.100.35"), 25);
+  assert.deepEqual(r, { sent: 25, refused: null });
 });
 
 console.log(`relay review: ${passed} passed`);

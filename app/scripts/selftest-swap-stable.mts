@@ -455,6 +455,10 @@ function fresh() {
   delete process.env.GLOAM_RELAY_HOURLY_SPEND_8453;
   delete process.env.GLOAM_RELAY_IP_SENDS_1;
   delete process.env.GLOAM_RELAY_SENDER_SHARE_1;
+  // The revert share has its own self-test (selftest-relay-review). These cases pin the cap and
+  // the other shares with sends whose receipts nobody sees, which the revert share counts as
+  // reverts, so it would stop them first.
+  for (const id of [1, 8453, 4663]) process.env[`GLOAM_RELAY_REVERT_SHARE_${id}`] = "off";
   resetSwapFloorReads();
   resetGasReads();
 }
