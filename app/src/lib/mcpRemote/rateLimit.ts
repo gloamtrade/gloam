@@ -49,6 +49,7 @@ const LOCAL_BUCKETS = new Set([
   "tg-bug",
   "tg-warn",
   "tg-classify",
+  "hunt-visit",
 ]);
 const PREFIX = "gloam:mcp:rl:";
 const MEM_MAX_KEYS = 10_000;

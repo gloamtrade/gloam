@@ -5,10 +5,11 @@
  * It talks in the Gloam group (TELEGRAM_GROUP_ID) and, in private, only with
  * the team: the owner (TELEGRAM_OWNER_IDS, else TELEGRAM_OWNER_HANDLES) and the
  * admins (TELEGRAM_ADMIN_IDS or TELEGRAM_ADMIN_HANDLES). Anyone else's private
- * message gets no reply and costs no model call. With the team it chats: it
- * answers in its own voice from the product facts and the group's live
- * numbers, drafts posts and replies, and remembers the last few exchanges for
- * a few hours. The owner also gets /report. A private chat is chat only: it
+ * message gets no reply and costs no model call (the one exception is the
+ * treasure hunt's exact passphrase, lib/hunt, off unless HUNT_ENABLED is set).
+ * With the team it chats: it answers in its own voice from the product facts
+ * and the group's live numbers, drafts posts and replies, and remembers the
+ * last few exchanges for a few hours. The owner also gets /report. A private chat is chat only: it
  * never posts in the group or acts on anything from there. It never starts a
  * DM; the scheduled report goes only to a chat an owner opened. Every other
  * chat is ignored. In the group:
@@ -188,6 +189,7 @@ import {
   type TgUser,
 } from "./telegram";
 import { hitRateLimit } from "@/lib/mcpRemote/rateLimit";
+import { HUNT_INPUT_MAX, countHuntStep, glimHuntGroupReply, glimHuntReply, huntEnabled, huntSubject } from "@/lib/hunt";
 import { isMainnetLive } from "@/lib/mainnet";
 
 /** t.me/gloamhq. TELEGRAM_GROUP_ID overrides it. */
@@ -1201,6 +1203,7 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
     await sendMessage(chatId, leakWarning(name, removed), { threadId, replyTo: removed ? undefined : msg.message_id });
     return;
   }
+  if (answerable && !edited && (await onHuntPassphrase(msg, from, "group", threadId))) return;
   const me = await getMe();
   // a call-channel post forwarded or quoted in from elsewhere ("80x move from our call")
   const outside = msg.forward_origin || msg.external_reply ? [text, msg.external_reply?.text, msg.external_reply?.caption, msg.quote?.text].filter(Boolean).join(" ") : "";
@@ -1535,8 +1538,38 @@ const DM_KEEP_REPLY = 1500;
 /** Every key and token this deployment holds (public NEXT_PUBLIC_ values aside), so a reply can never carry one, even by accident. */
 function deploymentSecrets(): string[] {
   return Object.entries(process.env)
-    .filter(([k, v]) => /KEY|TOKEN|SECRET|PASSWORD|PRIVATE|PEPPER/i.test(k) && !k.startsWith("NEXT_PUBLIC_") && typeof v === "string" && v.trim().length >= 8)
+    .filter(([k, v]) => /KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|FRAGMENT|NULLIFIER|PRIVATE|PEPPER/i.test(k) && !k.startsWith("NEXT_PUBLIC_") && typeof v === "string" && v.trim().length >= 8)
     .map(([, v]) => v!.trim());
+}
+
+/** Passphrase tries per person per hour in private, and replies to a right one. */
+const HUNT_TRIES_PER_HOUR = 30;
+const HUNT_REPLIES_PER_HOUR = 5;
+
+/**
+ * The treasure hunt's passphrase (lib/hunt), from anyone: checked before any other
+ * handling and any model call, and only ever matched exactly (case and spaces
+ * aside). In private the next clue and its piece of the prize link come back; in the group the message is taken
+ * down so the passphrase doesn't spread, with a note to send it privately. With
+ * the hunt off, or for any other text, this does nothing and says nothing.
+ * True when the message was handled here.
+ */
+async function onHuntPassphrase(msg: TgMessage, from: TgUser, where: "private" | "group", threadId?: number): Promise<boolean> {
+  if (!huntEnabled()) return false;
+  const raw = messageText(msg).trim();
+  if (!raw || raw.length > HUNT_INPUT_MAX) return false;
+  const chatId = msg.chat.id;
+  if (where === "private" && !(await hitRateLimit(`tg:${from.id}`, "tg-hunt-try", HUNT_TRIES_PER_HOUR, Date.now(), 3600)).allowed) return false;
+  const reply = glimHuntReply(raw);
+  if (!reply) return false;
+  if (where === "group") {
+    const removed = await deleteMessage(chatId, msg.message_id);
+    await sendMessage(chatId, glimHuntGroupReply(), { threadId, replyTo: removed ? undefined : msg.message_id });
+    return true;
+  }
+  if (!(await hitRateLimit(`tg:${from.id}`, "tg-hunt", HUNT_REPLIES_PER_HOUR, Date.now(), 3600)).allowed) return true;
+  if (await sendMessage(chatId, reply)) await countHuntStep("glim", huntSubject("tg", from.id));
+  return true;
 }
 
 /**
@@ -1607,6 +1640,7 @@ async function chatWithTeam(
 async function onPrivate(msg: TgMessage, c: BotConfig): Promise<void> {
   const from = msg.from;
   if (!from || from.is_bot) return;
+  if (await onHuntPassphrase(msg, from, "private")) return;
   const owner = isOwner(from, c);
   if (!owner && !isAdmin(from, c)) return;
   const chatId = msg.chat.id;
