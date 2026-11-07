@@ -204,7 +204,7 @@ export function VolumeChart({ days, caption }: { days: VolumeDay[]; caption: str
     return () => ro.disconnect();
   }, [wrap]);
 
-  const H = 260;
+  const H = 320;
   const padL = 56;
   const padR = 8;
   const padT = 10;
@@ -215,8 +215,10 @@ export function VolumeChart({ days, caption }: { days: VolumeDay[]; caption: str
   const top = niceMax(Math.max(0, ...days.map((d) => Math.max(d.inUsd, d.outUsd))));
   const band = days.length ? plotW / days.length : plotW;
   const bw = Math.max(3, Math.min(24, band * 0.56));
-  const y = (v: number) => (v / top) * (half - 1);
-  const ticks = [top, top / 2, 0, top / 2, top];
+  // Square-root scale: a record day still fits under the top tick, and quiet days stay visible
+  // instead of flattening into the baseline. Ticks are labelled with their real values.
+  const y = (v: number) => Math.sqrt(Math.max(0, v) / top) * (half - 1);
+  const ticks = [top, top / 4, 0, top / 4, top];
   const every = Math.max(1, Math.ceil(days.length / Math.max(1, Math.floor(plotW / 64))));
   const h = hover != null ? days[hover] : null;
 

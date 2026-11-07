@@ -797,7 +797,7 @@ export function AdminDashboard() {
                 caption={`Daily deposits and cash-outs in dollars, ${isMain ? "mainnet" : "testnet"}`}
               />
               <p className="mt-4 text-[13px] leading-relaxed text-mute">
-                UTC days, {money}. Deposits rise above the line, cash-outs drop below it.{" "}
+                UTC days, {money}. Deposits rise above the line, cash-outs drop below it. The scale stretches to fit the biggest day, so quiet days stay readable.{" "}
                 {oc ? flowPricing(oc, isMain, rev?.atToday) : "Priced once the chains are read"}
                 {noPrice ? `. Not in dollars: ${noPrice}` : ""}.
               </p>
