@@ -5,7 +5,8 @@
  *  - off (HUNT_ENABLED unset): no home page clue, the hidden page and its
  *    answer route 404, Glim's check says nothing, and gloam_info
  *    answers as usual whatever arguments it gets
- *  - answers match ignoring case and spaces, as plain text or a sha256 hash,
+ *  - answers match ignoring case, spaces, punctuation and curly quotes, as
+ *    plain text or a sha256 hash of the normalized answer (older hashes too),
  *    with alternatives split by "|"; anything too long or not text never matches
  *  - the home page clue: the HTML comment can't be ended early and the console
  *    line can't break out of its <script>
@@ -81,7 +82,7 @@ const { default: HuntPage } = await import("../src/app/hunt/[slug]/page");
 const { prizeState } = await import("../src/lib/huntPrize");
 const { nullifierOfClaimLink } = await import("../src/lib/huntNullifier");
 const { buildNotePackage, encodeNotePackage } = await import("../src/lib/notePackage");
-const { claimLinkFor } = await import("../src/lib/claimLink");
+const { longClaimLinkFor } = await import("../src/lib/claimLink");
 const { paymentNullifier } = await import("../src/lib/sentLinks");
 
 let passed = 0;
@@ -177,13 +178,51 @@ await test("answers match ignoring case and spaces, plain or hashed, with altern
   // alternatives
   assert.equal(hunt.matchesSecret("two", "one | two"), true);
   assert.equal(hunt.matchesSecret("three", "one | two"), false);
-  // hashed: sha256 of the answer lowered with spaces removed
+  // hashed: sha256 of normalizeGuess(answer), here lowered with spaces removed
   const hashed = `sha256:${createHash("sha256").update("darkforest").digest("hex")}`;
   assert.equal(hunt.matchesSecret("Dark Forest", hashed), true);
   assert.equal(hunt.matchesSecret("dark", hashed), false);
   assert.equal(hunt.matchesSecret("Dark Forest", `nope|${hashed.toUpperCase().replace("SHA256:", "sha256:")}`), true);
   // full-width letters fold to plain ones
   assert.equal(hunt.matchesSecret("ＧＬＯＡＭ", "gloam"), true);
+});
+
+await test("answers ignore punctuation, symbols and curly quotes, and keep letters and digits from any script", () => {
+  const want = "don't trust, verify";
+  // a phone types a curly apostrophe
+  assert.equal(hunt.matchesSecret("don\u2019t trust, verify", want), true);
+  assert.equal(hunt.matchesSecret("Don\u2019t trust, verify!", "dont trust verify"), true);
+  assert.equal(hunt.matchesSecret("DONT TRUST VERIFY", want), true);
+  assert.equal(hunt.matchesSecret("\u201cdon't trust; verify.\u201d", want), true);
+  assert.equal(hunt.matchesSecret("don't trust, verify?!", want), true);
+  assert.equal(hunt.matchesSecret("do trust, verify", want), false, "the words still have to be the same");
+  assert.equal(hunt.normalizeGuess("Don\u2019t trust, verify!"), "donttrustverify");
+  assert.equal(hunt.normalizeGuess("dont trust verify"), "donttrustverify");
+  // symbols go, digits stay
+  assert.equal(hunt.normalizeGuess("$GLOAM #1 -> 100%"), "gloam1100");
+  // other scripts keep their letters, with their marks
+  assert.equal(hunt.normalizeGuess("Größe, Straße!"), "größestraße");
+  assert.equal(hunt.normalizeGuess("नमस्ते, दुनिया"), "नमस्तेदुनिया");
+  assert.equal(hunt.normalizeGuess("秘密の 合言葉。"), "秘密の合言葉");
+  assert.equal(hunt.matchesSecret("ПРИВЕТ, мир!", "привет мир"), true);
+  // an answer of only punctuation never matches anything
+  assert.equal(hunt.matchesSecret("!!!", "!!!"), false);
+  assert.equal(hunt.matchesSecret("a", "!!!"), false);
+});
+
+await test("a sha256 answer is the hash of normalizeGuess, and hashes made before still match", () => {
+  const h = (s: string) => `sha256:${createHash("sha256").update(s, "utf8").digest("hex")}`;
+  // the runbook's recipe: hash the normalized form
+  const hashed = h(hunt.normalizeGuess("Don't trust, verify"));
+  assert.equal(hashed, h("donttrustverify"));
+  assert.equal(hunt.matchesSecret("Don\u2019t trust, verify!", hashed), true);
+  assert.equal(hunt.matchesSecret("dont trust verify", hashed), true);
+  assert.equal(hunt.matchesSecret("trust verify", hashed), false);
+  // a hash made the old way (lower case, spaces removed, punctuation kept) still opens with the curly apostrophe
+  const old = h("don'ttrust,verify");
+  assert.equal(hunt.matchesSecret("Don't trust, verify", old), true);
+  assert.equal(hunt.matchesSecret("don\u2019t trust, verify", old), true);
+  assert.equal(hunt.matchesSecret("dont trust verify", old), false, "an old hash knows only its own punctuation");
 });
 
 // ---------------------------------------------------------------- on
@@ -338,7 +377,8 @@ await test("the prize link: one piece per step, in order, and together they make
   const code = encodeNotePackage(
     buildNotePackage({ pool: "0x39e28cde55cab798874746ac52cb4b5cc99a0194", asset: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", amountWei: "100000000", secret, commitment, chainId: 4663 }),
   );
-  const link = claimLinkFor(code, "robinhood-mainnet");
+  // the prize is a long link: its final step adds the pieces after "#claim=gloam1="
+  const link = longClaimLinkFor(code, "robinhood-mainnet");
   const prefix = "https://www.gloam.trade/claim?net=robinhood-mainnet#claim=gloam1=";
   assert.ok(link.startsWith(prefix), link);
   const body = link.slice(prefix.length);
