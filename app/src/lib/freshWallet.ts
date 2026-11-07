@@ -26,7 +26,7 @@ import type { CashOutCall } from "./cashOutProof";
 import type { CashOutWindow, OwnedCashOutJob } from "./cashOutLater";
 import { FRESH_WALLET_PATH, GAS_STATION_CHAIN_ID, STATION_MAX_PUMP_USDG, STATION_USDG, predictStation, fundingStep, readStationState, walletHasGas, type StationState } from "./gasStation";
 import { getNetwork } from "./networks";
-import { buildPaymentRequestLink, requestAssetsFor } from "./paymentRequest";
+import { buildShortPaymentRequestLink, requestAssetsFor } from "./paymentRequest";
 import { RelaySubmitError, relayGasStation, relayUnshield, waitForTx } from "./relay/client";
 import { publicClientFor } from "./rhClient";
 import { updateLocalNote, withdrawFeeOf, type LocalNote } from "./shield";
@@ -322,5 +322,5 @@ export function readFundLink(hash: string): { to: string; amount: string } {
 export function backLink(tag: string, origin = "https://gloam.trade"): string {
   const asset = requestAssetsFor("robinhood-mainnet").find((a) => !a.native && a.address.toLowerCase() === STATION_USDG.toLowerCase());
   if (!asset) throw new Error("USDG is not listed on Robinhood Chain.");
-  return buildPaymentRequestLink({ to: tag, network: "robinhood-mainnet", asset, amount: "" }, origin);
+  return buildShortPaymentRequestLink({ to: tag, network: "robinhood-mainnet", asset, amount: "" }, origin);
 }
