@@ -73,8 +73,10 @@ export async function GET(req: Request) {
       const only = url.searchParams.get("vote");
       const pick = rows.filter((r) => !only || r.summary.id === only);
       const csv = pick.length === 1 ? ballotsCsv(pick[0]!.ballots) : allVotesCsv(pick.map((r) => ({ id: r.summary.id, ballots: r.ballots })));
+      // the file is named from a vote id the config holds, never from the query as typed
+      const name = only && pick.length === 1 ? safeFileName(pick[0]!.summary.id) : "all";
       return new Response(csv, {
-        headers: { ...noStore, "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="gloam-votes-${only ?? "all"}-${date}.csv"` },
+        headers: { ...noStore, "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="gloam-votes-${name}-${date}.csv"` },
       });
     }
 
@@ -86,6 +88,11 @@ export async function GET(req: Request) {
   } catch {
     return NextResponse.json({ ok: false, error: { message: "Could not read votes." } }, { status: 503, headers: noStore });
   }
+}
+
+/** Letters, digits, dot, dash and underscore only, so a name never ends the header's quoted value. */
+function safeFileName(s: string): string {
+  return s.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 80) || "vote";
 }
 
 function allVotesCsv(sets: { id: string; ballots: { voter: string; option: number; choice: string; weight: string; timestamp: number; signature: string }[] }[]): string {

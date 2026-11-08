@@ -362,6 +362,8 @@ export function AdminDashboard() {
     await fetch("/api/admin/logout", {
       method: "POST",
       credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
     });
     setAuthed(false);
     setData(null);
