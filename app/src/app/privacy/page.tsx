@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: "Privacy Policy" };
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="November 5, 2026">
+    <LegalLayout title="Privacy Policy" updated="November 8, 2026">
       <p>
         This Privacy Policy describes what information Gloam (&ldquo;we,&rdquo;
         &ldquo;us&rdquo;) handles when you use gloam.trade, the Gloam app, the
@@ -253,7 +253,7 @@ export default function PrivacyPage() {
           before you choose it.
         </p>
       )}
-      <h2>9. Tester applications</h2>
+      <h2>9. Tester applications and contest entries</h2>
       <p>
         If you apply at gloam.trade/testers, we keep what you send: your name,
         Telegram and X handles, the network you want to test, your device and
@@ -265,6 +265,17 @@ export default function PrivacyPage() {
         address is not kept with your application; the rate limit holds a
         hashed copy for up to two hours. We delete applications 90 days after
         the testers program ends, or sooner if you ask at{" "}
+        <a href="mailto:hello@gloam.trade">hello@gloam.trade</a>.
+      </p>
+      <p>
+        If you enter the video contest at gloam.trade/contest, we keep what you
+        send: your name, X handle, the link to your post, the network you used,
+        your note and, if you give it, your email. We also note when you
+        entered and when you last changed your entry. We use it to judge the
+        contest and to reach and pay winners, and for nothing else. Only the
+        Gloam team can read it. Your IP address is not kept with your entry;
+        the rate limit holds a hashed copy for up to two hours. We delete
+        entries 90 days after winners are paid, or sooner if you ask at{" "}
         <a href="mailto:hello@gloam.trade">hello@gloam.trade</a>.
       </p>
       <h2>10. Glim, our Telegram helper</h2>

@@ -25,6 +25,7 @@ import {
 import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET } from "@/lib/elysium";
 import { VAULT_SWAP_V2_ROUTER, swapV3Live } from "@/lib/vaultSwap";
 import { voteFacts } from "@/lib/vote/glim";
+import { CONTEST, CONTEST_TOTAL, contestDay, contestTime, placeLabel } from "@/lib/contest";
 
 /** Private swaps v2 on Robinhood Chain (lib/vaultSwap VAULT_SWAP_V2_ROUTER): the facts follow the switch. */
 const SWAPS_V2 = Boolean(VAULT_SWAP_V2_ROUTER[4663]);
@@ -64,6 +65,7 @@ export const OFFICIAL_LINKS = [
   "gloam.trade/docs (docs; the testnet guide is gloam.trade/docs/testnet)",
   "gloam.trade/verify (check a proof, no wallet needed)",
   "gloam.trade/testers (apply to be a tester)",
+  "gloam.trade/contest (the Gloam Video Contest: prizes, rules and the entry form)",
   "gloam.trade/transparency (what anyone can see about the vault)",
   "gloam.trade/blog/live-on-mainnet (the mainnet launch post)",
   "gloam.trade/blog/private-agent-payments (Raeto and Agent Wormhole: agents funded privately, checked before they pay)",
@@ -620,6 +622,21 @@ function liveSwaps(): [string, string][] {
   ];
 }
 
+/** The video contest, from CONTEST (lib/contest), so the dates and prizes match the page. */
+function contestFacts(): string {
+  const prizes = CONTEST.prizes.map((usd, i) => `${placeLabel(i)} $${usd}`).join(", ");
+  const closes = `${contestDay(CONTEST.closesAt)} at ${contestTime(CONTEST.closesAt)}`;
+  return [
+    "VIDEO CONTEST",
+    `- The ${CONTEST.name}: $${CONTEST_TOTAL} for short videos (${CONTEST.minSeconds} to ${CONTEST.maxSeconds} seconds) about Gloam. Prizes: ${prizes}. Winners are paid privately with a Gloam claim link, in USDG on Robinhood Chain or USDC on Base, their choice.`,
+    `- Entries open ${contestDay(CONTEST.opensAt)} and close ${closes}. Winners are announced by ${contestDay(CONTEST.winnersBy)} on @${CONTEST.account}.`,
+    `- To enter: post the video on X quoting the contest announcement, tag @${CONTEST.account} and add ${CONTEST.hashtag}, then send the post link with the form at gloam.trade/contest. Both the post and the form are needed. One entry per X account; sending the form again with the same handle replaces it.`,
+    "- Judged by the Gloam team on clarity (40%), creativity (30%), production quality (20%) and showing a real flow in the app, mainnet or testnet (10%). Likes and views do not count. The team's decision is final. Testnet is fine; nobody has to deposit money.",
+    `- Entering never needs a private key, seed phrase or wallet connection. Gloam never DMs first asking for keys or funds, and winners are contacted only from @${CONTEST.account}. You never ask anyone for keys either. Anyone in DMs claiming to judge or verify an entry is a scammer.`,
+    "- Never say who is winning, who entered or how many entries there are, and never promise anyone a prize.",
+  ].join("\n");
+}
+
 /**
  * The knowledge block for the system prompt. `live` defaults to whether
  * mainnet is live now; before that the block is exactly what it always was.
@@ -641,6 +658,7 @@ export function knowledgeBlock(testingOpen: boolean, live: boolean = isMainnetLi
     APP_MAP.trim(),
     (testingOpen ? START_OPEN : START_CLOSED).trim(),
     REWARDS.trim(),
+    contestFacts(),
     CODES.trim(),
     ISSUES.trim(),
     `OFFICIAL LINKS (the only ones you may share)\n${OFFICIAL_LINKS.map((l) => `- ${l}`).join("\n")}`,

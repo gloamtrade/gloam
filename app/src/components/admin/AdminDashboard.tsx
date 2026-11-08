@@ -24,6 +24,7 @@ import { relayChainName } from "@/lib/bridge";
 import type { RelayVolume } from "@/lib/relayVolume";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { MAINNET_LAUNCH_ISO } from "@/lib/mainnet";
+import { CONTEST_NETWORK_LABEL, type ContestNetwork } from "@/lib/contest";
 import { VotesPanel } from "./AdminVotes";
 import { AdminBackfill, AdminPartnerDetail } from "./AdminPartnerDetail";
 import { ActivityFeed, ChainCards, MovedHero, Stat, VolumeChart, type Moved, type VolumeDay } from "./AdminCharts";
@@ -57,7 +58,7 @@ type MetricsPayload = {
   error?: string;
 };
 
-type Tab = "overview" | "revenue" | "relay" | "users" | "events" | "partners" | "testers" | "updates" | "bugs" | "votes" | "hunt";
+type Tab = "overview" | "revenue" | "relay" | "users" | "events" | "partners" | "testers" | "contest" | "updates" | "bugs" | "votes" | "hunt";
 
 /** The two views: mainnet or the testnets. Never mixed. */
 type Env = "mainnet" | "testnet";
@@ -600,6 +601,7 @@ export function AdminDashboard() {
   const opsTabs: [Tab, string][] = [
     ["partners", "Partners"],
     ["testers", "Testers"],
+    ["contest", "Contest"],
     ["updates", "Email updates"],
     ["bugs", "Bug reports"],
     ["votes", "Votes"],
@@ -1083,6 +1085,7 @@ export function AdminDashboard() {
 
         {shown === "partners" && <PartnersPanel tier={env} />}
         {shown === "testers" && <TestersPanel />}
+        {shown === "contest" && <ContestPanel />}
         {shown === "updates" && <UpdatesPanel />}
         {shown === "bugs" && <BugsPanel />}
         {shown === "votes" && <VotesPanel />}
@@ -1996,6 +1999,136 @@ function TestersPanel() {
         <p className="mt-4 text-[13px] leading-relaxed text-mute">
           Approve Telegram join requests that match an application. The CSV has full addresses for paying rewards. Store:{" "}
           {data.backend}.
+        </p>
+      </Panel>
+    </>
+  );
+}
+
+type ContestRow = {
+  name: string;
+  handle: string;
+  postUrl: string;
+  postUser: string;
+  postId: string;
+  note: string | null;
+  email: string | null;
+  network: ContestNetwork;
+  submittedAt: number;
+  updatedAt: number;
+  revisions?: number;
+  previousPosts?: string[];
+};
+
+/** Video contest entries (gloam.trade/contest), newest first, and the CSV. Read only. */
+function ContestPanel() {
+  const [data, setData] = useState<{ backend: string; entries: ContestRow[]; loadedAt: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/contest/entries", { credentials: "include", cache: "no-store" });
+        const json = (await res.json().catch(() => null)) as
+          | { ok?: boolean; data?: { backend: string; entries: ContestRow[] }; error?: { message?: string } }
+          | null;
+        if (!live) return;
+        if (!res.ok || !json?.ok || !json.data) {
+          setErr(json?.error?.message ?? `Contest entries failed (${res.status})`);
+          return;
+        }
+        setErr(null);
+        setData({ ...json.data, loadedAt: Date.now() });
+      } catch {
+        if (live) setErr("Network error loading contest entries");
+      }
+    };
+    void load();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, ADMIN_REFRESH_MS);
+    return () => {
+      live = false;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  if (err) {
+    return (
+      <p className="rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger" role="alert">
+        {err}
+      </p>
+    );
+  }
+  if (!data) return <PanelSkeleton label="Loading contest entries" />;
+
+  const entries = data.entries;
+  const dayAgo = data.loadedAt - 86_400_000;
+  const differs = (e: ContestRow) => e.postUser.toLowerCase() !== e.handle.toLowerCase();
+  // the same post entered under more than one handle
+  const postCount = new Map<string, number>();
+  for (const e of entries) postCount.set(e.postId, (postCount.get(e.postId) ?? 0) + 1);
+  const shared = (e: ContestRow) => (postCount.get(e.postId) ?? 0) > 1;
+  const link = "underline decoration-line-strong underline-offset-4 hover:decoration-foreground";
+  return (
+    <>
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi label="Entries" value={n(entries.length)} sub={`${n(entries.filter((e) => e.submittedAt > dayAgo).length)} new in the last 24h`} />
+        <Kpi label="Updated" value={n(entries.filter((e) => (e.revisions ?? 0) > 0).length)} sub="sent again with the same handle" />
+        <Kpi label="Flagged" value={n(entries.filter((e) => differs(e) || shared(e)).length)} sub="post account differs, or post reused" />
+        <Kpi label="With email" value={n(entries.filter((e) => e.email).length)} sub="for reaching winners" />
+      </section>
+      <Panel
+        title="Contest entries"
+        action={
+          <a href="/api/contest/entries?format=csv" className="btn btn-ghost btn-sm">
+            Download CSV
+          </a>
+        }
+      >
+        <DataTable
+          headers={["Name", "X handle", "Video post", "Flag", "Network", "What it shows", "Email", "Submitted", "Updated"]}
+          rows={entries.map((e) => [
+            <span key="n" className="text-foreground">
+              {e.name}
+            </span>,
+            <a key="h" href={`https://x.com/${e.handle}`} target="_blank" rel="noreferrer" className={link}>
+              @{e.handle}
+            </a>,
+            <a
+              key="p"
+              href={e.postUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={(e.previousPosts ?? []).length ? `Earlier: ${(e.previousPosts ?? []).join(" ")}` : e.postUrl}
+              className={link}
+            >
+              @{e.postUser}/{e.postId.slice(-6)}
+            </a>,
+            differs(e) || shared(e) ? (
+              <span key="f" className="text-danger">
+                {[differs(e) ? "Post is not by this handle" : null, shared(e) ? "Same post as another entry" : null]
+                  .filter(Boolean)
+                  .join(". ")}
+              </span>
+            ) : (
+              "None"
+            ),
+            CONTEST_NETWORK_LABEL[e.network] ?? e.network,
+            <span key="note" title={e.note ?? undefined} className="block max-w-[260px] truncate">
+              {e.note ?? "None"}
+            </span>,
+            e.email ?? "None",
+            new Date(e.submittedAt).toLocaleString(),
+            (e.revisions ?? 0) > 0 ? `${new Date(e.updatedAt).toLocaleString()} (${e.revisions}x)` : "Not updated",
+          ])}
+          empty={data.backend === "none" ? "Contest storage is not configured (set Upstash Redis)." : "No entries yet"}
+          minWidth={1240}
+        />
+        <p className="mt-4 text-[13px] leading-relaxed text-mute">
+          One entry per X handle; sending again replaces it. Check each post quotes the announcement with the hashtag
+          before judging. Hover a post link for posts an entry replaced. Store: {data.backend}.
         </p>
       </Panel>
     </>

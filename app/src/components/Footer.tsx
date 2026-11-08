@@ -21,6 +21,7 @@ const groups: {
       { href: "/app/disclose", label: "Prove" },
       { href: "/docs/testnet", label: "Testnet guide" },
       { href: "/testers", label: "Become a tester" },
+      { href: "/contest", label: "Video contest" },
     ],
   },
   {
