@@ -6,7 +6,8 @@
  *  - the partner relay (lib/partnerRelay): a swap whose note the vault reads as
  *    unspent is counted; one whose note is already spent (the refund path) and an
  *    exit are sent and not counted; the vault is read before the send, and a read
- *    that fails sends nothing; nothing in the request decides what is counted
+ *    that fails sends nothing; nothing in the request decides what is counted; a
+ *    count whose transaction reverted is taken back, and only once
  *  - the v1 routes: swap and swapExit refused on a network with no swaps, before
  *    any chain read; GET /api/v1/swaps; the quote route's input checks
  *  - the server quote (lib/swapQuote) against a fake chain: a clean quote, and each
@@ -34,7 +35,7 @@ env.NODE_ENV = "test";
 
 const { resetMemoryKv } = await import("../src/lib/partnersKv");
 const { apiKeyPepper, createApiKey } = await import("../src/lib/apiKeys");
-const { attributedTo, claimTransaction, commissionFor, describeFee, readPartnerStats, recordActivity, upsertPartner, ACTIVITY_KINDS } = await import("../src/lib/partners");
+const { attributedTo, claimTransaction, commissionFor, describeFee, readPartnerStats, recordActivity, reverseActivity, upsertPartner, ACTIVITY_KINDS } = await import("../src/lib/partners");
 const { depositIn } = await import("../src/lib/partnerDeposits");
 const { relayForPartner, partnerRelayDeps } = await import("../src/lib/partnerRelay");
 const { RelayError } = await import("../src/lib/relay/server");
@@ -286,6 +287,59 @@ await test("partner relay: an exit is sent and not counted; payments and cash ou
     assert.ok(e instanceof RelayError && e.code === "bad_action" && e.status === 400);
     return true;
   });
+});
+
+await test("partner relay: a count whose transaction reverted is taken back, whether its receipt comes before or after the count", async () => {
+  type End = (status: "success" | "reverted") => Promise<void>;
+  const p = await upsertPartner(privateKeyToAccount(generatePrivateKey()).address, { name: "Revert Desk", fees: { cashoutBps: 25 } });
+  const ends: End[] = [];
+  const { deps } = fakeDeps({ spent: false });
+  const hooked = (h: Hex, now?: "reverted" | "success") => async (_n: unknown, _b: unknown, _s: unknown, hooks?: { onEnd?: End }) => {
+    if (now) await hooks!.onEnd!(now); // the receipt before the count
+    else ends.push(hooks!.onEnd!);
+    return h;
+  };
+  const cashOut = (h: Hex, now?: "reverted" | "success") =>
+    relayForPartner(
+      { net: RH, body: { chainId: RH.chainId, action: "unshield", asset: RH_USDG, amount: "5000000" }, partner: p, keyId: "k" },
+      { ...deps, relayUnshield: hooked(h, now) as typeof deps.relayUnshield }
+    );
+  // landed: stays counted
+  const ok = await cashOut(H(7001));
+  await ends.pop()!("success");
+  assert.equal(ok.attribution.recorded, true);
+  // reverted after the count: taken back
+  const late = await cashOut(H(7002));
+  assert.equal(late.attribution.recorded, true);
+  await ends.pop()!("reverted");
+  // reverted before the count: never left counted
+  await cashOut(H(7003), "reverted");
+  // a payment and a swap the same way
+  await relayForPartner({ net: RH, body: { chainId: RH.chainId, action: "transfer" }, partner: p, keyId: "k" }, { ...deps, relayTransfer: hooked(H(7004)) as typeof deps.relayTransfer });
+  await ends.pop()!("reverted");
+  await relayForPartner(
+    { net: RH, body: swapBody({ spend: { ...swapBody().spend, nullifier: H(7005) } }), partner: p, keyId: "k" },
+    { ...deps, relayVaultSwap: hooked(H(7006)) as typeof deps.relayVaultSwap }
+  );
+  await ends.pop()!("reverted");
+  const stats = await readPartnerStats(p.id, { recent: 10 });
+  assert.equal(stats.totals.cashOuts, 1, "only the cash out that landed");
+  assert.equal(stats.totals.privatePayments, 0);
+  assert.equal(stats.totals.privateSwaps, 0);
+  assert.deepEqual(stats.recent.map((r) => r.txHash), [H(7001)]);
+  for (const h of [H(7002), H(7003), H(7004), H(7006)]) assert.equal(await attributedTo(RH.chainId, h), null, `${h} is no one's`);
+  assert.equal(await attributedTo(RH.chainId, H(7001)), p.id);
+});
+
+await test("partner store: two reversals of one transaction at once take its counts back once", async () => {
+  const p = await upsertPartner(privateKeyToAccount(generatePrivateKey()).address, { name: "Twice Desk", fees: { cashoutBps: 25 } });
+  await recordActivity({ partner: p, keyId: "k", network: RH, kind: "cash_out", txHash: H(7101), edge: { asset: RH_USDG, amount: 1_000_000n } });
+  await recordActivity({ partner: p, keyId: "k", network: RH, kind: "cash_out", txHash: H(7102), edge: { asset: RH_USDG, amount: 2_000_000n } });
+  const [a, b] = await Promise.all([reverseActivity(RH.chainId, H(7101)), reverseActivity(RH.chainId, H(7101))]);
+  assert.equal([a, b].filter(Boolean).length, 1, "one of them finds it");
+  const stats = await readPartnerStats(p.id, { recent: 5 });
+  assert.equal(stats.totals.cashOuts, 1, "the other cash out is still counted");
+  assert.equal(stats.totals.publicVolumeUsd, 2);
 });
 
 // ---------------------------------------------------------------- v1 routes
