@@ -70,7 +70,7 @@ export function contestClosed(now = Date.now()): boolean {
   return now > Date.parse(CONTEST.closesAt);
 }
 
-export const CONTEST_NETWORKS = ["robinhood", "tempo", "base", "ethereum", "testnet", "none"] as const;
+export const CONTEST_NETWORKS = ["robinhood", "tempo", "base", "ethereum", "none"] as const;
 export type ContestNetwork = (typeof CONTEST_NETWORKS)[number];
 
 export const CONTEST_NETWORK_LABEL: Record<ContestNetwork, string> = {
@@ -78,7 +78,6 @@ export const CONTEST_NETWORK_LABEL: Record<ContestNetwork, string> = {
   tempo: "Tempo",
   base: "Base",
   ethereum: "Ethereum",
-  testnet: "A testnet",
   none: "Didn't use the app",
 };
 
