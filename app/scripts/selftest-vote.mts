@@ -680,26 +680,47 @@ await test("connected holders: the signed votes are noted, and stay noted", asyn
   assert.ok(csv.includes(getAddress(topHolder)) && csv.includes(topWei) && csv.includes('"yes"'));
 });
 
+await test("holder records: only a wallet with $GLOAM, a signed vote or a team listing is stored new", () => {
+  const none = { address: carol.address, snapshot: "0", eligible: false, excluded: null, signed: [] as string[] };
+  assert.equal(holders.worthRecording(none, null), false);
+  assert.equal(holders.worthRecording(none, 0n), false);
+  assert.equal(holders.worthRecording(none, 1n), true, "holds some now");
+  assert.equal(holders.worthRecording({ ...none, snapshot: "1" }, null), true, "held at a snapshot");
+  assert.equal(holders.worthRecording({ ...none, signed: ["v"] }, null), true, "signed a vote");
+  assert.equal(holders.worthRecording({ ...none, excluded: "Team" }, null), true, "a listed team address");
+});
+
 await test("the seen route: balances from the server only, bad input refused, rate limited", async () => {
   // whatever balance the browser claims is ignored
   const res = await seenRoute.POST(seenReq({ address: carol.address, snapshot: (999n * ONE).toString(), current: (999n * ONE).toString(), eligible: true }));
   assert.equal(res.status, 200);
   const j = (await res.json()) as { data: { current: string | null; recorded: boolean } };
   assert.equal(j.data.current, null, "no chain read in the self-test");
-  assert.equal(j.data.recorded, true);
-  const rec = await holders.getHolder(carol.address);
-  assert.equal(rec!.snapshot, "0");
-  assert.equal(rec!.current, null);
-  assert.equal(rec!.eligible, false);
+  // nothing at the snapshot, nothing read now, no vote signed: answered, not stored
+  assert.equal(j.data.recorded, false, "a wallet with no $GLOAM is not stored");
+  assert.equal(await holders.getHolder(carol.address), null);
+  // a flood of made-up addresses stores nothing
+  const stored = (await holders.listHolders()).length;
+  for (let i = 0; i < 10; i++) {
+    const r = await seenRoute.POST(seenReq({ address: privateKeyToAccount(generatePrivateKey()).address }, `198.51.100.${i + 1}`));
+    assert.equal(((await r.json()) as { data: { recorded: boolean } }).data.recorded, false);
+  }
+  assert.equal((await holders.listHolders()).length, stored, "nothing new stored");
   // a team wallet is recorded as excluded
   await seenRoute.POST(seenReq({ address: TEAM_WALLET }));
   const t = await holders.getHolder(TEAM_WALLET);
   assert.equal(t!.eligible, false);
   assert.match(t!.excluded ?? "", /Team/);
-  // twice is still one record
-  await seenRoute.POST(seenReq({ address: carol.address }));
-  assert.equal((await holders.listHolders()).length, 2);
-  assert.equal((await holders.getHolder(carol.address))!.visits, 2);
+  // a holder at the snapshot is recorded, whatever the browser claims; twice is still one record
+  const before = (await holders.getHolder(topHolder))?.visits ?? 0;
+  const h = await seenRoute.POST(seenReq({ address: topHolder, snapshot: "1" }));
+  assert.equal(((await h.json()) as { data: { recorded: boolean } }).data.recorded, true);
+  const rec = await holders.getHolder(topHolder);
+  assert.equal(rec!.snapshot, topWei);
+  assert.equal(rec!.visits, before + 1);
+  await seenRoute.POST(seenReq({ address: topHolder }));
+  assert.equal((await holders.getHolder(topHolder))!.visits, before + 2);
+  assert.equal((await holders.listHolders()).length, stored + 1 + (before === 0 ? 1 : 0), "the team wallet and the holder, once each");
 
   for (const bad of [{}, { address: "nope" }, { address: 42 }, "not json"]) assert.equal((await seenRoute.POST(seenReq(bad))).status, 400);
   assert.equal((await seenRoute.POST(seenReq({ address: `0x${"1".repeat(40)}`, pad: "x".repeat(600) }))).status, 413);
