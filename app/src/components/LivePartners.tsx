@@ -5,7 +5,7 @@ import Image from "next/image";
  * Raeto, Agent Wormhole, Motion, Killfloor and Autonomo are drawn inline so they follow the theme: Raeto's
  * ring takes the text colour, the others keep their own dark grounds.
  * Zedkr's mark and VEYA's wordmark are rendered files, so each ships as a light and a
- * dark PNG and the theme picks one. Static copies of the first five live in public/brand/partners.
+ * dark PNG and the theme picks one. Oak's medallion is one round PNG that holds on both. Static copies of the first five live in public/brand/partners.
  */
 
 /** Raeto's mark: an open ring, a centre dot and the green dot in the gap. */
@@ -110,6 +110,11 @@ export function AutonomoMark({ size = 40 }: { size?: number }) {
   );
 }
 
+/** Oak's mark: their own tree medallion from oakagentkit.org, round with clear corners, so one file holds on both grounds. */
+export function OakMark({ size = 40 }: { size?: number }) {
+  return <Image src="/brand/partners/oak-mark.png" alt="" width={size} height={size} className="block rounded-full" />;
+}
+
 type Partner = {
   name: string;
   href: string;
@@ -128,6 +133,7 @@ export const LIVE_PARTNERS: Partner[] = [
   { name: "VEYA", href: "https://www.veyanet.tech", line: "Budget checks before an agent pays", Mark: VeyaWordmark, wordmark: true },
   { name: "Killfloor", href: "https://killfloor.org", line: "AI agents pay each other privately", Mark: KillfloorMark },
   { name: "Autonomo", href: "https://autonomo.fun", line: "Agents pay for APIs privately", Mark: AutonomoMark },
+  { name: "Oak", href: "https://oakagentkit.org", line: "Private payments from your AI assistant", Mark: OakMark },
 ];
 
 function PartnerLink({ p, withLine = false, size = 32 }: { p: Partner; withLine?: boolean; size?: number }) {
