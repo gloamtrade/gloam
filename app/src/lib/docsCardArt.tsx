@@ -903,3 +903,42 @@ export function JobArt() {
     </div>
   );
 }
+
+/** Video contest: a video frame with a play mark, and a progress line under it. */
+export function PlayArt() {
+  return (
+    <div style={{ ...col, alignItems: "center" }}>
+      <div
+        style={{
+          ...row,
+          justifyContent: "center",
+          width: 300,
+          height: 172,
+          borderRadius: 22,
+          border: `1.5px solid ${C.line}`,
+          background: C.surface,
+        }}
+      >
+        <div
+          style={{
+            ...row,
+            justifyContent: "center",
+            width: 72,
+            height: 72,
+            borderRadius: 36,
+            background: C.tintSoft,
+            border: `1.5px solid ${C.tintLine}`,
+          }}
+        >
+          <svg width={28} height={28} viewBox="0 0 24 24" style={{ marginLeft: 4 }}>
+            <path d="M7 4.5v15l12-7.5z" fill={C.tint} />
+          </svg>
+        </div>
+      </div>
+      <div style={{ ...row, gap: 10, marginTop: 22 }}>
+        <Bar w={120} h={8} color={C.paper} />
+        <Bar w={168} h={8} />
+      </div>
+    </div>
+  );
+}

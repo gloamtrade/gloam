@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: "Privacy Policy" };
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="November 5, 2026">
+    <LegalLayout title="Privacy Policy" updated="November 8, 2026">
       <p>
         This Privacy Policy describes what information Gloam (&ldquo;we,&rdquo;
         &ldquo;us&rdquo;) handles when you use gloam.trade, the Gloam app, the
@@ -253,7 +253,7 @@ export default function PrivacyPage() {
           before you choose it.
         </p>
       )}
-      <h2>9. Tester applications</h2>
+      <h2>9. Tester applications and contest entries</h2>
       <p>
         If you apply at gloam.trade/testers, we keep what you send: your name,
         Telegram and X handles, the network you want to test, your device and
@@ -266,6 +266,21 @@ export default function PrivacyPage() {
         hashed copy for up to two hours. We delete applications 90 days after
         the testers program ends, or sooner if you ask at{" "}
         <a href="mailto:hello@gloam.trade">hello@gloam.trade</a>.
+      </p>
+      <p>
+        If you enter the video contest at gloam.trade/contest, we keep what you
+        send: your name, X handle, the link to your post, the network you
+        used, your note and, if you give it, your email. We also note when you
+        entered, when you last changed your entry, and when you agreed that
+        Gloam may use your video for marketing with credit to you. We use it to
+        judge the contest, to reach and pay winners, and to show we have your
+        permission when we use a video, and for nothing else. Only the Gloam
+        team can read it. Your IP address is not kept with your entry; the
+        rate limit holds a hashed copy for up to two hours. We delete entries
+        90 days after winners are paid, except the name, handle, post link and
+        consent time for a video we use, which we keep while we use it. Ask at{" "}
+        <a href="mailto:hello@gloam.trade">hello@gloam.trade</a> to have yours
+        deleted sooner.
       </p>
       <h2>10. Glim, our Telegram helper</h2>
       <p>
