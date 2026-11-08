@@ -36,6 +36,12 @@ import {
   GLOAM_NOT_FINAL,
   SEALED_VAULT,
   FIELD_PRIME,
+  encodeNotePackage,
+  sealToReceiveTag,
+  encodePaymentHeader,
+  decodePaymentHeader,
+  checkGloamPaymentBinding,
+  gloamPaymentBinding,
 } from "../dist/index.js";
 
 let checks = 0;
@@ -383,6 +389,75 @@ const stranger = await generateReceiveKey();
     submit: async () => ((sentSweep = true), "0x" + "34".repeat(32)),
   });
   assert(r2.status === "unconfirmed" && r2.freshNote, "a sent sweep is not given up on from one lagging read: the fresh note is kept");
+}
+
+// ── 6e. a sealed ticket from the payment board is not an x402 payment ────────
+// A payment to the payee's receive tag made outside x402 (the app's Pay, or
+// buildPrivatePaymentWithReceipt) posts its sealed ticket on the public payment
+// board (GloamPayMemo). Anyone can copy that ticket into an X-PAYMENT header. It
+// opens with the payee's key and names a real, unspent note, so without a binding
+// only the payer and the payee can make, a seller would serve a stranger with it.
+{
+  const pool = mockPool();
+  const secret = 9191n;
+  const amount = 400n;
+  const c = fieldToHex(await noteCommitmentPoseidon(secret, amount, STABLE));
+  await pool.insert(c); // landed: a real leaf, unspent
+  const req = buildGloamPaymentRequirements({ amountWei: amount, asset: STABLE, assetSymbol: "USD", payTo: payee.tag, resource: "r", network: NETWORK });
+  // exactly what the board carries: the gloam1. package sealed to the payee's tag
+  const boardTicket = await sealToReceiveTag(
+    encodeNotePackage({ pool: req.poolAddress, asset: STABLE, amountWei: amount.toString(), secret: fieldToHex(secret), commitment: c, chainId: NETWORK, note: "order 1042" }),
+    payee.tag
+  );
+  // a stranger wraps it in an x402 payload of their own
+  const lifted = { x402Version: 1, scheme: req.scheme, network: NETWORK, payload: { paymentNote: boardTicket, txHash: null, exec: { fn: "transfer", poolAddress: req.poolAddress } } };
+  const opened = await openGloamPaymentNote(boardTicket, payee);
+  assert(verifyGloamPayment({ requirements: req, payload: lifted, note: opened }).ok, "the structural verify alone cannot tell a board ticket from a payment");
+  const log = [];
+  const r = await settleGloamPayment({ requirements: req, payload: lifted, receiveKey: payee, prove: stubProve, chain: pool.chain, submit: submitTo(pool, log) });
+  assert(r.grantAccess === false && r.status === "rejected", `a board ticket wrapped as x402 is refused (${r.status}: ${r.reason})`);
+  assert(/binding/i.test(r.reason ?? ""), "the reason names the missing binding");
+  assert(log.length === 0, "nothing was swept");
+  // a made-up binding is refused too
+  const forged = { ...lifted, payload: { ...lifted.payload, binding: "A".repeat(43) } };
+  const f = await settleGloamPayment({ requirements: req, payload: forged, receiveKey: payee, prove: stubProve, chain: pool.chain, submit: submitTo(pool, log) });
+  assert(f.grantAccess === false && f.status === "rejected", "a binding not made with the note's secret is refused");
+  assert(log.length === 0, "still nothing swept");
+}
+
+// ── 6f. a real x402 payment carries its binding and settles ───────────────────
+{
+  const { pool, req, built } = await paidPool(payee);
+  assert(typeof built.payload.payload.binding === "string" && built.payload.payload.binding.length === 43, "buildGloamPayment binds the payment to its payee");
+  const roundTrip = decodePaymentHeader(encodePaymentHeader(built.payload));
+  assert(roundTrip.payload.binding === built.payload.payload.binding, "the binding survives the X-PAYMENT header");
+  const note = await openGloamPaymentNote(built.payload.payload.paymentNote, payee);
+  assert((await checkGloamPaymentBinding({ requirements: req, payload: built.payload, note })) === null, "the binding checks out");
+  // bound to the payee's tag, pool, chain and the note: another tag's requirements don't match
+  const other = { ...req, payTo: stranger.tag };
+  assert((await checkGloamPaymentBinding({ requirements: other, payload: built.payload, note })) !== null, "a binding for one payee does not pass for another");
+  assert(
+    (await gloamPaymentBinding({ secret: note.secret, network: req.network, poolAddress: req.poolAddress, payTo: req.payTo, commitment: note.commitment })) === built.payload.payload.binding,
+    "gloamPaymentBinding recomputes it"
+  );
+  const r = await settleGloamPayment({ requirements: req, payload: roundTrip, receiveKey: payee, prove: stubProve, chain: pool.chain, submit: submitTo(pool) });
+  assert(r.grantAccess === true && r.status === "swept", `a bound payment settles (${r.reason})`);
+}
+
+// ── 6g. an older payer's unbound payment settles only when the seller allows it ─
+{
+  const { pool, req, built } = await paidPool(payee);
+  const unbound = { ...built.payload, payload: { ...built.payload.payload } };
+  delete unbound.payload.binding;
+  const no = await settleGloamPayment({ requirements: req, payload: unbound, receiveKey: payee, prove: stubProve, chain: pool.chain, submit: submitTo(pool) });
+  assert(no.grantAccess === false && no.status === "rejected", "unbound: refused by default");
+  const yes = await settleGloamPayment({ requirements: req, payload: unbound, receiveKey: payee, prove: stubProve, chain: pool.chain, submit: submitTo(pool), allowUnbound: true });
+  assert(yes.grantAccess === true, `unbound: settles with allowUnbound (${yes.reason})`);
+  // a wrong binding is never let through, allowUnbound or not
+  const { pool: pool2, req: req2, built: built2 } = await paidPool(payee);
+  const wrong = { ...built2.payload, payload: { ...built2.payload.payload, binding: "B".repeat(43) } };
+  const w = await settleGloamPayment({ requirements: req2, payload: wrong, receiveKey: payee, prove: stubProve, chain: pool2.chain, submit: submitTo(pool2), allowUnbound: true });
+  assert(w.grantAccess === false && w.status === "rejected", "a wrong binding is refused even with allowUnbound");
 }
 
 // ── 7. the zero-change sweep is a valid transfer proof ────────────────────────
