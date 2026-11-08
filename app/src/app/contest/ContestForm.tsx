@@ -42,6 +42,7 @@ export function ContestForm({ closed }: { closed: boolean }) {
       name: String(f.get("name") ?? ""),
       handle: String(f.get("handle") ?? ""),
       post: String(f.get("post") ?? ""),
+      video: String(f.get("video") ?? ""),
       note: String(f.get("note") ?? ""),
       email: String(f.get("email") ?? ""),
       network: String(f.get("network") ?? ""),
@@ -111,9 +112,9 @@ export function ContestForm({ closed }: { closed: boolean }) {
       </Row>
 
       <Row
-        label="Link to your video post on X"
+        label="Link to your post on X"
         htmlFor="c-post"
-        hint={`The post that quotes the announcement, with ${CONTEST.hashtag}.`}
+        hint={`The post that quotes the announcement, with ${CONTEST.hashtag}. It can hold the video or link to it.`}
         error={fieldError("post")}
       >
         <input
@@ -130,6 +131,29 @@ export function ContestForm({ closed }: { closed: boolean }) {
           className="gl-input"
           aria-invalid={Boolean(fieldError("post"))}
           aria-describedby={described("post", true)}
+        />
+      </Row>
+
+      <Row
+        label="Full video link (YouTube or other)"
+        optional
+        htmlFor="c-video"
+        hint="For a longer video hosted somewhere other than X."
+        error={fieldError("video")}
+      >
+        <input
+          id="c-video"
+          name="video"
+          type="url"
+          inputMode="url"
+          placeholder="https://youtube.com/watch?v=…"
+          autoComplete="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          maxLength={CONTEST_LIMITS.video}
+          className="gl-input"
+          aria-invalid={Boolean(fieldError("video"))}
+          aria-describedby={described("video", true)}
         />
       </Row>
 

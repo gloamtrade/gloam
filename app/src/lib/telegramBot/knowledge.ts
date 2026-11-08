@@ -628,9 +628,9 @@ function contestFacts(): string {
   const closes = `${contestDay(CONTEST.closesAt)} at ${contestTime(CONTEST.closesAt)}`;
   return [
     "VIDEO CONTEST",
-    `- The ${CONTEST.name}: $${CONTEST_TOTAL} for short videos (${CONTEST.minSeconds} to ${CONTEST.maxSeconds} seconds) about Gloam. Prizes: ${prizes}. Winners are paid privately with a Gloam claim link, in USDG on Robinhood Chain or USDC on Base, their choice.`,
+    `- The ${CONTEST.name}: $${CONTEST_TOTAL} for videos about Gloam. Any type and any length: explainers, tutorials, films, animations, skits, memes, long or short. Prizes: ${prizes}. Winners are paid privately with a Gloam claim link, in USDG on Robinhood Chain or USDC on Base, their choice.`,
     `- Entries open ${contestDay(CONTEST.opensAt)} and close ${closes}. Winners are announced by ${contestDay(CONTEST.winnersBy)} on @${CONTEST.account}.`,
-    `- To enter: post the video on X quoting the contest announcement, tag @${CONTEST.account} and add ${CONTEST.hashtag}, then send the post link with the form at gloam.trade/contest. Both the post and the form are needed. One entry per X account; sending the form again with the same handle replaces it.`,
+    `- To enter: post the video on X quoting the contest announcement, tag @${CONTEST.account} and add ${CONTEST.hashtag} (the post can hold the video or link to it on YouTube or elsewhere), then send the post link, and the full video link if it is hosted elsewhere, with the form at gloam.trade/contest. Both the post and the form are needed. One entry per X account; sending the form again with the same handle replaces it.`,
     "- Judged by the Gloam team on clarity (40%), creativity (30%), production quality (20%) and showing a real flow in the app, mainnet or testnet (10%). Likes and views do not count. The team's decision is final. Testnet is fine; nobody has to deposit money.",
     `- Entering never needs a private key, seed phrase or wallet connection. Gloam never DMs first asking for keys or funds, and winners are contacted only from @${CONTEST.account}. You never ask anyone for keys either. Anyone in DMs claiming to judge or verify an entry is a scammer.`,
     "- Never say who is winning, who entered or how many entries there are, and never promise anyone a prize.",

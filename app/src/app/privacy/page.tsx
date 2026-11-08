@@ -269,7 +269,8 @@ export default function PrivacyPage() {
       </p>
       <p>
         If you enter the video contest at gloam.trade/contest, we keep what you
-        send: your name, X handle, the link to your post, the network you used,
+        send: your name, X handle, the link to your post, the link to your
+        full video if it is hosted elsewhere, the network you used,
         your note and, if you give it, your email. We also note when you
         entered and when you last changed your entry. We use it to judge the
         contest and to reach and pay winners, and for nothing else. Only the

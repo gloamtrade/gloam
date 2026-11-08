@@ -20,7 +20,7 @@ import { ContestForm } from "./ContestForm";
 export const revalidate = 60;
 
 const TITLE = CONTEST.name;
-const DESCRIPTION = `$${CONTEST_TOTAL} for the best short videos about Gloam, private money on public chains. Entries close ${contestDay(CONTEST.closesAt, false)}.`;
+const DESCRIPTION = `$${CONTEST_TOTAL} for the best videos about Gloam, private money on public chains. Entries close ${contestDay(CONTEST.closesAt, false)}.`;
 
 export const metadata: Metadata = {
   title: { absolute: TITLE },
@@ -36,6 +36,7 @@ const IDEAS = [
   "A payroll run",
   "Paying an AI agent privately",
   "Why privacy matters on public chains",
+  "How Gloam keeps a payment private, explained",
 ];
 
 const JUDGING: [string, string, number][] = [
@@ -57,6 +58,10 @@ const RULES = [
 
 const FAQ: [string, string][] = [
   ["Do I need to use real money?", "No. The testnet is fine, and so is a video about the idea without the app."],
+  [
+    "Can my video be long?",
+    "Yes. Any length works. Host a longer video on YouTube or elsewhere, link to it in your post on X, and add the link in the form.",
+  ],
   [
     "Can I enter more than once?",
     "One entry per X account. To change it, send the form again with the same X handle. The latest one counts.",
@@ -100,7 +105,7 @@ export default function ContestPage() {
               <p className="text-[15px] text-mute">{CONTEST.name}</p>
               <h1 className="t-display-xl mt-4">${CONTEST_TOTAL} up for grabs</h1>
               <p className="mt-6 max-w-[44ch] text-[18px] leading-[1.55] text-soft">
-                Make a short video about Gloam, private money on public chains.
+                Make a video about Gloam, private money on public chains.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
                 <a href="#enter" className="btn btn-ink btn-lg">
@@ -137,12 +142,9 @@ export default function ContestPage() {
 
         {/* what to make */}
         <section id="make" aria-labelledby="make-title" className={SECTION}>
-          <SectionHead
-            id="make"
-            label="What to make"
-            title={`A ${CONTEST.minSeconds} to ${CONTEST.maxSeconds} second video about Gloam.`}
-          >
-            Any style works: funny, cinematic, a tutorial, a meme. It has to show Gloam clearly, the app or the idea.
+          <SectionHead id="make" label="What to make" title="Any video about Gloam.">
+            An explainer, a tutorial, a short film, an animation, a skit or a meme. Long or short, all are welcome, and a
+            carefully made video gets the attention it deserves. It has to show Gloam clearly, the app or the idea.
           </SectionHead>
           <div className="mt-12 max-w-[720px]">
             <p className="text-[14px] text-mute">Some ideas</p>
@@ -164,21 +166,22 @@ export default function ContestPage() {
           </SectionHead>
           <ol className="mt-12 divide-y divide-line border-y border-line">
             <Step n={1} title="Make the video">
-              {CONTEST.minSeconds} to {CONTEST.maxSeconds} seconds, about Gloam.
+              Any length, any style, about Gloam.
             </Step>
             <Step n={2} title="Post it on X">
               Quote{" "}
               <a href={announcement} target="_blank" rel="noreferrer" className={xLink}>
                 the contest announcement
               </a>
-              , tag @{CONTEST.account} and add {CONTEST.hashtag}.
+              , tag @{CONTEST.account} and add {CONTEST.hashtag}. Put the video in the post, or link to it if it lives on
+              YouTube or somewhere else.
             </Step>
             <Step n={3} title="Send us the link">
               Put the link to your post in{" "}
               <a href="#enter" className={xLink}>
                 the form on this page
               </a>
-              .
+              , and the full video link if it is hosted elsewhere.
             </Step>
           </ol>
         </section>

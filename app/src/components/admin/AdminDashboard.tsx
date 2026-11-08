@@ -2011,6 +2011,7 @@ type ContestRow = {
   postUrl: string;
   postUser: string;
   postId: string;
+  videoUrl?: string | null;
   note: string | null;
   email: string | null;
   network: ContestNetwork;
@@ -2088,7 +2089,7 @@ function ContestPanel() {
         }
       >
         <DataTable
-          headers={["Name", "X handle", "Video post", "Flag", "Network", "What it shows", "Email", "Submitted", "Updated"]}
+          headers={["Name", "X handle", "Post on X", "Full video", "Flag", "Network", "What it shows", "Email", "Submitted", "Updated"]}
           rows={entries.map((e) => [
             <span key="n" className="text-foreground">
               {e.name}
@@ -2106,6 +2107,14 @@ function ContestPanel() {
             >
               @{e.postUser}/{e.postId.slice(-6)}
             </a>,
+            // https only, checked on the server (lib/contest normalizeVideoUrl)
+            e.videoUrl?.startsWith("https://") ? (
+              <a key="v" href={e.videoUrl} target="_blank" rel="noreferrer noopener" title={e.videoUrl} className={`${link} block max-w-[200px] truncate`}>
+                {e.videoUrl.replace(/^https:\/\/(www\.)?/, "")}
+              </a>
+            ) : (
+              "None"
+            ),
             differs(e) || shared(e) ? (
               <span key="f" className="text-danger">
                 {[differs(e) ? "Post is not by this handle" : null, shared(e) ? "Same post as another entry" : null]
@@ -2124,7 +2133,7 @@ function ContestPanel() {
             (e.revisions ?? 0) > 0 ? `${new Date(e.updatedAt).toLocaleString()} (${e.revisions}x)` : "Not updated",
           ])}
           empty={data.backend === "none" ? "Contest storage is not configured (set Upstash Redis)." : "No entries yet"}
-          minWidth={1240}
+          minWidth={1400}
         />
         <p className="mt-4 text-[13px] leading-relaxed text-mute">
           One entry per X handle; sending again replaces it. Check each post quotes the announcement with the hashtag

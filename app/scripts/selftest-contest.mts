@@ -124,14 +124,29 @@ function fieldOf(body: unknown): string | null {
   assert.equal(fieldOf({ ...GOOD, agree: "on" }), "agree", "only a real true counts");
   n += 12 + contest.CONTEST_NETWORKS.length;
 
+  // the optional full video link
+  const vid = (v: string) => parseContestInput({ ...GOOD, video: v }).videoUrl;
+  assert.equal(parseContestInput(GOOD).videoUrl, null, "video link optional");
+  assert.equal(vid(""), null);
+  assert.equal(vid("https://www.youtube.com/watch?v=abc123"), "https://www.youtube.com/watch?v=abc123");
+  assert.equal(vid("youtu.be/abc123"), "https://youtu.be/abc123", "no scheme is fine");
+  assert.equal(fieldOf({ ...GOOD, video: "http://youtube.com/watch?v=1" }), "video", "http is refused");
+  assert.equal(fieldOf({ ...GOOD, video: "javascript:alert(1)" }), "video");
+  assert.equal(fieldOf({ ...GOOD, video: "https://user:pw@vimeo.com/1" }), "video", "no credentials");
+  assert.equal(fieldOf({ ...GOOD, video: "https://127.0.0.1/v" }), "video", "no bare IP");
+  assert.equal(fieldOf({ ...GOOD, video: "https://localhost/v" }), "video", "a real host name");
+  assert.equal(fieldOf({ ...GOOD, video: `https://youtube.com/${"v".repeat(300)}` }), "video", "over 300 characters");
+  n += 10;
+
   // the config
-  assert.equal(contest.CONTEST_TOTAL, 500, "prizes add up to $500");
+  assert.equal(contest.CONTEST_TOTAL, 600, "prizes add up to $600");
+  assert.deepEqual(CONTEST.prizes, [250, 150, 100, 100]);
   assert.equal(contest.contestDay(CONTEST.closesAt), "16 November 2026");
   assert.equal(contest.contestTime(CONTEST.closesAt), "23:59 UTC");
   assert.equal(contestClosed(Date.parse("2026-11-16T23:59:30Z")), false, "open through the last minute");
   assert.equal(contestClosed(Date.parse("2026-11-17T00:00:00Z")), true);
   assert.deepEqual([0, 1, 2, 3].map(contest.placeLabel), ["1st", "2nd", "3rd", "4th"]);
-  n += 6;
+  n += 7;
 }
 
 // ------------------------------------------------------------ the route
@@ -170,7 +185,7 @@ try {
 
   // same handle again (any case): replaces, keeps the first time, keeps the old post
   Date.now = () => Date.parse("2026-11-11T12:00:00Z");
-  const again = await send({ ...GOOD, handle: "ADA_L", post: "https://x.com/someone_else/status/99", note: "" });
+  const again = await send({ ...GOOD, handle: "ADA_L", post: "https://x.com/someone_else/status/99", note: "", video: "https://youtu.be/full1" });
   assert.deepEqual(again.json, { ok: true, data: { updated: true } }, "the answer says it was updated");
   const list1 = await entries.listContestEntries();
   assert.equal(list1.length, 1, "still one entry per handle");
@@ -245,9 +260,10 @@ try {
   assert.ok(csv.startsWith('"Submitted (UTC)","Updated (UTC)","Name","X handle","Video post"'), "CSV header");
   assert.ok(csv.includes(`"'=HYPERLINK(""x"")"`), "formula cells quoted as text");
   assert.ok(csv.includes('"Yes (@someone_else)"'), "the flag is in the CSV");
+  assert.ok(csv.includes(",\"Full video link\",") && csv.includes("\"https://youtu.be/full1\""), "the full video link is in the CSV");
   assert.ok(csv.includes('"https://x.com/Ada_L/status/1850000000000000001"'), "earlier posts in the CSV");
   g.__testCookies = {};
-  n += 10;
+  n += 11;
 }
 
 console.log(`video contest: ${n} passed`);

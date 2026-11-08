@@ -7,8 +7,8 @@
  * the entry, keeps when it was first sent, and keeps the last few post links
  * it replaced so a changed entry can be traced.
  *
- * An entry holds a name, the X handle, the link to the video post, an optional
- * line on what it shows, an optional email for reaching winners, and the
+ * An entry holds a name, the X handle, the link to the post on X, an optional
+ * link to the full video elsewhere, an optional line on what it shows, an optional email for reaching winners, and the
  * network used. No IP address is kept with it; the rate limit holds a hashed
  * IP for up to two hours.
  */
@@ -100,6 +100,7 @@ export function contestCsv(entries: ContestEntry[]): string {
     "X handle",
     "Video post",
     "Post account differs",
+    "Full video link",
     "Network",
     "What it shows",
     "Email",
@@ -114,6 +115,7 @@ export function contestCsv(entries: ContestEntry[]): string {
       e.handle,
       e.postUrl,
       postUserDiffers(e) ? `Yes (@${e.postUser})` : "No",
+      e.videoUrl ?? null,
       CONTEST_NETWORK_LABEL[e.network] ?? e.network,
       e.note,
       e.email,
