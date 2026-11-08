@@ -70,7 +70,9 @@ for (const [id, chainId, pool, asset] of PINNED) {
 }
 // an entry appended later never repeats a place that already has an id
 const key = (w) => `${w.chainId}|${w.pool.toLowerCase()}|${w.asset.toLowerCase()}`;
-assert.equal(new Set(SHORT_LINK_WHERE.map(key)).size, SHORT_LINK_WHERE.length, "no place has two ids");
+// (reserved ids, Elysium's before its values are in, are all chain 0 and stand for no place yet)
+const placed = SHORT_LINK_WHERE.filter((w) => w.chainId !== 0);
+assert.equal(new Set(placed.map(key)).size, placed.length, "no place has two ids");
 n++;
 
 // fixed bodies: a seed link on ids 1, 16 (with a note) and 44, and a 32-byte secret link on id 10.
