@@ -43,7 +43,7 @@ const JUDGING: [string, string, number][] = [
   ["Clarity", "Does a viewer understand what Gloam does?", 40],
   ["Creativity", "Something we haven’t seen before.", 30],
   ["Production quality", "Sound, pacing and picture.", 20],
-  ["A real flow in the app", "A private payment or another flow, on mainnet or testnet.", 10],
+  ["A real flow in the app", "A private payment or another flow on mainnet. Testnet footage doesn't count.", 10],
 ];
 
 const RULES = [
@@ -59,7 +59,7 @@ const RULES = [
 ];
 
 const FAQ: [string, string][] = [
-  ["Do I need to use real money?", "No. The testnet is fine, and so is a video about the idea without the app."],
+  ["Do I need to use the app?", "No. A video about the idea works too. If you show the app, show it on mainnet: testnet footage is not accepted."],
   ["How long should my video be?", `Between ${CONTEST.minMinutes} and ${CONTEST.maxMinutes} minutes.`],
   [
     "Can I post it on YouTube instead?",
@@ -236,7 +236,7 @@ export default function ContestPage() {
           <div className="mt-10 max-w-[720px] rounded-2xl bg-sealed-soft px-5 py-5 sm:px-6">
             <p className="text-[15px] font-medium text-foreground">You never need to deposit money.</p>
             <p className="mt-2 text-[14.5px] leading-relaxed text-soft">
-              The testnet is fine. We never ask for a private key, a seed phrase or a wallet connection to enter. Gloam
+              A video about the idea works without the app. If you show the app, use mainnet; testnet footage is not accepted. We never ask for a private key, a seed phrase or a wallet connection to enter. Gloam
               never DMs first asking for keys or funds, and winners are contacted only from @{CONTEST.account}.
             </p>
           </div>
