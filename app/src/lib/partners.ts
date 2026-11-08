@@ -695,17 +695,20 @@ export async function countedRecord(chainId: number, txHash: string): Promise<{ 
 /**
  * Takes a counted transaction back from its partner, exactly as it was counted,
  * and frees its claim: for a cash out to another partner's own address, which the
- * on-chain match gives to that partner (lib/partnerBackfill). Null when it was not counted.
+ * on-chain match gives to that partner (lib/partnerBackfill), or for a relayed one whose
+ * transaction reverted (lib/partnerRelay). Null when it was not counted.
+ *
+ * The record is taken with GETDEL, so of two reversals of one transaction at once only
+ * one finds it, and its counters come off once.
  */
 export async function reverseActivity(chainId: number, txHash: string): Promise<{ partnerId: string; record: ActivityRecord } | null> {
   const h = txHash.toLowerCase();
-  const raw = jsonOf<{ partnerId: string; json: string }>(await kv1(["GET", k("txrec", chainId, h)]));
+  const raw = jsonOf<{ partnerId: string; json: string }>(await kv1(["GETDEL", k("txrec", chainId, h)]));
   const record = raw ? jsonOf<ActivityRecord>(raw.json) : null;
   if (!raw || !record) return null;
   await kv([
     ...counterCommands(raw.partnerId, normalized(record), -1n),
     ["LREM", k("events", raw.partnerId), 0, raw.json],
-    ["DEL", k("txrec", chainId, h)],
     ["DEL", k("tx", chainId, h)],
   ]);
   return { partnerId: raw.partnerId, record: normalized(record) };

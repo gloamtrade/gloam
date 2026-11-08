@@ -7,6 +7,7 @@ import {
   adminCodeConfigured,
 } from "@/lib/adminAuth";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
+import { sameSiteJson } from "@/lib/partnersAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,11 @@ const TRIES_PER_MIN = 5;
 const TRIES_PER_HOUR = 20;
 
 export async function POST(req: Request) {
+  // A JSON body from this site only, before any try is counted: another site can't
+  // spend this IP's tries (the admin's own) or post a code here.
+  if (!sameSiteJson(req)) {
+    return NextResponse.json({ ok: false, error: "Sign in from the Gloam admin page." }, { status: 403 });
+  }
   if (!adminCodeConfigured()) {
     return NextResponse.json(
       { ok: false, error: "Admin sign-in is not configured." },

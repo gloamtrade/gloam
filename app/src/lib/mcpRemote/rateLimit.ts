@@ -67,9 +67,19 @@ export class SharedCountUnavailable extends Error {
   }
 }
 
-/** The client's IP as the platform reports it (Vercel sets x-forwarded-for). */
+/**
+ * The client's IP as the platform reports it. On Vercel (VERCEL=1) the edge sets
+ * x-vercel-forwarded-for and x-real-ip itself and overwrites x-forwarded-for, so
+ * those are read first, in that order. Elsewhere (a local run, a self-host behind a
+ * proxy) it is the leftmost x-forwarded-for, then x-real-ip, as before.
+ */
 export function clientIp(req: Request): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip")?.trim() || "local";
+  const first = (name: string) => req.headers.get(name)?.split(",")[0]?.trim() || "";
+  if (process.env.VERCEL === "1") {
+    const ip = first("x-vercel-forwarded-for") || first("x-real-ip") || first("x-forwarded-for");
+    if (ip) return ip;
+  }
+  return first("x-forwarded-for") || req.headers.get("x-real-ip")?.trim() || "local";
 }
 
 /**

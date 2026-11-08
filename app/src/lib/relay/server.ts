@@ -860,7 +860,11 @@ type SubmitOpts = {
 };
 
 /** Hooks a caller may hang on a send. */
-export type SendHooks = Pick<SubmitOpts, "beforeBroadcast">;
+/**
+ * `onEnd`: how the send ended, once its receipt shows it (after the reply). Nothing it
+ * throws reaches the send (the partner relay takes back a count whose send reverted).
+ */
+export type SendHooks = Pick<SubmitOpts, "beforeBroadcast" | "onEnd">;
 
 /** The call a spend sends, as calldata, for the before-broadcast hook. */
 function callTx(net: GloamNetwork, call: Call): { to: Address; data: Hex } | null {
@@ -1364,7 +1368,11 @@ export async function relayTransfer(net: GloamNetwork, body: Record<string, unkn
   if (!Array.isArray(commitments) || commitments.length !== 2) throw new RelayError("Invalid commitments.");
   const c0 = asBytes32(commitments[0], "commitment");
   const c1 = asBytes32(commitments[1], "commitment");
-  return submitSpend(net, { kind: "transfer", args: [proof, root, nullifier, [c0, c1]] }, { sender: () => sender, beforeBroadcast: hooks.beforeBroadcast });
+  return submitSpend(
+    net,
+    { kind: "transfer", args: [proof, root, nullifier, [c0, c1]] },
+    { sender: () => sender, beforeBroadcast: hooks.beforeBroadcast, onEnd: hooks.onEnd }
+  );
 }
 
 type UnshieldCall = Extract<Call, { kind: "unshield" }>;
@@ -1389,7 +1397,7 @@ async function unshieldCall(net: GloamNetwork, body: Record<string, unknown>): P
 
 /** As relayTransfer. The recipient is screened once, before anything else. */
 export async function relayUnshield(net: GloamNetwork, body: Record<string, unknown>, sender?: Sender, hooks: SendHooks = {}) {
-  return submitSpend(net, await unshieldCall(net, body), { sender: () => sender, screened: true, beforeBroadcast: hooks.beforeBroadcast });
+  return submitSpend(net, await unshieldCall(net, body), { sender: () => sender, screened: true, beforeBroadcast: hooks.beforeBroadcast, onEnd: hooks.onEnd });
 }
 
 /**
@@ -1592,7 +1600,13 @@ export async function relayVaultSwap(net: GloamNetwork, body: Record<string, unk
         await keepSwapEscrow(net, escrow);
         return refunding ? holdWaiting(net, spend.asset, refund.amount, gasLimit) : holdSwap(net, gasLimit);
       },
-      onEnd: (status) => noteEnded(net, refunding ? `refund|${escrow}` : spend.nullifier, status),
+      onEnd: async (status) => {
+        // each on its own: one that throws never stops the other
+        await Promise.all([
+          noteEnded(net, refunding ? `refund|${escrow}` : spend.nullifier, status).catch(() => {}),
+          hooks.onEnd?.(status).catch(() => {}),
+        ]);
+      },
       // a refund is never a link's swap: no binding for it
       beforeBroadcast: (tx) => (refunding ? undefined : hooks.beforeBroadcast?.(tx)),
     }

@@ -183,6 +183,12 @@ await test("with a session, the admin sees every ballot and note, and exports th
 
   const votesCsv = await (await adminRoute.GET(new Request(`http://localhost/api/admin/votes?format=csv&kind=votes&vote=${v.id}`))).text();
   assert.ok(votesCsv.includes(holder.address) && votesCsv.includes(`0x${"ab".repeat(65)}`));
+  const oneRes = await adminRoute.GET(new Request(`http://localhost/api/admin/votes?format=csv&kind=votes&vote=${v.id}`));
+  assert.match(oneRes.headers.get("content-disposition") ?? "", new RegExp(`filename="gloam-votes-${v.id}-\\d{4}-\\d{2}-\\d{2}\\.csv"$`));
+  // the file name comes from the vote config, never from the query as typed
+  const odd = await adminRoute.GET(new Request(`http://localhost/api/admin/votes?format=csv&kind=votes&vote=${encodeURIComponent('x"; filename*=UTF-8\'\'evil.html')}`));
+  assert.equal(odd.status, 200);
+  assert.match(odd.headers.get("content-disposition") ?? "", /^attachment; filename="gloam-votes-all-\d{4}-\d{2}-\d{2}\.csv"$/);
   const allCsv = await (await adminRoute.GET(new Request("http://localhost/api/admin/votes?format=csv&kind=votes"))).text();
   assert.ok(allCsv.startsWith('"vote","voter"') && allCsv.includes(v.id));
   const fbRes = await adminRoute.GET(new Request("http://localhost/api/admin/votes?format=csv&kind=feedback"));

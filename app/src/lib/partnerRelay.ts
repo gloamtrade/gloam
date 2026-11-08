@@ -18,12 +18,16 @@
  * A cash out's and a swap's vault fee is recorded with it: the amount times the
  * vault's withdrawFeeBps, read after the send (cached a few minutes), the way
  * the vault works it out. A fee that can't be read is left unknown.
+ * A count is made when the relay sends, before the transaction is mined. When its
+ * receipt then shows a revert (the relay watches every send it makes), the count is
+ * taken back exactly (lib/partners reverseActivity), so a partner's numbers hold only
+ * transactions that landed.
  *
  * Server only. The relay functions and the vault read are injectable for tests.
  */
 import type { Address, Hex } from "viem";
 import { logSafe } from "./logSafe";
-import { claimTransaction, recordActivity, type ActivityKind, type ActivityRecord, type Partner } from "./partners";
+import { claimTransaction, recordActivity, reverseActivity, type ActivityKind, type ActivityRecord, type Partner } from "./partners";
 import type { GloamNetwork } from "./networks";
 import { swapRouterFor } from "./vaultSwap";
 import {
@@ -40,6 +44,7 @@ import {
   relayVaultSwapExit,
   type MemoPartner,
   type Sender,
+  type SendHooks,
 } from "./relay/server";
 
 export type PartnerRelayAction = "transfer" | "unshield" | "memo" | "swap" | "swapExit";
@@ -50,14 +55,16 @@ export type Attribution =
   | { recorded: false; kind: ActivityKind | null; reason: "not_billable" | "duplicate" | "storage_error" };
 
 export type PartnerRelayDeps = {
-  relayTransfer: (net: GloamNetwork, body: Record<string, unknown>, sender?: Sender) => Promise<Hex>;
-  relayUnshield: (net: GloamNetwork, body: Record<string, unknown>, sender?: Sender) => Promise<Hex>;
+  relayTransfer: (net: GloamNetwork, body: Record<string, unknown>, sender?: Sender, hooks?: SendHooks) => Promise<Hex>;
+  relayUnshield: (net: GloamNetwork, body: Record<string, unknown>, sender?: Sender, hooks?: SendHooks) => Promise<Hex>;
   relayMemo: (net: GloamNetwork, body: Record<string, unknown>, from?: MemoPartner) => Promise<Hex>;
-  relayVaultSwap: (net: GloamNetwork, body: Record<string, unknown>, sender?: Sender) => Promise<Hex>;
+  relayVaultSwap: (net: GloamNetwork, body: Record<string, unknown>, sender?: Sender, hooks?: SendHooks) => Promise<Hex>;
   relayVaultSwapExit: (net: GloamNetwork, body: Record<string, unknown>, sender?: Sender) => Promise<Hex>;
   /** The vault's spent(nullifier), read on the relay's own node. */
   isSpent: (net: GloamNetwork, nullifier: Hex) => Promise<boolean>;
   record: typeof recordActivity;
+  /** Takes back a count whose transaction reverted. */
+  reverse: typeof reverseActivity;
   /** Claims a transaction for the partner without counting it (a refund, an exit). */
   claim: typeof claimTransaction;
   /** The vault's cash-out fee in basis points, or null when it can't be read. */
@@ -104,6 +111,7 @@ export const partnerRelayDeps: PartnerRelayDeps = {
   isSpent: async (net, nullifier) =>
     Boolean(await relayPublicClient(net).readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "spent", args: [nullifier] })),
   record: recordActivity,
+  reverse: reverseActivity,
   claim: claimTransaction,
   vaultFeeBps: readVaultFeeBps,
 };
@@ -129,13 +137,29 @@ export async function relayForPartner(
   let edge: { asset: Address; amount: bigint } | null = null;
   /** Sent and not counted, but claimed for this partner (a refund, an exit). */
   let claimed: Hex | null = null;
+  // A send whose receipt shows a revert is taken back from the count, whichever of the
+  // count and the receipt comes first (the receipt is read after the reply).
+  let reverted = false;
+  let counted: Hex | null = null;
+  const takeBack = (tx: Hex) =>
+    deps.reverse(net.chainId, tx).then(
+      () => undefined,
+      (e: unknown) => console.error("gloam_api_reverse", logSafe(e))
+    );
+  const hooks: SendHooks = {
+    onEnd: async (status) => {
+      if (status !== "reverted" || reverted) return;
+      reverted = true;
+      if (counted) await takeBack(counted);
+    },
+  };
   switch (body.action) {
     case "transfer":
-      hash = await deps.relayTransfer(net, body, sender);
+      hash = await deps.relayTransfer(net, body, sender, hooks);
       kind = "private_payment";
       break;
     case "unshield":
-      hash = await deps.relayUnshield(net, body, sender);
+      hash = await deps.relayUnshield(net, body, sender, hooks);
       kind = "cash_out";
       // Public inputs of the cash-out proof, already validated by the relay.
       edge = { asset: asAddress(body.asset, "asset"), amount: asAmount(body.amount) };
@@ -157,7 +181,7 @@ export async function relayForPartner(
       } catch {
         throw new RelayError("Could not read the vault right now. Nothing was sent. Try again shortly.", 503, "check_failed");
       }
-      hash = await deps.relayVaultSwap(net, body, sender);
+      hash = await deps.relayVaultSwap(net, body, sender, hooks);
       if (!spent) {
         kind = "private_swap";
         // The swap's input: public inputs of its unshield proof, which the relay's dry run checked.
@@ -188,6 +212,11 @@ export async function relayForPartner(
       const bps = edge ? await deps.vaultFeeBps(net).catch(() => null) : null;
       const vaultFee = edge && bps != null ? vaultFeeOn(edge.amount, bps) : null;
       const r = await deps.record({ partner, keyId, network: net, kind, txHash: hash, edge, vaultFee, source: "api" });
+      if (r.recorded) {
+        counted = hash;
+        // its receipt already showed a revert: take it back now
+        if (reverted) await takeBack(hash);
+      }
       attribution = r.recorded ? { recorded: true, kind, activity: r.record } : { recorded: false, kind, reason: r.reason };
     } catch (e) {
       console.error("gloam_api_attribution", logSafe(e));
