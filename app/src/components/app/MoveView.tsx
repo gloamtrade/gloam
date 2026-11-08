@@ -1870,7 +1870,17 @@ export function MoveView() {
         });
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message.replace(/\.$/, "") : "something went wrong";
+      // viem's message carries the whole RPC request (URL, body, call args): show its first line only,
+      // and say plainly when the network itself could not be reached.
+      const short =
+        (e as { shortMessage?: string } | null)?.shortMessage ??
+        (e instanceof Error ? e.message.split("\n")[0] : "something went wrong");
+      const offline =
+        (e as { name?: string } | null)?.name === "HttpRequestError" ||
+        /HTTP request failed|Failed to fetch|fetch failed|timed? ?out|network/i.test(short);
+      const msg = offline
+        ? `${network.label} could not be reached just now. Tap Secure it now to try again`
+        : short.replace(/\.$/, "");
       if (report) setImportOk({
         text: `${did}, but it is not secured yet: ${msg}. ${stillOpen}`,
         note: claim?.note,
