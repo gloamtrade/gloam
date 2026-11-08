@@ -579,6 +579,9 @@ export async function settleGloamCharge(args: {
       prove: config.prove,
       chain,
       submit: config.submit,
+      // the x402 binding is for X-PAYMENT: this credential's own binding, keyed by the same note
+      // secret over this challenge (challengeBinding), was checked in validateGloamCharge
+      allowUnbound: true,
       beforeSubmit: async (fresh, intent) => {
         // The note first: a failure here means nothing went out, and a sent record would block every retry.
         await config.beforeSubmit(fresh, intent);

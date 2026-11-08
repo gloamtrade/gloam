@@ -27,6 +27,7 @@ import { GloamRelayError, RELAY_MAYBE_SENT, relayIntent, type RelayOptions } fro
 import { syncTree, type SyncTreeParams } from "./sync.js";
 import type { NoteExport } from "./witness.js";
 import {
+  checkGloamPaymentBinding,
   openGloamPaymentNote,
   verifyGloamPayment,
   verifyPaymentNoteBinding,
@@ -311,6 +312,12 @@ export interface SettleParams {
   chain: SweepChain;
   submit: SweepSubmitter;
   beforeSubmit?: SweepParams["beforeSubmit"];
+  /**
+   * Take a payment with no binding (from a payer older than it). Off by default: a
+   * sealed ticket copied from the payment board has none either (checkGloamPaymentBinding).
+   * A binding that is there and wrong is refused either way.
+   */
+  allowUnbound?: boolean;
 }
 
 export interface SettleResult {
@@ -356,6 +363,9 @@ export async function settleGloamPayment(params: SettleParams): Promise<SettleRe
   }
   const verify = verifyGloamPayment({ requirements: req, payload, note });
   if (!verify.ok) return reject(verify.reason ?? "payment did not verify", verify);
+  // made as this payment, by its payer: not a sealed ticket copied from the payment board
+  const unbound = await checkGloamPaymentBinding({ requirements: req, payload, note, allowUnbound: params.allowUnbound });
+  if (unbound) return reject(unbound, verify);
 
   const sweep = await sweepReceivedNote({
     note,

@@ -46,6 +46,7 @@ import {
   buildGloamPayment,
   verifyGloamPayment,
   verifyPaymentNoteBinding,
+  checkGloamPaymentBinding,
   noteFieldProblem,
   encodeRequirements,
   decodeRequirements,
@@ -2736,6 +2737,11 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
       if (!verify.ok) return reject(verify.reason ?? "The payment did not verify.", { verify: verifyView });
       // A structural pass alone would trust a lying payer; the amount must bind to the commitment.
       if (!(await verifyPaymentNoteBinding(note))) return reject("The payment note's amount does not bind to its commitment.");
+      // Made as this payment by its payer, not a sealed ticket copied from the payment board: a payment
+      // made with the app or a payment request posts its ticket there, where anyone can read it.
+      // GLOAM_X402_ALLOW_UNBOUND=1 takes payments from payers older than the binding (and copies with them).
+      const unbound = await checkGloamPaymentBinding({ requirements: req, payload: pay, note, allowUnbound: env.GLOAM_X402_ALLOW_UNBOUND?.trim() === "1" });
+      if (unbound) return reject(unbound, { problem: "unbound-payment" });
       const paymentNullifier = fieldToHex(await noteNullifierPoseidon(hexToField(note.secret), hexToField(note.commitment)));
       return settleReceived({ net, notes, note, paymentNullifier, label: req.resource, sealed, verifyView });
     }

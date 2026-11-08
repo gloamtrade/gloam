@@ -120,7 +120,8 @@ assert(v.final === false && v.finality === GLOAM_NOT_FINAL, "verify without a sw
 assert(/spend the money back/.test(v.finality) && /settleGloamPayment/.test(v.finality), "not-final notice names the risk and the fix");
 assert(v.amountWei === PRICE.toString(), "verify surfaces amount");
 assert(v.commitment === payNote.commitment, "verify surfaces the commitment to check on-chain");
-assert(v.onchainChecksRequired.length === 5, "verify lists 5 on-chain checks");
+assert(v.onchainChecksRequired.length === 6, "verify lists 6 checks");
+assert(v.onchainChecksRequired.some((c) => c.includes("checkGloamPaymentBinding")), "verify lists the payment binding check");
 assert(v.onchainChecksRequired.some((c) => /sweep/i.test(c)), "verify lists the sweep as a required step");
 assert(v.onchainChecksRequired.some((c) => /binding/i.test(c)), "verify flags the note-binding check");
 assert(v.onchainChecksRequired.some((c) => c.includes("not yet attached")), "verify flags missing settlement tx");

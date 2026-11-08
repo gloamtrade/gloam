@@ -407,6 +407,7 @@ Two rules keep the money safe:
 
 - **The payment note is sealed to the payee.** `payTo` must be the payee's receive tag (`gloamr1.…`). `buildGloamPayment` encrypts the payment note to it, so the agent, a proxy or a log that sees the `X-PAYMENT` header cannot open it. A `payTo` that is not a receive tag is refused.
 - **The payee sweeps before it serves.** The payer created the payment note, so it knows the secret too and could spend it back after being served. `settleGloamPayment` opens the note, verifies it, and moves it into a fresh note only the payee knows. Grant access only when it returns `grantAccess: true`. A `verifyGloamPayment` on its own always says `final: false`.
+- **The payment is bound to its payee.** `buildGloamPayment` adds `payload.binding`, an HMAC keyed by the payment note's secret over the chain, pool, receive tag and note. A sealed ticket can also be public (a payment made with the app or `buildPrivatePaymentWithReceipt` posts it on the payment board), and anyone could copy it into an X-PAYMENT header; it has no binding, so `settleGloamPayment` refuses it. A payer older than the binding sends none: pass `allowUnbound: true` to take such payments anyway. `checkGloamPaymentBinding` runs the check on its own.
 
 ```ts
 import {
