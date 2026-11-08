@@ -42,11 +42,11 @@ export function ContestForm({ closed }: { closed: boolean }) {
       name: String(f.get("name") ?? ""),
       handle: String(f.get("handle") ?? ""),
       post: String(f.get("post") ?? ""),
-      video: String(f.get("video") ?? ""),
       note: String(f.get("note") ?? ""),
       email: String(f.get("email") ?? ""),
       network: String(f.get("network") ?? ""),
       agree: f.get("agree") === "on",
+      marketing: f.get("marketing") === "on",
       hp: String(f.get("hp") ?? ""),
     };
     try {
@@ -114,7 +114,7 @@ export function ContestForm({ closed }: { closed: boolean }) {
       <Row
         label="Link to your post on X"
         htmlFor="c-post"
-        hint={`The post that quotes the announcement, with ${CONTEST.hashtag}. It can hold the video or link to it.`}
+        hint={`The post with your video uploaded to it, quoting the announcement, with ${CONTEST.hashtag}.`}
         error={fieldError("post")}
       >
         <input
@@ -131,29 +131,6 @@ export function ContestForm({ closed }: { closed: boolean }) {
           className="gl-input"
           aria-invalid={Boolean(fieldError("post"))}
           aria-describedby={described("post", true)}
-        />
-      </Row>
-
-      <Row
-        label="Full video link (YouTube or other)"
-        optional
-        htmlFor="c-video"
-        hint="For a longer video hosted somewhere other than X."
-        error={fieldError("video")}
-      >
-        <input
-          id="c-video"
-          name="video"
-          type="url"
-          inputMode="url"
-          placeholder="https://youtube.com/watch?v=…"
-          autoComplete="off"
-          autoCapitalize="none"
-          spellCheck={false}
-          maxLength={CONTEST_LIMITS.video}
-          className="gl-input"
-          aria-invalid={Boolean(fieldError("video"))}
-          aria-describedby={described("video", true)}
         />
       </Row>
 
@@ -233,6 +210,26 @@ export function ContestForm({ closed }: { closed: boolean }) {
         {fieldError("agree") && (
           <p id="c-agree-err" className="mt-2 text-[13px] text-danger">
             {fieldError("agree")}
+          </p>
+        )}
+      </div>
+
+      <div>
+        <label htmlFor="c-marketing" className="flex cursor-pointer items-start gap-3 text-[14.5px] leading-relaxed text-soft">
+          <input
+            id="c-marketing"
+            name="marketing"
+            type="checkbox"
+            required
+            className="mt-[3px] h-[18px] w-[18px] shrink-0 cursor-pointer accent-[var(--foreground)]"
+            aria-invalid={Boolean(fieldError("marketing"))}
+            aria-describedby={described("marketing")}
+          />
+          <span>Gloam may use my video for marketing, with credit to me.</span>
+        </label>
+        {fieldError("marketing") && (
+          <p id="c-marketing-err" className="mt-2 text-[13px] text-danger">
+            {fieldError("marketing")}
           </p>
         )}
       </div>

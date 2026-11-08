@@ -23,7 +23,7 @@ function fail(status: number, message: string, field: string | null = null, head
 const ok = (updated: boolean) => NextResponse.json({ ok: true, data: { updated } }, { headers: { "Cache-Control": "no-store" } });
 
 /**
- * Enter the video contest: `{ name, handle, post, note, email, network, agree }`.
+ * Enter the video contest: `{ name, handle, post, note, email, network, agree, marketing }`. Both checkboxes must be true.
  * One entry per X handle; the same handle again replaces it (`updated: true`).
  */
 export async function POST(req: Request) {

@@ -20,6 +20,9 @@ export const CONTEST = {
   closesAt: "2026-11-16T23:59:59Z",
   /** Winners are announced on @gloamtrade by this day (UTC). */
   winnersBy: "2026-11-19T00:00:00Z",
+  /** Video length, in minutes. */
+  minMinutes: 1,
+  maxMinutes: 3,
   hashtag: "#GloamVideo",
   account: "gloamtrade",
   /** The contest post on X that entries quote. Until it is set, the page points at @gloamtrade. */
@@ -79,10 +82,10 @@ export const CONTEST_NETWORK_LABEL: Record<ContestNetwork, string> = {
   none: "Didn't use the app",
 };
 
-export const CONTEST_LIMITS = { name: 80, note: 280, email: 120, post: 300, video: 300 } as const;
+export const CONTEST_LIMITS = { name: 80, note: 280, email: 120, post: 300 } as const;
 
 /** What the form sends. `hp` is the field people never see. */
-export const CONTEST_FIELDS = ["name", "handle", "post", "video", "note", "email", "network", "agree", "hp"] as const;
+export const CONTEST_FIELDS = ["name", "handle", "post", "note", "email", "network", "agree", "marketing", "hp"] as const;
 
 export type ContestInput = {
   name: string;
@@ -93,14 +96,12 @@ export type ContestInput = {
   /** The account in the post link, lowercased. It can differ from the handle; admin flags it. */
   postUser: string;
   postId: string;
-  /** The full video somewhere else (YouTube or other), for videos the X post links to. */
-  videoUrl: string | null;
   note: string | null;
   email: string | null;
   network: ContestNetwork;
 };
 
-export type ContestField = "name" | "handle" | "post" | "video" | "note" | "email" | "network" | "agree";
+export type ContestField = "name" | "handle" | "post" | "note" | "email" | "network" | "agree" | "marketing";
 
 /** A field the entrant needs to fix, with a message they can act on. */
 export class ContestInputError extends Error {
@@ -158,27 +159,6 @@ export function normalizeXPost(raw: unknown): { url: string; user: string; id: s
   return { url: `https://x.com/${user}/status/${id}`, user: user!.toLowerCase(), id: id! };
 }
 
-/**
- * A link to the full video anywhere on the web (YouTube or other), as an
- * https URL without credentials or a port. Null when it isn't one.
- */
-export function normalizeVideoUrl(raw: unknown): string | null {
-  let s = clean(raw);
-  if (!s || s.length > CONTEST_LIMITS.video) return null;
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(s)) s = `https://${s}`;
-  let u: URL;
-  try {
-    u = new URL(s);
-  } catch {
-    return null;
-  }
-  if (u.protocol !== "https:" || u.username || u.password || u.port) return null;
-  const host = u.hostname.toLowerCase();
-  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host) || /^\d+(\.\d+)+$/.test(host)) return null;
-  const out = u.toString();
-  return out.length <= CONTEST_LIMITS.video ? out : null;
-}
-
 /** Checks an entry. The same rules run in the form and on the server. */
 export function parseContestInput(raw: unknown): ContestInput {
   const b = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -197,14 +177,6 @@ export function parseContestInput(raw: unknown): ContestInput {
   const post = normalizeXPost(b.post);
   if (!post) {
     throw new ContestInputError("post", "Use the link to your post on X, like x.com/yourname/status/123.");
-  }
-
-  let videoUrl: string | null = null;
-  if (clean(b.video)) {
-    videoUrl = normalizeVideoUrl(b.video);
-    if (!videoUrl) {
-      throw new ContestInputError("video", "Use a full https link to the video, like https://youtube.com/watch?v=…, or leave it empty.");
-    }
   }
 
   const note = clean(b.note);
@@ -227,13 +199,16 @@ export function parseContestInput(raw: unknown): ContestInput {
     throw new ContestInputError("agree", "Confirm the video is your own work and you agree to the rules.");
   }
 
+  if (b.marketing !== true) {
+    throw new ContestInputError("marketing", "Confirm Gloam may use your video for marketing, with credit to you.");
+  }
+
   return {
     name,
     handle: handle.toLowerCase(),
     postUrl: post.url,
     postUser: post.user,
     postId: post.id,
-    videoUrl,
     note: note || null,
     email,
     network: b.network as ContestNetwork,

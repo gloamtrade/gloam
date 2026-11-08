@@ -58,6 +58,7 @@ const GOOD = {
   email: "Ada@Example.com",
   network: "robinhood",
   agree: true,
+  marketing: true,
   hp: "",
 };
 
@@ -124,23 +125,21 @@ function fieldOf(body: unknown): string | null {
   assert.equal(fieldOf({ ...GOOD, agree: "on" }), "agree", "only a real true counts");
   n += 12 + contest.CONTEST_NETWORKS.length;
 
-  // the optional full video link
-  const vid = (v: string) => parseContestInput({ ...GOOD, video: v }).videoUrl;
-  assert.equal(parseContestInput(GOOD).videoUrl, null, "video link optional");
-  assert.equal(vid(""), null);
-  assert.equal(vid("https://www.youtube.com/watch?v=abc123"), "https://www.youtube.com/watch?v=abc123");
-  assert.equal(vid("youtu.be/abc123"), "https://youtu.be/abc123", "no scheme is fine");
-  assert.equal(fieldOf({ ...GOOD, video: "http://youtube.com/watch?v=1" }), "video", "http is refused");
-  assert.equal(fieldOf({ ...GOOD, video: "javascript:alert(1)" }), "video");
-  assert.equal(fieldOf({ ...GOOD, video: "https://user:pw@vimeo.com/1" }), "video", "no credentials");
-  assert.equal(fieldOf({ ...GOOD, video: "https://127.0.0.1/v" }), "video", "no bare IP");
-  assert.equal(fieldOf({ ...GOOD, video: "https://localhost/v" }), "video", "a real host name");
-  assert.equal(fieldOf({ ...GOOD, video: `https://youtube.com/${"v".repeat(300)}` }), "video", "over 300 characters");
-  n += 10;
+  // marketing consent is required, and there is no other link field
+  assert.equal(fieldOf({ ...GOOD, marketing: false }), "marketing");
+  assert.equal(fieldOf({ ...GOOD, marketing: "on" }), "marketing", "only a real true counts");
+  const { marketing: _m, ...noMarketing } = GOOD;
+  void _m;
+  assert.equal(fieldOf(noMarketing), "marketing", "missing consent is refused");
+  assert.ok(!(contest.CONTEST_FIELDS as readonly string[]).includes("video"), "no full video link field");
+  assert.ok(!("videoUrl" in parseContestInput(GOOD)), "nothing but the X post is kept as a link");
+  n += 5;
 
   // the config
   assert.equal(contest.CONTEST_TOTAL, 600, "prizes add up to $600");
   assert.deepEqual(CONTEST.prizes, [250, 150, 100, 100]);
+  assert.equal(CONTEST.minMinutes, 1);
+  assert.equal(CONTEST.maxMinutes, 3);
   assert.equal(contest.contestDay(CONTEST.closesAt), "16 November 2026");
   assert.equal(contest.contestTime(CONTEST.closesAt), "23:59 UTC");
   assert.equal(contestClosed(Date.parse("2026-11-16T23:59:30Z")), false, "open through the last minute");
@@ -185,13 +184,18 @@ try {
 
   // same handle again (any case): replaces, keeps the first time, keeps the old post
   Date.now = () => Date.parse("2026-11-11T12:00:00Z");
-  const again = await send({ ...GOOD, handle: "ADA_L", post: "https://x.com/someone_else/status/99", note: "", video: "https://youtu.be/full1" });
+  const again = await send({ ...GOOD, handle: "ADA_L", post: "https://x.com/someone_else/status/99", note: "" });
   assert.deepEqual(again.json, { ok: true, data: { updated: true } }, "the answer says it was updated");
   const list1 = await entries.listContestEntries();
   assert.equal(list1.length, 1, "still one entry per handle");
   assert.equal(list1[0]!.submittedAt, Date.parse("2026-11-10T12:00:00Z"), "first time kept");
   assert.equal(list1[0]!.updatedAt, Date.parse("2026-11-11T12:00:00Z"));
   assert.equal(list1[0]!.revisions, 1);
+  assert.equal(list1[0]!.marketingConsentAt, Date.parse("2026-11-11T12:00:00Z"), "consent stored with its time");
+  const noConsent = await send({ ...GOOD, handle: "nokay", marketing: false });
+  assert.equal(noConsent.status, 400);
+  assert.equal(noConsent.json.error?.field, "marketing", "the server refuses an entry without consent");
+  n += 3;
   assert.deepEqual(list1[0]!.previousPosts, ["https://x.com/Ada_L/status/1850000000000000001"]);
   assert.equal(list1[0]!.note, null);
   assert.equal(entries.postUserDiffers(list1[0]!), true, "a post by another account is flagged");
@@ -260,7 +264,8 @@ try {
   assert.ok(csv.startsWith('"Submitted (UTC)","Updated (UTC)","Name","X handle","Video post"'), "CSV header");
   assert.ok(csv.includes(`"'=HYPERLINK(""x"")"`), "formula cells quoted as text");
   assert.ok(csv.includes('"Yes (@someone_else)"'), "the flag is in the CSV");
-  assert.ok(csv.includes(",\"Full video link\",") && csv.includes("\"https://youtu.be/full1\""), "the full video link is in the CSV");
+  assert.ok(!csv.includes("Full video link"), "no full video link column");
+  assert.ok(csv.includes(',"Marketing consent (UTC)",') && csv.includes('"2026-11-11 12:00"'), "consent time in the CSV");
   assert.ok(csv.includes('"https://x.com/Ada_L/status/1850000000000000001"'), "earlier posts in the CSV");
   g.__testCookies = {};
   n += 11;

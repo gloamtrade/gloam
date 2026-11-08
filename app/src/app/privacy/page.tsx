@@ -269,15 +269,18 @@ export default function PrivacyPage() {
       </p>
       <p>
         If you enter the video contest at gloam.trade/contest, we keep what you
-        send: your name, X handle, the link to your post, the link to your
-        full video if it is hosted elsewhere, the network you used,
-        your note and, if you give it, your email. We also note when you
-        entered and when you last changed your entry. We use it to judge the
-        contest and to reach and pay winners, and for nothing else. Only the
-        Gloam team can read it. Your IP address is not kept with your entry;
-        the rate limit holds a hashed copy for up to two hours. We delete
-        entries 90 days after winners are paid, or sooner if you ask at{" "}
-        <a href="mailto:hello@gloam.trade">hello@gloam.trade</a>.
+        send: your name, X handle, the link to your post, the network you
+        used, your note and, if you give it, your email. We also note when you
+        entered, when you last changed your entry, and when you agreed that
+        Gloam may use your video for marketing with credit to you. We use it to
+        judge the contest, to reach and pay winners, and to show we have your
+        permission when we use a video, and for nothing else. Only the Gloam
+        team can read it. Your IP address is not kept with your entry; the
+        rate limit holds a hashed copy for up to two hours. We delete entries
+        90 days after winners are paid, except the name, handle, post link and
+        consent time for a video we use, which we keep while we use it. Ask at{" "}
+        <a href="mailto:hello@gloam.trade">hello@gloam.trade</a> to have yours
+        deleted sooner.
       </p>
       <h2>10. Glim, our Telegram helper</h2>
       <p>

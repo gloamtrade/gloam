@@ -47,20 +47,23 @@ const JUDGING: [string, string, number][] = [
 ];
 
 const RULES = [
+  `Videos are ${CONTEST.minMinutes} to ${CONTEST.maxMinutes} minutes long.`,
+  "Entries come from X only, with the video uploaded to the post.",
   "Original work only.",
   "One entry per X account.",
   "The video stays public until winners are paid.",
   "No impersonating other projects.",
   "No bought likes, views or followers.",
   "Entries that break a rule are removed.",
-  "We may share winning videos on Gloam’s channels, with credit.",
+  "Gloam may repost, clip and use entries in its marketing, with credit to the creator.",
 ];
 
 const FAQ: [string, string][] = [
   ["Do I need to use real money?", "No. The testnet is fine, and so is a video about the idea without the app."],
+  ["How long should my video be?", `Between ${CONTEST.minMinutes} and ${CONTEST.maxMinutes} minutes.`],
   [
-    "Can my video be long?",
-    "Yes. Any length works. Host a longer video on YouTube or elsewhere, link to it in your post on X, and add the link in the form.",
+    "Can I post it on YouTube instead?",
+    "Entries come from X only. Upload the video to your post on X; a link to YouTube or another site doesn’t count.",
   ],
   [
     "Can I enter more than once?",
@@ -142,9 +145,14 @@ export default function ContestPage() {
 
         {/* what to make */}
         <section id="make" aria-labelledby="make-title" className={SECTION}>
-          <SectionHead id="make" label="What to make" title="Any video about Gloam.">
-            An explainer, a tutorial, a short film, an animation, a skit or a meme. Long or short, all are welcome, and a
-            carefully made video gets the attention it deserves. It has to show Gloam clearly, the app or the idea.
+          <SectionHead
+            id="make"
+            label="What to make"
+            title={`A ${CONTEST.minMinutes} to ${CONTEST.maxMinutes} minute video about Gloam.`}
+          >
+            An explainer, a tutorial, a short film, an animation, a skit or a meme. Any style is welcome, and a carefully
+            made video gets the attention it deserves. It has to show Gloam clearly, the app or the idea, and be posted
+            on X.
           </SectionHead>
           <div className="mt-12 max-w-[720px]">
             <p className="text-[14px] text-mute">Some ideas</p>
@@ -166,22 +174,21 @@ export default function ContestPage() {
           </SectionHead>
           <ol className="mt-12 divide-y divide-line border-y border-line">
             <Step n={1} title="Make the video">
-              Any length, any style, about Gloam.
+              {CONTEST.minMinutes} to {CONTEST.maxMinutes} minutes long, any style, about Gloam.
             </Step>
             <Step n={2} title="Post it on X">
-              Quote{" "}
+              Upload the video to the post itself. Quote{" "}
               <a href={announcement} target="_blank" rel="noreferrer" className={xLink}>
                 the contest announcement
               </a>
-              , tag @{CONTEST.account} and add {CONTEST.hashtag}. Put the video in the post, or link to it if it lives on
-              YouTube or somewhere else.
+              , tag @{CONTEST.account} and add {CONTEST.hashtag}. Links to YouTube or other sites don&rsquo;t count.
             </Step>
             <Step n={3} title="Send us the link">
               Put the link to your post in{" "}
               <a href="#enter" className={xLink}>
                 the form on this page
               </a>
-              , and the full video link if it is hosted elsewhere.
+              .
             </Step>
           </ol>
         </section>

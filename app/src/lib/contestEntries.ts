@@ -7,10 +7,11 @@
  * the entry, keeps when it was first sent, and keeps the last few post links
  * it replaced so a changed entry can be traced.
  *
- * An entry holds a name, the X handle, the link to the post on X, an optional
- * link to the full video elsewhere, an optional line on what it shows, an optional email for reaching winners, and the
- * network used. No IP address is kept with it; the rate limit holds a hashed
- * IP for up to two hours.
+ * An entry holds a name, the X handle, the link to the post on X (the video
+ * is uploaded to it), an optional line on what it shows, an optional email for
+ * reaching winners, the network used, and when the entrant agreed that Gloam
+ * may use the video for marketing with credit. No IP address is kept with it;
+ * the rate limit holds a hashed IP for up to two hours.
  */
 import { CONTEST_NETWORK_LABEL, type ContestInput } from "./contest";
 import { jsonOf, kv } from "./partnersKv";
@@ -29,6 +30,8 @@ export type ContestEntry = ContestInput & {
   revisions: number;
   /** Post links this entry replaced, newest first. */
   previousPosts: string[];
+  /** When the entrant last agreed Gloam may use the video for marketing, with credit (every entry needs it). */
+  marketingConsentAt: number;
 };
 
 /** The entry list is full; nothing was saved. */
@@ -60,6 +63,7 @@ export async function saveContestEntry(input: ContestInput, now = Date.now()): P
     updatedAt: now,
     revisions: earlier ? (earlier.revisions ?? 0) + 1 : 0,
     previousPosts,
+    marketingConsentAt: now,
   };
   await kv([
     ["SET", entryKey(input.handle), JSON.stringify(entry)],
@@ -100,10 +104,10 @@ export function contestCsv(entries: ContestEntry[]): string {
     "X handle",
     "Video post",
     "Post account differs",
-    "Full video link",
     "Network",
     "What it shows",
     "Email",
+    "Marketing consent (UTC)",
     "Times updated",
     "Earlier posts",
   ];
@@ -115,10 +119,10 @@ export function contestCsv(entries: ContestEntry[]): string {
       e.handle,
       e.postUrl,
       postUserDiffers(e) ? `Yes (@${e.postUser})` : "No",
-      e.videoUrl ?? null,
       CONTEST_NETWORK_LABEL[e.network] ?? e.network,
       e.note,
       e.email,
+      e.marketingConsentAt ? utc(e.marketingConsentAt) : null,
       e.revisions ?? 0,
       (e.previousPosts ?? []).join(" "),
     ].map(cell),

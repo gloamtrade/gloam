@@ -2011,7 +2011,7 @@ type ContestRow = {
   postUrl: string;
   postUser: string;
   postId: string;
-  videoUrl?: string | null;
+  marketingConsentAt?: number;
   note: string | null;
   email: string | null;
   network: ContestNetwork;
@@ -2089,7 +2089,7 @@ function ContestPanel() {
         }
       >
         <DataTable
-          headers={["Name", "X handle", "Post on X", "Full video", "Flag", "Network", "What it shows", "Email", "Submitted", "Updated"]}
+          headers={["Name", "X handle", "Post on X", "Flag", "Network", "What it shows", "Email", "Marketing consent", "Submitted", "Updated"]}
           rows={entries.map((e) => [
             <span key="n" className="text-foreground">
               {e.name}
@@ -2107,14 +2107,6 @@ function ContestPanel() {
             >
               @{e.postUser}/{e.postId.slice(-6)}
             </a>,
-            // https only, checked on the server (lib/contest normalizeVideoUrl)
-            e.videoUrl?.startsWith("https://") ? (
-              <a key="v" href={e.videoUrl} target="_blank" rel="noreferrer noopener" title={e.videoUrl} className={`${link} block max-w-[200px] truncate`}>
-                {e.videoUrl.replace(/^https:\/\/(www\.)?/, "")}
-              </a>
-            ) : (
-              "None"
-            ),
             differs(e) || shared(e) ? (
               <span key="f" className="text-danger">
                 {[differs(e) ? "Post is not by this handle" : null, shared(e) ? "Same post as another entry" : null]
@@ -2129,6 +2121,7 @@ function ContestPanel() {
               {e.note ?? "None"}
             </span>,
             e.email ?? "None",
+            e.marketingConsentAt ? `Yes, ${new Date(e.marketingConsentAt).toLocaleString()}` : "No",
             new Date(e.submittedAt).toLocaleString(),
             (e.revisions ?? 0) > 0 ? `${new Date(e.updatedAt).toLocaleString()} (${e.revisions}x)` : "Not updated",
           ])}
