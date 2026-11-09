@@ -67,7 +67,7 @@ const FAQ: [string, string][] = [
   ],
   [
     "Where can I ask questions?",
-    "In the Creators topic of our Telegram community, t.me/gloamhq. Share drafts, ask questions and meet other creators there.",
+    "In the Creators topic of our Telegram community, t.me/gloamhq/28002. Share drafts, ask questions and meet other creators there.",
   ],
   [
     "Can I enter more than once?",
@@ -120,6 +120,9 @@ export default function ContestPage() {
                 </a>
                 <a href="#rules" className="gl-arrowlink">
                   Read the rules <span aria-hidden>→</span>
+                </a>
+                <a href={CONTEST.telegramUrl} target="_blank" rel="noreferrer" className="gl-arrowlink">
+                  Join the creators on Telegram <span aria-hidden>→</span>
                 </a>
               </div>
               <p className="tnum mt-8 text-[13.5px] text-mute">
@@ -260,6 +263,13 @@ export default function ContestPage() {
                   : `Post your video on X first, quoting the announcement and tagging @${CONTEST.account}. Then add the link here.`}
               </p>
               <p className="mt-6 max-w-[40ch] text-[13.5px] leading-relaxed text-mute">
+                Questions or a draft to share? Ask in{" "}
+                <a href={CONTEST.telegramUrl} target="_blank" rel="noreferrer" className={xLink}>
+                  the Creators topic on Telegram
+                </a>
+                .
+              </p>
+              <p className="mt-4 max-w-[40ch] text-[13.5px] leading-relaxed text-mute">
                 We keep your entry to run the contest and contact winners, and for nothing else. Only the Gloam team can
                 read it.
               </p>
