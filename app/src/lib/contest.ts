@@ -25,7 +25,9 @@ export const CONTEST = {
   maxMinutes: 3,
   account: "gloamtrade",
   /** The contest post on X that entries quote. Until it is set, the page points at @gloamtrade. */
-  announcementUrl: null as string | null,
+  announcementUrl: "https://x.com/gloamtrade/status/2119693757138317348" as string | null,
+  /** The Telegram community, where the Creators topic lives. */
+  telegramUrl: "https://t.me/gloamhq",
 } as const;
 
 export const CONTEST_TOTAL = CONTEST.prizes.reduce((a, b) => a + b, 0);
