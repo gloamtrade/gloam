@@ -1,4 +1,4 @@
-import { BASE_MAINNET_TOKENS, ETHEREUM_MAINNET_TOKENS, RH_MAINNET_SWAP_TOKENS, RH_MAINNET_TOKENS, type OnchainToken } from "./tokens";
+import { BASE_MAINNET_TOKENS, ELYSIUM_MAINNET_TOKENS, ETHEREUM_MAINNET_TOKENS, RH_MAINNET_SWAP_TOKENS, RH_MAINNET_TOKENS, type OnchainToken } from "./tokens";
 
 /**
  * Tokens the markets feed does not price: on Robinhood Chain mainnet $GLOAM,
@@ -12,6 +12,7 @@ const LISTED: readonly (readonly [chainId: number, tokens: readonly OnchainToken
   [4663, [...RH_MAINNET_TOKENS, ...RH_MAINNET_SWAP_TOKENS]],
   [8453, BASE_MAINNET_TOKENS],
   [1, ETHEREUM_MAINNET_TOKENS],
+  [99901, ELYSIUM_MAINNET_TOKENS],
 ];
 
 const marked = (t: OnchainToken) => Boolean(t.coingecko) && t.kind === "token" && t.id !== "weth";
@@ -45,5 +46,5 @@ export const STOCK_FALLBACK_MARKED: OnchainToken[] = uniqueByAddress(
 
 /** Chains whose listed tokens include one priced here: Robinhood Chain, Base and Ethereum mainnet. */
 export function hasCoingeckoMarks(chainId: number): boolean {
-  return chainId === 4663 || chainId === 8453 || chainId === 1;
+  return chainId === 4663 || chainId === 8453 || chainId === 1 || (chainId === 99901 && ELYSIUM_MAINNET_TOKENS.length > 0);
 }

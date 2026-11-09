@@ -304,12 +304,17 @@ export const ETHEREUM_SEPOLIA_TOKENS: OnchainToken[] = [
 export const NATIVE_ETH_TOKEN: OnchainToken = { id: "eth", symbol: "ETH", name: "Ether", address: "0x0000000000000000000000000000000000000000", decimals: 18, yahoo: "", kind: "token", coingecko: "ethereum" };
 
 /**
- * Elysium mainnet: USDC only at launch, with the launch limits (500 per deposit,
- * 25,000 in total), behind NEXT_PUBLIC_ELYSIUM_ENABLED (lib/elysium.ts). Its
- * address and decimals come from there. HYPE, the gas coin, is not listed.
+ * Elysium mainnet, behind NEXT_PUBLIC_ELYSIUM_ENABLED (lib/elysium.ts): USDC from
+ * launch (500 per deposit, 25,000 in total; address and decimals from lib/elysium.ts),
+ * and KNTQ, Kinetiq's token as bridged through Elysium's canonical gateway
+ * (l1Address 0x0000…c2d6 on HyperEVM), open once its queued limit lands
+ * (1,400 per deposit, 70,000 in total; queued 9 Nov 2026). HYPE, the gas coin, is not listed yet.
  */
 export const ELYSIUM_MAINNET_TOKENS: OnchainToken[] = ELYSIUM
-  ? [{ id: "usdc", symbol: "USDC", name: "USD Coin", address: ELYSIUM.usdc, decimals: ELYSIUM.usdcDecimals, yahoo: "", kind: "stablecoin" }]
+  ? [
+      { id: "usdc", symbol: "USDC", name: "USD Coin", address: ELYSIUM.usdc, decimals: ELYSIUM.usdcDecimals, yahoo: "", kind: "stablecoin" },
+      { id: "kntq", symbol: "KNTQ", name: "Kinetiq", address: "0xe45a355d9e9cAd2aD85F2d03E3eE3102A036acF0", decimals: 18, yahoo: "", kind: "token", coingecko: "kinetiq", opensWithLimit: true },
+    ]
   : [];
 
 /**

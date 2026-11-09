@@ -878,8 +878,8 @@ export default function DocsNetworksPage() {
                   launch, raised only through the vault&apos;s 3-day timelock
                 </li>
                 <li>
-                  <strong>Not on Elysium yet.</strong> Private swaps, and bringing money over
-                  into Elysium.
+                  <strong>Bring money over</strong> into Elysium USDC from other chains through
+                  Relay, or swap HYPE into USDC on Elysium. Private swaps are not on Elysium yet.
                 </li>
               </ul>
             </>
