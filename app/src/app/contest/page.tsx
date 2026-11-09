@@ -66,6 +66,10 @@ const FAQ: [string, string][] = [
     "Entries come from X only. Upload the video to your post on X; a link to YouTube or another site doesn’t count.",
   ],
   [
+    "Where can I ask questions?",
+    "In the Creators topic of our Telegram community, t.me/gloamhq. Share drafts, ask questions and meet other creators there.",
+  ],
+  [
     "Can I enter more than once?",
     "One entry per X account. To change it, send the form again with the same X handle. The latest one counts.",
   ],
@@ -237,7 +241,7 @@ export default function ContestPage() {
             <p className="text-[15px] font-medium text-foreground">You never need to deposit money.</p>
             <p className="mt-2 text-[14.5px] leading-relaxed text-soft">
               A video about the idea works without the app. If you show the app, use mainnet; testnet footage is not accepted. We never ask for a private key, a seed phrase or a wallet connection to enter. Gloam
-              never DMs first asking for keys or funds, and winners are contacted only from @{CONTEST.account}.
+              never asks for keys or funds in DMs, and winners are contacted only from @{CONTEST.account}.
             </p>
           </div>
         </section>
