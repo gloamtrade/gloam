@@ -55,17 +55,19 @@ export WITHDRAW_FEE_BPS=50 FEE_RECIPIENT=0xB3900ac9350903218e4c7597bAb0f008F01B3
 # The guard owns this vault: no NEW_OWNER on this path.
 unset NEW_OWNER NEW_OWNER_EOA
 export GUARD_CONTROLLER GUARD_CONTROLLER_EOA=${GUARD_CONTROLLER_EOA:-0}
-# The deploy scripts refuse a DEPLOYER_PK that is not this address's key.
-export DEPLOYER=0x891E74a11abC5D0eC2EE855B2BD521fF9D18F411
 export SCRIPT=script/DeployElysiumMainnet.s.sol:DeployElysiumMainnet
 
 printf "Deployer private key (hidden, then Enter): "
 read -rs DEPLOYER_PK
 echo
 export DEPLOYER_PK
+# The deployer is whoever this key belongs to. The first deployer (0x891E...F411) was
+# retired on 9 Nov 2026, so Elysium's vault address differs from the other chains;
+# elysium-mainnet-after-deploy.sh reads the real addresses from the deploy.
+export DEPLOYER=$(cast wallet address --private-key "$DEPLOYER_PK")
 
 echo "chain:      $_chain   must be $ELYSIUM_CHAIN_ID"
-echo "deployer:   $(cast wallet address --private-key "$DEPLOYER_PK")   must be $DEPLOYER"
+echo "deployer:   $DEPLOYER   the new wallet you funded"
 echo "nonce:      $(cast nonce $DEPLOYER --rpc-url "$RPC_URL")   must be 0"
 echo "balance:    $(cast balance $DEPLOYER --rpc-url "$RPC_URL" --ether) HYPE   see DEPLOY-ELYSIUM.md step 1"
 echo "gas:        $(cast to-unit $(cast gas-price --rpc-url "$RPC_URL") gwei) gwei"

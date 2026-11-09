@@ -49,9 +49,9 @@ export interface ElysiumMainnetInput {
 
 export const ELYSIUM_MAINNET: ElysiumMainnetInput = {
   chainId: 99901,
-  rpcUrl: null,
-  explorerUrl: null,
-  usdc: null,
+  rpcUrl: "https://rpc.elysium.kinetiq.xyz",
+  explorerUrl: "https://elysium.kinetiq.xyz/explorer",
+  usdc: "0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65",
   usdcDecimals: 6,
   pool: null,
   deployBlock: null,
