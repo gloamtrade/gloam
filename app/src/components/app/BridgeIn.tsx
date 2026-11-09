@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { erc20Abi, formatUnits, parseUnits, type Address, type Hex } from "viem";
 import { useAccount, useConfig, useReadContract } from "wagmi";
-import { getAccount, getTransactionReceipt, sendTransaction, switchChain, waitForTransactionReceipt } from "wagmi/actions";
+import { getAccount, getTransactionReceipt, readContract, sendTransaction, switchChain, waitForTransactionReceipt } from "wagmi/actions";
 import {
   BRIDGE_CHAINS,
   bridgeSources,
@@ -565,6 +565,8 @@ function BridgeSheet({
   }
 
   function pick(c: BridgeChain) {
+    // An error from the last chain's quote (its balance, its route) never carries over.
+    setStage((st) => (st.kind === "form" ? { kind: "form", error: null } : st));
     setChain(c);
     setSymbol(c.tokens[0]!.symbol);
     setRefundTo("");
@@ -741,6 +743,17 @@ function BridgeSheet({
             throw e;
           });
           if (rec.status !== "success") throw new Error("The approval didn't go through.");
+          // Some wallets (OKX among them) let the approval be edited down. A payment
+          // above what was approved fails in the wallet's own check, so stop here and
+          // say so instead of handing over a payment that cannot go through.
+          if (tx.data.slice(0, 10).toLowerCase() === "0x095ea7b3") {
+            const spender = `0x${tx.data.slice(34, 74)}` as Address;
+            const needed = BigInt(`0x${tx.data.slice(74, 138)}`);
+            const allowed = await readContract(config, { address: tx.to as Address, abi: erc20Abi, functionName: "allowance", args: [getAccount(config).address as Address, spender], chainId }).catch(() => null);
+            if (allowed !== null && allowed < needed) {
+              throw new Error(`Your wallet approved less than this payment needs (${formatUnits(allowed, quote.send.symbol === "USDC" || quote.send.symbol === "USDT" ? 6 : 18)} of ${quote.send.amount} ${quote.send.symbol}). Try again and approve the amount shown, without editing it.`);
+            }
+          }
           approved = true;
           // Some wallets check the payment against a node that hasn't seen the approval yet
           // and call it a failed contract call: give the chain a few seconds first.
@@ -898,7 +911,7 @@ function BridgeSheet({
                       ? `Swap ${token.symbol} for ${dest.token.symbol}, straight into your private balance.`
                       : `Swap ${token.symbol} for ${dest.token.symbol} in your wallet on ${dest.chain}.`
                     : privately
-                      ? `From ${chain.kind === "svm" ? "your Solana wallet" : `this wallet on ${chain.name}`}, straight into your private balance on ${dest.chain}.`
+                      ? `From ${chain.kind === "svm" ? "your Solana wallet" : chain.name} to your private balance on ${dest.chain}.`
                       : `From another chain or an exchange, into your wallet on ${dest.chain}.`}
               </p>
             </div>
@@ -988,6 +1001,17 @@ function BridgeSheet({
               </button>
             </div>
 
+            <div>
+              <p className="text-[13px] text-mute">To</p>
+              <div className="mt-1.5 flex h-14 w-full items-center gap-3 rounded-xl bg-surface px-3.5">
+                <ChainLogo id={dest.chainId} size={28} />
+                <span className="min-w-0 flex-1 text-[15px] text-foreground">{dest.chain}</span>
+                <span className={`shrink-0 text-[13px] ${privately ? "text-sealed" : "text-mute"}`}>
+                  {privately ? `Private balance, ${dest.token.symbol}` : `Your wallet, ${dest.token.symbol}`}
+                </span>
+              </div>
+            </div>
+
             {chain.tokens.length > 1 && (
               <div role="radiogroup" aria-label="Token" className="flex flex-wrap gap-2">
                 {chain.tokens.map((t) => (
@@ -1013,6 +1037,7 @@ function BridgeSheet({
 
             {canPrivate && (
               <PrivateToggle
+                destChain={dest.chain}
                 on={privateOn}
                 onChange={setPrivateOn}
                 detail={
@@ -1401,7 +1426,7 @@ function StatusLine({ status, quote }: { status: BridgeStatus | null; quote: Bri
 }
 
 /** "Land in private balance": on, the payer's own wallet pays straight into the private balance. */
-function PrivateToggle({ on, onChange, detail }: { on: boolean; onChange: (on: boolean) => void; detail: string }) {
+function PrivateToggle({ on, onChange, detail, destChain }: { on: boolean; onChange: (on: boolean) => void; detail: string; destChain: string }) {
   return (
     <button
       type="button"
@@ -1413,7 +1438,7 @@ function PrivateToggle({ on, onChange, detail }: { on: boolean; onChange: (on: b
       }`}
     >
       <span className="min-w-0 flex-1">
-        <span className="block text-[14.5px] font-medium text-foreground">Land in private balance</span>
+        <span className="block text-[14.5px] font-medium text-foreground">Land in your private balance on {destChain}</span>
         <span className="mt-0.5 block text-[12.5px] leading-snug text-mute">{detail}</span>
       </span>
       <span
