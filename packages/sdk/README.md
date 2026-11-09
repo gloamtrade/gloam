@@ -694,10 +694,34 @@ proveGroth16(input, wasm, zkey)                              // one-shot form
 ### Tree sync
 
 ```ts
-syncTree(client, { pool, fromBlock?, chunkSize? }): Promise<SyncedTree>
+syncTree(client, { pool, fromBlock?, chunkSize?, concurrency? }): Promise<SyncedTree>
 assertTreeMatchesChain(client, pool, synced): Promise<boolean>
 // SyncedTree.pathForCommitment(commitment) feeds straight into the spend builders.
+
+// keep the tree instead of rebuilding it (next release)
+createTreeSync(client, { pool, fromBlock?, chunkSize?, concurrency?, store?, seed?, overlap?, verifyRoot?, reuseMs? }): TreeSync
+  .sync(): Promise<SyncedTree>                                // reads only the blocks since the last sync
+  .pathForCommitment(commitment, { atBlock? }?)               // sync, then the path (atBlock: skip the head read)
+  .knownPath(commitment)                                      // the kept tree's path, one root check, no log reads
+  .follow(intervalMs): () => void                             // keep syncing in the background (servers)
+gloamLeafSeed(network, { url?, fetch?, timeoutMs? }?): TreeSeed  // gloam.trade's public leaf list for a cold start
+parseTreeSnapshot(json, pool): TreeSnapshot | null             // what a TreeStore keeps (JSON)
 ```
+
+`syncTree` walks the pool's logs from `fromBlock` every time. On a public RPC that caps `eth_getLogs` (Tempo: 100,000 blocks) that is about a minute for a pool a few months old. A server or agent that spends more than once should keep a `createTreeSync`:
+
+```ts
+const tree = createTreeSync(publicClient, {
+  pool: net.pool,
+  fromBlock: net.deployBlock,
+  chunkSize: 99_000n,
+  seed: gloamLeafSeed("tempo-mainnet"),  // a cold start in one request instead of a walk over the pool's history
+  store: myFileStore,                    // { load(), save(snapshot) }: a restart reads only the blocks since
+});
+const path = await tree.pathForCommitment(note.commitment);
+```
+
+Nothing from the seed is trusted, nor a stored copy the pool has not confirmed: the rebuilt root has to be one the pool knows (`isKnownRoot`, one call), and a list that does not match is dropped for a walk of the chain. Gloam pools keep every root they have had, so a store saves the root the pool confirmed with its copy, and `knownPath` answers from that copy on the next run with no chain reads at all (a copy whose items do not build that root is checked again). The seed request names only the network and is the same for everyone.
 
 ### x402 payments
 
@@ -734,7 +758,7 @@ isReceiveTag(s) / assertReceiveTag(s)                        // strict: gloamr1.
 sealToReceiveTag(text, tag) / openSealedTicket(sealed, key)  // gloam2t.… tickets, app-compatible
 encodeNotePackage / decodeNotePackage                        // gloam1.… note packages, app-compatible
 sweepReceivedNote(p): Promise<SweepResult>                   // move a received note into a fresh one
-sweepChainFromClient(publicClient, { pool, fromBlock })      // the chain reads a sweep needs
+sweepChainFromClient(publicClient, { pool, fromBlock, ...treeSyncParams, tree?, pollingInterval? }) // the chain reads a sweep needs; keeps the tree
 relaySubmitter(opts?)                                        // submit sweeps through the Gloam relay
 POOL_TRANSFER_ABI, POOL_STATE_ABI, transferCallArgs(intent)  // sign a transfer with your own wallet
 ```

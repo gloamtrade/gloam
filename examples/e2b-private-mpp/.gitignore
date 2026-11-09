@@ -4,3 +4,5 @@
 # Note secrets (the agent's balance, the seller's swept notes). Never commit.
 .wallet/
 node_modules/
+# The pool tree cache (public chain data, rebuilt if missing).
+.cache/

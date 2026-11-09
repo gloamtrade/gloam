@@ -28,6 +28,7 @@ import {
   noteNullifierPoseidon,
   openGloamPaymentNote,
   settleGloamPayment,
+  createTreeSync,
   sweepChainFromClient,
   sweepChainProblem,
   verifyPaymentNoteBinding,
@@ -41,6 +42,7 @@ import {
   type Prover,
   type ReceiveKey,
   type SweepChain,
+  type SweepChainParams,
 } from "@gloamtrade/sdk";
 import {
   allowedModes,
@@ -164,10 +166,22 @@ export function transfersInReceipt(receipt: MinimalReceipt, pool: Address): Tran
 
 type SdkPublicClient = Parameters<typeof sweepChainFromClient>[0];
 
-/** A GloamChargeChain over a viem PublicClient (the pool's tree is rebuilt for each sweep path). */
-export function gloamChargeChainFromClient(client: SdkPublicClient, params: { pool: Address; fromBlock?: bigint }): GloamChargeChain {
+/**
+ * A GloamChargeChain over a viem PublicClient. It keeps the pool's tree for the
+ * life of the server (the SDK's createTreeSync), so a sweep reads only the
+ * blocks since the last one. Make it once and share it between requests. For
+ * a fast cold start pass `seed: gloamLeafSeed(network)` (and a `store` to keep
+ * the leaf list across restarts), and call `warm()` at startup.
+ */
+export function gloamChargeChainFromClient(client: SdkPublicClient, params: SweepChainParams): GloamChargeChain & { warm(): Promise<void> } {
+  const tree = params.tree ?? createTreeSync(client, params);
+  const sweep = sweepChainFromClient(client, { ...params, tree });
   return {
-    ...sweepChainFromClient(client, params),
+    ...sweep,
+    /** Sync the tree (and read the RPC's chain id) now, at startup, so the first payment does not wait for them. */
+    warm: async () => {
+      await Promise.all([tree.sync(), sweep.chainId?.()]);
+    },
     transferWouldLand: transferCheckFromCall((a) => client.call(a)),
     async getReceipt(hash) {
       try {
@@ -309,6 +323,8 @@ export interface ValidatedGloamCharge {
   landed: boolean;
   /** A record left by an earlier attempt with this payment (a sweep whose outcome was unknown). */
   pending: GloamReplayRecord | null;
+  /** When the chain was read for this validation (ms, the config's clock). */
+  checkedAt?: number;
 }
 
 /**
@@ -376,6 +392,24 @@ export async function validateGloamCharge(args: {
     throw new GloamChargeError("invalid-challenge", "This challenge was already paid and used. Request the resource again for a fresh one.");
   }
 
+  // The reads below are independent: in pull mode they go out together, and are looked at in this order.
+  const t = payload.type === "hash" ? null : payload.transfer;
+  const early = <T>(p: Promise<T>) => p.then((v) => ({ v }), (e: unknown) => ({ e }));
+  const open = <T>(r: { v: T } | { e: unknown }): T => {
+    if ("e" in r) throw r.e;
+    return r.v;
+  };
+  const reads = t
+    ? {
+        seen: early(chain.isCommitmentSeen(note.commitment)),
+        sourceSpent: pending ? null : early(chain.isSpent(t.nullifier)),
+        wouldLand:
+          !pending && chain.transferWouldLand && t.proof && t.root
+            ? chain.transferWouldLand(md.pool, { proof: t.proof, root: t.root, nullifier: t.nullifier, newCommitments: t.newCommitments }).catch(() => null)
+            : null,
+      }
+    : null;
+
   // Spent with no record of ours: the payer (who also knows the secret) moved it, or another server took it.
   if (!pending && (await chain.isSpent(paymentNullifier))) {
     throw fail("The payment note was already spent, most likely by the payer who created it. Do not grant access.");
@@ -392,21 +426,20 @@ export async function validateGloamCharge(args: {
     transfer = event;
     landed = true;
   } else {
-    const t = payload.transfer;
-    if (lc(t.newCommitments[0]) !== lc(note.commitment)) throw fail("The payment note is not the payment output of the presented transfer.");
-    transfer = t;
-    landed = await chain.isCommitmentSeen(note.commitment);
-    if (!landed && !pending && (await chain.isSpent(t.nullifier))) {
+    const pt = payload.transfer;
+    if (lc(pt.newCommitments[0]) !== lc(note.commitment)) throw fail("The payment note is not the payment output of the presented transfer.");
+    transfer = pt;
+    landed = open(await reads!.seen);
+    if (!landed && reads!.sourceSpent && open(await reads!.sourceSpent)) {
       throw fail("The note that funds this transfer was already spent elsewhere, so the transfer cannot land.");
     }
     // The pool's own checks run first, sending nothing: a transfer it would refuse is never submitted.
-    if (!landed && !pending && chain.transferWouldLand && t.proof && t.root) {
-      const would = await chain.transferWouldLand(md.pool, { proof: t.proof, root: t.root, nullifier: t.nullifier, newCommitments: t.newCommitments }).catch(() => null);
-      if (would === false) throw fail("The pool would not take the presented transfer (its proof, root or note does not hold), so nothing was sent.");
+    if (!landed && reads!.wouldLand && (await reads!.wouldLand) === false) {
+      throw fail("The pool would not take the presented transfer (its proof, root or note does not hold), so nothing was sent.");
     }
   }
 
-  return { challengeId: challenge.id, realm: challenge.realm, request, payload, mode, note, paymentNullifier, transfer, landed, pending };
+  return { challengeId: challenge.id, realm: challenge.realm, request, payload, mode, note, paymentNullifier, transfer, landed, pending, checkedAt: now };
 }
 
 // ── settle ───────────────────────────────────────────────────────────────────
@@ -544,7 +577,9 @@ export async function settleGloamCharge(args: {
   try {
     // Pull: the payer's transfer has to land before the payment note can be swept.
     let paymentHash: Hex | null = v.payload.type === "hash" ? v.payload.hash : null;
-    if (v.mode === "pull" && !(await chain.isCommitmentSeen(v.note.commitment))) {
+    // Read again unless this request's own validation just read it (a transfer that lands in between is caught below).
+    const justChecked = args.validated !== undefined && v.checkedAt !== undefined && clock() - v.checkedAt < 5_000;
+    if (v.mode === "pull" && !v.landed && (justChecked || !(await chain.isCommitmentSeen(v.note.commitment)))) {
       let ok = false;
       try {
         paymentHash = await config.submit(payerTransferIntent(md.chainId, md.pool, v.transfer));

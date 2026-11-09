@@ -17,23 +17,26 @@
  * no payer, no payee.
  */
 import { decodeEventLog, decodeFunctionData, erc20Abi, formatUnits, parseAbiItem, parseUnits, toEventSelector, type Hex } from "viem";
+import { existsSync } from "node:fs";
 import { privateKeyToAccount } from "viem/accounts";
 import { Mppx } from "mppx/client";
 import { gloam } from "@gloamtrade/mppx-gloam/client";
 import { parsePaymentChallenges, parseReceipt } from "@gloamtrade/mppx-gloam/core";
-import { POOL_TRANSFER_ABI, relayIntent, syncTree, type BuiltPayment } from "@gloamtrade/sdk";
+import { createTreeSync, POOL_TRANSFER_ABI, relayIntent, type BuiltPayment } from "@gloamtrade/sdk";
 import {
   agentNotes,
   ASSET,
   loadEnv,
   NET,
+  Phases,
   proverFor,
   publicClient,
   sdkClient,
   SERVER_URL,
   short,
   stamp,
-  TREE,
+  treeCacheFile,
+  treeParams,
   txUrl,
   type HeldNote,
 } from "./common.js";
@@ -59,8 +62,17 @@ if (balance() === 0n) throw new Error("The agent holds no private balance. Run `
 log(`private balance ${fmt(balance())} in ${notes.filter((n) => n.status === "unspent").length} note(s) in the Gloam pool on ${NET.label} testnet`);
 
 // ── 1. ask without paying: the same 402 E2B sends today, with a private offer added ──
+const phases = new Phases();
+// The pool's tree, kept in .cache/ (on the first run, Gloam's public leaf list, checked with one call to the pool).
+// Each note's membership path comes from it without reading logs, side by side with the request below.
+const kept = existsSync(treeCacheFile("agent"));
+const tree = createTreeSync(sdkClient, treeParams("agent"));
+const treeStart = Date.now();
+const knownPaths = Promise.all(
+  notes.filter((n) => n.status === "unspent").map(async (n) => [n.commitment.toLowerCase(), await tree.knownPath(n.commitment).catch(() => null)] as const)
+).then((rows) => new Map(rows));
 log(`POST ${URL_} ${BODY}`);
-const first = await fetch(URL_, { method: "POST", headers: { "content-type": "application/json" }, body: BODY });
+const first = await phases.time("402", () => fetch(URL_, { method: "POST", headers: { "content-type": "application/json" }, body: BODY }));
 log(`${first.status} Payment Required. The offers:`);
 for (const c of parsePaymentChallenges(first.headers.get("www-authenticate"))) {
   const r = (typeof c.request === "string" ? b64url(c.request) : c.request) as {
@@ -78,9 +90,11 @@ for (const c of parsePaymentChallenges(first.headers.get("www-authenticate"))) {
 }
 
 // ── 2. pay it with mppx + the gloam method ──────────────────────────────────
-log("Syncing the pool's tree for the note's membership path...");
-const tree = await syncTree(sdkClient, TREE);
-const transferProver = await proverFor("transfer");
+log("Finding the note's membership path in the pool's tree...");
+const paths = await knownPaths;
+phases.add("note path", Date.now() - Math.max(treeStart, phases.start + phases.total("402")));
+const transferProver = await phases.time("load prover", () => proverFor("transfer"));
+let paidAt = 0;
 
 let spent: HeldNote | null = null;
 let built: BuiltPayment | null = null;
@@ -95,14 +109,21 @@ const mppx = Mppx.create({
           .filter((x) => x.status === "unspent" && BigInt(x.amountWei) >= amountWei)
           .sort((a, b) => (BigInt(a.amountWei) < BigInt(b.amountWei) ? -1 : 1))[0];
         if (!n) throw new Error("No single private note covers this charge.");
-        const path = await tree.pathForCommitment(n.commitment);
+        // In the kept tree, or (a note that landed after it was kept) read the blocks since.
+        let path = paths.get(n.commitment.toLowerCase()) ?? null;
+        if (path) {
+          log(kept ? "  path from the tree kept in .cache/ (its root confirmed by the pool when kept), no log reads" : "  path from Gloam's public leaf list (first run), root confirmed by the pool, no log reads");
+        } else {
+          path = await phases.time("note path", () => tree.pathForCommitment(n.commitment));
+          log(`  path after reading the newest blocks (tree now at block ${tree.toBlock}), root confirmed by the pool`);
+        }
         if (!path) throw new Error("The note is not in the pool's tree yet. Retry in a moment.");
         spent = n;
         n.status = "pending";
         log(`paying from note ${short(n.commitment)} (${fmt(BigInt(n.amountWei))})`);
         return { secret: n.secret, amountWei: BigInt(n.amountWei), path };
       },
-      prove: transferProver,
+      prove: (input) => phases.time("payment proof", () => transferProver(input)),
       mode: "auto", // pull when offered: the agent broadcasts nothing and needs no gas
       submit: (intent) => relayIntent(intent), // only used if a server accepts push only
       waitForReceipt: async (hash) => ({ status: (await publicClient.waitForTransactionReceipt({ hash })).status }),
@@ -110,6 +131,7 @@ const mppx = Mppx.create({
       // The change note is the rest of the balance: keep it before anything is sent.
       beforeSubmit: (b, mode) => {
         built = b;
+        paidAt = Date.now();
         const c = b.changeNote;
         notes.push({ secret: c.secret as Hex, commitment: c.commitment as Hex, amountWei: String(c.amountWei), status: "pending", createdAt: new Date().toISOString() });
         agentNotes.save(notes);
@@ -122,6 +144,9 @@ const mppx = Mppx.create({
 const t0 = Date.now();
 const res = await mppx.fetch(URL_, { method: "POST", headers: { "content-type": "application/json" }, body: BODY });
 const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+const paidIn = Date.now() - t0;
+if (paidAt) phases.add("server: settle + sandbox", Date.now() - paidAt);
+const timings = phases.summary();
 
 // Settle the wallet: the spent note goes, the change becomes spendable (or the reservation is undone).
 const change = built ? (built as BuiltPayment).changeNote : null;
@@ -143,7 +168,8 @@ if (!res.ok) {
   process.exit(1);
 }
 const receipt = parseReceipt(res.headers.get("payment-receipt") ?? "");
-log(`${res.status} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+log(`${res.status} in ${(paidIn / 1000).toFixed(1)}s`);
+log(`timings          ${timings}`);
 log(`Payment-Receipt  method=${receipt.method} status=${receipt.status} chainId=${receipt.chainId} reference=${receipt.reference}`);
 log(`sandbox          ${JSON.stringify(json)}`);
 log(`sandboxID        ${json.sandboxID}${json.mock ? "  (MOCK: the server has no E2B_API_KEY)" : ""}`);
@@ -194,6 +220,9 @@ for (const { label, hash } of txs) {
   log(`  a token transfer of the price (${fmt(amountWei)})  ${pricePaid ? "YES" : "no"}`);
   log(`  E2B's address                          none exists: E2B is paid to a receive tag, which never goes on chain`);
 }
+// Keep the tree with this purchase's change note in it, so the next run pays without reading logs.
+await tree.sync().catch(() => undefined);
+
 log();
 log("On chain: two pool transfers, each a nullifier and two commitments, sent by the relay.");
 log(`No amount, no asset, no payer, no payee. Only the agent and E2B know this was a ${fmt(amountWei)} sandbox purchase.`);

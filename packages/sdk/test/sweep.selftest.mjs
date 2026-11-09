@@ -42,7 +42,9 @@ import {
   decodePaymentHeader,
   checkGloamPaymentBinding,
   gloamPaymentBinding,
+  receiptInsertsCommitment,
 } from "../dist/index.js";
+import { keccak256, toBytes } from "viem";
 
 let checks = 0;
 function assert(cond, msg) {
@@ -238,6 +240,47 @@ const stranger = await generateReceiveKey();
   };
   const r3 = await settleGloamPayment({ requirements: blind.req, payload: blind.built.payload, receiveKey: payee, prove: stubProve, chain: blindChain, submit: submitTo(blind.pool) });
   assert(r3.grantAccess === false && r3.status === "unconfirmed" && r3.freshNote, "an unreadable fresh note is unconfirmed, and the fresh note is kept");
+}
+
+// ── 3c. the sweep's receipt logs: the pool's own Transferred event for the fresh note is final ──
+{
+  const TOPIC = keccak256(toBytes("Transferred(bytes32,bytes32[2])"));
+  const withLogs = (pool, address) => ({
+    ...pool.chain,
+    // the pool can't be read at all: only the receipt can make the sweep final
+    isCommitmentSeen: async () => { throw new Error("rpc down"); },
+    waitForReceipt: async (h) => {
+      const r = await pool.chain.waitForReceipt(h);
+      const outs = pool.lastOuts;
+      return r.status === "success"
+        ? { ...r, logs: [{ address, topics: [TOPIC, "0x" + "11".repeat(32)], data: "0x" + outs[0].slice(2) + outs[1].slice(2) }] }
+        : { ...r, logs: [] };
+    },
+  });
+  const tap = (pool) => {
+    const transfer = pool.transfer;
+    pool.transfer = async (args) => {
+      pool.lastOuts = args[3];
+      return transfer(args);
+    };
+    return pool;
+  };
+
+  const a = await paidPool(payee);
+  tap(a.pool);
+  const r = await settleGloamPayment({ requirements: a.req, payload: a.built.payload, receiveKey: payee, prove: stubProve, chain: withLogs(a.pool, SEALED_VAULT), submit: submitTo(a.pool) });
+  assert(r.grantAccess === true && r.status === "swept", `the pool's Transferred event for the fresh note in the receipt settles (${r.status})`);
+  assert(receiptInsertsCommitment([{ address: SEALED_VAULT, topics: [TOPIC], data: "0x" + r.freshNote.commitment.slice(2) + "00".repeat(32) }], SEALED_VAULT, r.freshNote.commitment), "receiptInsertsCommitment finds the payment output");
+
+  // The same event from any other contract proves nothing.
+  const b = await paidPool(payee);
+  tap(b.pool);
+  const r2 = await settleGloamPayment({ requirements: b.req, payload: b.built.payload, receiveKey: payee, prove: stubProve, chain: withLogs(b.pool, "0x000000000000000000000000000000000000dEaD"), submit: submitTo(b.pool) });
+  assert(r2.grantAccess === false && r2.status === "unconfirmed", `an event from another address is not the pool's (${r2.status})`);
+  // Nor does the change output, or a malformed log.
+  assert(!receiptInsertsCommitment([{ address: SEALED_VAULT, topics: [TOPIC], data: "0x" + "00".repeat(32) + r2.freshNote.commitment.slice(2) }], SEALED_VAULT, r2.freshNote.commitment), "the change slot is not the payment output");
+  assert(!receiptInsertsCommitment([{ address: SEALED_VAULT, topics: [TOPIC], data: "0x" + r2.freshNote.commitment.slice(2) }], SEALED_VAULT, r2.freshNote.commitment), "a short log is ignored");
+  assert(!receiptInsertsCommitment([{ address: SEALED_VAULT, topics: ["0x" + "00".repeat(32)], data: "0x" + r2.freshNote.commitment.slice(2) + "00".repeat(32) }], SEALED_VAULT, r2.freshNote.commitment), "another event is ignored");
 }
 
 // ── 4. payment never landed ───────────────────────────────────────────────────
