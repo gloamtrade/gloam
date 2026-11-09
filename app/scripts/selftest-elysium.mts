@@ -140,7 +140,8 @@ if (MODE === "off" || MODE === "coming") {
   ok(nets.isNetworkWritable(e), "on: writable");
   ok(nets.ceremonyForChain(CHAIN_ID) === "production", "on: proofs use the final keys");
   const usdc = tokens.shieldTokensFor(CHAIN_ID);
-  ok(usdc.length === 1 && usdc[0]!.symbol === "USDC" && usdc[0]!.address === USDC && usdc[0]!.decimals === 6, "on: USDC only");
+  ok(usdc.length === 2 && usdc[0]!.symbol === "USDC" && usdc[0]!.address === USDC && usdc[0]!.decimals === 6 && !usdc[0]!.opensWithLimit, "on: USDC open from launch");
+  ok(usdc[1]!.symbol === "KNTQ" && usdc[1]!.decimals === 18 && usdc[1]!.opensWithLimit === true && usdc[1]!.address === "0xe45a355d9e9cAd2aD85F2d03E3eE3102A036acF0", "on: KNTQ listed, open only once its queued limit lands");
   ok(!tokens.supportsNativeShield(CHAIN_ID), "on: HYPE can't be added privately");
   ok(walkTuning(CHAIN_ID, e.logRange).span === 1_000_000n, "on: tree reads at the RPC's range (1,000,000 blocks at 100 ms)");
   ok(networkForChain(CHAIN_ID).key === "elysium-mainnet", "on: the relay serves it");

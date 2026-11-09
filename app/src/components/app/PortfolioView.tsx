@@ -31,6 +31,7 @@ import {
   walletDisplayTokensFor,
   type OnchainToken,
 } from "@/lib/tokens";
+import { isElysiumChainId } from "@/lib/elysium";
 import { COINGECKO_MARKED, hasCoingeckoMarks, useCoingeckoMarks } from "@/hooks/useCoingeckoMarks";
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
 import {
@@ -213,7 +214,7 @@ export function PortfolioView() {
   // unit is worth $1, never the ETH price. The wallet card labels it with the
   // chain's own symbol rather than a hardcoded "ETH".
   const nativeSymbol = network.primaryAsset.symbol;
-  const isElysium = network.family === "elysium";
+  const isElysium = isElysiumChainId(network.chainId);
   // The gas coin's own price: HYPE on Elysium, never ETH's.
   const nativeUsdRate: number | null = isTempo ? 1 : isElysium ? (marketData?.hypeUsd ?? null) : ethUsd;
   const nativeId = isElysium ? "hype" : "eth";

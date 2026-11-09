@@ -149,7 +149,7 @@ export default function DocsProductPage() {
                   n: ELYSIUM ? "●" : "○",
                   title: "Elysium",
                   body: ELYSIUM
-                    ? `The mainnet vault and final keys on Elysium, live since ${ELYSIUM_LIVE_SINCE}: USDC only, gas in HYPE. Private swaps and bringing money over are not on Elysium yet.`
+                    ? `The mainnet vault and final keys on Elysium, live since ${ELYSIUM_LIVE_SINCE}: USDC, gas in HYPE, and money brought over from other chains through Relay. Private swaps are not on Elysium yet.`
                     : "Coming: the mainnet vault and final keys on Elysium, USDC first, gas in HYPE.",
                 },
               ]

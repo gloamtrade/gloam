@@ -23,6 +23,7 @@
  */
 import { formatUnits, isAddress } from "viem";
 import type { ChainFamily, GloamNetwork } from "./networks";
+import { ELYSIUM } from "./elysium";
 
 export type BridgeChainKind = "evm" | "svm" | "tvm" | "bvm";
 
@@ -111,10 +112,17 @@ export const BRIDGE_DESTINATIONS: Partial<Record<ChainFamily, BridgeDestination>
     chain: "Ethereum",
     token: { symbol: "USDC", address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6, logo: "/brand/tokens/usdc.png" },
   },
-  // Elysium: not yet. No live Relay route into Elysium USDC has been checked, so
-  // there is no bridge in there and the app shows no bridge panel on Elysium. Add
-  // an entry here (from lib/elysium.ts) once a live Relay quote into it works, and
-  // drop the "not on Elysium yet" lines in Glim and /docs/chain and /docs/bridge.
+  // Elysium, with the flag on: Relay lists chain 99901 and its USDC. Live quotes on
+  // 2026-11-09: 20 USDC from Base or Arbitrum landed 19.975 USDC in about 10 s.
+  ...(ELYSIUM
+    ? {
+        elysium: {
+          chainId: ELYSIUM.chainId,
+          chain: "Elysium",
+          token: { symbol: "USDC", address: ELYSIUM.usdc, decimals: ELYSIUM.usdcDecimals, logo: "/brand/tokens/usdc.png" },
+        },
+      }
+    : {}),
 };
 
 /** The chains money can come from into `destChainId`: every listed chain but that one. */
@@ -151,6 +159,18 @@ export const SWAP_SOURCES: Partial<Record<ChainFamily, BridgeChain>> = {
     swap: true,
     tokens: [{ symbol: "ETH", address: "0x0000000000000000000000000000000000000000", decimals: 18, logo: "/brand/tokens/eth.png" }],
   },
+  // HYPE to USDC on Elysium (live quote 2026-11-09: 0.1 HYPE gave about 7.05 USDC)
+  ...(ELYSIUM
+    ? {
+        elysium: {
+          id: ELYSIUM.chainId,
+          name: "Elysium",
+          kind: "evm" as const,
+          swap: true,
+          tokens: [{ symbol: "HYPE", address: "0x0000000000000000000000000000000000000000", decimals: 18, logo: "/brand/tokens/hype.png" }],
+        },
+      }
+    : {}),
 };
 
 /** The swap on this network's own chain, when it has one: mainnet only, since Relay only swaps on mainnets. */

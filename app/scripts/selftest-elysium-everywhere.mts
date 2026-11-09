@@ -141,8 +141,8 @@ const toolText = JSON.stringify(TOOLS);
 const mainnetKeys = () => nets.NETWORK_KEYS.filter((k) => !nets.getNetwork(k).testnet);
 const testnetKeys = () => nets.NETWORK_KEYS.filter((k) => nets.getNetwork(k).testnet);
 
-// Both runs: no bridge into Elysium and no swap router there yet (config says "not yet").
-ok(!("elysium" in BRIDGE_DESTINATIONS), "no bridge destination on Elysium");
+// The bridge brings USDC into Elysium only with the flag on; no swap router there yet in either run.
+ok(("elysium" in BRIDGE_DESTINATIONS) === ely.ELYSIUM_ENABLED, "a bridge destination on Elysium exactly when it is on");
 ok(vaultSwapRouter(CHAIN_ID) === null && vaultSwapRouter(TESTNET_ID) === null, "no swap router on Elysium");
 ok(!swapMainnets().includes("Elysium"), "the swap chains leave Elysium out");
 // Both runs: link attribution there counts relay-sent payments only, until its sequencer is checked.
@@ -188,7 +188,7 @@ if (MODE === "off") {
     ok(sendGasMost(n.chainId, "unshield") === 4_800_000n, `on: ${key} gets Orbit gas room, like Robinhood Chain`);
   }
   ok(nets.getNetwork("elysium").logRange === 1_000_000n, "on: 100 ms blocks, 1,000,000-block log reads");
-  ok(tokens.shieldTokensFor(CHAIN_ID).map((t) => t.symbol).join() === "USDC", "on: USDC on Elysium mainnet");
+  ok(tokens.shieldTokensFor(CHAIN_ID).map((t) => t.symbol).join() === "USDC,KNTQ", "on: USDC and KNTQ on Elysium mainnet");
   ok(tokens.shieldTokensFor(TESTNET_ID)[0]?.address === "0x7D29d8047B905000459c0E80c34a26CeedcB47b2", "on: test USDC on Elysium testnet");
   ok(hourlySpendWei(CHAIN_ID, {}) === 10n ** 18n, "on: the relay's hourly cap is 1 HYPE");
   const dir = contractDirectory();
