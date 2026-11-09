@@ -6,7 +6,7 @@
   "scripts": {
     "public-402": "node public-402.mjs",
     "fund": "tsx fund.ts",
-    "server": "tsx server.ts",
+    "proxy": "tsx server.ts",
     "agent": "tsx agent.ts",
     "typecheck": "tsc -p ."
   },

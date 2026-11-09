@@ -1,7 +1,7 @@
 /**
  * An agent that buys an E2B sandbox and pays for it privately over MPP.
  *
- *   pnpm agent         (with pnpm server running)
+ *   pnpm agent         (with pnpm proxy running)
  *
  * The agent holds a private balance (a note in the Gloam pool, made by
  * `pnpm fund`). It sends a normal E2B request; on the 402 it picks the gloam

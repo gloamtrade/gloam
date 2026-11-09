@@ -2,7 +2,7 @@
  * What E2B adds: an mpp.e2b.dev-style route, POST /sandboxes, that also takes
  * the private "gloam" method.
  *
- *   pnpm server        (after pnpm fund)
+ *   pnpm proxy        (after pnpm fund)
  *
  * mpp.e2b.dev today builds its payment handler like this, and the gloam
  * method goes next to the tempo one. The tempo offer stays exactly as it is;

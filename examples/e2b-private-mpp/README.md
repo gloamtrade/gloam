@@ -24,11 +24,11 @@ From the repo root, `pnpm install`, then in `examples/e2b-private-mpp`:
 ```bash
 node public-402.mjs   # the live E2B endpoint, no payment
 pnpm fund             # once: throwaway Tempo testnet key, faucet, 1 PathUSD into the Gloam pool
-pnpm server           # terminal 1
+pnpm proxy           # terminal 1
 pnpm agent            # terminal 2
 ```
 
-Everything runs on Tempo testnet (Moderato, chain 42431) with test PathUSD and the Gloam testnet pool `0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb`. `pnpm fund` writes the throwaway key, the seller's receive key and the MPP secret to `.env`, and note secrets to `.wallet/`. Both are gitignored and nothing prints them. Set `E2B_API_KEY` before `pnpm server` to create real sandboxes on `api.e2b.app`.
+Everything runs on Tempo testnet (Moderato, chain 42431) with test PathUSD and the Gloam testnet pool `0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb`. `pnpm fund` writes the throwaway key, the seller's receive key and the MPP secret to `.env`, and note secrets to `.wallet/`. Both are gitignored and nothing prints them. Set `E2B_API_KEY` before `pnpm proxy` to create real sandboxes on `api.e2b.app`.
 
 Each side keeps the pool's Merkle tree in `.cache/` (gitignored, public chain data only). With nothing there, it starts from Gloam's public leaf list (one request, checked against the pool's root on chain) instead of walking the pool's logs.
 
@@ -37,7 +37,7 @@ Each side keeps the pool's Merkle tree in `.cache/` (gitignored, public chain da
 Warm both sides once, a few minutes before:
 
 ```bash
-pnpm server           # terminal 1: syncs the pool tree at startup ("warm  pool tree ready in ...") and keeps it current
+pnpm proxy           # terminal 1: syncs the pool tree at startup ("warm  pool tree ready in ...") and keeps it current
 pnpm agent            # terminal 2: one throwaway purchase, so the agent's .cache/ holds its newest note
 ```
 
