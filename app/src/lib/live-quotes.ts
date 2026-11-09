@@ -217,6 +217,16 @@ export async function loadLiveMarkets() {
 }
 
 /** ETH USD for portfolio dollar conversion */
+/** HYPE in USD (CoinGecko "hyperliquid"): Elysium's gas coin. Null when unknown, never ETH's price. */
+export async function loadHypeUsd(): Promise<number | null> {
+  try {
+    const map = await fetchCoinGeckoSimple(["hyperliquid"]);
+    return map.get("hyperliquid")?.mark ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadEthUsd(): Promise<number | null> {
   try {
     const map = await fetchCoinGeckoSimple(["ethereum"]);

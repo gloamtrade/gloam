@@ -213,7 +213,11 @@ export function PortfolioView() {
   // unit is worth $1, never the ETH price. The wallet card labels it with the
   // chain's own symbol rather than a hardcoded "ETH".
   const nativeSymbol = network.primaryAsset.symbol;
-  const nativeUsdRate: number | null = isTempo ? 1 : ethUsd;
+  const isElysium = network.family === "elysium";
+  // The gas coin's own price: HYPE on Elysium, never ETH's.
+  const nativeUsdRate: number | null = isTempo ? 1 : isElysium ? (marketData?.hypeUsd ?? null) : ethUsd;
+  const nativeId = isElysium ? "hype" : "eth";
+  const nativeName = isElysium ? "Hyperliquid" : "Ether";
   // $GLOAM and the swap tokens on Robinhood Chain mainnet, and BDX on Base and Ethereum, priced like Transparency does.
   const { marks: geckoMarks, pending: geckoPending } = useCoingeckoMarks(hasCoingeckoMarks(network.chainId));
   // BDX, or ETH on Robinhood Chain, is offered to Add only once the vault's live limit for it is open.
@@ -470,9 +474,9 @@ export function PortfolioView() {
       rows.push({
         key: "native",
         native: true,
-        id: "eth",
+        id: nativeId,
         symbol: nativeSymbol,
-        name: "Ether",
+        name: nativeName,
         raw: nativeWei,
         decimals: 18,
         amount,
@@ -486,7 +490,7 @@ export function PortfolioView() {
       });
     }
     return rows;
-  }, [network.chainId, positions, nativeWei, nativeSymbol, nativeUsdRate, marketsPending, openGated]);
+  }, [network.chainId, positions, nativeWei, nativeSymbol, nativeId, nativeName, nativeUsdRate, marketsPending, openGated]);
   const walletSplit = useMemo(() => splitWalletRows(walletRows), [walletRows]);
   const foldEmpty = walletSplit.held.length > 0 && walletSplit.empty.length > 0;
   const walletShown = foldEmpty && !showEmptyRows ? walletSplit.held : [...walletSplit.held, ...walletSplit.empty];

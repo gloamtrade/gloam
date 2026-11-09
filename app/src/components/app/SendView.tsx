@@ -37,7 +37,7 @@ export function SendView() {
   const { address, isConnected, chainId, demo } = useAppAccount();
   const { network } = useNetwork();
   const onProduct = chainId === network.chainId;
-  const { ethUsd } = useEthPrice();
+  const { ethUsd, hypeUsd } = useEthPrice();
   const { data: marketData } = useLiveMarkets();
   // Tokens the markets feed has no price for, $GLOAM and PONS among them.
   const { marks: geckoMarks } = useCoingeckoMarks(hasCoingeckoMarks(network.chainId));
@@ -243,7 +243,9 @@ export function SendView() {
     ? isDollarStable(token)
       ? 1
       : (marketData?.markets?.find((m) => m.id === token.id)?.mark ?? geckoMarks.get(token.address.toLowerCase()) ?? null)
-    : ethUsd;
+    : network.family === "elysium"
+      ? hypeUsd
+      : ethUsd;
   const usdHint =
     usdEach && Number.isFinite(amtNum) && amtNum > 0
       ? formatUsd(amtNum * usdEach)
@@ -318,7 +320,11 @@ export function SendView() {
                 }}
                 options={[
                   ...(nativeOk
-                    ? [{ value: NATIVE_CHOICE, label: network.primaryAsset.symbol, description: "Ether", icon: <EthMark /> }]
+                    ? [
+                        network.family === "elysium"
+                          ? { value: NATIVE_CHOICE, label: network.primaryAsset.symbol, description: "Hyperliquid", icon: <TokenLogo id="hype" symbol="HYPE" size={30} /> }
+                          : { value: NATIVE_CHOICE, label: network.primaryAsset.symbol, description: "Ether", icon: <EthMark /> },
+                      ]
                     : []),
                   ...tokens.map((t) => ({
                     value: t.id,
