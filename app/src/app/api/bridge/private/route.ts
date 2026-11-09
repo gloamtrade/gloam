@@ -119,6 +119,8 @@ export async function POST(req: Request) {
   if (network.chain.testnet || !network.pool) return fail(400, "Bringing money in privately works on mainnet.");
   const dest = BRIDGE_DESTINATIONS[network.family];
   if (!dest) return fail(400, `Bringing money over isn't on ${network.label} yet.`);
+  // Elysium takes the plain bridge only until a private landing there is proven (BridgeIn).
+  if (network.family === "elysium") return fail(400, `On ${network.label}, bring the money to your wallet first, then add it privately.`);
   const asset = dest.token.address as Address;
 
   const swap = swapSource(network);

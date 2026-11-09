@@ -30,6 +30,7 @@ import {
 import { prepareBridgeNote, settleBridgeNote } from "@/lib/bridgePrivate";
 import { useAppBalance, useAppSendTransaction, useAppTxReceipt, useDemo } from "@/lib/demo";
 import { MAINNET_ENABLED, type GloamChainId } from "@/lib/networks";
+import { isElysiumChainId } from "@/lib/elysium";
 import { originChain } from "@/lib/originChains";
 import { useVaultStatus } from "@/lib/passkey";
 import { dropUnsentNote, formatFeePercent, saveLocalNote, updateLocalNote, type LocalNote } from "@/lib/shield";
@@ -273,8 +274,12 @@ function BridgeSheet({
   const [solName, setSolName] = useState("");
   const solWallet = chain.kind === "svm" ? (solWallets.find((w) => w.name === solName) ?? solWallets[0] ?? null) : null;
   const switchable = connector?.type === "injected" || connector?.type === "walletConnect";
+  // Elysium: the plain bridge only (into the wallet, then Add privately), until a
+  // private landing there is proven end to end. The first one (9 Nov 2026) sat at
+  // Relay with no fill on Elysium.
   const canPrivate =
     !demo &&
+    !isElysiumChainId(network.chainId) &&
     !network.chain.testnet &&
     Boolean(network.pool) &&
     privateBridgeable(chain) &&
