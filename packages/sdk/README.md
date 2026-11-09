@@ -721,7 +721,7 @@ const tree = createTreeSync(publicClient, {
 const path = await tree.pathForCommitment(note.commitment);
 ```
 
-Nothing from the seed or the store is trusted: after each change the rebuilt root has to be one the pool knows (`isKnownRoot`, one call), and a list that does not match is dropped for a walk of the chain. Gloam pools keep every root they have had, so `knownPath` can answer from a tree kept from an earlier run with that one call and no log reads. The seed request names only the network and is the same for everyone.
+Nothing from the seed is trusted, nor a stored copy the pool has not confirmed: the rebuilt root has to be one the pool knows (`isKnownRoot`, one call), and a list that does not match is dropped for a walk of the chain. Gloam pools keep every root they have had, so a store saves the root the pool confirmed with its copy, and `knownPath` answers from that copy on the next run with no chain reads at all (a copy whose items do not build that root is checked again). The seed request names only the network and is the same for everyone.
 
 ### x402 payments
 

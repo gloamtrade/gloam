@@ -117,7 +117,8 @@ async function getLogsChunked(
   if (toBlock < fromBlock) return [];
   const jobs: (() => Promise<DecodedLog[]>)[] = [];
   for (let start = fromBlock; start <= toBlock; start += chunkSize) {
-    const end = start + chunkSize - 1n > toBlock ? toBlock : start + chunkSize - 1n;
+    let end = start + chunkSize - 1n;
+    if (end > toBlock) end = toBlock;
     jobs.push(() => client.getLogs({ address, event: event as never, fromBlock: start, toBlock: end }) as Promise<DecodedLog[]>);
   }
   return (await pooled(jobs, concurrency)).flat();
@@ -303,6 +304,12 @@ export interface TreeSnapshot {
   leafCount: number;
   /** In on-chain order. */
   items: TreeInsert[];
+  /**
+   * The root these items build, once the pool confirmed it. Gloam pools keep
+   * every root, so a stored copy whose items still build this root needs no
+   * check on load. Only honoured from the store, never from a seed.
+   */
+  root?: Hex;
 }
 
 /** Somewhere to keep a snapshot between runs (a file, a key-value store). Both calls may fail; the sync then goes on without them. */
@@ -352,10 +359,11 @@ export interface TreeSync {
   pathForCommitment(commitment: Hex, opts?: { atBlock?: bigint }): Promise<PoseidonMerklePath | null>;
   /**
    * The path from the tree as it already is (on a cold start, the store's copy,
-   * else the seed's), with no log reads: one call asks the pool whether it knows
-   * that root. Gloam pools keep every root they have had, so a path from an
-   * older tree stays good. Null when the leaf is not in it or the pool does not
-   * confirm the root; then use pathForCommitment.
+   * else the seed's), with no log reads. Gloam pools keep every root they have
+   * had, so a path from an older tree stays good: a stored copy the pool already
+   * confirmed needs no call at all, anything else one call (isKnownRoot). Null
+   * when the leaf is not in it or the pool does not confirm the root; then use
+   * pathForCommitment.
    */
   knownPath(commitment: Hex): Promise<PoseidonMerklePath | null>;
   /** The last block read, or null before the first sync. */
@@ -402,7 +410,8 @@ export function parseTreeSnapshot(json: unknown, pool: Address): TreeSnapshot | 
     count += row.c.length;
   }
   if (s.leafCount !== undefined && s.leafCount !== count) return null;
-  return { v: 1, pool, fromBlock, toBlock: s.toBlock, leafCount: count, items };
+  const root = typeof s.root === "string" && HEX32.test(s.root) ? (s.root.toLowerCase() as Hex) : undefined;
+  return { v: 1, pool, fromBlock, toBlock: s.toBlock, leafCount: count, items, ...(root ? { root } : {}) };
 }
 
 /** The public leaf list gloam.trade keeps for each live pool (the same for everyone; the request names only the network). */
@@ -412,7 +421,7 @@ export const GLOAM_LEAVES_URL = "https://www.gloam.trade/api/vault-leaves";
  * A TreeSeed from gloam.trade's public leaf list, so a cold start is one
  * request instead of a walk over the pool's history. The list is not trusted:
  * createTreeSync checks the root it gives against the pool and walks the chain
- * when it does not match. Null (walk the chain) when the list is unavailable or slower than `timeoutMs`.
+ * when it does not match. Null (walk the chain) when the list is unavailable or slower than `timeoutMs` (default 20 s).
  */
 export function gloamLeafSeed(
   network: string,
@@ -421,7 +430,8 @@ export function gloamLeafSeed(
   return async () => {
     const f = opts.fetch ?? fetch;
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 8_000);
+    // Generous: walking the chain instead takes far longer on an RPC that caps log ranges.
+    const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 20_000);
     try {
       const res = await f(`${opts.url ?? GLOAM_LEAVES_URL}?network=${encodeURIComponent(network)}`, {
         signal: ctrl.signal,
@@ -462,7 +472,9 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
   const concurrency = params.concurrency ?? 1;
   const overlap = params.overlap ?? 16n;
   let state: TreeState | null = null;
-  let toBlock: bigint | null = null;
+  // The last block read (meaningful once `state` is set). A bigint from the start, never null: Next's file tracer
+  // evaluates declarations it can and throws on null + 1n, which would break any app that bundles the SDK.
+  let toBlock = -1n;
   /** The leaves came from the store or the seed and the pool has not confirmed them yet. */
   let borrowed = false;
   let verified = false;
@@ -487,24 +499,32 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
     }
   };
 
-  const start = async (snapshot: TreeSnapshot | null) => {
+  const start = async (loaded: { snap: TreeSnapshot; stored: boolean } | null) => {
     state = new TreeState();
-    if (snapshot) {
-      await state.append(snapshot.items);
-      toBlock = BigInt(snapshot.toBlock);
+    verified = false;
+    if (loaded) {
+      await state.append(loaded.snap.items);
+      toBlock = BigInt(loaded.snap.toBlock);
       borrowed = true;
+      // Our own copy, saved after the pool confirmed this very root: still a root the pool knows.
+      if (loaded.stored && loaded.snap.root && loaded.snap.root === fieldToHex(state.tree.currentRoot).toLowerCase()) {
+        verified = true;
+        borrowed = false;
+      }
     } else {
       toBlock = fromBlock - 1n;
       borrowed = false;
     }
-    verified = false;
   };
 
-  const load = async (): Promise<TreeSnapshot | null> => {
-    for (const source of [params.store?.load, params.seed]) {
-      if (!source) continue;
-      const snap = parseTreeSnapshot(await source().catch(() => null), params.pool);
-      if (snap) return snap;
+  const load = async (): Promise<{ snap: TreeSnapshot; stored: boolean } | null> => {
+    if (params.store) {
+      const snap = parseTreeSnapshot(await params.store.load().catch(() => null), params.pool);
+      if (snap) return { snap, stored: true };
+    }
+    if (params.seed) {
+      const snap = parseTreeSnapshot(await params.seed().catch(() => null), params.pool);
+      if (snap) return { snap, stored: false };
     }
     return null;
   };
@@ -512,12 +532,13 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
   /** Read from the last block (less the overlap) to the head. `again`: re-read the overlap even if the head has not moved. */
   const readTail = async (again = false, atBlock?: bigint): Promise<boolean> => {
     const s = state!;
-    const head = atBlock !== undefined && atBlock > toBlock! ? atBlock : await client.getBlockNumber({ cacheTime: 0 });
-    if (head <= toBlock! && !again) return false;
-    const from = toBlock! + 1n - overlap > fromBlock ? toBlock! + 1n - overlap : fromBlock;
+    const head = atBlock !== undefined && atBlock > toBlock ? atBlock : await client.getBlockNumber({ cacheTime: 0 });
+    if (head <= toBlock && !again) return false;
+    let from = toBlock + 1n - overlap;
+    if (from < fromBlock) from = fromBlock;
     if (head < from) return false;
     const rows = (await readInserts(client, params.pool, from, head, chunkSize, concurrency)).filter((r) => !s.keys.has(insertKey(r)));
-    if (head > toBlock!) toBlock = head;
+    if (head > toBlock) toBlock = head;
     if (rows.length === 0) return false;
     const last = s.inserts[s.inserts.length - 1];
     if (!last || byChainOrder(last, rows[0]!) < 0) {
@@ -558,7 +579,7 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
       }
       if (known === false) {
         state = null;
-        toBlock = null;
+        toBlock = -1n;
         throw new Error("The rebuilt tree's root is not one the pool knows (an RPC answered with missing logs). Sync again.");
       }
       if (known === true) {
@@ -570,7 +591,15 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
       const s = state!;
       unsaved = false;
       await params.store
-        .save({ v: 1, pool: params.pool, fromBlock: fromBlock.toString(), toBlock: toBlock!.toString(), leafCount: s.tree.nextIndex, items: s.inserts })
+        .save({
+          v: 1,
+          pool: params.pool,
+          fromBlock: fromBlock.toString(),
+          toBlock: toBlock.toString(),
+          leafCount: s.tree.nextIndex,
+          items: s.inserts,
+          ...(verified ? { root: fieldToHex(s.tree.currentRoot).toLowerCase() as Hex } : {}),
+        })
         .catch(() => undefined);
     }
     syncedAt = began;
@@ -602,7 +631,7 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
         return path;
       }),
     get toBlock() {
-      return toBlock;
+      return state ? toBlock : null;
     },
     follow(intervalMs) {
       let stopped = false;

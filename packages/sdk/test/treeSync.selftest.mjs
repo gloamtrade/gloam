@@ -294,12 +294,31 @@ function chain() {
   m.state.reads = [];
   m.state.rootReads = 0;
   const ts = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, store });
+  assert(saved.root && saved.root === saved.root.toLowerCase(), "the store keeps the root the pool confirmed");
   const p = await ts.knownPath(mine);
   assert(p && p.leafIndex === 0, "knownPath gives the stored leaf's path");
-  assert(m.state.reads.length === 0 && m.state.rootReads === 1, "with one root check and no log reads");
+  assert(m.state.reads.length === 0 && m.state.rootReads === 0, "a confirmed stored copy: no log reads, no root check");
   assert(m.state.known.has("0x" + p.root.toString(16).padStart(64, "0")), "at a root the pool knows (an older one)");
   assert((await ts.knownPath(hex(777777))) === null, "a leaf not in the copy: null");
-  assert(m.state.rootReads === 1, "the root is checked once");
+
+  // A stored copy without a confirmed root (or one that does not match its items) is checked once.
+  const unconfirmed = { ...saved };
+  delete unconfirmed.root;
+  for (const copy of [unconfirmed, { ...saved, root: hex(31337) }]) {
+    m.state.rootReads = 0;
+    const u = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, store: { load: async () => copy, save: async () => {} } });
+    assert((await u.knownPath(mine))?.leafIndex === 0, "an unconfirmed copy still answers");
+    assert(m.state.rootReads === 1, "after one root check");
+    assert((await u.knownPath(mine))?.leafIndex === 0 && m.state.rootReads === 1, "and only one");
+  }
+  // A seed's root claim is never taken.
+  m.state.rootReads = 0;
+  const seeded = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, seed: async () => saved });
+  await seeded.knownPath(mine);
+  assert(m.state.rootReads === 1, "a seed is always checked, root field or not");
+  // A store written by a class (methods on the prototype) works.
+  class Store { constructor(v) { this.v = v; } async load() { return this.v; } async save(x) { this.v = x; } }
+  assert((await createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, store: new Store(saved) }).knownPath(mine))?.leafIndex === 0, "a class-based store loads");
 
   // A copy whose root the pool does not know gives nothing.
   const forged = { ...saved, items: saved.items.slice(1), leafCount: saved.leafCount - 1 };

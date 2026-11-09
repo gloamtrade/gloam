@@ -63,8 +63,8 @@ log(`private balance ${fmt(balance())} in ${notes.filter((n) => n.status === "un
 
 // ── 1. ask without paying: the same 402 E2B sends today, with a private offer added ──
 const phases = new Phases();
-// The pool's tree, kept in .cache/ (on the first run, Gloam's public leaf list). Each note's membership path
-// comes from it with one call that asks the pool to confirm the root, side by side with the request below.
+// The pool's tree, kept in .cache/ (on the first run, Gloam's public leaf list, checked with one call to the pool).
+// Each note's membership path comes from it without reading logs, side by side with the request below.
 const kept = existsSync(treeCacheFile("agent"));
 const tree = createTreeSync(sdkClient, treeParams("agent"));
 const treeStart = Date.now();
@@ -112,10 +112,10 @@ const mppx = Mppx.create({
         // In the kept tree, or (a note that landed after it was kept) read the blocks since.
         let path = paths.get(n.commitment.toLowerCase()) ?? null;
         if (path) {
-          log(`  path from ${kept ? "the tree kept in .cache/" : "Gloam's public leaf list (first run)"}, root confirmed by the pool, no log reads`);
+          log(kept ? "  path from the tree kept in .cache/ (its root confirmed by the pool when kept), no log reads" : "  path from Gloam's public leaf list (first run), root confirmed by the pool, no log reads");
         } else {
           path = await phases.time("note path", () => tree.pathForCommitment(n.commitment));
-          log(`  path after reading the blocks since the kept tree (now at block ${tree.toBlock}), root confirmed by the pool`);
+          log(`  path after reading the newest blocks (tree now at block ${tree.toBlock}), root confirmed by the pool`);
         }
         if (!path) throw new Error("The note is not in the pool's tree yet. Retry in a moment.");
         spent = n;
@@ -144,6 +144,7 @@ const mppx = Mppx.create({
 const t0 = Date.now();
 const res = await mppx.fetch(URL_, { method: "POST", headers: { "content-type": "application/json" }, body: BODY });
 const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+const paidIn = Date.now() - t0;
 if (paidAt) phases.add("server: settle + sandbox", Date.now() - paidAt);
 const timings = phases.summary();
 
@@ -167,7 +168,7 @@ if (!res.ok) {
   process.exit(1);
 }
 const receipt = parseReceipt(res.headers.get("payment-receipt") ?? "");
-log(`${res.status} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+log(`${res.status} in ${(paidIn / 1000).toFixed(1)}s`);
 log(`timings          ${timings}`);
 log(`Payment-Receipt  method=${receipt.method} status=${receipt.status} chainId=${receipt.chainId} reference=${receipt.reference}`);
 log(`sandbox          ${JSON.stringify(json)}`);

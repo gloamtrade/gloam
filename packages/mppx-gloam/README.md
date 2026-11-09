@@ -67,7 +67,7 @@ await chain.warm();                       // at startup: the tree and the RPC's 
 tree.follow(1_000);                       // a payment's leaf is usually there before the sweep asks
 ```
 
-What a payment still waits for, and should: the payer's transfer to confirm (pull mode), then the sweep to confirm with its fresh note in the pool. A receipt is served only after that, since until the sweep lands the payer could spend the payment note back. The sweep's own receipt is enough proof when it carries the pool's `Transferred` event for the fresh note; otherwise the pool is asked (`commitmentSeen`). Neither wait can be turned off. On Tempo testnet from a laptop a warm payment settles in about 7 to 8 seconds, most of it the two relay submissions and their blocks (see `examples/e2b-private-mpp`).
+What a payment still waits for, and should: the payer's transfer to confirm (pull mode), then the sweep to confirm with its fresh note in the pool. A receipt is served only after that, since until the sweep lands the payer could spend the payment note back. The sweep's own receipt is enough proof when it carries the pool's `Transferred` event for the fresh note; otherwise the pool is asked (`commitmentSeen`). Neither wait can be turned off. On Tempo testnet from a laptop a warm payment settles in about 6 to 9 seconds, most of it the two relay submissions and their blocks (see `examples/e2b-private-mpp`).
 
 ## Client (mppx)
 

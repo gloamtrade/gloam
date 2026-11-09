@@ -14,7 +14,7 @@ The chain then shows a nullifier and two commitments. No payer, no payee, no amo
 | `server.ts` | What E2B adds: an `mpp.e2b.dev`-style `POST /sandboxes` that offers `tempo` (as today) and `gloam`. On a private payment it forwards to `https://api.e2b.app/sandboxes` when `E2B_API_KEY` is set, else returns a mock sandbox labelled `"mock": true`. |
 | `agent.ts` | An agent with a private balance. It pays the 402 with `mppx/client` and the `gloam` method, prints the receipt and the sandbox id, then reads both transactions from the chain and shows what is and is not there. |
 | `fund.ts` | One-time testnet setup: a throwaway key, Tempo's testnet faucet, and a 1 PathUSD deposit into the Gloam pool. |
-| `demo-output.txt` | The full transcript of a real run on Tempo testnet (three purchases: one cold, two warm). |
+| `demo-output.txt` | The full transcript of a real run on Tempo testnet (four purchases: one cold, three warm). |
 | `public-402-output.txt` | `public-402.mjs` run against the live E2B endpoint. |
 
 ## Run it
@@ -41,41 +41,42 @@ pnpm server           # terminal 1: syncs the pool tree at startup ("warm  pool 
 pnpm agent            # terminal 2: one throwaway purchase, so the agent's .cache/ holds its newest note
 ```
 
-Leave the server running. On the call, `pnpm agent` again: each purchase prints a `timings` line on both sides. The agent holds about 0.89 test PathUSD, about 100 purchases at 0.008721. If the server was restarted, that is fine: it reads only the blocks since its `.cache/` copy.
+Leave the server running. On the call, `pnpm agent` again: each purchase prints a `timings` line on both sides. The agent holds about 0.75 test PathUSD, about 85 purchases at 0.008721. If the server was restarted, that is fine: it reads only the blocks since its `.cache/` copy.
 
 ## Timings
 
-One purchase, measured on a laptop against the public Tempo testnet RPC (each RPC call there took 0.4 to 1 s) and Gloam's production relay. Before is the code merged in #245, after is this version. Full logs in `demo-output.txt`.
+One purchase, measured on a laptop against the public Tempo testnet RPC and Gloam's production relay. Before is the code merged in #245; after is this version, from the run in `demo-output.txt` (one cold purchase, then three warm).
 
 | Phase | Before | After, cold | After, warm |
 | --- | --- | --- | --- |
-| Agent: the note's membership path | 54.4 s (walks ~6M blocks of logs) | 3.4 s (Gloam's leaf list + root check) | 1.2 to 2.2 s (kept tree + root check, no log reads) |
+| Agent: the note's membership path | 54.4 s (walks ~6M blocks of logs) | 3.5 s (Gloam's leaf list + the newest blocks) | 0.2 to 0.3 s (the kept tree, no chain reads) |
 | Agent: payment proof | 0.4 s | 0.4 s | 0.4 s |
-| Server: checks before submitting | 4.2 s (sequential reads) | 0.6 s (in parallel) | 1.0 s |
-| Server: relay submits the payer's transfer | 2.9 s | 2.0 s | 3.0 to 4.2 s |
-| Server: payer's transfer confirms | 0.7 s | 1.5 s | 0.3 to 1.0 s |
-| Server: the payment's path (tree sync) | 48.8 s (walks again) | 1.0 s (new blocks only) | 0.0 to 0.5 s (kept current) |
+| Server: checks before submitting | 4.2 s (one read after another) | 0.9 s (side by side) | 0.6 to 1.0 s |
+| Server: relay submits the payer's transfer | 2.9 s | 3.7 s | 2.0 to 3.0 s (one 11.9 s outlier) |
+| Server: payer's transfer confirms | 0.7 s | 0.3 s | 0.3 to 0.5 s |
+| Server: the payment's path (tree sync) | 48.8 s (walks again) | 0.9 s (new blocks only) | 0.2 to 1.2 s (kept current) |
 | Server: sweep proof | 0.4 s | 0.4 s | 0.2 s |
-| Server: relay submits the sweep | 2.6 s | 1.5 s | 1.6 to 3.3 s |
-| Server: sweep confirms | 0.3 s | 0.3 s | 0.3 s |
-| Paid request (credential sent to 201) | 61.3 s | 9.0 s | 9.3 to 9.4 s |
-| End to end (first request to 201) | 115.8 s | 10.8 s | 9.9 to 11.2 s |
+| Server: relay submits the sweep | 2.6 s | 1.3 s | 1.4 to 2.2 s |
+| Server: sweep confirms | 0.3 s | 3.0 s | 0.3 to 2.0 s |
+| Paid request (credential sent to 201) | 61.3 s | 12.8 s | 6.2 s, 7.4 s (17.8 s with the outlier) |
+| End to end (first request to 201) | 115.8 s | 13.9 s | 6.7 s, 7.9 s (18.3 s with the outlier) |
 
-A warm run earlier the same evening came in at 6.9 to 9.3 s end to end. The server's startup sync (2.9 s from the leaf list) happens once, before the first request.
+The server's startup sync (2.8 to 7.9 s from the leaf list, or from `.cache/` plus the blocks since) happens once, before the first request. Over about fifteen purchases that evening a warm one took 6.7 to 11 s end to end; the slow ones were the testnet RPC or the relay answering in several seconds instead of under one.
 
-What is left is the floor of a private payment that is safe to serve: two relay submissions (1.5 to 4 s each, about 0.65 s of it the round trip to gloam.trade) and two block confirmations. The server never serves before the sweep has confirmed and its fresh note is in the pool, so the payer cannot spend the payment back; that wait is not configurable and should not be.
+What is left is the floor of a private payment that is safe to serve: two relay submissions (usually 1.5 to 3 s each, about 0.65 s of it the round trip to gloam.trade) and two block confirmations. The server never serves before the sweep has confirmed and its fresh note is in the pool, so the payer cannot spend the payment back; that wait is not configurable and should not be.
 
 What changed:
 
-- The SDK keeps the pool tree (`createTreeSync`) instead of rebuilding it for every path: each sync reads only the blocks since the last one, a restart starts from a stored copy, and a cold start from Gloam's public leaf list. Every root it builds from a copy or the list is checked against the pool (`isKnownRoot`) before use, and a list that does not match is dropped for a walk of the chain. Gloam pools keep every root they have had, so the agent's path comes from its kept tree with that one check and no log reads.
+- The SDK keeps the pool tree (`createTreeSync`) instead of rebuilding it for every path: each sync reads only the blocks since the last one, a restart starts from a stored copy, and a cold start from Gloam's public leaf list. Every root built from the list, or from a copy the pool has not confirmed, is checked against the pool (`isKnownRoot`) before use, and a list that does not match is dropped for a walk of the chain. Gloam pools keep every root they have had, so a stored copy saved with its confirmed root gives the agent its path with no chain reads at all.
 - `gloamChargeChainFromClient` keeps one tree for the life of the server; `warm()` syncs it at startup, `follow(1000)` keeps it current, and a sweep's path reads only up to the payer's receipt block.
-- The server's checks before submitting run in parallel, the read the settle step repeated right after validation is gone, and a sweep whose receipt carries the pool's `Transferred` event for the fresh note is final without one more read.
+- The server's checks before submitting run side by side, the read the settle step repeated right after validation is gone, and a sweep whose receipt carries the pool's `Transferred` event for the fresh note is final without one more read.
 - Receipts are polled every 250 ms (viem's default is 4 s), and the SDK's relay URL is `www.gloam.trade` (the bare domain answered every relay call with a redirect).
+- In this demo, a read the RPC has not answered in 1.2 s is sent again and the first answer wins (`hedged` in `common.ts`). Reads only.
 - Proving keys were never the problem: a transfer proof takes 0.2 to 0.4 s with the files read from disk each time.
 
 ## What the real run showed
 
-From `demo-output.txt` (three purchases):
+From `demo-output.txt` (four purchases):
 
 - The 402 offers `tempo/charge` to wallet `0xb10A...1460` (public) and `gloam/charge` to a receive tag (private), both at E2B's price for a 300 second `base` sandbox, 0.008721.
 - The agent pays in pull mode: it proves the payment and broadcasts nothing. The server submits it through the Gloam relay, sweeps it into a note only the server knows, and then creates the sandbox. `201`, `Payment-Receipt method=gloam status=success`.
@@ -83,9 +84,10 @@ From `demo-output.txt` (three purchases):
 
 | Purchase | Payment tx | Sweep tx |
 | --- | --- | --- |
-| 1 (cold) | [0xe6bacfda...](https://explore.testnet.tempo.xyz/tx/0xe6bacfda64163bc42f8bb0f047a95215d63c15eee4192ac2c83e9fa5dc91be31) | [0x834d6957...](https://explore.testnet.tempo.xyz/tx/0x834d69570b9c8417628261545562e587af8be6b010a9d6898165ac897e5c954c) |
-| 2 (warm) | [0x0da27beb...](https://explore.testnet.tempo.xyz/tx/0x0da27beba848ae4ae63092835b0755bcff9f7eaca072a276669bb022aac6d65f) | [0xfe0c5dbe...](https://explore.testnet.tempo.xyz/tx/0xfe0c5dbe94407b59687a018de360aba649889fce64935d5e59aea49d458ba32e) |
-| 3 (warm) | [0xc1af4775...](https://explore.testnet.tempo.xyz/tx/0xc1af47752395cb9457f0195e420f09c7aa257153f89322c54eac22db553942ee) | [0x35668a15...](https://explore.testnet.tempo.xyz/tx/0x35668a158229e358dc4c2a7b5ca684177b9aa5ae6d777752b7221c75a743ea7a) |
+| 1 (cold) | [0x24b27c42...](https://explore.testnet.tempo.xyz/tx/0x24b27c42d8ff5096fa5a59b2d34916c945b42627365e604015af39cc9e6005fa) | [0x623ab347...](https://explore.testnet.tempo.xyz/tx/0x623ab3478b764825ab5507d6385f6033f4e0bfe52f174709b43710669dd261ed) |
+| 2 (warm) | [0x35db5643...](https://explore.testnet.tempo.xyz/tx/0x35db56432732ef7adb19ae542f6874085ed8c7ef423df0e97fcac02927584862) | [0xd571730a...](https://explore.testnet.tempo.xyz/tx/0xd571730aec8a9dbc7bda6d9087f90948315a1638618b6ee8f0d9f8c9be491a65) |
+| 3 (warm) | [0xabacd190...](https://explore.testnet.tempo.xyz/tx/0xabacd190027580bf31d8c2c998e87e1901bee1762e4f4e0586f799977a5d7caa) | [0xc63d0beb...](https://explore.testnet.tempo.xyz/tx/0xc63d0beb8e45baccf222a178c0f9d8d96420899fc03b033abc7e2e626b9bfb41) |
+| 4 (warm) | [0x392eabf8...](https://explore.testnet.tempo.xyz/tx/0x392eabf898acd9ee6bdb3639c728c2b8619d1b4163fed65b9324960faf129e71) | [0x65d981bf...](https://explore.testnet.tempo.xyz/tx/0x65d981bffe2f7c26fb44e8609f72773aa4ba8157a60f2b85978f9fec7f434a02) |
 
 The one public step is the agent's deposit into the pool ([0xa7c9dfdf...](https://explore.testnet.tempo.xyz/tx/0xa7c9dfdfac090fa04ba8e53a6830e7fa07849eeaf9c1c4982b5810de9aad3776)). It shows that address put 1 PathUSD into Gloam, not what it bought or from whom.
 
@@ -138,7 +140,7 @@ Routes do not change: `mppx.charge({ amount })` (or a `compose` with `["gloam/ch
 - **A receive key and somewhere to keep notes.** The receive key opens payments (store it like a signing key). Each swept payment is a note whose secret is the money; persist it before the sweep goes out (`beforeSubmit`). E2B cashes out to its Privy wallet whenever it likes; a cash out costs 0.5%, private payments cost nothing.
 - **A shared replay store on Vercel.** Pass `replay` (Redis or a database) when several instances settle. The default is in memory.
 - **Node runtime and the proving key.** The sweep makes a Groth16 proof (`transfer_final.zkey`, about 3.7 MB). It runs in Node, not the Edge runtime.
-- **Latency.** About 9 to 11 seconds per purchase end to end (see Timings), almost all of it two relay submissions and their confirmations. The first version took about 70 seconds per paid request because both sides rebuilt the pool's tree from the public RPC every time; both now keep it. Creating the sandbox can start while the payment settles, as long as it is handed over only after the receipt.
+- **Latency.** About 7 to 11 seconds per purchase end to end (see Timings), almost all of it two relay submissions and their confirmations. The first version took about 70 seconds per paid request because both sides rebuilt the pool's tree from the public RPC every time; both now keep it. Creating the sandbox can start while the payment settles, as long as it is handed over only after the receipt.
 - **Charges only.** `gloam` implements the MPP `charge` intent. Sessions stay on `tempo`.
 
 From us: the Tempo mainnet pool and relay are live, `@gloamtrade/mppx-gloam` is on npm, and we can run this against E2B's staging with a real `E2B_API_KEY`.

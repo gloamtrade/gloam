@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } fr
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createPublicClient, http, type Chain, type Hex } from "viem";
+import { createPublicClient, http, type Chain, type Hex, type Transport } from "viem";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import {
   artifactProver,
@@ -67,8 +67,37 @@ export function fileTreeStore(path: string): TreeStore {
 
 /** The SDK's chain object, typed for this package's viem (the SDK is built against an older one). */
 export const CHAIN = NET.chain as unknown as Chain;
+/**
+ * Reads that have not answered in HEDGE_MS are sent a second time, and the
+ * first answer wins. The public testnet RPC answers most calls in under a
+ * second but stalls one now and then for several, and a payment makes a dozen
+ * calls in a row. Reads only: nothing here sends a transaction (the relay does).
+ */
+const HEDGE_MS = 1_200;
+const HEDGED = new Set(["eth_blockNumber", "eth_call", "eth_chainId", "eth_getLogs", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getBlockByNumber"]);
+function hedged(inner: Transport): Transport {
+  return (opts) => {
+    const t = inner(opts);
+    const request = ((args: { method: string }) => {
+      if (!HEDGED.has(args.method)) return t.request(args as never);
+      return new Promise<unknown>((resolve, reject) => {
+        let done = false;
+        const settle = (f: (v: unknown) => void) => (v: unknown) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          f(v);
+        };
+        t.request(args as never).then(settle(resolve), settle(reject));
+        const timer = setTimeout(() => t.request(args as never).then(settle(resolve), settle(reject)), HEDGE_MS);
+      });
+    }) as typeof t.request;
+    return { ...t, request };
+  };
+}
+
 /** Tempo makes a block about every half second: poll receipts at that pace, not viem's 4 s default. */
-export const publicClient = createPublicClient({ chain: CHAIN, transport: http(RPC), pollingInterval: 250 });
+export const publicClient = createPublicClient({ chain: CHAIN, transport: hedged(http(RPC)), pollingInterval: 250 });
 /**
  * The same client, typed for the SDK. mppx 0.13 needs a newer viem than the
  * SDK in this repo was built against; the client is the same at runtime.
