@@ -23,7 +23,6 @@ export const CONTEST = {
   /** Video length, in minutes. */
   minMinutes: 1,
   maxMinutes: 3,
-  hashtag: "#GloamVideo",
   account: "gloamtrade",
   /** The contest post on X that entries quote. Until it is set, the page points at @gloamtrade. */
   announcementUrl: null as string | null,

@@ -181,7 +181,7 @@ export default function ContestPage() {
               <a href={announcement} target="_blank" rel="noreferrer" className={xLink}>
                 the contest announcement
               </a>
-              , tag @{CONTEST.account} and add {CONTEST.hashtag}. Links to YouTube or other sites don&rsquo;t count.
+              , and tag @{CONTEST.account}. Links to YouTube or other sites don&rsquo;t count.
             </Step>
             <Step n={3} title="Send us the link">
               Put the link to your post in{" "}
@@ -253,7 +253,7 @@ export default function ContestPage() {
               <p className="mt-6 max-w-[40ch] text-[16px] leading-relaxed text-soft sm:text-[17px]">
                 {closed
                   ? `Thanks to everyone who entered. Winners are announced by ${winners} on @${CONTEST.account}.`
-                  : `Post your video on X first, with ${CONTEST.hashtag} and @${CONTEST.account}. Then add the link here.`}
+                  : `Post your video on X first, quoting the announcement and tagging @${CONTEST.account}. Then add the link here.`}
               </p>
               <p className="mt-6 max-w-[40ch] text-[13.5px] leading-relaxed text-mute">
                 We keep your entry to run the contest and contact winners, and for nothing else. Only the Gloam team can

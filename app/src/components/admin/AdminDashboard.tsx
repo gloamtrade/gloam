@@ -2129,7 +2129,7 @@ function ContestPanel() {
           minWidth={1400}
         />
         <p className="mt-4 text-[13px] leading-relaxed text-mute">
-          One entry per X handle; sending again replaces it. Check each post quotes the announcement with the hashtag
+          One entry per X handle; sending again replaces it. Check each post quotes the announcement and tags @gloamtrade
           before judging. Hover a post link for posts an entry replaced. Store: {data.backend}.
         </p>
       </Panel>

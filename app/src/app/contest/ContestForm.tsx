@@ -114,7 +114,7 @@ export function ContestForm({ closed }: { closed: boolean }) {
       <Row
         label="Link to your post on X"
         htmlFor="c-post"
-        hint={`The post with your video uploaded to it, quoting the announcement, with ${CONTEST.hashtag}.`}
+        hint={`The post with your video uploaded to it, quoting the announcement and tagging @${CONTEST.account}.`}
         error={fieldError("post")}
       >
         <input
