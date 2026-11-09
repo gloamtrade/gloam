@@ -26,8 +26,8 @@ export const CONTEST = {
   account: "gloamtrade",
   /** The contest post on X that entries quote. Until it is set, the page points at @gloamtrade. */
   announcementUrl: "https://x.com/gloamtrade/status/2119693757138317348" as string | null,
-  /** The Telegram community, where the Creators topic lives. */
-  telegramUrl: "https://t.me/gloamhq",
+  /** The Creators topic in the Telegram community, for questions and drafts. */
+  telegramUrl: "https://t.me/gloamhq/28002",
 } as const;
 
 export const CONTEST_TOTAL = CONTEST.prizes.reduce((a, b) => a + b, 0);
