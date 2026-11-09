@@ -159,6 +159,17 @@ import { ClaimSafetyLine } from "./ClaimSafetyLine";
 import { canSwapAfterClaim, takeFirstClaim } from "@/lib/afterClaim";
 import { TokenLogo } from "./TokenLogo";
 import { AddTokenToWallet } from "./AddTokenToWallet";
+import { CrossChainCashOutStatus, CrossChainPicker, CrossChainQuoteCard } from "./CrossChainCashOut";
+import {
+  cashOutNet,
+  crossChainDestination,
+  crossChainDestinations,
+  crossChainProblem,
+  relayOrderUrl,
+  requestCrossChainQuote,
+  requoteStillFine,
+  type CrossChainQuote,
+} from "@/lib/cashOutCrossChain";
 import { checkSweep, sweepVerdict, type SweepCheck, type SweepReader } from "@/lib/sweepCheck";
 import { EMBEDDED_CONNECTOR_ID } from "@/lib/embeddedWallet";
 import { moveModeFromParam, searchWithMoveMode } from "@/lib/vaultNav";
@@ -241,6 +252,11 @@ export function MoveView() {
   const sweepRuns = useRef(new Map<string, Promise<SweepCheck>>());
   /** Where the last cash out went, for the "see it in your wallet" step after it lands. */
   const [cashedOut, setCashedOut] = useState<{ to: Address; asset: Address } | null>(null);
+  // Cash out to another chain (lib/cashOutCrossChain): where it lands (null: this chain, as
+  // always), the live price for it, and the order just sent, for its status.
+  const [xDestId, setXDestId] = useState<string | null>(null);
+  const [xQuote, setXQuote] = useState<CrossChainQuote | null>(null);
+  const [xSent, setXSent] = useState<CrossChainQuote | null>(null);
   /** What was just scheduled: one cash out, or a private cash out's pieces (count, from `at` to `until`). */
   const [scheduledNotice, setScheduledNotice] = useState<{ at: number; label: string; count?: number; until?: number } | null>(null);
   // Cash out privately (lib/cashOutPrivately): a few pieces over time, the
@@ -908,6 +924,27 @@ export function MoveView() {
     poolForCashOut != null &&
     poolForCashOut < cashOutAmount;
 
+  // Cash out to another chain (lib/cashOutCrossChain): offered for the stablecoins Relay
+  // takes from this chain. Now and all at once only; picking it turns off later and pieces.
+  const xDestinations = mode === "cashout" && selected && !demoMode ? crossChainDestinations(network.chainId, selected.asset) : [];
+  const xDestination = xDestinations.find((d) => d.id === xDestId) ?? null;
+  const xActive = xDestination != null;
+  /** What reaches Relay's deposit address: the cash out less the vault's fee. */
+  const xNet = cashOutNet(cashOutAmount, cashOutFeeBps);
+  /** The price, only while it still fits what is on screen: the amount after the fee, the chain, the wallets. */
+  const xPrice =
+    xQuote &&
+    xDestination &&
+    xQuote.destination.id === xDestination.id &&
+    xQuote.amountIn === xNet.toString() &&
+    address != null &&
+    xQuote.refundTo.toLowerCase() === address.toLowerCase() &&
+    (xDestination.kind === "svm" || (cashOutTo != null && xQuote.recipient.toLowerCase() === cashOutTo.toLowerCase()))
+      ? xQuote
+      : null;
+  /** The person's address on the other chain: the To address for an EVM chain, typed in for Solana (in the quote). */
+  const xRecipient = xDestination?.kind === "svm" ? (xPrice?.recipient ?? null) : cashOutTo;
+
   // Cash out privately (lib/cashOutPrivately): 2 to 4 round pieces, none
   // matching money that came in, each through cash out later. Offered for a
   // stablecoin above 5 with the relay up, since the relay sends every step.
@@ -928,7 +965,7 @@ export function MoveView() {
           random: seededRandom(planSeed),
         })
       : null;
-  const planOffered = plan != null && relayAvailable && poseidonMode;
+  const planOffered = plan != null && relayAvailable && poseidonMode && !xActive;
   const planActive = planOffered && privatePref;
   // While a run is setting pieces up, the card shows that run (the note it
   // started from is spent part way, so the selection moves on underneath).
@@ -954,7 +991,7 @@ export function MoveView() {
     : [];
   const privacyWarnings = selected
     ? cashOutPrivacyWarnings({
-        to: cashOutTo,
+        to: xActive ? xRecipient : cashOutTo,
         connected: address,
         amountWei: planActive || cashOutAmountInvalid ? null : cashOutAmount,
         asset: selected.asset,
@@ -995,7 +1032,7 @@ export function MoveView() {
   // Does money sent to this address get swept out? Read in the background; a
   // failed read is no warning, never a blocked cash out.
   const sweepKey =
-    mode === "cashout" && cashOutTo && selected && !demoMode
+    mode === "cashout" && cashOutTo && selected && !demoMode && !xActive
       ? `${network.chainId}:${cashOutTo.toLowerCase()}:${selected.asset.toLowerCase()}`
       : null;
   function runSweepCheck(key: string, to: Address, asset: Address, chainId: number): Promise<SweepCheck> {
@@ -1061,12 +1098,19 @@ export function MoveView() {
     }
     setError(null);
     setScheduledNotice(null);
-    const later = cashOutWhen !== "now";
+    // To another chain: always now, and the vault pays Relay's one-time address from the price shown.
+    const xShown = xActive ? xPrice : null;
+    const xDest = xActive ? xDestination : null;
+    const later = cashOutWhen !== "now" && !xDest;
     const amount = cashOutAmount;
-    const to = cashOutTo;
+    let to: Address | null = xShown ? (xShown.depositAddress as Address) : cashOutTo;
 
     if (cashOutAmountInvalid || amount <= 0n || amount > noteWei) {
       setError("Enter an amount up to this balance.");
+      return;
+    }
+    if (xDest && (!xShown || !address)) {
+      setError("Wait for the price from Relay, then try again.");
       return;
     }
     if (!to) {
@@ -1093,7 +1137,8 @@ export function MoveView() {
       );
       return;
     }
-    if (!(await checkCashOutTargets([to], selected.asset, to))) return;
+    // Relay's address passes the same checks, but not the sweep check: it is swept on purpose.
+    if (!(await checkCashOutTargets([to], selected.asset, to, { sweep: !xDest }))) return;
     const feeNote = await feeMoved(network, liveFeeBps);
     if (feeNote) {
       setError(feeNote);
@@ -1112,6 +1157,7 @@ export function MoveView() {
     pendingAction.current = "cashout";
     pendingChange.current = null;
     setCashedOut(null);
+    setXSent(null);
 
     let splitDone = false;
     try {
@@ -1149,9 +1195,51 @@ export function MoveView() {
         path = (await pathForLeaf(selected.leafIndex!)) as PoseidonMerklePath | null;
       }
       if (!path) throw new Error("Could not read your private balance. Refresh and try again.");
+      // To another chain: a fresh price for exactly what the vault will pay, right before the
+      // proof fixes the address and the amount. A worse price stops here and is shown instead.
+      let xOrder: CrossChainQuote | null = null;
+      if (xDest && xShown && address) {
+        setStatus("Getting a fresh price from Relay…");
+        const gross = BigInt(target.amountWei);
+        const fresh = await requestCrossChainQuote({
+          network: network.key,
+          asset: target.asset,
+          amount: cashOutNet(gross, cashOutFeeBps),
+          destination: xDest.id,
+          recipient: xShown.recipient,
+          refundTo: address,
+        });
+        if (!requoteStillFine(xShown, fresh)) {
+          setXQuote(fresh);
+          throw new Error("The price moved. Check the new amount, then cash out again.");
+        }
+        const binding = { chainId: network.chainId, asset: target.asset, gross, feeBps: cashOutFeeBps, destinationId: xDest.id, recipient: xShown.recipient, refundTo: address };
+        const problem = crossChainProblem(fresh, { ...binding, to: fresh.depositAddress });
+        if (problem) throw new Error(problem);
+        if (!(await checkCashOutTargets([fresh.depositAddress as Address], target.asset as Address, null, { sweep: false }))) {
+          throw new Error("Relay's address didn't pass the checks. Nothing was sent.");
+        }
+        xOrder = fresh;
+        to = fresh.depositAddress as Address;
+        setXQuote(fresh);
+      }
       spentNoteId.current = target.id;
       setStatus("Proving privately, this takes 10 to 30 seconds…");
       const call = await proveCashOut(target, to, path, network.chainId);
+      // the proof binds where the money goes and how much: it must be exactly Relay's order
+      if (xOrder && address) {
+        const problem = crossChainProblem(xOrder, {
+          chainId: call.chainId,
+          asset: call.asset,
+          gross: call.amount,
+          feeBps: cashOutFeeBps,
+          to: call.to,
+          destinationId: xOrder.destination.id,
+          recipient: xOrder.recipient,
+          refundTo: address,
+        });
+        if (problem) throw new Error(problem);
+      }
       // From a partner's link to the request's own wallet: bound to the link's code before anything is sent.
       const fromLink = requestPartner(to);
       if (later) {
@@ -1179,7 +1267,8 @@ export function MoveView() {
         setStatus("Sending through the Gloam relay…");
         // the relay registers it under the code as it sends it
         const h = await relayUnshield({ ...call, ...(fromLink ? { partnerCode: fromLink.code } : {}) });
-        setCashedOut({ to, asset: target.asset as Address });
+        if (xOrder) setXSent(xOrder);
+        else setCashedOut({ to, asset: target.asset as Address });
         setRelayHash(h);
         setSuccessTitle("Cashed out");
         setCashOutInput("");
@@ -1196,11 +1285,12 @@ export function MoveView() {
         gas: gasFor(network.chainId, SHIELD_GAS_LIMIT),
         chainId: network.chainId,
       });
-      setCashedOut({ to, asset: target.asset as Address });
+      if (xOrder) setXSent(xOrder);
+      else setCashedOut({ to, asset: target.asset as Address });
       setSuccessTitle("Cashed out");
       setCashOutInput("");
       void import("@/lib/track").then(({ track }) => {
-        track("unshield_success");
+        track(xOrder ? "unshield_xchain" : "unshield_success");
       });
       // cash out is intentional exit, no onboarding mark
     } catch (e) {
@@ -1230,7 +1320,12 @@ export function MoveView() {
    * `quiet` address (the one under To) stops without a message, since its
    * warning says why and how to go ahead; any other swept address is refused.
    */
-  async function checkCashOutTargets(targets: Address[], asset: Address, quiet: Address | null): Promise<boolean> {
+  async function checkCashOutTargets(
+    targets: Address[],
+    asset: Address,
+    quiet: Address | null,
+    opts: { sweep?: boolean } = {}
+  ): Promise<boolean> {
     const unique = targets.filter((t, i) => targets.findIndex((x) => x.toLowerCase() === t.toLowerCase()) === i);
     // Never to the vault, the memo board, a token or a swap router: the money would be stuck there.
     for (const t of unique) {
@@ -1242,7 +1337,7 @@ export function MoveView() {
     }
     // Money sent here has been swept out within seconds before: only on purpose.
     // A check still running gets a few seconds; one that fails is no warning.
-    if (!demoMode) {
+    if (!demoMode && opts.sweep !== false) {
       for (const t of unique) {
         const key = `${network.chainId}:${t.toLowerCase()}:${asset.toLowerCase()}`;
         if (sweepOkFor === key) continue;
@@ -2979,6 +3074,15 @@ export function MoveView() {
                           }
                         />
                       )}
+                      {xActive && xDestination ? (
+                        <div className="mt-4 border-t border-line pt-3">
+                          <p className="tnum text-[12.5px] leading-relaxed text-mute">
+                            {cashOutFeeBps > 0
+                              ? `${formatFeePercent(cashOutFeeBps)} fee: ${formatAssetLabel(cashOutFee, selected.asset)}. Relay gets ${formatAssetLabel(xNet, selected.asset)} and sends ${xDestination.token.symbol} on ${xDestination.chain}.`
+                              : `Relay gets ${formatAssetLabel(xNet, selected.asset)} and sends ${xDestination.token.symbol} on ${xDestination.chain}.`}
+                          </p>
+                        </div>
+                      ) : (
                       <div className="mt-4 border-t border-line pt-3">
                         <p className="text-[13px] text-mute">You get</p>
                         <p className="tnum mt-1.5 truncate text-[22px] font-light leading-tight text-foreground">
@@ -2991,6 +3095,7 @@ export function MoveView() {
                           </p>
                         )}
                       </div>
+                      )}
                       <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-3 text-[13px]">
                         <span className="text-mute">
                           In the vault ({assetLabel(selected.asset)})
@@ -3020,8 +3125,24 @@ export function MoveView() {
                     </div>
                   )}
 
+                  {selected && xDestinations.length > 0 && (
+                    <CrossChainPicker
+                      chainId={network.chainId}
+                      chainLabel={network.label}
+                      symbol={assetLabel(selected.asset)}
+                      destinations={xDestinations}
+                      value={xDestination ? xDestination.id : null}
+                      onChange={(id) => {
+                        setXDestId(id);
+                        setXQuote(null);
+                      }}
+                      disabled={working}
+                    />
+                  )}
+
+                  {xDestination?.kind !== "svm" && (
                   <div>
-                    <p id="cashout-to" className="text-[13px] text-mute">To</p>
+                    <p id="cashout-to" className="text-[13px] text-mute">{xDestination ? `To, on ${xDestination.chain}` : "To"}</p>
                     <div role="radiogroup" aria-labelledby="cashout-to" className="mt-2 grid grid-cols-2 gap-2">
                       {(
                         [
@@ -3117,6 +3238,23 @@ export function MoveView() {
                       </p>
                     ) : null}
                   </div>
+                  )}
+
+                  {xDestination && selected && (
+                    <CrossChainQuoteCard
+                      networkKey={network.key}
+                      chainId={network.chainId}
+                      asset={selected.asset}
+                      destination={xDestination}
+                      netAmount={xNet}
+                      evmRecipient={xDestination.kind === "evm" ? cashOutTo : null}
+                      refundTo={(address as Address | undefined) ?? null}
+                      ready={!cashOutAmountInvalid && !cashOutFeeUnknown && xNet > 0n}
+                      quote={xPrice}
+                      onQuote={setXQuote}
+                      disabled={working}
+                    />
+                  )}
 
                   {planOffered && plan && (
                     <HowChoice
@@ -3199,7 +3337,7 @@ export function MoveView() {
                     </>
                   )}
 
-                  {!planActive && (
+                  {!planActive && !xActive && (
                   <div>
                     <p id="cashout-when" className="text-[13px] text-mute">When</p>
                     <div role="radiogroup" aria-labelledby="cashout-when" className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -3272,7 +3410,7 @@ export function MoveView() {
                         cashOutInventoryShort ||
                         cashOutFeeUnknown ||
                         cashOutAmountInvalid ||
-                        !cashOutTo ||
+                        (xActive ? !xPrice : !cashOutTo) ||
                         sweepHold ||
                         (planActive ? !piecesReady : cashOutWhen !== "now" && !relayAvailable)
                       }
@@ -3295,6 +3433,8 @@ export function MoveView() {
                         "Loading the cash-out fee…"
                       ) : sweepHold ? (
                         "Check the address first"
+                      ) : xActive && xDestination ? (
+                        xPrice ? `Cash out to ${xDestination.chain}` : "Waiting for the price"
                       ) : planActive ? (
                         piecesReady || !perPiece ? "Cash out privately" : "Add an address for each piece"
                       ) : cashOutWhen !== "now" ? (
@@ -3817,9 +3957,11 @@ export function MoveView() {
             </>
           ) : (
             <p>
-              {cashOutDest === "other"
-                ? "The money is on its way to that address."
-                : "The money is back in your wallet."}{" "}
+              {xSent
+                ? `The vault paid Relay, and Relay sends ${xSent.destination.symbol} on ${xSent.destination.chain}.`
+                : cashOutDest === "other"
+                  ? "The money is on its way to that address."
+                  : "The money is back in your wallet."}{" "}
               The amount and the address it went to are public on the explorer, so only cash out when you
               need it in the open.
             </p>
@@ -3831,6 +3973,11 @@ export function MoveView() {
         footer={
           paidPrivately ? (
             <PrivatePayShare chainId={network.chainId} networkLabel={network.label} testnet={network.testnet} />
+          ) : successTitle === "Cashed out" && xSent ? (
+            <CrossChainCashOutStatus
+              quote={xSent}
+              explorerTx={crossChainDestination(xSent.destination.id)?.explorerTx ?? relayOrderUrl}
+            />
           ) : successTitle === "Cashed out" && cashedOut ? (
             <AddTokenToWallet chainId={network.chainId} asset={cashedOut.asset} to={cashedOut.to} />
           ) : undefined

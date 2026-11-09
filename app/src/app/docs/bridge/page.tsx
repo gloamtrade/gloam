@@ -8,7 +8,7 @@ import { BRIDGE_MAX_USD, BRIDGE_MIN_USD, EXPENSIVE_ROUTE_MIN_USD, EXPENSIVE_ROUT
 export const metadata: Metadata = {
   title: "Deposit from another chain",
   description:
-    "Pay into Gloam from Bitcoin, Solana, Tron or 22 EVM chains through Relay. From a Solana or EVM wallet it lands straight in your private balance; from Bitcoin or an exchange it lands in your wallet first.",
+    "Pay into Gloam from Bitcoin, Solana, Tron or 22 EVM chains through Relay. From a Solana or EVM wallet it lands straight in your private balance; from Bitcoin or an exchange it lands in your wallet first. Cash outs can land on another chain too.",
 };
 
 const usd = (n: number) => `$${n.toLocaleString("en-US")}`;
@@ -77,6 +77,28 @@ export default function DocsBridgePage() {
         wallet and the amount, and the vault shows the deposit. What you do with
         the money after it lands stays private. See{" "}
         <Link href="/docs/privacy-model">what stays private</Link>.
+      </p>
+
+      <h2 id="cash-out">Cash out to another chain</h2>
+      <p>
+        It works the other way too. On Robinhood Chain, Base or Ethereum, a
+        cash out can land as USDC on Base, Ethereum, Arbitrum or Solana in one
+        step. Under <strong>Lands on</strong>, pick the chain, then the address
+        there. The vault pays a one-time Relay address for exactly the amount
+        after the 0.5% cash-out fee, and Relay sends the USDC on.
+      </p>
+      <p>
+        Before you confirm you see what arrives, the least that will arrive,
+        Relay&apos;s fee and roughly how long it takes. Right before your proof
+        is made, the app asks Relay once more and stops if the price got worse.
+        If Relay can&apos;t deliver it, it sends the money back to your wallet
+        on the chain you cashed out from. That refund is public.
+      </p>
+      <p>
+        A cash out to another chain goes now and all at once. Cashing out later
+        or in pieces stays on the same chain, and Tempo isn&apos;t a starting
+        point yet. Like any cash out, the amount and where it goes are public,
+        on both chains.
       </p>
 
       <h2 id="try">Try it</h2>
