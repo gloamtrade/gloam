@@ -180,6 +180,21 @@ export function swapSource(network: Pick<GloamNetwork, "family" | "chainId">): B
   return s && s.id === network.chainId ? s : null;
 }
 
+/**
+ * A wallet's balance of a bridge token, rounded down so it never claims more
+ * than is there: two decimals for a stablecoin, up to six significant digits
+ * for a chain's own coin ("727.49", "0.0123456").
+ */
+export function formatBridgeBalance(value: bigint, decimals: number, stable = false): string {
+  // Cut as text, so no float rounding ever shows a cent that isn't there.
+  const [whole = "0", frac = ""] = formatUnits(value < BigInt(0) ? BigInt(0) : value, decimals).split(".");
+  const grouped = BigInt(whole).toLocaleString("en-US");
+  if (stable) return `${grouped}.${frac.padEnd(2, "0").slice(0, 2)}`;
+  const keep = whole !== "0" ? Math.max(0, 6 - whole.length) : (frac.match(/^0*/)?.[0].length ?? 0) + 6;
+  const f = frac.slice(0, keep).replace(/0+$/, "");
+  return f ? `${grouped}.${f}` : grouped;
+}
+
 /** ETH kept back by Max, so the swap itself can still pay its network fee. */
 export const SWAP_GAS_RESERVE_WEI = BigInt(200_000_000_000_000);
 

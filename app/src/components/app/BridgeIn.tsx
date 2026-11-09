@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "framer-motion";
-import { erc20Abi, formatUnits, parseUnits, type Address, type Hex } from "viem";
-import { useAccount, useConfig, useReadContract } from "wagmi";
+import { erc20Abi, formatUnits, isAddress, parseUnits, type Address, type Hex } from "viem";
+import { useAccount, useBalance, useConfig, useReadContract } from "wagmi";
 import { getAccount, getTransactionReceipt, readContract, sendTransaction, switchChain, waitForTransactionReceipt } from "wagmi/actions";
 import {
   BRIDGE_CHAINS,
@@ -16,6 +16,7 @@ import {
   bridgeFeeLines,
   chainLogo,
   expensiveRoute,
+  formatBridgeBalance,
   leftoverLabel,
   privateBridgeable,
   swapSource,
@@ -321,16 +322,28 @@ function BridgeSheet({
     chainId: (swap?.id ?? network.chainId) as GloamChainId,
     enabled: open && swapping,
   });
-  // In a private bridge from another EVM chain: this wallet's balance of the token it pays in, for Max.
+  // This wallet's balance of the picked token on the picked EVM chain, so the amount
+  // isn't a guess (and Max). Only chains the wagmi config knows; a failed read shows nothing.
   const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
-  const tokenBal = useReadContract({
+  const nativeToken = token.address === ZERO_ADDR;
+  const balanceReadable =
+    open && !demo && !swapping && chain.kind === "evm" && isAddress(recipient) && config.chains.some((c) => c.id === chain.id);
+  const srcToken = useReadContract({
     address: token.address as Address,
     abi: erc20Abi,
     functionName: "balanceOf",
     args: [recipient as Address],
     chainId: chain.id as GloamChainId,
-    query: { enabled: open && privately && !swapping && chain.kind === "evm" && token.address !== ZERO_ADDR && Boolean(recipient) },
+    query: { enabled: balanceReadable && !nativeToken, retry: 1 },
   });
+  const srcCoin = useBalance({
+    address: recipient as Address,
+    chainId: chain.id as GloamChainId,
+    query: { enabled: balanceReadable && nativeToken, retry: 1 },
+  });
+  const srcRead = nativeToken ? srcCoin : srcToken;
+  const srcBalance: bigint | null = balanceReadable && !srcRead.isError ? (nativeToken ? srcCoin.data?.value : srcToken.data) ?? null : null;
+  const srcLoading = balanceReadable && srcRead.isLoading;
   const send = useAppSendTransaction();
   const receipt = useAppTxReceipt({ hash: send.data, chainId: (swap?.id ?? network.chainId) as GloamChainId });
   const resetSend = send.reset;
@@ -865,6 +878,10 @@ function BridgeSheet({
   })();
   const overBalance = swapping && !privately && gasCoin != null && amountWei != null && amountWei > gasCoin.value;
   const maxWei = gasCoin != null && gasCoin.value > SWAP_GAS_RESERVE_WEI ? gasCoin.value - SWAP_GAS_RESERVE_WEI : BigInt(0);
+  // Only a note, never a block: a deposit address can be paid from an exchange. Privately
+  // the amount is what lands, so it is compared only for a stablecoin.
+  const overSource =
+    srcBalance != null && amountNum > 0 && (!privately || token.stable) && amountNum > Number(formatUnits(srcBalance, token.decimals));
   const amountOk = privately
     ? /^\d+(\.\d{1,2})?$/.test(amount) && amountNum >= BRIDGE_MIN_USD
     : (token.stable ? amountNum >= BRIDGE_MIN_USD && amountNum <= BRIDGE_MAX_USD : amountNum > 0) && !overBalance;
@@ -1097,20 +1114,21 @@ function BridgeSheet({
                   <span className="text-[14px] text-mute">{dest.token.symbol}</span>
                 </div>
                 <AmountProblem value={amount} decimals={2} />
-                {!swapping && token.stable && tokenBal.data != null && (
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                    <span className="tnum text-[12px] text-mute">
-                      In your wallet on {chain.name}: {trimAmount(formatUnits(tokenBal.data as bigint, token.decimals))} {token.symbol}
-                    </span>
-                    <button
-                      type="button"
-                      disabled={(tokenBal.data as bigint) === BigInt(0)}
-                      onClick={() => setAmount(String(Math.floor(Number(formatUnits(tokenBal.data as bigint, token.decimals)) * 0.995 * 100) / 100))}
-                      className="h-9 rounded-full border border-line px-3 text-[12.5px] text-soft transition-colors hover:bg-surface hover:text-foreground disabled:opacity-40"
-                    >
-                      Max
-                    </button>
-                  </div>
+                {!swapping && (
+                  <SourceBalance
+                    value={srcBalance}
+                    loading={srcLoading}
+                    decimals={token.decimals}
+                    symbol={token.symbol}
+                    stable={token.stable}
+                    over={overSource ? chain.name : null}
+                    // The amount here is what lands, so Max leaves room for Relay's fee.
+                    onMax={
+                      token.stable && srcBalance != null
+                        ? () => setAmount(String(Math.floor(Number(formatUnits(srcBalance, token.decimals)) * 0.995 * 100) / 100))
+                        : null
+                    }
+                  />
                 )}
                 {swapping && maxOut && (
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
@@ -1158,6 +1176,18 @@ function BridgeSheet({
                 <span className="text-[14px] text-mute">{token.symbol}</span>
               </div>
               <AmountProblem value={amount} decimals={token.decimals} />
+              {!swapping && (
+                <SourceBalance
+                  value={srcBalance}
+                  loading={srcLoading}
+                  decimals={token.decimals}
+                  symbol={token.symbol}
+                  stable={token.stable}
+                  over={overSource ? chain.name : null}
+                  // Stablecoins only: a chain's own coin also pays the network fee to send it.
+                  onMax={token.stable && srcBalance != null ? () => setAmount(stableMax(srcBalance, token.decimals)) : null}
+                />
+              )}
               {swapping && gasCoin != null && (
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                   <span className="tnum text-[12px] text-mute">
@@ -1249,7 +1279,7 @@ function BridgeSheet({
                 : swapping
                   ? "Swapping is public, like any deposit."
                   : "Bridging is public, like any deposit."}{" "}
-              Powered by Relay.
+              <PoweredByRelay />
             </p>
             {chain.kind === "svm" && solWallets.length === 0 && !network.chain.testnet && (
               <p className="text-center text-[12px] leading-relaxed text-mute">
@@ -1681,6 +1711,82 @@ function trimAmount(text: string): string {
   const [whole, frac = ""] = text.split(".");
   const f = frac.slice(0, 6).replace(/0+$/, "");
   return f ? `${whole}.${f}` : whole!;
+}
+
+/** Max for a stablecoin sent to a deposit address: all of it, up to the bridge's limit. */
+function stableMax(value: bigint, decimals: number): string {
+  const cap = parseUnits(String(BRIDGE_MAX_USD), decimals);
+  return trimAmount(formatUnits(value > cap ? cap : value, decimals));
+}
+
+/** "Balance 727.49 USDC" under the amount, with Max when it has one. Nothing without a reading. */
+function SourceBalance({
+  value,
+  loading,
+  decimals,
+  symbol,
+  stable,
+  over,
+  onMax,
+}: {
+  value: bigint | null;
+  loading: boolean;
+  decimals: number;
+  symbol: string;
+  stable?: boolean;
+  /** The source chain's name when the amount is more than the balance there. */
+  over: string | null;
+  onMax: (() => void) | null;
+}) {
+  if (loading) {
+    return (
+      <p className="mt-2 text-[12px] text-faint" aria-live="polite">
+        Balance …
+      </p>
+    );
+  }
+  if (value == null) return null;
+  return (
+    <>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="tnum text-[12px] text-mute">
+          Balance {formatBridgeBalance(value, decimals, stable)} {symbol}
+        </span>
+        {onMax && (
+          <button
+            type="button"
+            disabled={value === BigInt(0)}
+            onClick={onMax}
+            className="h-9 rounded-full border border-line px-3 text-[12.5px] text-soft transition-colors hover:bg-surface hover:text-foreground disabled:opacity-40"
+          >
+            Max
+          </button>
+        )}
+      </div>
+      {over && <p className="mt-1 text-[12px] text-mute">More than your balance on {over}.</p>}
+    </>
+  );
+}
+
+/** "Powered by" Relay's own wordmark, dark or light with the theme, linking to Relay. */
+function PoweredByRelay() {
+  return (
+    <span className="whitespace-nowrap">
+      Powered by{" "}
+      <a
+        href="https://relay.link"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Relay"
+        className="inline-block align-baseline opacity-80 transition-opacity hover:opacity-100"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element -- small local logo */}
+        <img src="/brand/partners/relay.svg" alt="" width={66} height={15} className="relative top-[3px] inline-block h-[15px] w-auto dark:hidden" />
+        {/* eslint-disable-next-line @next/next/no-img-element -- small local logo */}
+        <img src="/brand/partners/relay-white.svg" alt="" width={66} height={15} className="relative top-[3px] hidden h-[15px] w-auto dark:inline-block" />
+      </a>
+    </span>
+  );
 }
 
 /** Two decimals, rounded down, so "Add it privately" never asks for more than arrived. */
