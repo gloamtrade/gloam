@@ -16,6 +16,7 @@ import {
   relayAppFees,
   swapSource,
   validRefundAddress,
+  walletBridgeTxs,
   type BridgeQuote,
 } from "@/lib/bridge";
 import { noteRelayQuote } from "@/lib/relayLedger";
@@ -41,6 +42,12 @@ function fail(status: number, message: string, headers?: HeadersInit) {
  * The person sends `amount` of that token to the returned address and Relay
  * delivers the network's stablecoin to `recipient`. Gloam keeps nothing unless
  * BRIDGE_FEE_BPS is set; the quote says so either way (appFee).
+ *
+ * With `fromWallet: true` on an EVM chain, the connected wallet (`recipient`)
+ * pays instead: no deposit address, and the quote carries the transactions it
+ * signs (`evmTxs`: an approve and the deposit, or the deposit alone), checked by
+ * walletBridgeTxs. The money lands in the same wallet on the destination chain,
+ * and a refund goes back to it on the source chain.
  */
 export async function POST(req: Request) {
   let body: Record<string, unknown>;
@@ -85,6 +92,7 @@ export async function POST(req: Request) {
 
   // Refunds go back to the sender's own address on the source chain. On an
   // EVM chain that is the same address as the connected wallet.
+  const fromWallet = body.fromWallet === true && chain.kind === "evm" && !chain.swap;
   const refundTo = chain.kind === "evm" ? recipient : typeof body.refundTo === "string" ? body.refundTo.trim() : "";
   if (!validRefundAddress(chain.kind, refundTo)) {
     return fail(400, `Add your ${ADDRESS_NAME[chain.kind] ?? chain.name} address, so a failed transfer can be sent back to you.`);
@@ -100,8 +108,9 @@ export async function POST(req: Request) {
       method: "POST",
       headers: { "content-type": "application/json", ...(apiKey ? { "x-api-key": apiKey } : {}) },
       body: JSON.stringify({
-        // A swap is signed by the person's own wallet, so Relay builds it for that wallet.
-        user: chain.swap ? recipient : chain.kind === "evm" ? "0x000000000000000000000000000000000000dEaD" : refundTo,
+        // A swap, or a bridge paid from the wallet, is signed by the person's own
+        // wallet, so Relay builds it for that wallet.
+        user: chain.swap || fromWallet ? recipient : chain.kind === "evm" ? "0x000000000000000000000000000000000000dEaD" : refundTo,
         recipient,
         originChainId: chain.id,
         destinationChainId: dest.chainId,
@@ -109,7 +118,7 @@ export async function POST(req: Request) {
         destinationCurrency: dest.token.address,
         amount: amount.toString(),
         tradeType: "EXACT_INPUT",
-        useDepositAddress: !chain.swap,
+        useDepositAddress: !chain.swap && !fromWallet,
         refundTo,
         appFees: relayAppFees(feeSetting),
         // Relay refuses a referrer without a key; with one, it tags the request for /admin.
@@ -125,7 +134,7 @@ export async function POST(req: Request) {
   const data = (await res.json().catch(() => null)) as Record<string, any> | null;
   const step = data?.steps?.[0];
   const out = data?.details?.currencyOut;
-  if (!res.ok || (!chain.swap && !step?.depositAddress) || !step?.requestId || !out) {
+  if (!res.ok || (!chain.swap && !fromWallet && !step?.depositAddress) || !step?.requestId || !out) {
     const msg = typeof data?.message === "string" ? data.message : "";
     return fail(502, /amount|too (low|small)|insufficient/i.test(msg) ? "That amount is too small to bridge. Try a little more." : "The bridge couldn't make a route right now. Try again.");
   }
@@ -155,11 +164,23 @@ export async function POST(req: Request) {
     tx = { to: item.to, data: item.data, value: amount.toString(), chainId: chain.id };
   }
 
+  // A bridge from the wallet: only the plain approve and deposit on this chain,
+  // for exactly this amount, ever reach the wallet (lib/bridge walletBridgeTxs).
+  let evmTxs: BridgeQuote["evmTxs"];
+  if (fromWallet) {
+    const txs = walletBridgeTxs(data, chain, token, amount, recipient);
+    if (!txs || data?.steps?.some((s: any) => s?.requestId !== undefined && s.requestId !== step.requestId)) {
+      return fail(502, "The bridge couldn't make a route right now. Try again.");
+    }
+    evmTxs = txs;
+  }
+
   const feeUsd = ["relayer", "app"].reduce((sum, k) => sum + Number(data?.fees?.[k]?.amountUsd ?? 0), 0);
   const quote: BridgeQuote = {
     requestId: String(step.requestId),
-    depositAddress: chain.swap ? "" : String(step.depositAddress),
+    depositAddress: chain.swap || fromWallet ? "" : String(step.depositAddress),
     tx,
+    ...(evmTxs ? { evmTxs } : {}),
     send: {
       amount: amountText,
       symbol: token.symbol,
@@ -181,7 +202,8 @@ export async function POST(req: Request) {
     bitcoin: chain.kind === "bvm",
   };
   // For /admin's count (lib/relayLedger), with no wallet. A swap is left out: the
-  // panel re-prices it as the amount is typed, so most never run.
+  // panel re-prices it as the amount is typed, so most never run. A bridge from the
+  // wallet goes on by its request id alone (no deposit address to note).
   if (apiKey && !chain.swap) await noteRelayQuote(quote.requestId, quote.depositAddress);
   return NextResponse.json({ ok: true, data: quote }, { headers: { "Cache-Control": "no-store" } });
 }

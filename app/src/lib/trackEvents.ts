@@ -16,6 +16,8 @@ export const TRACK_EVENTS = [
   "bridge_private_landed",
   "bridge_private_review",
   "bridge_private_sent",
+  "bridge_wallet_review",
+  "bridge_wallet_sent",
   "claim_secure",
   "first_pay_nudge_dismiss",
   "first_pay_nudge_open",
