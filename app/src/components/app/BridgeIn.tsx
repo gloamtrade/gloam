@@ -1057,23 +1057,6 @@ function BridgeSheet({
               </div>
             )}
 
-            {canPrivate && (
-              <PrivateToggle
-                destChain={dest.chain}
-                on={privateOn}
-                onChange={setPrivateOn}
-                detail={
-                  privateOn
-                    ? swapping
-                      ? "One transaction swaps it and adds it privately."
-                      : `${solWallet ? `${solWallet.name} pays` : "Pay from this wallet"} and it arrives private. Sending from an exchange? Turn this off for a deposit address.`
-                    : swapping
-                      ? `It lands in your wallet as ${dest.token.symbol}, then you add it privately.`
-                      : `A deposit address: it lands in your wallet on ${dest.chain}, then you add it privately.`
-                }
-              />
-            )}
-
             {privately && chain.kind === "svm" && solWallets.length > 1 && (
               <div role="radiogroup" aria-label="Solana wallet" className="flex flex-wrap gap-2">
                 {solWallets.map((w) => (
@@ -1255,6 +1238,23 @@ function BridgeSheet({
               <p role="alert" className="rounded-xl bg-danger-soft px-4 py-3 text-[13px] leading-relaxed text-danger">
                 {stage.error}
               </p>
+            )}
+
+            {canPrivate && (
+              <PrivateToggle
+                destChain={dest.chain}
+                on={privateOn}
+                onChange={setPrivateOn}
+                detail={
+                  privateOn
+                    ? swapping
+                      ? "One transaction swaps it and adds it privately."
+                      : `${solWallet ? `${solWallet.name} pays` : "Pay from this wallet"} and it arrives private. Sending from an exchange? Turn this off for a deposit address.`
+                    : swapping
+                      ? `It lands in your wallet as ${dest.token.symbol}, then you add it privately.`
+                      : `A deposit address: it lands in your wallet on ${dest.chain}, then you add it privately.`
+                }
+              />
             )}
 
             <button
