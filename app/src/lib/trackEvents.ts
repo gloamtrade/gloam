@@ -49,6 +49,7 @@ export const TRACK_EVENTS = [
   "unshield_private",
   "unshield_scheduled",
   "unshield_success",
+  "unshield_xchain",
   "verify_make_own",
   "verify_page_view",
   "wallet_connect",
