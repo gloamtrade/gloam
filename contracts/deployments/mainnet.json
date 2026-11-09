@@ -4,7 +4,7 @@
   "owner": "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8",
   "feeRecipient": "0xB3900ac9350903218e4c7597bAb0f008F01B30B8",
   "feeRecipientNote": "The treasury since 2026-10-24 on both chains (setWithdrawFee(25, treasury) through the 3-day timelock). At deploy it was the owner, 0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8.",
-  "withdrawFeeBps": 25,
+  "withdrawFeeBps": 50,
   "deployer": "0x891E74a11abC5D0eC2EE855B2BD521fF9D18F411",
   "chains": {
     "4663": {

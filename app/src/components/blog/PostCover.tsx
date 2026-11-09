@@ -159,7 +159,7 @@ function MainnetArt() {
             </div>
             <div className="mt-4 flex items-center justify-between text-[12px] text-mute">
               <span>Asset</span>
-              <span>Beta limit, per deposit / total</span>
+              <span>Deposit limit, per deposit / total</span>
             </div>
             <ul className="mt-1 divide-y divide-line">
               {n.assets.map((a) => (

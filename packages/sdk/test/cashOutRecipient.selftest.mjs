@@ -79,6 +79,17 @@ for (const net of nets) {
   is(cashOutTargetProblem(WALLET, net), null, `a wallet on ${net.key}`);
 }
 
+// The next routers' addresses are known before they deploy, and refused from the start.
+const pinned = JSON.parse(readFileSync(new URL("../../../contracts/test/fixtures/router-next.json", import.meta.url), "utf8"));
+for (const [id, c] of Object.entries(pinned.chains)) {
+  is(cashOutTargetProblem(c.address, { chainId: Number(id) }), CASH_OUT_TO_ROUTER_MESSAGE, `${c.name}: the next router`);
+  is(cashOutTargetProblem(c.address, { chainId: 46630 }), null, `${c.name}: its router is nothing on another chain`);
+}
+
+// WETH isn't a vault asset on Base or Ethereum, but money sent to its contract is lost all the same.
+is(cashOutTargetProblem("0x4200000000000000000000000000000000000006", { chainId: 8453 }), CASH_OUT_TO_TOKEN_MESSAGE, "WETH on Base");
+is(cashOutTargetProblem("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", { chainId: 1 }), CASH_OUT_TO_TOKEN_MESSAGE, "WETH on Ethereum");
+
 // One address, a different answer on each chain: lists are never matched across chains.
 const shared = "0xfCa1887e77f738ef9C5751974b3f3873d029F2DC";
 is(cashOutTargetProblem(shared, { chainId: 4663 }), CASH_OUT_TO_ROUTER_MESSAGE, "0xfCa1 is a router on Robinhood Chain");

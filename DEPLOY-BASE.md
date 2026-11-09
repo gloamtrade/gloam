@@ -46,7 +46,7 @@ RPC for the server (`GLOAM_RPC_URL_84532`, `GLOAM_RPC_URL_8453`) once Base is on
 
 ## Assets and limits
 
-Checked on chain on 24 October 2026 (`symbol()`, `decimals()`). Beta limits match the
+Checked on chain on 24 October 2026 (`symbol()`, `decimals()`). Deposit limits match the
 other chains: 500 per deposit and 25,000 in total for each stablecoin. ETH gets 0.2 per
 deposit and 10 in total: about $467 and $23,400 at Chainlink's ETH/USD on Base that day
 ($2,337), round numbers just under the stablecoin caps.

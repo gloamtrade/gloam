@@ -6,10 +6,11 @@
  * nothing.
  */
 
-import { withoutLookup } from "@/lib/analyticsClean";
+import { analyticsUrl } from "@/lib/analyticsClean";
 import { analyticsAllowed } from "@/lib/consent";
 import { readDemo } from "@/lib/demoFlag";
 import { getActiveNetwork } from "@/lib/networks";
+import type { TrackEvent } from "@/lib/trackEvents";
 
 /** Which network the visitor is on, so mainnet and testnet activity can be told apart. */
 function networkMeta(): TrackPayload["meta"] {
@@ -22,7 +23,7 @@ function networkMeta(): TrackPayload["meta"] {
 }
 
 export type TrackPayload = {
-  t: string;
+  t: TrackEvent;
   path?: string;
   ref?: string | null;
   meta?: Record<string, string | number | boolean | null>;
@@ -53,7 +54,7 @@ function send(body: TrackPayload) {
 
 /** Product / funnel events, only after "Accept all" (anonymous, no cookies). */
 export function track(
-  event: string,
+  event: TrackEvent,
   meta?: TrackPayload["meta"],
   _opts?: { requireConsent?: boolean },
 ) {
@@ -65,8 +66,8 @@ export function track(
 
   send({
     t: event,
-    path: withoutLookup(window.location.pathname),
-    ref: document.referrer ? withoutLookup(document.referrer) : null,
+    path: analyticsUrl(window.location.pathname),
+    ref: document.referrer ? analyticsUrl(document.referrer) : null,
     meta: { ...networkMeta(), ...(meta ?? {}) },
     ts: Date.now(),
   });

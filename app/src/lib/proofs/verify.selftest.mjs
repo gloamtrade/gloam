@@ -1,6 +1,6 @@
 /**
  * Proof of payment, exact balance and payroll total checks, in node: the REAL verifyProof
- * (verify.ts), findNoteTx / findPayrollPayment (chain.ts), checkPayrollProof
+ * (verify.ts), findNoteTx / payrollLookups (chain.ts), checkPayrollProof
  * (payrollCheck.ts) and the label rules (label.ts), transpiled on the fly. Only
  * the RPC client is replaced, by an in-memory chain that emits the pool's real
  * events and counts every read. Proofs are real Groth16 proofs made with the
@@ -69,7 +69,7 @@ const seen = new Set();
 const logs = [];
 const receipts = new Map();
 let txN = 1n;
-const rpc = { calls: 0, offline: false };
+const rpc = { calls: 0, offline: false, logQueries: [] };
 
 function rawLog(eventName, args, data, blockNumber, hash) {
   const topics = encodeEventTopics({ abi: ABI, eventName, args });
@@ -128,7 +128,10 @@ globalThis.__fakeClient = {
     hit();
     const inRange = logs.filter((l) => l.blockNumber >= fromBlock && l.blockNumber <= toBlock);
     let parsed = parseEventLogs({ abi: events ?? [event], logs: inRange });
-    if (args?.nullifier) parsed = parsed.filter((l) => l.args.nullifier?.toLowerCase() === args.nullifier.toLowerCase());
+    // one value, or several OR'd (an array), as eth_getLogs takes a topic
+    const wanted = args?.nullifier ? [args.nullifier].flat().map((n) => n.toLowerCase()) : null;
+    if (wanted) parsed = parsed.filter((l) => wanted.includes(l.args.nullifier?.toLowerCase()));
+    rpc.logQueries.push(wanted?.length ?? 0);
     return parsed;
   },
 };
@@ -173,6 +176,7 @@ writeFileSync(join(tmp, "artifacts-stub.mjs"),
   `  return JSON.parse(readFileSync(${JSON.stringify(circuits)} + "/" + f + "_vkey.json", "utf8"));\n}\n`);
 for (const f of ["label.ts", "types.ts", "payrollCheck.ts", "chain.ts", "verify.ts"]) load(f);
 const { verifyProof, PAID_BY_SEND } = await import(url("verify.mjs"));
+const { payrollLookups, PAYROLL_MAX_READS } = await import(url("chain.mjs"));
 const { displayLabel, plainLabel, isPlainLabel } = await import(url("label.mjs"));
 
 // ── history: Alice deposits, pays Bob, pays herself ─────────────────────────
@@ -218,6 +222,7 @@ const show = (tag, r) => {
 };
 async function run(p) {
   rpc.calls = 0;
+  rpc.logQueries = [];
   const r = await verifyProof(p);
   return { r, calls: rpc.calls };
 }
@@ -326,8 +331,7 @@ async function payrollPayment(i, amount, { slot = 0, shield = false } = {}) {
   else hash = (await transferTx(nullifier, slot === 0 ? commitment : other, slot === 0 ? other : commitment, HEAD - 1000n + BigInt(i))).hash;
   return { secret: fieldToHex(secret), amount, spendSecret: fieldToHex(spendSecret), spendAmount, commitment: fieldToHex(commitment), nullifier: fieldToHex(nullifier), txHash: hash };
 }
-async function payrollProof(run, { verifier = "Tax office", parts: split } = {}) {
-  const expiresAt = NOW + 7 * 86400;
+async function payrollProof(run, { verifier = "Tax office", parts: split, expiresAt = NOW + 7 * 86400 } = {}) {
   const context = proofContext({ kind: "payroll", chainId: CHAIN, pool: POOL, verifier, expiresAt });
   const slices = split ?? [run];
   const parts = [];
@@ -398,6 +402,51 @@ const depositAsPay = await payrollPayment(4, 9_000_000_000n, { shield: true });
   assert(!r3.ok && check(r3, "The proof checks out")?.state === "fail" && c3 === 0, "a broken payroll proof makes no chain reads");
   const { r: r4, calls: c4 } = await run({ ...p, verifier: "Someone else" });
   assert(!r4.ok && c4 === 0, "a relabelled payroll proof makes no chain reads");
+}
+
+{
+  // Chain reads per check: the payments of a group share one log query per block range,
+  // lookups stop at the first payment not found, and an expired proof reads nothing.
+  const p = await payrollProof([employee, backToEmployer]);
+  const { r, calls } = await run(p);
+  assert(r.ok && calls === 4, `two named payments: two receipts and two block times (${calls} reads)`);
+  const { r: r2, calls: c2 } = await run({ ...p, payments: p.payments.map((x) => ({ ...x, txHash: null })) });
+  assert(r2.ok && c2 === 4 && rpc.logQueries.length === 1 && rpc.logQueries[0] === 2, `two unnamed payments: the head, one log query for both, two block times (${c2} reads)`);
+
+  // payments never made (their spend markers are on no transfer): one scan for the group, then it stops
+  const unpaid = [];
+  for (let i = 0; i < 5; i++) {
+    const spendSecret = S(600 + i);
+    const spendAmount = 1_000_005n;
+    const spendC = await noteCommitmentPoseidon(spendSecret, spendAmount, USD);
+    const secret = S(700 + i);
+    unpaid.push({
+      secret: fieldToHex(secret), amount: 1_000_000n, spendSecret: fieldToHex(spendSecret), spendAmount,
+      commitment: fieldToHex(await noteCommitmentPoseidon(secret, 1_000_000n, USD)),
+      nullifier: fieldToHex(await noteNullifierPoseidon(spendSecret, spendC)), txHash: null,
+    });
+  }
+  const q = await payrollProof(unpaid);
+  const { r: r3, calls: c3 } = await run(q);
+  assert(!r3.ok && check(r3, "Each one is a private payment")?.state === "unknown", "payments that are not on chain are not confirmed");
+  assert(c3 === 25 && rpc.logQueries.every((n) => n === 5), `five unnamed payments: the head and 24 log queries in all (${c3} reads)`);
+
+  const old = await payrollProof([employee, backToEmployer], { expiresAt: NOW - 60 });
+  const { r: r4, calls: c4 } = await run(old);
+  assert(!r4.ok && r4.expired && c4 === 0, `an expired payroll proof makes no chain reads (${c4})`);
+  const { r: r5, calls: c5 } = await run({ ...old, payments: old.payments.map((x) => ({ ...x, txHash: null })) });
+  assert(!r5.ok && r5.expired && c5 === 0, "an expired payroll proof with no transactions named makes no chain reads");
+
+  // one check's reads have a ceiling
+  const net = { chainId: CHAIN, pool: POOL, deployBlock: DEPLOY, logRange: 100000n };
+  assert(PAYROLL_MAX_READS === 512, "a check reads the chain at most 512 times");
+  rpc.calls = 0;
+  const l = payrollLookups(globalThis.__fakeClient, net, POOL, 3);
+  const named = await l.find(p.payments);
+  assert(rpc.calls === 2 && l.reads() === 2 && named.every((x) => x?.state === "found"), "receipts count as reads");
+  const more = await l.find(q.payments);
+  assert(rpc.calls === 3 && l.reads() === 3 && more.every((x) => x?.state === "over-limit"), `past the ceiling nothing more is read (${rpc.calls} reads)`);
+  await l.blockTime(1n).then(() => assert(false, "a block time past the ceiling is not read"), () => assert(rpc.calls === 3, "a block time past the ceiling is refused"));
 }
 
 // ── exact balance (gloambal1, replaces the copyable gloamdisc1, ZK-2) ───────

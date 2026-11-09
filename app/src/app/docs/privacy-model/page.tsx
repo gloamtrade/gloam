@@ -5,6 +5,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { SCREEN_LIST_INFO } from "@/lib/screening";
+import { swapMainnets } from "@/lib/vaultSwap";
 
 export const metadata: Metadata = {
   title: "What stays private",
@@ -50,7 +51,7 @@ export default function DocsPrivacyPage() {
           {
             n: "!",
             title: "Private swaps (mainnet)",
-            body: "Swap from your private balance on Robinhood Chain and Tempo mainnet. Who swapped stays private. The tokens and amounts show, like any DEX trade.",
+            body: `Swap from your private balance on ${swapMainnets()} mainnet. Who swapped stays private. The tokens and amounts show, like any DEX trade.`,
           },
           {
             n: "!",
@@ -140,8 +141,9 @@ export default function DocsPrivacyPage() {
           time inside the window. The proof is made in your browser at once and
           the relay sends it then. The proof binds the amount and the recipient,
           so the relay can only send it as it is or not at all. The vault
-          accepts the proof however long it waits. If the relay can&apos;t send
-          it, nothing moves and the money shows in your balance again. Once it
+          accepts the proof however long it waits, and takes its fee when it
+          lands, at the rate that day. If the relay can&apos;t send it, nothing
+          moves and the money shows in your balance again. Once it
           starts going out it can&apos;t be cancelled, and it shows as on its
           way until the network settles it.
         </li>
@@ -350,8 +352,9 @@ export default function DocsPrivacyPage() {
         <li>
           <strong>Cash out:</strong> the vault must be allowed to send it, and
           the destination must be allowed to receive it. If the destination&apos;s
-          own Tempo receive policy would refuse the vault, Gloam says so instead
-          of letting the payment be held.
+          own Tempo receive policy would refuse the payment, Gloam says so instead
+          of letting it be held. If that policy can&apos;t be read, the relay sends
+          nothing and asks you to try again.
         </li>
         <li>
           <strong>When:</strong> next to sanctions screening, in the app before
@@ -418,8 +421,7 @@ export default function DocsPrivacyPage() {
 
       <h2>Before you use mainnet</h2>
       <p>
-        Mainnet is beta software. These are the honest gaps
-        to know about first:
+        These are the honest gaps to know about first:
       </p>
       <ul>
         <li>
@@ -435,7 +437,7 @@ export default function DocsPrivacyPage() {
           The swap routers, circuits, app and relay were not part of it. Before
           that came several internal rounds, with fixes deployed, and a review
           before launch that finished on 20 October with no Critical or High
-          findings open. Beta deposit limits cap how much each pool can hold: 50,000 per
+          findings open. Deposit limits cap how much each pool can hold: 50,000 per
           deposit and 2,500,000 in total for each stablecoin, and 2,500,000 per
           deposit and 25,000,000 in total for $GLOAM.
         </li>

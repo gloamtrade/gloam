@@ -136,6 +136,7 @@ test("add privately, pay a Gloam address, receive, pay a request and a claim lin
   assert.equal(out.status, "done", JSON.stringify(out));
   const carolHas = await fork.client.readContract({ address: BASE_SEPOLIA_USDC, abi: ERC20, functionName: "balanceOf", args: [carol] });
   assert.equal(carolHas, usdc("5") - cashOutFee(usdc("5"), bps));
+  assert.equal(out.fee, `${formatUnits(cashOutFee(usdc("5"), bps), 6)} USDC`, "the fee reported is what the pool kept");
   log(`cash out 5 USDC to ${carol}: received ${formatUnits(carolHas, 6)} after the 0.25% fee (${out.hash})`);
 
   // 8. Prove funds, checked by the other agent against the fork.

@@ -1,5 +1,5 @@
 /**
- * Beta deposit limits, read live from the vault.
+ * Deposit limits, read live from the vault.
  *
  * Each payments vault caps one deposit (perDeposit) and the running total of
  * each asset (total) while depositLimitsOn is true. The owner changes them
@@ -113,12 +113,12 @@ export function depositLimitProblem(
   if (!limit.on) return null;
   if (limit.perDeposit === 0n) return `The ${where} vault takes no ${symbol} deposits.`;
   if (!isNoLimit(limit.perDeposit) && amount > limit.perDeposit) {
-    return `Over the beta limit on ${where}: at most ${amountText(limit.perDeposit, decimals)} ${symbol} per deposit.`;
+    return `Over the deposit limit on ${where}: at most ${amountText(limit.perDeposit, decimals)} ${symbol} per deposit.`;
   }
   if (!isNoLimit(limit.total) && amount > limit.room) {
     return limit.room === 0n
-      ? `The ${where} vault is full for ${symbol} during the beta. Try again once the limit is raised.`
-      : `The ${where} vault has room for ${amountText(limit.room, decimals)} more ${symbol} during the beta.`;
+      ? `The ${where} vault is full for ${symbol}. Try again once the limit is raised.`
+      : `The ${where} vault has room for ${amountText(limit.room, decimals)} more ${symbol} right now.`;
   }
   return null;
 }

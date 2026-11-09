@@ -4,12 +4,16 @@
  * Reads go straight to the network's public RPC (eth_call only, nothing is
  * signed or sent). A stablecoin's policy and the vault's standing under it are
  * cached briefly; a wallet's standing is asked fresh each time. If the RPC
- * fails, screening fails open: the token enforces its policy on-chain anyway,
- * so a missed early check costs a reverted transaction, never a compliance gap.
+ * fails, the issuer policy check fails open: the token enforces its policy
+ * on-chain anyway, so a missed early check costs a reverted transaction, never a
+ * compliance gap. A cash out's receive policy fails closed: a payment it
+ * refuses is held by Tempo instead of reverting (lib/tip403).
  */
 import { createPublicClient, type Address } from "viem";
 import { NETWORK_KEYS, getNetwork, isNetworkWritable, type GloamNetwork } from "./networks";
 import {
+  TIP403_RECEIVE_UNCHECKED_MESSAGE,
+  checkReceivePolicy,
   checkTip403,
   isTip20Address,
   isTip403Chain,
@@ -46,6 +50,7 @@ function readerFor(net: GloamNetwork): Tip403Reader | null {
   if (hit) return hit;
   const client = createPublicClient({
     chain: net.chain,
+    ccipRead: false,
     transport: serverTransport(net, { timeout: 8_000, retryCount: 1 }),
   });
   const reader: Tip403Reader = {
@@ -80,20 +85,30 @@ export async function tip403AssetStatus(chainId: unknown, asset: unknown): Promi
 
 /**
  * Screen public addresses against the issuer policy of `asset` for one edge of
- * the vault. Allowed when no check applies or the RPC cannot answer.
+ * the vault. Allowed when no check applies. The issuer policy passes when the
+ * RPC cannot answer. On a cash out, each recipient's receive policy must accept
+ * `sender` (the vault unless set: a swap's exit pays from its escrow), and when
+ * it can't be read the verdict is "unchecked", which refuses.
  */
 export async function screenTip403(
   addresses: readonly Address[],
-  opts: { chainId?: unknown; asset?: unknown; flow?: Tip403Flow }
+  opts: { chainId?: unknown; asset?: unknown; flow?: Tip403Flow; sender?: Address }
 ): Promise<Tip403Verdict> {
   const net = tip403Network(opts.chainId);
   if (!net || !isTip20Address(opts.asset)) return { allowed: true };
+  const reader = readerFor(net);
+  if (!reader) return { allowed: true };
   try {
-    const reader = readerFor(net);
     const status = await tip403AssetStatus(net.chainId, opts.asset);
-    if (!reader || !status) return { allowed: true };
-    return await checkTip403({ reader, status, addresses, flow: opts.flow });
+    const verdict = status ? await checkTip403({ reader, status, addresses, flow: opts.flow, receive: false }) : null;
+    if (verdict && !verdict.allowed) return verdict;
   } catch {
-    return { allowed: true };
+    // the issuer policy fails open: the token enforces it on chain
+  }
+  if (opts.flow !== "cashout") return { allowed: true };
+  try {
+    return await checkReceivePolicy(reader, opts.asset, opts.sender ?? net.pool!, addresses);
+  } catch {
+    return { allowed: false, reason: "unchecked", message: TIP403_RECEIVE_UNCHECKED_MESSAGE };
   }
 }

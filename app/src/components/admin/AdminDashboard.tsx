@@ -11,6 +11,8 @@ import {
 } from "react";
 import { Logo } from "@/components/Logo";
 import { SealedField } from "@/components/ui/SealedField";
+import { HowItWorks } from "@/components/ui/HowItWorks";
+import { BusyLabel } from "@/components/ui/Spinner";
 import { shortAddress } from "@/lib/chain";
 import { MAINNET_ENABLED, NETWORK_KEYS, getNetwork, isNetworkKey, networkName, type GloamNetwork } from "@/lib/networks";
 import type { CreatorFees } from "@/lib/creatorFees";
@@ -22,7 +24,9 @@ import { relayChainName } from "@/lib/bridge";
 import type { RelayVolume } from "@/lib/relayVolume";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { MAINNET_LAUNCH_ISO } from "@/lib/mainnet";
+import { CONTEST_NETWORK_LABEL, type ContestNetwork } from "@/lib/contest";
 import { VotesPanel } from "./AdminVotes";
+import { AdminBackfill, AdminPartnerDetail } from "./AdminPartnerDetail";
 import { ActivityFeed, ChainCards, MovedHero, Stat, VolumeChart, type Moved, type VolumeDay } from "./AdminCharts";
 
 type MetricsPayload = {
@@ -54,7 +58,7 @@ type MetricsPayload = {
   error?: string;
 };
 
-type Tab = "overview" | "revenue" | "relay" | "users" | "events" | "partners" | "testers" | "bugs" | "votes";
+type Tab = "overview" | "revenue" | "relay" | "users" | "events" | "partners" | "testers" | "contest" | "updates" | "bugs" | "votes" | "hunt";
 
 /** The two views: mainnet or the testnets. Never mixed. */
 type Env = "mainnet" | "testnet";
@@ -359,6 +363,8 @@ export function AdminDashboard() {
     await fetch("/api/admin/logout", {
       method: "POST",
       credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
     });
     setAuthed(false);
     setData(null);
@@ -595,8 +601,11 @@ export function AdminDashboard() {
   const opsTabs: [Tab, string][] = [
     ["partners", "Partners"],
     ["testers", "Testers"],
+    ["contest", "Contest"],
+    ["updates", "Email updates"],
     ["bugs", "Bug reports"],
     ["votes", "Votes"],
+    ["hunt", "Hunt"],
   ];
   const liveRelay = relay && "enabled" in relay && relay.enabled ? relay : null;
   // The public edges only: deposits and cash-outs carry amounts on chain; private payments never do.
@@ -792,9 +801,8 @@ export function AdminDashboard() {
                 caption={`Daily deposits and cash-outs in dollars, ${isMain ? "mainnet" : "testnet"}`}
               />
               <p className="mt-4 text-[13px] leading-relaxed text-mute">
-                UTC days, {money}. Deposits rise above the line, cash-outs drop below it. Priced at today&apos;s prices:
-                dollar stablecoins at $1, ETH {oc?.prices.ethUsd ? `at ${fmtUsd(oc.prices.ethUsd)}` : "not priced right now"}
-                {isMain ? ", $GLOAM from DEX Screener" : ""}
+                UTC days, {money}. Deposits rise above the line, cash-outs drop below it. The scale stretches to fit the biggest day, so quiet days stay readable.{" "}
+                {oc ? flowPricing(oc, isMain, rev?.atToday) : "Priced once the chains are read"}
                 {noPrice ? `. Not in dollars: ${noPrice}` : ""}.
               </p>
             </Panel>
@@ -895,9 +903,9 @@ export function AdminDashboard() {
                 empty="Nothing held or moved yet"
               />
               <p className="mt-4 text-[13px] leading-relaxed text-mute">
-                Dollar stablecoins count as $1{heldNoPrice ? `; ${heldNoPrice} have no dollar price and are left out of dollar totals` : ""}. ETH {oc?.prices.ethUsd ? `at ${fmtUsd(oc.prices.ethUsd)}` : "is not priced right now"};
+                Held now is at today&apos;s prices. Dollar stablecoins count as $1{heldNoPrice ? `; ${heldNoPrice} have no dollar price and are left out of dollar totals` : ""}. ETH {oc?.prices.ethUsd ? `at ${fmtUsd(oc.prices.ethUsd)}` : "is not priced right now"};
                 stock tokens at live equity marks{oc?.prices.stocks === "live" ? "" : ", not available right now"}.
-                Counts in brackets.
+                Deposited and cashed out are token amounts, counts in brackets; private swaps are not in them.
               </p>
             </Panel>
             <Panel title="By network, in detail">
@@ -907,7 +915,7 @@ export function AdminDashboard() {
                   ["Deposits", ...byNetwork((m) => n(m.deposits), (c) => n(c.deposits))],
                   ["Private transfers", ...byNetwork((m) => n(m.transfers), (c) => n(c.transfers))],
                   ["Cash-outs", ...byNetwork((m) => n(m.cashouts), (c) => n(c.cashouts))],
-                  ["Private trades", ...byNetwork((m) => n(m.trades), (c) => n(c.trades))],
+                  ["Private swaps and trades", ...byNetwork((m) => n(m.trades), (c) => n(c.trades))],
                   ["Payment messages", ...byNetwork((m) => n(m.memos), (c) => n(c.memos))],
                   ["Depositor wallets", ...byNetwork((m) => n(m.depositors), (c) => n(c.depositors))],
                   ["Active wallets", ...byNetwork((m) => n(m.activeWallets), (c) => n(c.activeWallets))],
@@ -1075,10 +1083,13 @@ export function AdminDashboard() {
 
         {shown === "relay" && <RelayPanel relay={relay} counters={counters} dims={prod.dims} />}
 
-        {shown === "partners" && <PartnersPanel />}
+        {shown === "partners" && <PartnersPanel tier={env} />}
         {shown === "testers" && <TestersPanel />}
+        {shown === "contest" && <ContestPanel />}
+        {shown === "updates" && <UpdatesPanel />}
         {shown === "bugs" && <BugsPanel />}
         {shown === "votes" && <VotesPanel />}
+        {shown === "hunt" && <HuntPanel />}
 
         <p className="tnum text-[12px] text-mute">
           Generated {data?.generatedAt ?? "not yet"} ·{" "}
@@ -1240,35 +1251,156 @@ type AdminPartner = {
   name: string;
   website: string | null;
   fees: { privatePaymentCents: number; cashoutBps: number; depositBps: number };
+  relayApproved: boolean;
+  /** The name approved to show in links, or null. */
+  approvedName?: string | null;
+  nameAwaitingApproval?: boolean;
   createdAt: number;
   activeKeys: number;
+  /** Live link codes. */
+  liveCodes?: number;
+  /** Receiving addresses for the on-chain match: all, and proven by signature. */
+  addresses?: { total: number; verified: number };
+  /** "partial:<n>" when older activity outran what could be split into mainnet and testnet. */
+  migration?: string | null;
   totals: {
     privatePayments: number;
     cashOuts: number;
     deposits: number;
+    privateSwaps?: number;
     publicVolumeUsd: number;
+    swapVolumeUsd?: number;
     commissionUsd: number;
+    vaultFeeUsd?: number;
     unpriced: number;
     lastActivity: number | null;
+    bySource?: Record<"api" | "link" | "chain", { counts: Record<string, number>; volumeUsd: number; vaultFeeUsd: number }>;
   } | null;
 };
 
 type PartnersPayload = {
   backend: "redis" | "memory" | "none";
   partners: AdminPartner[];
-  totals: { privatePayments: number; cashOuts: number; deposits: number; publicVolumeUsd: number; commissionUsd: number } | null;
+  totals: {
+    privatePayments: number;
+    cashOuts: number;
+    deposits: number;
+    privateSwaps?: number;
+    publicVolumeUsd: number;
+    swapVolumeUsd?: number;
+    commissionUsd: number;
+    vaultFeeUsd?: number;
+  } | null;
 };
 
-/** The partner program: every partner, their keys and the volume their keys brought in. */
-function PartnersPanel() {
+/** How many a source brought in, every kind. */
+function sourceCount(t: AdminPartner["totals"], s: "api" | "link" | "chain"): number {
+  const c = t?.bySource?.[s]?.counts;
+  return c ? Object.values(c).reduce((a, b) => a + b, 0) : 0;
+}
+
+/**
+ * The partner program: every partner, their keys, link codes and receiving
+ * addresses, and what they brought in by source (API key, link, matched on chain).
+ * Details opens one partner's breakdown, codes and addresses.
+ */
+function PartnersPanel({ tier }: { tier: "mainnet" | "testnet" }) {
   const [data, setData] = useState<PartnersPayload | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+  /** Which button of that row is saving, for its spinner. */
+  const [savingWhat, setSavingWhat] = useState<"relay" | "name" | "remove" | null>(null);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  /** The account whose Remove was clicked once: a second click removes it. */
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [removedNote, setRemovedNote] = useState<string | null>(null);
+
+  /** Removes an account for good (lib/partnerRemove), after the inline confirm. */
+  const remove = async (p: AdminPartner) => {
+    setSaving(p.id);
+    setSavingWhat("remove");
+    setSaveErr(null);
+    setRemovedNote(null);
+    try {
+      const res = await fetch("/api/partners/admin", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: p.id, remove: true }),
+      });
+      const json = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        data?: { removed?: { keysRevoked?: number; codesRevoked?: number; addressesDropped?: number } };
+        error?: { message?: string };
+      } | null;
+      if (!res.ok || !json?.ok) {
+        setSaveErr(json?.error?.message ?? `Removing failed (${res.status})`);
+        return;
+      }
+      const r = json.data?.removed ?? {};
+      setRemovedNote(
+        `Removed ${p.name}: ${n(r.keysRevoked ?? 0)} keys revoked, ${n(r.codesRevoked ?? 0)} link codes revoked, ${n(r.addressesDropped ?? 0)} addresses dropped.`
+      );
+      setData((d) => (d ? { ...d, partners: d.partners.filter((x) => x.id !== p.id) } : d));
+      setOpen((o) => (o === p.id ? null : o));
+      // the program's totals no longer count it
+      setReload((v) => v + 1);
+    } catch {
+      setSaveErr("Network error removing the partner");
+    } finally {
+      setSaving(null);
+      setConfirmRemove(null);
+    }
+  };
+
+  /** Approves an account for the relay's larger message budget, or its name to show in links, or takes either back. */
+  const save = async (id: string, change: { relayApproved: boolean } | { approveName: boolean }) => {
+    setSaving(id);
+    setSavingWhat("relayApproved" in change ? "relay" : "name");
+    setSaveErr(null);
+    try {
+      const res = await fetch("/api/partners/admin", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, ...change }),
+      });
+      const json = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        data?: { partner?: { relayApproved?: boolean; approvedName?: string | null; nameAwaitingApproval?: boolean } };
+        error?: { message?: string };
+      } | null;
+      if (!res.ok || !json?.ok) {
+        setSaveErr(json?.error?.message ?? `Saving failed (${res.status})`);
+        return;
+      }
+      const saved = json.data?.partner ?? {};
+      setData((d) =>
+        d
+          ? {
+              ...d,
+              partners: d.partners.map((p) =>
+                p.id === id
+                  ? { ...p, relayApproved: saved.relayApproved === true, approvedName: saved.approvedName ?? null, nameAwaitingApproval: saved.nameAwaitingApproval }
+                  : p
+              ),
+            }
+          : d
+      );
+    } catch {
+      setSaveErr("Network error saving the partner");
+    } finally {
+      setSaving(null);
+    }
+  };
 
   useEffect(() => {
     let live = true;
     const load = async () => {
       try {
-        const res = await fetch("/api/partners/admin", { credentials: "include", cache: "no-store" });
+        const res = await fetch(`/api/partners/admin?tier=${tier}`, { credentials: "include", cache: "no-store" });
         const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: PartnersPayload; error?: { message?: string } } | null;
         if (!live) return;
         if (!res.ok || !json?.ok || !json.data) {
@@ -1289,7 +1421,7 @@ function PartnersPanel() {
       live = false;
       window.clearInterval(id);
     };
-  }, []);
+  }, [reload, tier]);
 
   if (err) {
     return (
@@ -1300,25 +1432,43 @@ function PartnersPanel() {
   }
   if (!data) {
     return (
-      <p className="flex items-center gap-2.5 rounded-xl bg-surface px-4 py-3 text-[14px] text-mute" role="status">
-        <span className="livedot h-2 w-2 rounded-full bg-foreground/60" />
-        Loading partners
-      </p>
+      <PanelSkeleton label="Loading partners" />
     );
   }
+  const openPartner = data.partners.find((p) => p.id === open) ?? null;
   const t = data.totals;
   const pct = (bps: number) => `${(bps / 100).toFixed(2)}%`;
   return (
     <>
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi label="Partners" value={n(data.partners.length)} sub={`${n(data.partners.reduce((s, p) => s + p.activeKeys, 0))} active keys`} />
-        <Kpi label="Private payments" value={n(t?.privatePayments)} sub="relayed with a partner key" />
-        <Kpi label="Public volume" value={fmtUsd(t?.publicVolumeUsd ?? 0)} sub={`${n((t?.cashOuts ?? 0) + (t?.deposits ?? 0))} cash outs and deposits`} />
-        <Kpi label="Would-be fees" value={fmtUsd(t?.commissionUsd ?? 0)} sub={MAINNET_ENABLED ? "partner fees not charged yet" : "testnet, nothing charged"} />
+        <Kpi label="Private payments" value={n(t?.privatePayments)} sub={`through partner keys and links, and ${n(t?.privateSwaps ?? 0)} private swaps`} />
+        <Kpi
+          label="Public volume"
+          value={tier === "testnet" ? "Not priced" : fmtUsd(t?.publicVolumeUsd ?? 0)}
+          sub={`${n((t?.cashOuts ?? 0) + (t?.deposits ?? 0))} cash outs and deposits${tier === "testnet" ? ", testnet" : ""}`}
+        />
+        <Kpi
+          label="Vault fees"
+          value={tier === "testnet" ? "Not priced" : fmtUsd(t?.vaultFeeUsd ?? 0)}
+          sub={`Gloam's cash-out fee on partner flows; would-be partner fees ${fmtUsd(t?.commissionUsd ?? 0)}, ${MAINNET_ENABLED ? "not charged" : "testnet"}`}
+        />
       </section>
-      <Panel title="Partners">
+      <Panel
+        title="Partners"
+        action={
+          <span className="flex flex-wrap gap-1">
+            <a href={`/api/partners/admin/export?id=all&type=daily&tier=${tier}`} className="btn btn-ghost btn-sm" download>
+              Daily CSV
+            </a>
+            <a href={`/api/partners/admin/export?id=all&type=transactions&tier=${tier}`} className="btn btn-ghost btn-sm" download>
+              Transactions CSV
+            </a>
+          </span>
+        }
+      >
         <DataTable
-          headers={["Partner", "Owner", "Keys", "Private payments", "Cash outs", "Deposits", "Public volume", "Would-be fees", "Fee setting", "Last payment", "Joined"]}
+          headers={["Partner", "", "Name in links", "Owner", "Keys", "Codes", "Addresses (proven)", "Messages", "Private payments", "Cash outs", "Deposits", "Swaps", "Via API key", "Via link", "Matched on chain", "Public volume", "Vault fees", "Would-be fees", "Fee setting", "Last payment", "Joined"]}
           rows={data.partners.map((p) => [
             <span key="n" className="text-foreground">
               {p.website ? (
@@ -1329,29 +1479,160 @@ function PartnersPanel() {
                 p.name
               )}
             </span>,
+            <span key="d" className="inline-flex items-center gap-2 whitespace-nowrap">
+              <button
+                type="button"
+                aria-expanded={open === p.id}
+                onClick={() => setOpen((o) => (o === p.id ? null : p.id))}
+                className="rounded-full border border-line px-3 py-1 text-[13px] text-foreground transition-colors hover:border-line-strong"
+              >
+                {open === p.id ? "Close" : "Details"}
+              </button>
+              {confirmRemove === p.id ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={saving === p.id}
+                    onClick={() => void remove(p)}
+                    className="rounded-full bg-danger px-3 py-1 text-[13px] text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                  >
+                    <BusyLabel busy={saving === p.id && savingWhat === "remove"}>Remove for good</BusyLabel>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving === p.id}
+                    onClick={() => setConfirmRemove(null)}
+                    className="rounded-full px-2 py-1 text-[13px] text-mute transition-colors hover:text-foreground disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={saving === p.id}
+                  onClick={() => setConfirmRemove(p.id)}
+                  className="rounded-full border border-line px-3 py-1 text-[13px] text-mute transition-colors hover:border-danger hover:text-danger disabled:opacity-50"
+                  title="Ends the account. Keys and links stop at once."
+                >
+                  Remove
+                </button>
+              )}
+            </span>,
+            <span key="nm" className="inline-flex items-center gap-2">
+              <span className={p.approvedName ? "text-foreground" : "text-mute"} title={p.nameAwaitingApproval ? `Account name now: ${p.name}` : undefined}>
+                {p.approvedName ?? "Not shown"}
+              </span>
+              {p.nameAwaitingApproval ? (
+                <button
+                  type="button"
+                  disabled={saving === p.id}
+                  onClick={() => void save(p.id, { approveName: true })}
+                  className="rounded-full border border-line px-3 py-1 text-[13px] text-foreground transition-colors hover:border-line-strong disabled:opacity-50"
+                  title={`Show "${p.name}" in links as a Gloam partner. Check it is the partner's real name, not Gloam or another brand.`}
+                >
+                  <BusyLabel busy={saving === p.id && savingWhat === "name"}>Approve {p.name}</BusyLabel>
+                </button>
+              ) : p.approvedName ? (
+                <button
+                  type="button"
+                  disabled={saving === p.id}
+                  onClick={() => void save(p.id, { approveName: false })}
+                  className="rounded-full border border-line px-3 py-1 text-[13px] text-mute transition-colors hover:border-line-strong disabled:opacity-50"
+                  title="Stop showing this name in links. The account and its keys stay."
+                >
+                  <BusyLabel busy={saving === p.id && savingWhat === "name"}>Hide name</BusyLabel>
+                </button>
+              ) : null}
+            </span>,
             <span key="o" title={p.owner}>
               {shortAddress(p.owner, 4)}
             </span>,
             n(p.activeKeys),
+            n(p.liveCodes ?? 0),
+            `${n(p.addresses?.total ?? 0)} (${n(p.addresses?.verified ?? 0)})`,
+            <button
+              key="r"
+              type="button"
+              disabled={saving === p.id}
+              onClick={() => void save(p.id, { relayApproved: !p.relayApproved })}
+              className="rounded-full border border-line px-3 py-1 text-[13px] text-foreground transition-colors hover:border-line-strong disabled:opacity-50"
+              title={p.relayApproved ? "Their keys use the larger message budget. Click to take it back." : "Their keys share the small message budget. Click to approve."}
+            >
+              <BusyLabel busy={saving === p.id && savingWhat === "relay"}>{p.relayApproved ? "Approved" : "Approve"}</BusyLabel>
+            </button>,
             n(p.totals?.privatePayments),
             n(p.totals?.cashOuts),
             n(p.totals?.deposits),
-            fmtUsd(p.totals?.publicVolumeUsd ?? 0),
-            fmtUsd(p.totals?.commissionUsd ?? 0),
+            n(p.totals?.privateSwaps ?? 0),
+            n(sourceCount(p.totals, "api")),
+            n(sourceCount(p.totals, "link")),
+            n(sourceCount(p.totals, "chain")),
+            tier === "testnet" ? "Not priced" : fmtUsd(p.totals?.publicVolumeUsd ?? 0),
+            tier === "testnet" ? "Not priced" : fmtUsd(p.totals?.vaultFeeUsd ?? 0),
+            tier === "testnet" ? "Not priced" : fmtUsd(p.totals?.commissionUsd ?? 0),
             `$${(p.fees.privatePaymentCents / 100).toFixed(2)} · ${pct(p.fees.cashoutBps)} · ${pct(p.fees.depositBps)}`,
             p.totals?.lastActivity ? new Date(p.totals.lastActivity).toLocaleString() : "None yet",
             new Date(p.createdAt).toLocaleDateString(),
           ])}
           empty={data.backend === "none" ? "Partner storage is not configured (set Upstash Redis)." : "No partners yet"}
-          minWidth={1100}
+          minWidth={1900}
         />
-        <p className="mt-4 text-[13px] leading-relaxed text-mute">
-          Fee setting is per private payment, cash outs, deposits. Volume counts payments relayed with a partner key and
-          deposits partners reported (checked on chain). Store: {data.backend}.
+        {saveErr && (
+          <p className="mt-3 text-[13px] text-danger" role="alert">
+            {saveErr}
+          </p>
+        )}
+        {removedNote && (
+          <p className="mt-3 text-[13px] text-foreground" role="status">
+            {removedNote}
+          </p>
+        )}
+        <p className="mt-4 text-[13px] text-mute">
+          Remove ends the account: keys and links stop, history is kept but not counted. Hide name keeps the account.
         </p>
+        {data.partners.some((p) => p.migration) && (
+          <p className="mt-1 text-[13px] text-warn">Some older activity could not be split into mainnet and testnet. See the details.</p>
+        )}
+        <HowItWorks
+          items={[
+            "Via API key: payments relayed with a partner key, and deposits partners reported. Checked on chain.",
+            "Via link: payments, cash outs and swaps opened from a partner's link. Checked on chain.",
+            "Matched on chain: past cash outs to the partner's proven addresses.",
+            "Name in links: shows only once approved. A rename needs approving again.",
+            "Messages: approved keys get the relay's larger message budget.",
+            "Fee setting: per private payment, cash out, deposit.",
+            tier === "testnet" ? "Testnet: counted, never valued." : "Mainnet only. Testnet is counted apart.",
+            "Only public transaction facts are kept. Never a payer's wallet or IP.",
+            `Store: ${data.backend}.`,
+          ]}
+        />
+      </Panel>
+      {openPartner && (
+        <Panel title={openPartner.name} action={<span className="tnum text-[12.5px] text-mute">{openPartner.id}</span>}>
+          <AdminPartnerDetail key={`${openPartner.id}-${tier}`} id={openPartner.id} tier={tier} onChanged={() => setReload((v) => v + 1)} />
+        </Panel>
+      )}
+      <Panel title="On-chain match">
+        <AdminBackfill onDone={() => setReload((v) => v + 1)} />
       </Panel>
     </>
   );
+}
+
+/**
+ * How the money figures are priced, for the notes under them. A mainnet
+ * snapshot prices each deposit, cash-out and fee at the time it happened;
+ * a testnet one (and a snapshot cached before that) at today's prices.
+ */
+function flowPricing(oc: OnchainMetrics, isMain: boolean, atToday: string[] | undefined): string {
+  if (isMain && oc.prices.flowsAtTime) {
+    const late = atToday?.length ? `; ${atToday.join(", ")} at today's price until its price at the time is read` : "";
+    return `Priced at the time of each transaction (CoinGecko's hourly price); dollar stablecoins at $1${late}`;
+  }
+  return `Priced at today's prices: dollar stablecoins at $1, ETH ${oc.prices.ethUsd ? `at ${fmtUsd(oc.prices.ethUsd)}` : "not priced right now"}${
+    isMain ? ", $GLOAM from DEX Screener" : ""
+  }`;
 }
 
 /** "EURC (Base)": what these networks moved with no dollar price, or "" when everything was priced. */
@@ -1507,10 +1788,10 @@ function RevenuePanel({
         />
         <p className="mt-4 text-[13px] leading-relaxed text-mute">
           {isMain
-            ? "Mainnet only, counted from the mainnet launch (21 Oct 2026, 13:00 UTC). $GLOAM creator fees are trading fees on the token's launchpad, not Gloam revenue, so they are shown on their own below. Priced at today's prices: dollar stablecoins at $1, "
-            : "Testnet fees from testing are not revenue. $GLOAM creator fees exist on mainnet only. Priced at today's prices: dollar stablecoins at $1, "}
-          ETH {oc.prices.ethUsd ? `at ${fmtUsd(oc.prices.ethUsd)}` : "not priced right now"}
-          {isMain ? ", $GLOAM from DEX Screener" : ""}
+            ? "Mainnet only, counted from the mainnet launch (21 Oct 2026, 13:00 UTC). $GLOAM creator fees are trading fees on the token's launchpad, not Gloam revenue, so they are shown on their own below. "
+            : "Testnet fees from testing are not revenue. $GLOAM creator fees exist on mainnet only. "}
+          {flowPricing(oc, isMain, rev.atToday)}
+          {isMain && oc.prices.flowsAtTime ? ". Fees waiting to collect are at today's prices" : ""}
           {noPrice ? `. Not in dollars: ${noPrice}` : ""}. Windows are the last 24 hours, 7 days and 30 days.
         </p>
       </Panel>
@@ -1586,9 +1867,13 @@ function RevenuePanel({
         />
         <p className="mt-4 text-[13px] leading-relaxed text-mute">
           UTC days, newest first, {isMain ? "mainnet only, from the launch at 13:00 UTC on 21 Oct" : "testnets only"}. Revenue is
-          cash-out fees. Deposits and cash-outs are dollar volume; transactions count deposits, private transfers,
-          cash-outs and trades.
-          {isMain ? " Creator fees on launch day include trades from before 13:00, and are placed in days by block." : ""}
+          cash-out fees, a private swap&apos;s included. Deposits and cash-outs are dollar volume; transactions count
+          deposits, private transfers, cash-outs and private swaps (one each).
+          {isMain
+            ? ` Creator fees on launch day include trades from before 13:00, and are placed in days by block${
+                oc.prices.flowsAtTime ? "; each day's are priced at that day's average ETH price" : ""
+              }.`
+            : ""}
         </p>
       </Panel>
     </>
@@ -1714,6 +1999,312 @@ function TestersPanel() {
         <p className="mt-4 text-[13px] leading-relaxed text-mute">
           Approve Telegram join requests that match an application. The CSV has full addresses for paying rewards. Store:{" "}
           {data.backend}.
+        </p>
+      </Panel>
+    </>
+  );
+}
+
+type ContestRow = {
+  name: string;
+  handle: string;
+  postUrl: string;
+  postUser: string;
+  postId: string;
+  marketingConsentAt?: number;
+  note: string | null;
+  email: string | null;
+  network: ContestNetwork;
+  submittedAt: number;
+  updatedAt: number;
+  revisions?: number;
+  previousPosts?: string[];
+};
+
+/** Video contest entries (gloam.trade/contest), newest first, and the CSV. Read only. */
+function ContestPanel() {
+  const [data, setData] = useState<{ backend: string; entries: ContestRow[]; loadedAt: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/contest/entries", { credentials: "include", cache: "no-store" });
+        const json = (await res.json().catch(() => null)) as
+          | { ok?: boolean; data?: { backend: string; entries: ContestRow[] }; error?: { message?: string } }
+          | null;
+        if (!live) return;
+        if (!res.ok || !json?.ok || !json.data) {
+          setErr(json?.error?.message ?? `Contest entries failed (${res.status})`);
+          return;
+        }
+        setErr(null);
+        setData({ ...json.data, loadedAt: Date.now() });
+      } catch {
+        if (live) setErr("Network error loading contest entries");
+      }
+    };
+    void load();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, ADMIN_REFRESH_MS);
+    return () => {
+      live = false;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  if (err) {
+    return (
+      <p className="rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger" role="alert">
+        {err}
+      </p>
+    );
+  }
+  if (!data) return <PanelSkeleton label="Loading contest entries" />;
+
+  const entries = data.entries;
+  const dayAgo = data.loadedAt - 86_400_000;
+  const differs = (e: ContestRow) => e.postUser.toLowerCase() !== e.handle.toLowerCase();
+  // the same post entered under more than one handle
+  const postCount = new Map<string, number>();
+  for (const e of entries) postCount.set(e.postId, (postCount.get(e.postId) ?? 0) + 1);
+  const shared = (e: ContestRow) => (postCount.get(e.postId) ?? 0) > 1;
+  const link = "underline decoration-line-strong underline-offset-4 hover:decoration-foreground";
+  return (
+    <>
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi label="Entries" value={n(entries.length)} sub={`${n(entries.filter((e) => e.submittedAt > dayAgo).length)} new in the last 24h`} />
+        <Kpi label="Updated" value={n(entries.filter((e) => (e.revisions ?? 0) > 0).length)} sub="sent again with the same handle" />
+        <Kpi label="Flagged" value={n(entries.filter((e) => differs(e) || shared(e)).length)} sub="post account differs, or post reused" />
+        <Kpi label="With email" value={n(entries.filter((e) => e.email).length)} sub="for reaching winners" />
+      </section>
+      <Panel
+        title="Contest entries"
+        action={
+          <a href="/api/contest/entries?format=csv" className="btn btn-ghost btn-sm">
+            Download CSV
+          </a>
+        }
+      >
+        <DataTable
+          headers={["Name", "X handle", "Post on X", "Flag", "Network", "What it shows", "Email", "Marketing consent", "Submitted", "Updated"]}
+          rows={entries.map((e) => [
+            <span key="n" className="text-foreground">
+              {e.name}
+            </span>,
+            <a key="h" href={`https://x.com/${e.handle}`} target="_blank" rel="noreferrer" className={link}>
+              @{e.handle}
+            </a>,
+            <a
+              key="p"
+              href={e.postUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={(e.previousPosts ?? []).length ? `Earlier: ${(e.previousPosts ?? []).join(" ")}` : e.postUrl}
+              className={link}
+            >
+              @{e.postUser}/{e.postId.slice(-6)}
+            </a>,
+            differs(e) || shared(e) ? (
+              <span key="f" className="text-danger">
+                {[differs(e) ? "Post is not by this handle" : null, shared(e) ? "Same post as another entry" : null]
+                  .filter(Boolean)
+                  .join(". ")}
+              </span>
+            ) : (
+              "None"
+            ),
+            CONTEST_NETWORK_LABEL[e.network] ?? e.network,
+            <span key="note" title={e.note ?? undefined} className="block max-w-[260px] truncate">
+              {e.note ?? "None"}
+            </span>,
+            e.email ?? "None",
+            e.marketingConsentAt ? `Yes, ${new Date(e.marketingConsentAt).toLocaleString()}` : "No",
+            new Date(e.submittedAt).toLocaleString(),
+            (e.revisions ?? 0) > 0 ? `${new Date(e.updatedAt).toLocaleString()} (${e.revisions}x)` : "Not updated",
+          ])}
+          empty={data.backend === "none" ? "Contest storage is not configured (set Upstash Redis)." : "No entries yet"}
+          minWidth={1400}
+        />
+        <p className="mt-4 text-[13px] leading-relaxed text-mute">
+          One entry per X handle; sending again replaces it. Check each post quotes the announcement and tags @gloamtrade
+          before judging. Hover a post link for posts an entry replaced. Store: {data.backend}.
+        </p>
+      </Panel>
+    </>
+  );
+}
+
+type UpdatesData = { backend: string; count: number; bySource: { "sign-in": number; settings: number; site: number } };
+
+/**
+ * The "Email me Gloam updates" list: how many, from where, and the CSV. The
+ * emails themselves are only in the CSV, which holds email, day and source
+ * (and each person's unsubscribe link), nothing about wallets.
+ */
+function UpdatesPanel() {
+  const [data, setData] = useState<UpdatesData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/updates", { credentials: "include", cache: "no-store" });
+        const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: UpdatesData; error?: { message?: string } } | null;
+        if (!live) return;
+        if (!res.ok || !json?.ok || !json.data) {
+          setErr(json?.error?.message ?? `Updates list failed (${res.status})`);
+          return;
+        }
+        setErr(null);
+        setData(json.data);
+      } catch {
+        if (live) setErr("Network error loading the updates list");
+      }
+    };
+    void load();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, ADMIN_REFRESH_MS);
+    return () => {
+      live = false;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  if (err) {
+    return (
+      <p className="rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger" role="alert">
+        {err}
+      </p>
+    );
+  }
+  if (!data) {
+    return (
+      <PanelSkeleton label="Loading the updates list" />
+    );
+  }
+  return (
+    <>
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi label="Subscribed" value={n(data.count)} sub="emails on the list" />
+        <Kpi label="From sign-in" value={n(data.bySource["sign-in"])} sub="Gloam wallet sign-in" />
+        <Kpi label="From Settings" value={n(data.bySource.settings)} sub="in the app" />
+        <Kpi label="From the site" value={n(data.bySource.site)} sub="footer field" />
+      </section>
+      <Panel
+        title="Email updates list"
+        action={
+          <a href="/api/updates?format=csv" className="btn btn-ghost btn-sm">
+            Download CSV
+          </a>
+        }
+      >
+        <p className="text-[13px] leading-relaxed text-mute">
+          The CSV has each email, the day it joined and where, plus its unsubscribe link for the bottom of an update. Emails
+          are kept alone: no wallet, address or IP is stored with them. Store: {data.backend}.
+        </p>
+      </Panel>
+    </>
+  );
+}
+
+type HuntData = {
+  backend: string;
+  setup: Record<string, boolean>;
+  reached: { page: number; riddle: number; glim: number; mcp: number } | null;
+  prize: "claimed" | "unclaimed" | "unknown" | "unchecked";
+};
+
+const PRIZE_TEXT: Record<HuntData["prize"], [string, string]> = {
+  claimed: ["Claimed", "the prize note is spent on chain"],
+  unclaimed: ["Not yet", "the prize note is unspent on chain"],
+  unknown: ["Unknown", "the chain didn't answer just now"],
+  unchecked: ["Not checked", "set HUNT_PRIZE_NULLIFIER to check"],
+};
+
+/** The treasure hunt: how many people reached each step, and whether the prize is claimed. Counts only; the clues stay in the server's settings. */
+function HuntPanel() {
+  const [data, setData] = useState<HuntData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/admin/hunt", { credentials: "include", cache: "no-store" });
+        const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: HuntData; error?: { message?: string } } | null;
+        if (!live) return;
+        if (!res.ok || !json?.ok || !json.data) {
+          setErr(json?.error?.message ?? `Hunt failed (${res.status})`);
+          return;
+        }
+        setErr(null);
+        setData(json.data);
+      } catch {
+        if (live) setErr("Network error loading the hunt");
+      }
+    };
+    void load();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, ADMIN_REFRESH_MS);
+    return () => {
+      live = false;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  if (err) {
+    return (
+      <p className="rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger" role="alert">
+        {err}
+      </p>
+    );
+  }
+  if (!data) {
+    return (
+      <p className="flex items-center gap-2.5 rounded-xl bg-surface px-4 py-3 text-[14px] text-mute" role="status">
+        <span className="livedot h-2 w-2 rounded-full bg-foreground/60" />
+        Loading the hunt
+      </p>
+    );
+  }
+  const r = data.reached;
+  const solved = r ? [r.riddle, r.glim, r.mcp].filter((v) => v > 0).length : 0;
+  const on = (v: boolean | undefined) => (v ? "Set" : "Not set");
+  const [prize, prizeSub] = PRIZE_TEXT[data.prize] ?? PRIZE_TEXT.unknown;
+  return (
+    <>
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <Kpi label="Found the hidden page" value={r ? n(r.page) : "None"} sub="from the page source, piece 1" />
+        <Kpi label="Solved the riddle" value={r ? n(r.riddle) : "None"} sub="on the hidden page, piece 2" />
+        <Kpi label="Asked Glim" value={r ? n(r.glim) : "None"} sub="with the passphrase, piece 3" />
+        <Kpi label="Got the prize link" value={r ? n(r.mcp) : "None"} sub="MCP key with pieces 1 to 3" />
+        <Kpi label="Prize" value={prize} sub={prizeSub} />
+      </section>
+      <Panel title="Hunt">
+        <DataTable
+          headers={["Part", "State"]}
+          rows={[
+            ["Hunt", data.setup.enabled ? "On" : "Off"],
+            ["Page source clue", on(data.setup.source)],
+            ["Hidden page", on(data.setup.page)],
+            ["Glim passphrase", on(data.setup.glim)],
+            ["MCP key", on(data.setup.mcp)],
+            ["Pieces 1 to 3", on(data.setup.pieces)],
+            ["Prize link", on(data.setup.prizeLink)],
+            ["Prize check (nullifier)", on(data.setup.prizeCheck)],
+          ]}
+          empty="Nothing set"
+          minWidth={420}
+        />
+        <p className="mt-4 text-[13px] leading-relaxed text-mute">
+          {r ? `${n(solved)} of 3 clues solved by someone so far. ` : ""}
+          Counts are distinct people per step, estimated, from a one-way hash: no addresses or accounts are kept. The home page clue is fixed at build time, so redeploy after changing it. Store: {data.backend}.
         </p>
       </Panel>
     </>
@@ -2006,6 +2597,21 @@ function RelayPanel({
         </>
       )}
     </>
+  );
+}
+
+/** Four figures and a panel, held in place while a tab's data loads. */
+function PanelSkeleton({ label }: { label: string }) {
+  return (
+    <div role="status" aria-busy="true" className="space-y-3">
+      <span className="sr-only">{label}</span>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="gl-skeleton h-[104px] rounded-[16px] sm:h-[120px]" aria-hidden />
+        ))}
+      </div>
+      <div className="gl-skeleton h-[220px] rounded-[16px]" aria-hidden />
+    </div>
   );
 }
 

@@ -1,10 +1,10 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "gloam",
-  "version": "0.6.4",
-  "description": "Private stablecoin payments for agents on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet: pay x402 and MPP resources, shield, get paid, with onchain spending limits.",
+  "version": "0.8.0",
+  "description": "Private stablecoin payments for agents on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet (Elysium support coming): pay x402 and MPP resources, shield, get paid, with onchain spending limits.",
   "homepage": "https://gloam.trade/docs/agents",
-  "repository": "https://github.com/cryptoduke01/gloam",
+  "repository": "https://github.com/gloamtrade/gloam",
   "license": "MIT",
   "keywords": ["gloam", "tempo", "payments", "privacy", "x402", "mpp", "mcp", "stablecoins", "access-keys"],
   "author": {

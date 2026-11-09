@@ -23,7 +23,15 @@
  *   prove     injected Groth16 prover (artifactProver) + proof packing
  *   rates     sealed-rate math + size-privacy policy (pure)
  *   builders  shieldBound | unshield | privateSend | privateTrade intents
+ *   swap      private swaps: the routers, pools, routes and quotes, the same
+ *             planning as the Gloam app, on every chain with a router
+ *   swapIntent quoteSwap, buildSwapIntent, sendSwap, and a swap's refund and
+ *             exit (readSwapOutcome, buildSwapRefund, buildSwapExit). A swap
+ *             hides who swapped, not the tokens or the amounts
+ *   fee       the vault's cash-out fee, read live
  *   x402      private agent payments over HTTP 402 (settle-then-prove)
+ *   x402Cashout scheme gloam-cashout: a private payer cashes out to a public
+ *             payee (a gateway's splitter), and the gateway's verifier
  *   receive   receive tags: seal a payment so only its payee can open it
  *   sweep     payee side: move a received payment to a fresh note (final)
  *   requests  payment request links (pay my Gloam address, with a private note)
@@ -32,26 +40,27 @@
  *   commerce  pay privately and put a receipt leaf in a merkle root you publish;
  *             the calls an agent signs, for a signing allowlist
  *   constants pool + verifier addresses, chain ids, networks (mainnet and
- *             testnet), assets + launch beta limits, cash-out fee and recipient
+ *             testnet), assets + launch deposit limits, cash-out fee and recipient
  *             check, circuit files
- *   limits    the vault's beta deposit limits, read live
+ *   limits    the vault's deposit limits, read live
  *   mainnet   MAINNET_POOLS, BASE_SEPOLIA_POOL and ETHEREUM_SEPOLIA_POOL, the
  *             one place those pool addresses live
  *
  * Environment split: the crypto/math core is pure and runs anywhere. Proving
  * (snarkjs + artifacts) and storage (notes, keys) are injected, so the same core
- * serves the browser app and the node MCP signer. sealedSwap builds a valid
- * intent, but private trading is switched off on every live pool (the mainnet
- * pools have no swap at all), so its on-chain path reverts today.
+ * serves the browser app and the node MCP signer. Private swaps go through the
+ * swap routers (swapIntent). The old sealed trade (buildPrivateTradeIntent,
+ * sealedSwap) is retired: its on-chain path reverts on every live pool.
  */
 
-export const SDK_VERSION = "0.4.6";
+export const SDK_VERSION = "0.6.0";
 
 export * from "./intents.js";
 export * from "./rates.js";
 export * from "./privacy.js";
 export * from "./constants.js";
 export * from "./mainnet.js";
+export * from "./elysium.js";
 export * from "./poseidon.js";
 export * from "./note.js";
 export * from "./merkle.js";
@@ -61,11 +70,16 @@ export * from "./proofs.js";
 export * from "./prove.js";
 export * from "./builders.js";
 export * from "./limits.js";
+export * from "./fee.js";
+export * from "./swap.js";
+export * from "./swapIntent.js";
 export * from "./sync.js";
 export * from "./x402.js";
+export * from "./x402Cashout.js";
 export * from "./receiveTag.js";
 export * from "./sweep.js";
 export * from "./requests.js";
+export * from "./shortLink.js";
 export * from "./incoming.js";
 export { PAYMENT_NOTE_MAX, cleanPaymentNote } from "./paymentNote.js";
 export * from "./relay.js";

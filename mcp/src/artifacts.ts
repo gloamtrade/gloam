@@ -10,18 +10,19 @@
  * fetched again once, then refused.
  *
  * shield backs gloam_execute_shield. transfer backs the private send that
- * settles an x402 or MPP payment and the payee's sweep; unshield backs cash out.
+ * settles an x402 or MPP payment and the payee's sweep; unshield backs cash out;
+ * receipt backs the proof of a payment that VEYA anchors.
  */
 import { createHash } from "node:crypto";
 import { mkdirSync, existsSync, readFileSync, rmSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { GLOAM_ARTIFACTS_URL, circuitArtifactFiles, type CeremonyKind, type PoolCircuit } from "@gloamtrade/sdk";
+import { GLOAM_ARTIFACTS_URL, circuitArtifactFiles, type CeremonyKind, type GloamCircuit } from "@gloamtrade/sdk";
 
 const SOURCE = (process.env.GLOAM_ARTIFACTS_SOURCE || GLOAM_ARTIFACTS_URL).replace(/\/+$/, "");
 const CACHE = process.env.GLOAM_ARTIFACTS_DIR || join(tmpdir(), "gloam-mcp-circuits");
 
-export type CircuitName = PoolCircuit;
+export type CircuitName = GloamCircuit;
 
 const sha256 = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
 const checked = new Set<string>();
@@ -68,4 +69,9 @@ export function transferArtifacts(ceremony: CeremonyKind = "dev") {
 /** Unshield circuit artifacts (cash out). */
 export function unshieldArtifacts(ceremony: CeremonyKind = "dev") {
   return circuitArtifacts("unshield", ceremony);
+}
+
+/** Receipt circuit artifacts (the proof of a payment, checked off chain). */
+export function receiptArtifacts(ceremony: CeremonyKind = "dev") {
+  return circuitArtifacts("receipt", ceremony);
 }

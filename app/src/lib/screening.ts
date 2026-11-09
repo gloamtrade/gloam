@@ -24,6 +24,8 @@ export type ScreenOptions = {
   chainId?: number;
   asset?: string | null;
   flow?: "deposit" | "cashout";
+  /** Who pays a cash out: the vault unless set. A swap's exit pays from its escrow. */
+  sender?: `0x${string}`;
 };
 
 /**

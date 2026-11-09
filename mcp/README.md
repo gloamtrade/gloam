@@ -2,7 +2,7 @@
 
 Private stablecoin payments for AI agents on Tempo, Robinhood Chain, Base and Ethereum, powered by [`@gloamtrade/sdk`](../packages/sdk). The agent pays x402 and MPP resources, holds a shielded balance and gets paid, within spending limits it cannot lift: off-chain limits this server checks, and on Tempo an access key whose cap the protocol enforces.
 
-Live on mainnet (beta) on Tempo (`4217`) and Robinhood Chain (`4663`) since 21 October 2026, and on Base (`8453`) and Ethereum (`1`) since 26 October 2026 (from 0.6.1). Robinhood gives agents an MCP server for **public** trading. Gloam gives them one for **private** payments, so who an agent pays, and how much, stays off the public chain.
+Live on mainnet on Tempo (`4217`) and Robinhood Chain (`4663`) since 21 October 2026, and on Base (`8453`) and Ethereum (`1`) since 26 October 2026 (from 0.6.1). Elysium mainnet support is coming (`elysium-mainnet`, gas in HYPE), in a release that has its values. Robinhood gives agents an MCP server for **public** trading. Gloam gives them one for **private** payments, so who an agent pays, and how much, stays off the public chain.
 
 ## Mainnet or testnet
 
@@ -11,7 +11,7 @@ Every tool that touches a chain takes a `network`:
 | `network` | What it is | Assets | Keys |
 | --- | --- | --- | --- |
 | `tempo-mainnet` | Tempo mainnet | USDC.e, pathUSD, USDT0, OUSD | Final ceremony keys |
-| `robinhood-mainnet` | Robinhood Chain mainnet | USDG, GLOAM, PONS, CASHCAT; ETH, AI, ORBIO and GRIFT once each timelocked limit lands | Final ceremony keys |
+| `robinhood-mainnet` | Robinhood Chain mainnet | USDG, GLOAM, PONS, CASHCAT, ETH, AI, ORBIO; GRIFT once its timelocked limit lands | Final ceremony keys |
 | `base-mainnet` | Base mainnet | USDC, EURC, USDT, ETH | Final ceremony keys |
 | `ethereum-mainnet` | Ethereum mainnet | USDC, USDT, USDG, PYUSD, EURC, ETH | Final ceremony keys |
 | `tempo` | Tempo testnet (Moderato) | PathUSD and other test stablecoins | Dev keys |
@@ -23,14 +23,14 @@ Every tool that touches a chain takes a `network`:
 
 On mainnet:
 
-- **Payments only, beta limits.** On the mainnet pools this server makes deposits, private payments and sweeps. It does not swap: private swaps are in the Gloam app (Vault > Swap) on Robinhood Chain and Tempo mainnet. A deposit is at most 50,000 of a stablecoin (20 ETH on Base and Ethereum, 2,500,000 GLOAM) during the beta, checked before anything is proved; private payments are never limited.
-- **Fees.** Deposits and private payments are free. Cashing out costs 0.25% (this server does not cash out; use the Gloam app or the SDK).
+- **Payments, swaps, deposit limits.** On the mainnet pools this server makes deposits, private payments and sweeps, and private swaps on the mainnets with a swap router (see [Private swaps](#private-swaps)). A deposit is at most 50,000 of a stablecoin (20 ETH on Base and Ethereum, 2,500,000 GLOAM), checked before anything is proved; private payments are never limited.
+- **Fees.** Deposits and private payments are free. Cashing out costs 0.5% (this server does not cash out; use the Gloam app or the SDK).
 - **Final keys.** Proofs for mainnet use the final keys of the 13-contributor trusted setup, downloaded from `https://www.gloam.trade/circuits/final` and checked against the SHA-256 the SDK pins. Testnet proofs use the dev keys. The two are cached apart.
-- **Beta software.** The contracts and circuits were reviewed internally before launch with no Critical or High findings open, and an independent review on 23 October found no new exploitable contract flaw (its app fixes are being merged). Kann Audits reviewed the vault contracts (report, 1 November 2026: [gloam.trade/security](https://gloam.trade/security)) and found no Critical, High or Medium issues; the routers, circuits, app, relay, this server and the SDK were not part of it. The mainnet pools are new, so the crowd of notes to hide among is small at first. Start with small amounts.
+- **Review status.** The contracts and circuits were reviewed internally before launch with no Critical or High findings open, and an independent review on 23 October found no new exploitable contract flaw (fixes in the app areas it named were merged by 24 October). Kann Audits reviewed the vault contracts (report, 1 November 2026: [gloam.trade/security](https://gloam.trade/security)) and found no Critical, High or Medium issues; the routers, circuits, app, relay, this server and the SDK were not part of it. The mainnet pools are new, so the crowd of notes to hide among is small at first.
 - **Pools come with the version.** A mainnet appears here once the SDK this package ships with has its pool. If `GLOAM_NETWORK` names a mainnet this version lacks, the server stops at startup and says so.
 - **Your own RPC.** `GLOAM_RPC_URL_4217`, `GLOAM_RPC_URL_4663`, `GLOAM_RPC_URL_8453` and `GLOAM_RPC_URL_1` point Tempo, Robinhood Chain, Base and Ethereum mainnet at another RPC (any chain id works the same way).
 
-**Base.** `GLOAM_NETWORK=base-mainnet` runs on Base mainnet (`8453`: USDC, EURC, USDT and ETH), live since 26 October 2026, and `GLOAM_NETWORK=base` on Base Sepolia (`84532`): test USDC, EURC and ETH on the mainnet pool and final keys. Base mainnet's beta limits are 50,000 per stablecoin and 20 ETH per deposit, Base Sepolia's are 500 per stablecoin and 0.2 ETH per deposit. Both have a payment-message board.
+**Base.** `GLOAM_NETWORK=base-mainnet` runs on Base mainnet (`8453`: USDC, EURC, USDT and ETH), live since 26 October 2026, and `GLOAM_NETWORK=base` on Base Sepolia (`84532`): test USDC, EURC and ETH on the mainnet pool and final keys. Base mainnet's deposit limits are 50,000 per stablecoin and 20 ETH per deposit, Base Sepolia's are 500 per stablecoin and 0.2 ETH per deposit. Both have a payment-message board.
 
 **Ethereum.** `GLOAM_NETWORK=ethereum-mainnet` runs on Ethereum mainnet (`1`: USDC, USDT, USDG, PYUSD, EURC and ETH, 50,000 per stablecoin and 20 ETH per deposit), live since 26 October 2026. Its testnet is Ethereum Sepolia (`ethereum`), below. Gas costs more there: the Gloam relay waits while Ethereum gas is above its ceiling (3 gwei by default) and answers `gas_high`. A USDT shield clears an old USDT approval first, since Tether's token refuses to change one non-zero approval into another. `GLOAM_RPC_URL_1` points it at your own RPC.
 **Ethereum Sepolia.** `GLOAM_NETWORK=ethereum` runs on Ethereum Sepolia (`11155111`: test USDC, USDG, PYUSD, EURC and ETH on the mainnet pool and final keys). `GLOAM_RPC_URL_11155111` points it at your own RPC.
@@ -51,7 +51,7 @@ Any other client (Claude Desktop, Cursor, Gemini CLI, Windsurf):
 { "mcpServers": { "gloam": { "command": "npx", "args": ["-y", "@gloamtrade/mcp"] } } }
 ```
 
-As a plugin, with the skills that teach the agent to use it safely: `claude plugin marketplace add cryptoduke01/gloam-plugins`, then `claude plugin install gloam@gloam` (Codex and Cursor too, see [integrations/plugins](../integrations/plugins)).
+As a plugin, with the skills that teach the agent to use it safely: `claude plugin marketplace add gloamtrade/gloam-plugins`, then `claude plugin install gloam@gloam` (Codex and Cursor too, see [integrations/plugins](../integrations/plugins)).
 
 Nothing to install: paste `https://www.gloam.trade/mcp` into Claude (Settings, Connectors, Add custom connector), ChatGPT, Cursor or any client that connects by URL. That hosted server only reads and plans (networks, vault stats, payment request links, proof checks, MPP how-to) and never takes a key; to sign and pay, run this one.
 
@@ -69,7 +69,7 @@ The server reads its environment, then `~/.gloam/agent.env` (or the file in `GLO
 
 | Setting | Meaning |
 | --- | --- |
-| `GLOAM_NETWORK` | Default network for tools: `tempo-mainnet`, `robinhood-mainnet`, `base-mainnet`, `ethereum-mainnet` (mainnet), `tempo`, `robinhood`, `base` or `ethereum` (testnet). Default `robinhood`. A mainnet here also puts the Tempo access key on Tempo mainnet |
+| `GLOAM_NETWORK` | Default network for tools: `tempo-mainnet`, `robinhood-mainnet`, `base-mainnet`, `ethereum-mainnet` (mainnet; `elysium-mainnet` is coming), `tempo`, `robinhood`, `base` or `ethereum` (testnet; `elysium`, Elysium testnet, is coming). Default `robinhood`. A mainnet here also puts the Tempo access key on Tempo mainnet |
 | `GLOAM_AGENT_PRIVATE_KEY` | The agent's key. Without it the execute tools return plans |
 | `GLOAM_TEMPO_ACCOUNT` | The owner's Tempo account. With it, the key is a Tempo access key acting for that account |
 | `GLOAM_TEMPO_FEE_TOKEN` | Token to pay Tempo fees in, in access-key mode. Default: the protocol's choice |
@@ -85,9 +85,9 @@ The server reads its environment, then `~/.gloam/agent.env` (or the file in `GLO
 | --- | --- | --- |
 | `gloam_info` | read | What Gloam is, its networks, and what the agent can do |
 | `gloam_privacy_status` | read | Honest posture: what is public, what is private, mainnet limits and fees, how thin the anonymity set is |
-| `gloam_list_markets` | read | Markets from the retired sealed trade, with indicative testnet marks. Nothing here trades |
-| `gloam_quote` | read | Indicative quote for the retired sealed trade |
-| `gloam_plan_private_trade` | plan | Describe a sealed trade (never executes; the sealed trade is retired) |
+| `gloam_swap_quote` | read | Price a private swap of one note's value, with everything that would stop it (see [Private swaps](#private-swaps)) |
+| `gloam_execute_private_swap` | execute | **Real private swap.** Proves locally and sends through the Gloam relay; both new notes are kept first |
+| `gloam_finish_swap` | execute | Settle a swap whose money waits at its escrow: the refund note, or an exit to an address you name |
 | `gloam_plan_shield` | plan | Describe a shield before executing (no signing) |
 | `gloam_execute_shield` | execute | **Real private deposit** on the chosen network. Mints a note, generates the Groth16 proof server-side with that network's keys, broadcasts `shieldBound()`, and returns a note handle |
 | `gloam_execute_transfer` | execute | Public transfer of test ETH on Robinhood Chain testnet (funding while practicing). Amount and recipient are visible |
@@ -96,14 +96,34 @@ The server reads its environment, then `~/.gloam/agent.env` (or the file in `GLO
 | `gloam_payment_requirements` | server | Price an agent resource in a private payment; returns the x402 requirements and the MPP challenge (`mpp.wwwAuthenticate`). `payTo` defaults to this server's receive tag |
 | `gloam_pay_x402` | agent | Plan the private payment that satisfies a 402 challenge (x402 or MPP) |
 | `gloam_execute_private_pay` | execute | **Real private payment** from a note handle: sync, prove, broadcast `transfer()`, keep the change. Returns the `X-PAYMENT` header, or for an MPP challenge the `Authorization: Payment` credential |
-| `gloam_fetch_paid` | execute | Fetch a URL; on a Gloam 402 (MPP method `gloam`, or x402), pay privately and retry, all inside the server. Returns the response and, for MPP, the decoded `Payment-Receipt` |
+| `gloam_fetch_paid` | execute | Fetch a URL; on a Gloam 402 (MPP method `gloam`, or x402), pay privately and retry, all inside the server. Returns the response and, for MPP, the decoded `Payment-Receipt`. Also pays x402 `gloam-cashout` (a public payee on Robinhood Chain) with a cash out through the relay; needs `maxAmount` |
 | `gloam_verify_payment` | server | Open a presented payment (x402 or MPP) with this server's receive key, verify it, sweep it into a fresh note, and say whether to grant access |
 | `gloam_get_limits` | read | This agent's spending limits: tools, assets, per payment, per day, recipients, expiry |
 | `gloam_get_spending_report` | read | Spent and left in the last 24 hours per asset, recent payments, refused attempts |
+| `gloam_retry_veya_receipts` | execute | Offered with VEYA receipts on: see where a payment's receipt stands (it is built after the payment's answer), or retry one that failed. Pays nothing |
 
 `gloam_execute_shield` is the private-execution rail: the agent ends up with a shielded balance only this server can spend. The agent sees a note handle such as `n-k3x9p2qw7m`, never the note's secret. When no signer is configured, every execute tool returns a plan instead of acting, and we never return a fake private fill.
 
 The x402 tools are private agent payments (the MCPay pattern, but the settlement is private). `gloam_payment_requirements` prices a resource to the payee's receive tag. The paying agent calls `gloam_execute_private_pay` (or `gloam_fetch_paid` for the whole request), which settles a private send and seals the payment note to that tag, so only the payee can open it. The payee calls `gloam_verify_payment`, which opens the note, checks it binds the required amount and asset, and sweeps it into a fresh note before saying `grantAccess: true`. Unlike a Tempo Zone, no operator sees the transaction: it is private from the public and self-custodial, with an optional per-payment issuer-scoped compliance disclosure. See `TEMPO_EXPANSION.md`.
+
+Scheme `gloam-cashout` is for gateways that pay out to a public address (a creator's splitter) in USDG on Robinhood Chain. `gloam_fetch_paid` pays it with a cash out of exactly the quoted amount from this server's notes to that address, through the Gloam relay, splitting a larger note privately first, and retries with `X-PAYMENT` = base64 JSON `{ scheme, txHash, quoteId }`. The payee and the amount are public; this server's wallet and balance are not. It needs `maxAmount`, and the same quote asked again is presented, never paid twice. With `gloam-private` offered too, `gloam-private` is paid unless `prefer` says `gloam-cashout`.
+
+## Private swaps
+
+A private swap takes one note out of the vault through a one-time escrow, trades it on a public DEX, and puts the result back as a new note, in one transaction the Gloam relay sends. It hides who swapped. The tokens and the amounts are public, like any trade on that DEX. The planning and the proofs are the SDK's, the same as the Gloam app's; the checks are listed below.
+
+| Tool | What it does |
+| --- | --- |
+| `gloam_swap_quote` | Read only. The price of swapping `amount` of `from` into `to` (or a note's whole value, with `note`), the vault's fee read live, the route, and anything that would stop it (below) |
+| `gloam_execute_private_swap` | Proves the swap here and sends it through the relay. Never from this server's wallet, which would put the wallet next to the swap on the explorer |
+| `gloam_finish_swap` | For a swap whose money waits at its escrow: brings it back as the refund note, or sends it to a `to` address when the refund note can't take it |
+
+- **One whole note.** A swap spends one note. With an `amount` below a note's value, the server first splits the note with a private send to its own notes (the amount and the change), waits for it, then swaps the note of the right size. Notes are never combined.
+- **What stops a swap, on every network.** Price impact over the owner's cap: 2% unless `GLOAM_SWAP_MAX_IMPACT_BPS` says otherwise (in basis points, 0 to 10000). An agent's `maxImpactBps` can lower it for one swap, never raise it. Two dollar stablecoins more than 2% apart. A refund note the vault couldn't take back, an output the vault doesn't take or has no room for, the relay off or over its gas ceiling, and on Ethereum a swap under the relay's smallest. Not checked: the price against the market, which the Gloam app's swap tab also weighs with prices from outside the chain; this server passes none.
+- **Limits.** A swap goes through the spending limits on the value it spends, and only when the owner lists `swap` in `tools` (`GLOAM_LIMIT_TOOLS=pay,swap`, or `"tools": [..., "swap"]` in the limits file). What it buys is limited too: one of `swapTo` when the owner sets it (`GLOAM_LIMIT_SWAP_TO=GLOAM,ETH`, or `"swapTo": ["GLOAM"]` in the file, symbols or 0x addresses), else one of the agent's own `assets`. An exit pays a public address, so it goes through the limits too, recipients included, but its amount is not counted again: the swap already counted it.
+- **Where.** Only on a network with a swap router: Robinhood Chain and Tempo mainnet today, Base and Ethereum once their routers are switched on. Elsewhere the tools say swaps aren't live there, and swaps are not on Elysium yet when its support (coming) is in.
+- **The relay.** `GLOAM_RELAY_URL` names a relay; unset, it is Gloam's. Swaps always go through a relay, whatever `GLOAM_USE_RELAY` says, so they need the note store (`GLOAM_NOTE_KEY`, or one derived from `GLOAM_AGENT_PRIVATE_KEY`) but no gas in the agent's wallet.
+- **Getting money back.** Before anything is sent, the server keeps both notes the swap makes: the new note, and a refund note that also holds the swap's exit key. One of them lands. If the swapped note's unshield is ever sent on its own, its money waits at the swap's escrow: `gloam_list_notes` with `refresh` says so, and `gloam_finish_swap` brings it back as the refund note. If the refund note can't take it (the vault's fee rose, or the vault has no room for it now), the exit sends it to an address you name (on routers with an exit). A swap the relay refused leaves the note spendable again, and the refund note stays kept until that note is spent. The same holds for the split before a swap and for a payment: once the relay (or the wallet's RPC) has seen a send's proof, the notes it would make are kept, marked dead, and come back if it lands after all. A swap that went out and reverted or ran out of time leaves its proof public and valid until the note is spent, so the server moves the note whole to a fresh note of its own right away (a private send through the relay); until that move lands the note is held, no tool spends it, and `gloam_list_notes` with `refresh` tries the move again.
 
 ## Notes stay in the server
 
@@ -118,6 +138,7 @@ A private balance is a note, and whoever knows a note's secret can spend it. So 
 | `GLOAM_NOTE_KEY` | 32 random bytes in hex (`openssl rand -hex 32`). The store key. Recommended, and required for a server with no signer |
 | (unset) | The store key is derived from `GLOAM_AGENT_PRIVATE_KEY` with HKDF-SHA256 under a Gloam note-store label, so it is never the signing key itself |
 | `GLOAM_NOTE_STORE` | Where the store lives. Default `~/.gloam/notes.<agent>.json` |
+| `GLOAM_X402_ALLOW_UNBOUND=1` | Seller side. Lets `gloam_verify_payment` take an x402 payment with no payment binding, from a payer older than it. Off by default: a sealed ticket copied from the payment board has no binding either, so leave it off unless you must serve such payers |
 | `GLOAM_EXPOSE_NOTE_SECRETS=1` | **Unsafe, legacy only.** Brings back the old behavior: shield and pay return note secrets, pay accepts `noteSecret`, and a `payTo` that is not a receive tag is paid with an unsealed note. Off by default. Read once at startup |
 
 The store is AES-256-GCM over the whole file (amounts and counts are hidden too), bound to the agent id, written with mode `0600` under the same kind of lock as the spending log. A store that does not decrypt is never overwritten, since it holds the only copy of the money: fix the key or move the file. Back it up together with its key. Changing `GLOAM_NOTE_KEY`, or the signer when the key is derived, makes an existing store unreadable until the old key is back.
@@ -139,7 +160,7 @@ The sweep is signed by `GLOAM_AGENT_PRIVATE_KEY`, or sent through the Gloam rela
 The payment tools also speak [MPP](https://mpp.dev): `402` with `WWW-Authenticate: Payment …`, a retry with `Authorization: Payment …`, and a `Payment-Receipt`. Gloam is an MPP payment method, `gloam` with intent `charge` ([spec draft](../docs/mpp/draft-gloam-charge-00.md), library [`@gloamtrade/mppx-gloam`](../packages/mppx-gloam) for mppx servers and clients). The settlement is the same private send as x402, so spending limits, the note store and the sweep work exactly as above.
 
 - **Paying.** `gloam_fetch_paid` reads `WWW-Authenticate`; when it offers `method="gloam"` it pays that (it is preferred over x402 when both are offered), retries with the credential in the field the challenge selects, and returns the decoded receipt. `gloam_execute_private_pay` takes the challenge (the `WWW-Authenticate` value) as `requirements` and returns `authorization`. This server pays in push mode (it broadcasts its own transfer); a challenge that only accepts pull, or with less than 30 seconds left, is refused before anything is proved.
-- **Getting paid.** `gloam_payment_requirements` returns `mpp.wwwAuthenticate` next to the x402 requirements: an HMAC-bound challenge, valid for 10 minutes by default (`expiresInSeconds`). Pass the presented `Authorization` value to `gloam_verify_payment` as `payment`. It checks that this server issued the challenge, that it has not expired, that the credential is bound to that challenge, and that the payment note is the payment output of a `Transferred` event in Gloam's pool; then it sweeps as above. For a pull credential (the payer hands over its proven transfer instead of broadcasting it) it submits the transfer first. On `grantAccess: true`, serve with `paymentReceipt` as the `Payment-Receipt` header. Passing the challenge you issued as `requirements` also binds the credential to that exact price.
+- **Getting paid.** `gloam_payment_requirements` returns `mpp.wwwAuthenticate` next to the x402 requirements: an HMAC-bound challenge, valid for 10 minutes by default (`expiresInSeconds`). Pass the presented `Authorization` value to `gloam_verify_payment` as `payment`, and the price of the resource you are serving as `requirements` (the `WWW-Authenticate` value you issued, or the encoded requirements). Both are required. It checks that this server issued the challenge, that its price matches `requirements`, that it has not expired, that the credential is bound to that challenge, and that the payment note is the payment output of a `Transferred` event in Gloam's pool; then it sweeps as above. For a pull credential (the payer hands over its proven transfer instead of broadcasting it) it submits the transfer first. On `grantAccess: true`, serve with `paymentReceipt` as the `Payment-Receipt` header.
 
 ## Check before paying (Agent Wormhole)
 
@@ -147,9 +168,47 @@ A 402 is text the payee wrote, and the agent reads it before it pays. With `GLOA
 
 - **Off by default.** No key, no call. Set it in `~/.gloam/agent.env` or the environment: `GLOAM_WORMHOLE_KEY=<your key>`.
 - **What it sees.** The payment request only, as `{"content": ...}`: the decoded price, followed for `gloam_fetch_paid` by the 402 body the price came in. Never a note, a balance, the wallet, a key or the payment itself.
-- **It fails closed.** `refuse`, `abstain`, any other answer, an `allow` with findings attached, an `allow` that scanned nothing, an HTTP error (402 means the account is out of checks), an unreadable answer, or no answer within 5 seconds: the tool answers `status: "refused"`, `code: "wormhole_refused"`, names the findings by code (never the text they matched), and nothing is spent. The note stays spendable.
+- **It fails closed.** `refuse`, `abstain`, any other answer, an `allow` with findings attached, an `allow` that scanned nothing, an HTTP error (402 means the account is out of checks), an unreadable answer (one over 64 KiB counts, and none is asked for compressed), or no answer within 5 seconds: the tool answers `status: "refused"`, `code: "wormhole_refused"`, names the findings by code (never the text they matched), and nothing is spent. The note stays spendable.
 - **Attestation.** A paid result carries Agent Wormhole's `attestation` and `signature` under `wormhole`. They are kept for you to check, not verified here yet: Agent Wormhole has not published the canonical form of a `/check` attestation.
 - **Settings.** `GLOAM_WORMHOLE_TIMEOUT_MS` (default 5000, 500 to 30000). `GLOAM_WORMHOLE_URL` points somewhere else (it must be https, or http on localhost); a key with an unusable URL refuses every payment rather than quietly turning the check off.
+
+## Check the budget before paying (VEYA)
+
+A Gloam note is spent with a proof, so wallet rules can't stop a payment. A budget only holds before the payment, on the server that keeps the notes. With `GLOAM_VEYA_KEY` set, `gloam_execute_private_pay` and `gloam_fetch_paid` ask [VEYA](https://veyanet.tech) whether this agent's budget covers the payment, after the spending limits and Agent Wormhole pass and before anything is proved. Only an exact `allow` pays.
+
+- **Off by default.** No key, no call. To turn it on, set all three in `~/.gloam/agent.env` or the environment: `GLOAM_VEYA_KEY=<your key>`, `GLOAM_VEYA_URL=https://api.veyanet.tech/guard/v1/check` and `GLOAM_VEYA_AGENT_ID=<an id you choose>`.
+- **What VEYA covers.** USDG on Robinhood Chain (`chain_id` 4663). A payment on another chain or in another asset is refused (`wrong_chain`, `asset_not_allowed`), so with the check on, this server pays only in USDG on Robinhood Chain. A new agent id gets its budget on its first check, 5 USDG as of 1 November 2026.
+- **What VEYA sees.** With this on, VEYA sees the agent id, the chain, the asset, the amount and the payee's receive tag during the check, and nothing else: `{"agent_id", "chain_id", "asset", "amount", "payee", "resource_host": null}`. `amount` is base units as a decimal string. `chain_id` is how VEYA tells its chain. `resource_host` is always `null`, and no payment request text is sent, so VEYA learns nothing about what was bought. Never a note, a secret, a balance, a wallet or a key. Agent Wormhole, if on, still gets the payment request as before. What VEYA keeps after the check is VEYA's to say; this server can't limit it.
+- **The agent id is opaque.** Pick any id that means nothing outside your setup. A value with a wallet address in it is refused, so a wallet never goes out as the id.
+- **It fails closed.** Only a `200` with `{"decision": "allow"}` pays. `refuse`, any other answer, any other status, a redirect, an unreadable answer (one over 64 KiB counts, and none is asked for compressed), no answer within 5 seconds, or a missing or unusable setting: the tool answers `status: "refused"`, `code: "veya_refused"`, the spend is settled as failed, and nothing is spent. The note stays spendable. VEYA answers every check with a `200`, including its own `timeout` and `internal_error`, and those are refuses like any other.
+- **Nothing at or below zero.** A price of zero or less is refused (`bad_amount`) before the spending limits and both checks, with the limits on or off, so it never reaches VEYA.
+- **If VEYA wants more fields.** A `bad_request` refuse, or HTTP `400` or `422`, means VEYA could not use the check as sent. It refuses the payment like any other answer, with a message that names the fields sent, and the server never retries with more. If that happens, VEYA's format has changed and this server needs an update.
+- **Both checks on.** Agent Wormhole goes first, then VEYA, and both must allow. A request Agent Wormhole refuses never reaches VEYA.
+- **VEYA's reason.** A `reason` is untrusted text. Before the agent or the spending log sees it, it is stripped to letters, digits and `_.:-` and cut to 40 characters. VEYA's reasons are short codes, which come through as written: `unauthorized`, `bad_request`, `wrong_chain`, `asset_not_allowed`, `unknown_agent`, `agent_limit`, `budget_exceeded`, `timeout` and `internal_error`.
+- **This server enforces it, off-chain.** The vault does not know about this check. It binds the agent only while the notes and the key are held by this server and nowhere else: anything else holding them can spend without asking VEYA.
+- **Payments only.** VEYA checks `gloam_execute_private_pay` and `gloam_fetch_paid`. These skip it and go through the spending limits only: `gloam_execute_transfer` (a public send of test ETH on Robinhood Chain testnet), and a private swap and a swap's exit to an address (`gloam_finish_swap` with `to`), which run only when the owner lists `swap` in `tools`. Leave `swap` out if every private spend must pass VEYA.
+- **A payment can fail after an allow.** VEYA is not told how a payment ended. If the proof, the send or the note fails after an allow, VEYA's running budget may sit ahead of what was really paid, and paying again is checked as a new payment. Compare with `gloam_get_spending_report` if the numbers matter.
+- **Settings.** `GLOAM_VEYA_TIMEOUT_MS` (default 5000, 500 to 30000). `GLOAM_VEYA_URL` must be https, or http on localhost; a key with an unusable URL or agent id refuses every payment rather than quietly turning the check off.
+
+### The receipt after a payment
+
+VEYA's allow carries a check id (`attestation`). With `GLOAM_VEYA_ANCHOR_URL=https://api.veyanet.tech/guard/v1/anchor` set as well, this server proves each payment once it lands, with that id as the receipt's verifier, hashes the proof into one `bytes32` leaf, and sends VEYA the leaf. VEYA writes it to `storeCommitment` on `Veya.sol`, so you need no anchoring wallet. [`examples/veya-receipt`](../examples/veya-receipt) shows the leaf.
+
+- **Off by default.** No `GLOAM_VEYA_ANCHOR_URL`, no receipt. It must be https, or http on localhost, on the same origin (scheme, host and port) as `GLOAM_VEYA_URL`, since the key goes to both. An unusable one refuses every payment rather than quietly turning receipts off.
+- **What VEYA gets.** `{"leaf": "0x…", "agent_id": "…"}` with the same key as the check, and nothing else: never the record, the proof, the amount, the payee, a note or the transaction hash. VEYA can't open a leaf.
+- **The check id.** Letters, digits and `_.:-`, at most 80 characters, with no wallet address in it. It is sealed into the proof as written, so it is checked, not cleaned.
+- **How a leaf is tied to its check.** The id goes in before anything is hashed: it is the receipt's verifier, sealed into the proof's `context`, and `context` is one of the public signals the leaf hashes. So a different check id makes a different leaf. VEYA can't read the id back out of a leaf. Anyone holding the record can confirm it with `checkPaymentReceipt`.
+- **What the write shows.** VEYA writes every receipt leaf with `storeCommitment(bytes16,bytes32)` under one fixed `bytes16`, `0xf390fb03d4d038add3736706029cbdd0`, the first 16 bytes of `keccak256("veya.guard.receipt-leaves.v1")`. It marks the entry as a receipt leaf, and it is the same for every agent.
+- **No usable id, no payment.** With receipts on, an allow without a usable id does not pay: the tool answers `veya_refused`, decision `unchecked`, and nothing is spent. A payment can't be undone, and without the id it could never get its receipt. VEYA's running budget may already count that allow. With receipts off the id is optional, and a bad one is ignored.
+- **It never holds up or changes the payment.** The payment's answer, with its `X-PAYMENT` header or MPP credential, comes back as soon as the payment lands, with `veya.receipt.status` `pending`, and the receipt is built and anchored after it. A challenge can't expire while a proof runs, so the agent is never pushed to pay twice. The work goes on in this server: keep it running until the receipt is done. On Robinhood Chain mainnet, reading the vault's tree alone took about 92 seconds on 1 November 2026.
+- **Seeing where a receipt stands.** `gloam_retry_veya_receipts` returns each receipt's `status`, `leaf`, `anchorTx`, `checkId`, `note` and a `message`, waiting at most 30 seconds (`GLOAM_VEYA_RECEIPT_TIMEOUT_MS`, 500 to 30000) on work still going. `anchored` means VEYA answered 200 naming this leaf and a transaction, given as `anchorTx`; this server does not read the chain to confirm the write, so look that transaction up if it matters. `anchor_failed` means the receipt is built and kept, and the leaf is in the result. `receipt_failed` means there is no leaf yet.
+- **A leaf goes out only once it is saved.** The record is written to the note store before its leaf is sent. If the store can't take it (another process holding it, a disk error), the leaf is not sent and the receipt reads `receipt_failed`, so a retry can never anchor a second, different leaf for the same payment.
+- **The anchor takes seconds, and is safe to repeat.** VEYA writes to chain before it answers, which has taken 5.6 to 10 seconds, so the anchor has its own timeout, `GLOAM_VEYA_ANCHOR_TIMEOUT_MS` (default 20000, 500 to 30000). VEYA writes a leaf once: the same leaf again answers the first transaction with `duplicate: true`, and that also reads as `anchored`.
+- **When the anchor can't finish.** `409` (the leaf is still being written), `502` and `503` (the chain write is not available) go again with the same leaf, up to three tries, then read as `anchor_failed`. `400`, `401`, `403` (`agent_limit`) and `404` (`unknown_agent`) are sent once, since sending them again would get the same answer, and the message says what is wrong. The leaf is kept either way, for `gloam_retry_veya_receipts`.
+- **Retrying.** `gloam_retry_veya_receipts`, offered only with receipts on, builds a missing receipt and sends its leaf. It pays nothing and does not ask for a new check. It sends the same leaf again after an `anchor_failed`, and never sends one VEYA took. While a receipt is still being worked on, a retry joins that work instead of starting a second. For a payment that landed with no answer, call `gloam_list_notes` with `refresh` first.
+- **What a receipt proves.** That a payment of at least the record's minimum amount, in its asset, was made into the vault by its transaction, as the payment and not the change, and that the proof is tied to VEYA's check id. It does not prove who received the payment, since the payee stays private, or that anything was delivered for it. The leaf on chain shows only that VEYA wrote that leaf; whoever holds the record checks the rest with `checkPaymentReceipt`.
+- **The record stays here.** The full record is kept on the payment's note in the encrypted note store. It shows the asset, the minimum amount and the transaction hash, so no tool returns it.
+- **Keys.** The receipt circuit's files are fetched and pinned like the others, on the key set that network's verifiers hold: the final keys on mainnet, dev keys on the older testnets.
 
 ## Spending limits
 
@@ -194,7 +253,7 @@ Not protected:
 
 | Limit | Meaning |
 | --- | --- |
-| `tools` | Which money tools the agent may use: `pay`, `send`, `shield`. Default all three |
+| `tools` | Which money tools the agent may use: `pay`, `send`, `shield`, `swap`. Default `pay`, `send` and `shield`: `swap` is allowed only when listed |
 | `assets` | Which assets it may move. Required, there is no "any" |
 | `maxPerPayment` | Cap on a single payment, in the asset's units (e.g. `"5"` is 5 USDC.e) |
 | `maxPerDay` | Cap over a rolling 24 hours, so a burst cannot straddle midnight |
@@ -280,7 +339,9 @@ GLOAM_LIMIT_MAX_PER_PAYMENT=5            # required, applies to each asset
 GLOAM_LIMIT_MAX_PER_DAY=50               # required, applies to each asset
 GLOAM_LIMIT_RECIPIENTS=any               # required: any, or a comma list
 GLOAM_LIMIT_EXPIRES=2026-12-31           # optional
-GLOAM_LIMIT_TOOLS=pay,shield             # optional
+GLOAM_LIMIT_TOOLS=pay,shield             # optional; add swap to allow private swaps
+GLOAM_LIMIT_SWAP_TO=GLOAM,ETH            # optional: what a swap may buy (else the assets above)
+GLOAM_SWAP_MAX_IMPACT_BPS=200            # optional: the most price impact a swap may take (default 200, 2%)
 ```
 
 Use the file or the variables, not both. The variables have one pair of caps for every asset listed, so list one kind of asset there (stablecoins, or a single other asset such as ETH); for ETH next to stablecoins, use the file.
@@ -400,7 +461,7 @@ Then the agent can shield into a private balance, pay for x402 and MPP resources
 
 ## Status
 
-- **Mainnet (beta):** Tempo, Robinhood Chain, Base and Ethereum, payments only, beta deposit limits, the trusted setup's final keys. Reviewed internally before launch and independently on 23 October; Kann Audits reviewed the vault contracts (report, 1 November 2026) and found no Critical, High or Medium issues.
+- **Mainnet:** Tempo, Robinhood Chain, Base and Ethereum (Elysium support is coming), payments only, deposit limits, the trusted setup's final keys. Reviewed internally before launch and independently on 23 October; Kann Audits reviewed the vault contracts (report, 1 November 2026) and found no Critical, High or Medium issues.
 - **Testnet:** Tempo Moderato and Robinhood Chain testnet on dev keys; Base Sepolia and Ethereum Sepolia on the final keys.
 - **Circuit files** are fetched from `https://www.gloam.trade/circuits` (final keys under `/final`) on first use, checked against pinned SHA-256 and cached locally (`GLOAM_ARTIFACTS_DIR`).
-- **Swaps.** Private swaps are live in the Gloam app on Robinhood Chain and Tempo mainnet, with who swapped kept private and the amounts public ([docs](https://gloam.trade/docs/private-swaps)). This server does not swap: its market and trade tools only plan, for the retired sealed trade. See the [agent docs](https://gloam.trade/docs/agents).
+- **Swaps.** Private swaps run here and in the Gloam app where the network has a swap router: who swapped stays private, the tokens and the amounts are public ([docs](https://gloam.trade/docs/private-swaps)). The old sealed trade is retired, and its planning tools are gone.

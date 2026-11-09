@@ -5,17 +5,20 @@ import { useEffect, useRef, useState } from "react";
 import { SealedField } from "@/components/ui/SealedField";
 import { SealDots } from "@/components/ui/SealDots";
 import { ClaimSafetyLine } from "@/components/app/ClaimSafetyLine";
-import { appClaimPath, codeFromHash } from "@/lib/claimLink";
+import { appClaimPath, codeFromHash, shortCodeFromHash } from "@/lib/claimLink";
 import { countLinkOpened, isClaimLink } from "@/lib/funnel";
 import { NETWORK_KEYS, getNetwork, isNetworkKey, type NetworkKey } from "@/lib/networks";
+import { liveMainnetNames } from "@/lib/mainnet";
 import { decodeNotePackage, isEncryptedPackage, paymentCodeIn } from "@/lib/notePackage";
 import { inWalletBrowser } from "@/lib/passkey";
 import { relayFor } from "@/lib/relay/client";
 import { WALLETCONNECT_ENABLED } from "@/lib/walletConnect";
 import { formatAssetLabel } from "@/lib/shield";
+import { SHORT_CLAIM_PREFIX, readShortClaim } from "@gloamtrade/sdk";
 
 /**
- * Where a claim link lands (gloam.trade/claim?net=...#claim=<code>). Phone
+ * Where a claim link lands (gloam.trade/c#<code>, or the older
+ * gloam.trade/claim?net=...#claim=<code>; /c renders this page). Phone
  * first: what was sent, one button into the app to claim it, and what to
  * expect. The code stays in the fragment, so it never reaches a server; this
  * page only reads it in the browser.
@@ -26,22 +29,30 @@ type View =
   | { kind: "missing" }
   | { kind: "ready"; code: string; net: NetworkKey; amount: string | null; locked: boolean; note?: string };
 
-/** A claim view for a code, with its amount and note when the code is not locked. */
-async function readyView(code: string, linkNet: NetworkKey): Promise<View> {
+/**
+ * A claim view for a code, with its amount and note when the code is not locked.
+ * "damaged": an unlocked code that doesn't open (cut short on the way), so the
+ * page asks for the whole message instead of offering a claim that will fail.
+ */
+async function readyView(code: string, linkNet: NetworkKey): Promise<View | "damaged"> {
   let amount: string | null = null;
   let note: string | undefined;
   let net = linkNet;
   const locked = isEncryptedPackage(code);
   if (!locked) {
     try {
-      const pack = await decodeNotePackage(code);
+      // A short link's fields read without the commitment, so this page never
+      // loads Poseidon; the claim screen works it out.
+      const pack = code.startsWith(SHORT_CLAIM_PREFIX)
+        ? readShortClaim(code.slice(SHORT_CLAIM_PREFIX.length))
+        : await decodeNotePackage(code);
       amount = formatAssetLabel(pack.amountWei, pack.asset);
       note = pack.note;
       // A code that names its chain is on that network, whatever ?net= says (a chat app can cut it off).
       const own = pack.chainId === undefined ? undefined : NETWORK_KEYS.find((k) => getNetwork(k).chainId === pack.chainId);
       if (own) net = own;
     } catch {
-      amount = null;
+      return "damaged";
     }
   }
   return { kind: "ready", code, net, amount, locked, note };
@@ -88,7 +99,9 @@ export default function ClaimPage() {
     const readLink = async () => {
       const n = ++reads.current;
       const current = () => !cancelled && n === reads.current;
-      const code = codeFromHash(window.location.hash);
+      const code =
+        codeFromHash(window.location.hash) ??
+        (/^\/c\/?$/.test(window.location.pathname) ? shortCodeFromHash(window.location.hash) : null);
       const q = new URLSearchParams(window.location.search).get("net");
       const known = isNetworkKey(q) ? q : null;
       const net: NetworkKey = known ?? "tempo";
@@ -106,7 +119,7 @@ export default function ClaimPage() {
       if (current()) {
         setWalletBrowser(wb);
         setLinkNet(known);
-        setView(ready);
+        setView(ready === "damaged" ? { kind: "missing" } : ready);
       }
     };
     const onHash = () => {
@@ -136,7 +149,12 @@ export default function ClaimPage() {
     countLinkOpened(code, net);
     setLinkNet(netIn(pasted) ?? linkNet);
     const ready = await readyView(code, net);
-    if (n === reads.current) setView(ready);
+    if (n !== reads.current) return;
+    if (ready === "damaged") {
+      setPasteError("That payment code is cut off or damaged. Paste the whole message the link came in, or ask the sender to send it again.");
+      return;
+    }
+    setView(ready);
   }
 
   async function copyLink() {
@@ -312,7 +330,7 @@ export default function ClaimPage() {
             ? `This link is on ${realNet.label} mainnet.`
             : net
               ? "This link is on a testnet."
-              : "Gloam runs on Robinhood Chain, Tempo, Base and Ethereum."}{" "}
+              : `Gloam runs on ${liveMainnetNames()}.`}{" "}
           <Link href="/docs/private-pay" className="underline underline-offset-4">
             How private payments work
           </Link>

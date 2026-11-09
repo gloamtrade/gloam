@@ -36,6 +36,10 @@ export interface UnshieldPlan {
   usd?: number;
   amountWei?: bigint;
   to: Address;
+  /** The vault's cash-out fee, read live (buildUnshieldIntent with a client), and what it keeps and pays out. */
+  feeBps?: number;
+  feeWei?: bigint;
+  receivesWei?: bigint;
 }
 export interface PrivateTradePlan {
   market: string; // symbol

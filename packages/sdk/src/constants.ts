@@ -2,6 +2,15 @@ import { defineChain, zeroAddress, type Address, type Chain } from "viem";
 import { base, baseSepolia, mainnet as ethereum, sepolia } from "viem/chains";
 import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, mainnetPoolFor, type MainnetChainId } from "./mainnet.js";
 import type { HistoryRpc } from "./rpc.js";
+import {
+  ELYSIUM_NATIVE_CURRENCY,
+  ELYSIUM_TESTNET_CHAIN_ID,
+  elysiumChainId,
+  elysiumMainnetConfig,
+  elysiumTestnetConfig,
+  type ElysiumMainnet,
+  type ElysiumTestnet,
+} from "./elysium.js";
 
 /** Native ETH is represented as the zero address across the vault. */
 export const NATIVE_ASSET: Address = zeroAddress;
@@ -180,11 +189,14 @@ export const MAINNET_POSEIDON_T3: Address =
   "0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4";
 
 /**
- * Cash-out fee on the mainnet pools at launch: 0.25% (25 basis points) of the
- * amount unshielded, kept by the pool. Deposits and private payments are free.
- * The live value is the pool's withdrawFeeBps(); read it when it matters.
+ * Cash-out fee on the mainnet pools: 0.5% (50 basis points) of the amount
+ * unshielded, kept by the pool. It was 0.25% until 3 November 2026. Base Sepolia
+ * and Ethereum Sepolia still charge 0.25%. Direct deposits and private payments
+ * are free. The pool takes the fee when a cash out lands, at the rate that day,
+ * and the owner can change it through the timelock, so a value that matters
+ * comes from the pool: readCashOutFeeBps (lib fee).
  */
-export const CASH_OUT_FEE_BPS = 25;
+export const CASH_OUT_FEE_BPS = 50;
 
 /**
  * What the pool keeps from a cash out of `amount` base units, rounded down the
@@ -207,7 +219,7 @@ export function cashOutFee(amount: bigint, bps: number = CASH_OUT_FEE_BPS): bigi
 export type CeremonyKind = "dev" | "production";
 
 /**
- * Beta deposit limit for one asset, in its base units, as it was at launch.
+ * Deposit limit for one asset, in its base units, as it was at launch.
  * The vault's owner changes limits through its timelock: read the current ones
  * with readDepositLimit (lib limits). The live read wins, and a live value of
  * type(uint128).max means no limit (isNoLimit).
@@ -223,7 +235,7 @@ export interface GloamAsset {
   /** Token address; the zero address (NATIVE_ASSET) for the chain's native coin. */
   address: Address;
   decimals: number;
-  /** Beta deposit limit on the payments pools (mainnet, Base Sepolia); null where none is set (the older testnets). */
+  /** Deposit limit on the payments pools (mainnet, Base Sepolia); null where none is set (the older testnets). */
   depositLimit: DepositLimit | null;
 }
 
@@ -235,10 +247,12 @@ export type GloamNetworkKey =
   | "robinhood-mainnet"
   | "tempo-mainnet"
   | "base-mainnet"
-  | "ethereum-mainnet";
+  | "ethereum-mainnet"
+  | "elysium-mainnet"
+  | "elysium";
 
-/** The chain a network runs on, testnet or mainnet. */
-export type GloamChainFamily = "robinhood" | "tempo" | "base" | "ethereum";
+/** The chain a network runs on, testnet or mainnet. Elysium's testnet is "elysium", its mainnet "elysium-mainnet". */
+export type GloamChainFamily = "robinhood" | "tempo" | "base" | "ethereum" | "elysium";
 
 /** Robinhood Chain mainnet (4663). */
 export const RH_MAINNET_CHAIN: Chain = defineChain({
@@ -339,37 +353,38 @@ export const ETHEREUM_SEPOLIA_HISTORY_RPC: HistoryRpc = {
 
 const units = (whole: bigint, decimals: number) => whole * 10n ** BigInt(decimals);
 /**
- * Launch values, still live on the Sepolia vaults. The mainnet vaults now take
- * 50,000 per deposit and 2,500,000 in total for each stablecoin, and
- * readDepositLimit reads that live.
+ * Each stablecoin's limit on the four mainnet vaults, as read on chain on
+ * 2026-11-02 (depositLimit on 0x39E2…0194): 50,000 per deposit and 2,500,000 in
+ * total. The limits change through the vault's timelock (a change to no limit
+ * is queued for every asset), so readDepositLimit reads the live value.
  */
-const stableLimit: DepositLimit = { perDeposit: units(500n, 6), total: units(25_000n, 6) };
+const stableLimit: DepositLimit = { perDeposit: units(50_000n, 6), total: units(2_500_000n, 6) };
+/** Each stablecoin's limit on the Sepolia vaults: the launch value, still live there. */
+const sepoliaStableLimit: DepositLimit = { perDeposit: units(500n, 6), total: units(25_000n, 6) };
 
 /**
- * Robinhood Chain mainnet pool assets and their beta deposit limits. GRIFT opens
- * with no limit once its timelocked change lands; 0 on chain until then, so the
- * vault refuses it and assertDepositWithinLiveLimit says so.
+ * Robinhood Chain mainnet pool assets and their deposit limits. USDG,
+ * GLOAM, PONS and CASHCAT are the limits read on chain on 2026-11-02. GRIFT
+ * opens with no limit once its timelocked change lands; 0 on chain until then,
+ * so the vault refuses it and assertDepositWithinLiveLimit says so.
  *
  * ETH, AI and ORBIO are the same: about $25,000 per deposit and $250,000 in total
  * at the prices of 2026-10-31, queued through contracts/script/
- * QueueRobinhoodAssets.s.sol, 0 on chain until each lands. PONS and CASHCAT were
- * opened as swap assets on 2026-10-27, so their limits here are the ones live
- * that day. USDG and GLOAM here are launch values. The vault now takes USDG at
- * 50,000 / 2,500,000, GLOAM at 2,500,000 / 25,000,000, PONS at 390,000 / 9,800,000
- * and CASHCAT at 960,000 / 24,000,000. In every case the live read wins.
+ * QueueRobinhoodAssets.s.sol (ready on 2026-11-03), 0 on chain until each lands.
+ * In every case the live read wins.
  */
 export const RH_MAINNET_ASSETS: GloamAsset[] = [
   { symbol: "USDG", address: RH_MAINNET_USDG, decimals: 6, depositLimit: stableLimit },
-  { symbol: "GLOAM", address: GLOAM_TOKEN, decimals: 18, depositLimit: { perDeposit: units(25_000n, 18), total: units(250_000n, 18) } },
+  { symbol: "GLOAM", address: GLOAM_TOKEN, decimals: 18, depositLimit: { perDeposit: units(2_500_000n, 18), total: units(25_000_000n, 18) } },
   { symbol: "GRIFT", address: RH_MAINNET_GRIFT, decimals: 18, depositLimit: { perDeposit: (1n << 128n) - 1n, total: (1n << 128n) - 1n } },
   { symbol: "ETH", address: NATIVE_ASSET, decimals: 18, depositLimit: { perDeposit: units(11n, 18), total: units(110n, 18) } },
-  { symbol: "PONS", address: RH_MAINNET_PONS, decimals: 18, depositLimit: { perDeposit: units(3_900n, 18), total: units(98_000n, 18) } },
-  { symbol: "CASHCAT", address: RH_MAINNET_CASHCAT, decimals: 18, depositLimit: { perDeposit: units(9_600n, 18), total: units(240_000n, 18) } },
+  { symbol: "PONS", address: RH_MAINNET_PONS, decimals: 18, depositLimit: { perDeposit: units(390_000n, 18), total: units(9_800_000n, 18) } },
+  { symbol: "CASHCAT", address: RH_MAINNET_CASHCAT, decimals: 18, depositLimit: { perDeposit: units(960_000n, 18), total: units(24_000_000n, 18) } },
   { symbol: "AI", address: RH_MAINNET_AI, decimals: 18, depositLimit: { perDeposit: units(400_000n, 18), total: units(4_000_000n, 18) } },
   { symbol: "ORBIO", address: RH_MAINNET_ORBIO, decimals: 18, depositLimit: { perDeposit: units(1_000_000n, 18), total: units(10_000_000n, 18) } },
 ];
 
-/** Tempo mainnet pool assets (TIP-20, 6 decimals) and their beta deposit limits. */
+/** Tempo mainnet pool assets (TIP-20, 6 decimals) and their deposit limits. */
 export const TEMPO_MAINNET_ASSETS: GloamAsset[] = [
   { symbol: "USDC.e", address: TEMPO_USDCE, decimals: 6, depositLimit: stableLimit },
   { symbol: "pathUSD", address: TEMPO_PATHUSD, decimals: 6, depositLimit: stableLimit },
@@ -378,21 +393,23 @@ export const TEMPO_MAINNET_ASSETS: GloamAsset[] = [
 ];
 
 /**
- * Native ETH's launch value on Base and Ethereum, still live on the Sepolia
- * vaults. The mainnet vaults now take 20 per deposit and 1,000 in total, and
- * readDepositLimit reads that live.
+ * Native ETH on the Base and Ethereum mainnet vaults, as read on chain on
+ * 2026-11-02: 20 per deposit and 1,000 in total. readDepositLimit reads it live.
  */
-const baseEthLimit: DepositLimit = { perDeposit: 2n * 10n ** 17n, total: units(10n, 18) };
+const baseEthLimit: DepositLimit = { perDeposit: units(20n, 18), total: units(1_000n, 18) };
+/** Native ETH on the Sepolia vaults: the launch value, still live there. */
+const sepoliaEthLimit: DepositLimit = { perDeposit: 2n * 10n ** 17n, total: units(10n, 18) };
 
 /**
- * BDX: 100,000 per deposit and 2,000,000 in total (about $7,150 and $143,000 at
- * $0.0715). Queued through the vault timelock on 2026-10-29 and 0 on chain until
- * it lands, so the vault refuses BDX deposits before then:
- * assertDepositWithinLiveLimit reads the live value and says so.
+ * BDX on Base and Ethereum: no limit once its timelocked change lands (queued
+ * 2026-10-30 through contracts/script/NoDepositLimits.s.sol, ready from
+ * 2026-11-02). It reads 0 on chain until then, so the vault refuses BDX
+ * deposits before it runs: assertDepositWithinLiveLimit reads the live value
+ * and says so.
  */
-const bdxLimit: DepositLimit = { perDeposit: units(100_000n, 9), total: units(2_000_000n, 9) };
+const bdxLimit: DepositLimit = { perDeposit: (1n << 128n) - 1n, total: (1n << 128n) - 1n };
 
-/** Base mainnet pool assets and their beta deposit limits. Native ETH is listed, then BDX. */
+/** Base mainnet pool assets and their deposit limits. Native ETH is listed, then BDX. */
 export const BASE_MAINNET_ASSETS: GloamAsset[] = [
   { symbol: "USDC", address: BASE_USDC, decimals: 6, depositLimit: stableLimit },
   { symbol: "EURC", address: BASE_EURC, decimals: 6, depositLimit: stableLimit },
@@ -401,7 +418,7 @@ export const BASE_MAINNET_ASSETS: GloamAsset[] = [
   { symbol: "BDX", address: BASE_BDX, decimals: 9, depositLimit: bdxLimit },
 ];
 
-/** Ethereum mainnet pool assets and their beta deposit limits: five stablecoins, ETH with Base's limit, then BDX. */
+/** Ethereum mainnet pool assets and their deposit limits: five stablecoins, ETH with Base's limit, then BDX. */
 export const ETHEREUM_MAINNET_ASSETS: GloamAsset[] = [
   { symbol: "USDC", address: ETHEREUM_USDC, decimals: 6, depositLimit: stableLimit },
   { symbol: "USDT", address: ETHEREUM_USDT, decimals: 6, depositLimit: stableLimit },
@@ -412,11 +429,58 @@ export const ETHEREUM_MAINNET_ASSETS: GloamAsset[] = [
   { symbol: "BDX", address: ETHEREUM_BDX, decimals: 9, depositLimit: bdxLimit },
 ];
 
+/**
+ * Elysium mainnet (Kinetiq's Hyperliquid L2, an Arbitrum Orbit chain, gas in
+ * HYPE), from the values in src/elysium.ts, or null until they are all in.
+ */
+export function elysiumMainnetChain(cfg: ElysiumMainnet | null = elysiumMainnetConfig()): Chain | null {
+  if (!cfg) return null;
+  return defineChain({
+    id: cfg.chainId,
+    name: "Elysium",
+    nativeCurrency: ELYSIUM_NATIVE_CURRENCY,
+    rpcUrls: { default: { http: [cfg.rpcUrl] } },
+    blockExplorers: { default: { name: "Elysium Explorer", url: cfg.explorerUrl } },
+  });
+}
+
+/**
+ * Elysium mainnet pool assets: USDC only at launch, with the launch limits every
+ * mainnet started on (500 per deposit, 25,000 in total), in USDC's own decimals.
+ * HYPE is not listed. readDepositLimit reads the live value.
+ */
+export function elysiumMainnetAssets(cfg: ElysiumMainnet | null = elysiumMainnetConfig()): GloamAsset[] {
+  if (!cfg) return [];
+  return [{ symbol: "USDC", address: cfg.usdc, decimals: cfg.usdcDecimals, depositLimit: { perDeposit: units(500n, cfg.usdcDecimals), total: units(25_000n, cfg.usdcDecimals) } }];
+}
+
+/**
+ * Elysium testnet (99801), from ELYSIUM_TESTNET in src/elysium.ts, or null until
+ * its pool is in. Gas in HYPE, like mainnet.
+ */
+export function elysiumTestnetChain(cfg: ElysiumTestnet | null = elysiumTestnetConfig()): Chain | null {
+  if (!cfg) return null;
+  return defineChain({
+    id: cfg.chainId,
+    name: "Elysium Testnet",
+    nativeCurrency: ELYSIUM_NATIVE_CURRENCY,
+    rpcUrls: { default: { http: [cfg.rpcUrl] } },
+    blockExplorers: { default: { name: "Elysium Testnet Explorer", url: cfg.explorerUrl } },
+    testnet: true,
+  });
+}
+
+/** Elysium testnet pool assets: test USDC only, at Base Sepolia's testnet limits (500 per deposit, 25,000 in total). HYPE is not listed. */
+export function elysiumTestnetAssets(cfg: ElysiumTestnet | null = elysiumTestnetConfig()): GloamAsset[] {
+  if (!cfg) return [];
+  return [{ symbol: "USDC", address: cfg.usdc, decimals: cfg.usdcDecimals, depositLimit: { perDeposit: units(500n, cfg.usdcDecimals), total: units(25_000n, cfg.usdcDecimals) } }];
+}
+
 /** Base Sepolia pool assets: Circle's test USDC and EURC (500 / 25,000 each), and ETH (0.2 / 10). No USDT there. */
 export const BASE_SEPOLIA_ASSETS: GloamAsset[] = [
-  { symbol: "USDC", address: BASE_SEPOLIA_USDC, decimals: 6, depositLimit: stableLimit },
-  { symbol: "EURC", address: BASE_SEPOLIA_EURC, decimals: 6, depositLimit: stableLimit },
-  { symbol: "ETH", address: NATIVE_ASSET, decimals: 18, depositLimit: baseEthLimit },
+  { symbol: "USDC", address: BASE_SEPOLIA_USDC, decimals: 6, depositLimit: sepoliaStableLimit },
+  { symbol: "EURC", address: BASE_SEPOLIA_EURC, decimals: 6, depositLimit: sepoliaStableLimit },
+  { symbol: "ETH", address: NATIVE_ASSET, decimals: 18, depositLimit: sepoliaEthLimit },
 ];
 
 /**
@@ -424,11 +488,11 @@ export const BASE_SEPOLIA_ASSETS: GloamAsset[] = [
  * and PYUSD, and ETH, with the same limits as Base Sepolia. No USDT there.
  */
 export const ETHEREUM_SEPOLIA_ASSETS: GloamAsset[] = [
-  { symbol: "USDC", address: ETHEREUM_SEPOLIA_USDC, decimals: 6, depositLimit: stableLimit },
-  { symbol: "USDG", address: ETHEREUM_SEPOLIA_USDG, decimals: 6, depositLimit: stableLimit },
-  { symbol: "PYUSD", address: ETHEREUM_SEPOLIA_PYUSD, decimals: 6, depositLimit: stableLimit },
-  { symbol: "EURC", address: ETHEREUM_SEPOLIA_EURC, decimals: 6, depositLimit: stableLimit },
-  { symbol: "ETH", address: NATIVE_ASSET, decimals: 18, depositLimit: baseEthLimit },
+  { symbol: "USDC", address: ETHEREUM_SEPOLIA_USDC, decimals: 6, depositLimit: sepoliaStableLimit },
+  { symbol: "USDG", address: ETHEREUM_SEPOLIA_USDG, decimals: 6, depositLimit: sepoliaStableLimit },
+  { symbol: "PYUSD", address: ETHEREUM_SEPOLIA_PYUSD, decimals: 6, depositLimit: sepoliaStableLimit },
+  { symbol: "EURC", address: ETHEREUM_SEPOLIA_EURC, decimals: 6, depositLimit: sepoliaStableLimit },
+  { symbol: "ETH", address: NATIVE_ASSET, decimals: 18, depositLimit: sepoliaEthLimit },
 ];
 
 /**
@@ -468,7 +532,7 @@ export interface GloamNetwork {
    */
   historyRpc: HistoryRpc | null;
   explorerUrl: string;
-  /** Assets the pool takes, with beta deposit limits on the payments pools. */
+  /** Assets the pool takes, with deposit limits on the payments pools. */
   assets: GloamAsset[];
 }
 
@@ -569,17 +633,46 @@ function buildMainnet(family: GloamChainFamily): GloamNetwork | null {
   };
 }
 
+/**
+ * Elysium mainnet, or null until every value in src/elysium.ts is in. Its pool
+ * is owned by a VaultOwnerGuard from the deploy, so its proof checkers can never
+ * be replaced. Native HYPE is not listed, so nativeShield is off.
+ */
+function buildElysium(): GloamNetwork | null {
+  const cfg = elysiumMainnetConfig();
+  const chain = elysiumMainnetChain(cfg);
+  if (!cfg || !chain) return null;
+  return {
+    key: "elysium-mainnet",
+    label: "Elysium",
+    chainId: cfg.chainId,
+    pool: cfg.pool,
+    deployBlock: cfg.deployBlock,
+    payMemo: cfg.payMemo?.address ?? null,
+    nativeShield: false,
+    family: "elysium",
+    testnet: false,
+    ceremony: "production",
+    chain,
+    rpcUrl: cfg.rpcUrl,
+    historyRpc: null,
+    explorerUrl: cfg.explorerUrl,
+    assets: elysiumMainnetAssets(cfg),
+  };
+}
+
 const MAINNETS: Partial<Record<GloamChainFamily, GloamNetwork | null>> = {
   robinhood: buildMainnet("robinhood"),
   tempo: buildMainnet("tempo"),
   base: buildMainnet("base"),
   ethereum: buildMainnet("ethereum"),
+  elysium: buildElysium(),
 };
 
 /**
  * Base Sepolia, or null while BASE_SEPOLIA_POOL is not filled in. A testnet,
  * but on the mainnet pool: ShieldPoolPayments on the final keys, payments only,
- * the same listed assets as Base mainnet, its own beta limits, the cash-out fee.
+ * the same listed assets as Base mainnet, its own deposit limits, the cash-out fee.
  */
 const BASE_TESTNET: GloamNetwork | null = (() => {
   const p = baseSepoliaPool();
@@ -606,7 +699,7 @@ const BASE_TESTNET: GloamNetwork | null = (() => {
 /**
  * Ethereum Sepolia, or null while ETHEREUM_SEPOLIA_POOL is not filled in. A
  * testnet on the mainnet pool: ShieldPoolPayments on the final keys, payments
- * only, beta deposit limits, the cash-out fee, and its payment-message board.
+ * only, deposit limits, the cash-out fee, and its payment-message board.
  */
 const ETHEREUM_TESTNET: GloamNetwork | null = (() => {
   const p = ethereumSepoliaPool();
@@ -631,9 +724,38 @@ const ETHEREUM_TESTNET: GloamNetwork | null = (() => {
 })();
 
 /**
+ * Elysium testnet (99801), or null while ELYSIUM_TESTNET's pool is not filled
+ * in. A testnet on the mainnet pool like Base Sepolia: ShieldPoolPayments born
+ * owned by a VaultOwnerGuard, the final keys, test USDC only, gas in HYPE (not
+ * listed, so nativeShield is off).
+ */
+const ELYSIUM_TESTNET_NETWORK: GloamNetwork | null = (() => {
+  const cfg = elysiumTestnetConfig();
+  const chain = elysiumTestnetChain(cfg);
+  if (!cfg || !chain) return null;
+  return {
+    key: "elysium",
+    label: "Elysium",
+    chainId: cfg.chainId,
+    pool: cfg.pool,
+    deployBlock: cfg.deployBlock,
+    payMemo: cfg.payMemo?.address ?? null,
+    nativeShield: false,
+    family: "elysium",
+    testnet: true,
+    ceremony: "production",
+    chain,
+    rpcUrl: cfg.rpcUrl,
+    historyRpc: null,
+    explorerUrl: cfg.explorerUrl,
+    assets: elysiumTestnetAssets(cfg),
+  };
+})();
+
+/**
  * A chain's MAINNET network, or null while its pool is not in
- * this SDK version. Mainnet pools are ShieldPoolPayments: payments only, beta
- * deposit limits, the ceremony's final keys, a 0.25% cash-out fee.
+ * this SDK version. Mainnet pools are ShieldPoolPayments: payments only,
+ * deposit limits, the ceremony's final keys, a 0.5% cash-out fee.
  */
 export function mainnetNetwork(family: GloamChainFamily): GloamNetwork | null {
   return MAINNETS[family] ?? null;
@@ -641,10 +763,11 @@ export function mainnetNetwork(family: GloamChainFamily): GloamNetwork | null {
 
 /**
  * A chain's TESTNET network, or null while its pool is not in this
- * SDK version: GLOAM_NETWORKS.robinhood and .tempo, and Base Sepolia and
- * Ethereum Sepolia once each pool is filled in.
+ * SDK version: GLOAM_NETWORKS.robinhood and .tempo, and Base Sepolia,
+ * Ethereum Sepolia and Elysium testnet once each pool is filled in.
  */
 export function testnetNetwork(family: GloamChainFamily): GloamNetwork | null {
+  if (family === "elysium") return ELYSIUM_TESTNET_NETWORK;
   if (family === "base") return BASE_TESTNET;
   if (family === "ethereum") return ETHEREUM_TESTNET;
   return GLOAM_NETWORKS[family];
@@ -652,13 +775,14 @@ export function testnetNetwork(family: GloamChainFamily): GloamNetwork | null {
 
 /** Every network Gloam runs on right now: mainnets with a pool first, then the testnets. */
 export function gloamNetworks(): GloamNetwork[] {
-  const live = [MAINNETS.robinhood, MAINNETS.tempo, MAINNETS.base, MAINNETS.ethereum].filter((n): n is GloamNetwork => n !== null);
+  const live = [MAINNETS.robinhood, MAINNETS.tempo, MAINNETS.base, MAINNETS.ethereum, MAINNETS.elysium].filter((n): n is GloamNetwork => n !== null);
   return [
     ...live,
     GLOAM_NETWORKS.robinhood,
     GLOAM_NETWORKS.tempo,
     ...(BASE_TESTNET ? [BASE_TESTNET] : []),
     ...(ETHEREUM_TESTNET ? [ETHEREUM_TESTNET] : []),
+    ...(ELYSIUM_TESTNET_NETWORK ? [ELYSIUM_TESTNET_NETWORK] : []),
   ];
 }
 
@@ -672,23 +796,28 @@ export function networkForChainId(chainId: number): GloamNetwork | undefined {
   return gloamNetworks().find((n) => n.chainId === chainId);
 }
 
-/** True for Robinhood Chain (4663), Tempo (4217), Base (8453) and Ethereum (1) mainnet, pool or not. */
+/**
+ * True for Robinhood Chain (4663), Tempo (4217), Base (8453) and Ethereum (1)
+ * mainnet, pool or not, and for Elysium mainnet once its chain id is filled in.
+ * Never for Elysium's testnet (99801).
+ */
 export function isMainnetChainId(chainId: number): boolean {
   return (
     chainId === RH_MAINNET_CHAIN_ID ||
     chainId === TEMPO_MAINNET_CHAIN_ID ||
     chainId === BASE_MAINNET_CHAIN_ID ||
-    chainId === ETHEREUM_MAINNET_CHAIN_ID
+    chainId === ETHEREUM_MAINNET_CHAIN_ID ||
+    (elysiumChainId() !== null && chainId === elysiumChainId())
   );
 }
 
 /**
  * True where the pool is ShieldPoolPayments, pool or not: every mainnet, Base
- * Sepolia and Ethereum Sepolia. Deposits there need a proof, assets are listed
- * with beta limits, a cash out pays the fee and there is no private trading.
+ * Sepolia, Ethereum Sepolia and Elysium testnet. Deposits there need a proof, assets are listed
+ * with deposit limits, a cash out pays the fee and there is no private trading.
  */
 export function isPaymentsPoolChainId(chainId: number): boolean {
-  return isMainnetChainId(chainId) || chainId === BASE_SEPOLIA_CHAIN_ID || chainId === ETHEREUM_SEPOLIA_CHAIN_ID;
+  return isMainnetChainId(chainId) || chainId === BASE_SEPOLIA_CHAIN_ID || chainId === ETHEREUM_SEPOLIA_CHAIN_ID || chainId === ELYSIUM_TESTNET_CHAIN_ID;
 }
 
 /**
@@ -706,10 +835,12 @@ export function networkName(chainId: number): string {
   if (chainId === TEMPO_MAINNET_CHAIN_ID) return "Tempo";
   if (chainId === BASE_MAINNET_CHAIN_ID) return "Base";
   if (chainId === ETHEREUM_MAINNET_CHAIN_ID) return "Ethereum";
+  if (elysiumChainId() !== null && chainId === elysiumChainId()) return "Elysium";
   if (chainId === RH_TESTNET_CHAIN_ID) return "Robinhood Chain testnet";
   if (chainId === TEMPO_TESTNET_CHAIN_ID) return "Tempo testnet";
   if (chainId === BASE_SEPOLIA_CHAIN_ID) return "Base testnet";
   if (chainId === ETHEREUM_SEPOLIA_CHAIN_ID) return "Ethereum Sepolia";
+  if (chainId === ELYSIUM_TESTNET_CHAIN_ID) return "Elysium testnet";
   return `chain ${chainId}`;
 }
 
@@ -736,8 +867,8 @@ export function poolForChainId(chainId: number): Address {
  * explicitly) are not checked, nor are the older testnets, whose pools list
  * nothing.
  *
- * The amount is not checked here: the beta limits change through the vault's
- * timelock, so the `depositLimit` on each asset is only the launch value. Read
+ * The amount is not checked here: the deposit limits change through the vault's
+ * timelock, so the `depositLimit` on each asset is only a snapshot. Read
  * them live with assertDepositWithinLiveLimit (lib limits), which
  * buildShieldBoundIntent does when given a `client`. `amount` is kept so
  * existing callers compile.
@@ -769,23 +900,31 @@ export const CASH_OUT_TO_ROUTER_MESSAGE =
 export const CASH_OUT_TO_ZERO_MESSAGE = "That is the zero address, which nobody controls. Cash out to a wallet you control.";
 
 /**
- * Gloam's swap routers, by chain: GloamVaultSwapV4b and GloamVaultSwapV4 (kept
- * for refunds) on Robinhood Chain, GloamVaultSwapTempo on Tempo. Base and
- * Ethereum have none. How swaps run is the app's (app/src/lib/vaultSwap.ts).
+ * Gloam's swap routers, by chain, the newest first. GloamVaultSwapV4c on Robinhood
+ * Chain, Base and Ethereum and GloamVaultSwapTempo2 on Tempo land through the CREATE2
+ * factory, so each address is known before it deploys and a cash out is refused from
+ * the start (contracts/test/fixtures/router-next.json pins them). The older routers
+ * stay listed for good: GloamVaultSwapV4b and GloamVaultSwapV4 on Robinhood Chain,
+ * GloamVaultSwapTempo on Tempo. How swaps run is the app's (app/src/lib/vaultSwap.ts).
  */
 const VAULT_SWAP_ROUTERS: Record<number, readonly Address[]> = {
-  [RH_MAINNET_CHAIN_ID]: ["0xfCa1887e77f738ef9C5751974b3f3873d029F2DC", "0x34AB06208586A737Bf1607fa996Bc9162271c52d"],
-  [TEMPO_MAINNET_CHAIN_ID]: ["0xfCa1887e77f738ef9C5751974b3f3873d029F2DC"],
+  [RH_MAINNET_CHAIN_ID]: ["0x9CdA89fA6E6f796a1623C2086b2C710DCa64486d", "0xfCa1887e77f738ef9C5751974b3f3873d029F2DC", "0x34AB06208586A737Bf1607fa996Bc9162271c52d"],
+  [TEMPO_MAINNET_CHAIN_ID]: ["0x991efFC6cA44BD578000d32C1351d78298BdBC0a", "0xfCa1887e77f738ef9C5751974b3f3873d029F2DC"],
+  [BASE_MAINNET_CHAIN_ID]: ["0x3A99f461bdbfc86fbd4e84ee80Bfb2fd73f3576a"],
+  [ETHEREUM_MAINNET_CHAIN_ID]: ["0x2E0c06Ac42Cc6f0ecC3eDc86bC0d67F3c2DC7E6A"],
 };
 
 /**
  * Tokens that are not in a network's `assets` because its pool doesn't take a
  * deposit of them, but a cash out could still be pointed at. On Robinhood Chain
  * mainnet: what a private swap can land in (the app's RH_SWAP_ASSETS_V2, past
- * the listed USDG, GLOAM, PONS and CASHCAT). On its testnet: the faucet stock
- * tokens. Kept out of `assets` on purpose: assertDepositAllowed reads that list.
+ * the listed USDG, GLOAM, PONS and CASHCAT). On Base and Ethereum: WETH, which the
+ * swap router there converts to and from. On Robinhood Chain's testnet: the faucet
+ * stock tokens. Kept out of `assets` on purpose: assertDepositAllowed reads that list.
  */
 const UNLISTED_TOKENS: Record<number, readonly Address[]> = {
+  [BASE_MAINNET_CHAIN_ID]: ["0x4200000000000000000000000000000000000006"], // WETH
+  [ETHEREUM_MAINNET_CHAIN_ID]: ["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"], // WETH
   [RH_MAINNET_CHAIN_ID]: [
     "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", // WETH
     "0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34", // USDe
@@ -898,36 +1037,42 @@ export const GLOAM_ARTIFACTS_URL = "https://www.gloam.trade/circuits";
 /** The pool circuits: deposit, private send, cash out. */
 export type PoolCircuit = "shield" | "transfer" | "unshield";
 
+/** Every circuit pinned here: the pool's, and the receipt circuit behind a proof of payment, which is checked off chain. */
+export type GloamCircuit = PoolCircuit | "receipt";
+
 /**
  * SHA-256 of each circuit file, to check a download before proving with it.
  * The .wasm files are the same for both key sets; the zkeys differ.
  */
 export const CIRCUIT_SHA256: {
-  wasm: Record<PoolCircuit, string>;
-  zkey: Record<CeremonyKind, Record<PoolCircuit, string>>;
+  wasm: Record<GloamCircuit, string>;
+  zkey: Record<CeremonyKind, Record<GloamCircuit, string>>;
 } = {
   wasm: {
     shield: "58157ec90f8af891acfa998bd599511b4d5cd06803cea32ab28a6eea8a9b2336",
     transfer: "081929509c3477ee264cb2422183018c23122d59952ed4a61c4932c95d360872",
     unshield: "84ac0942b1618c6112a10bfe82ff0a62a80b7a14881565781eb513e9e581c480",
+    receipt: "14733e0d4f598d6b392ce8e955eae5624ace80932aa9acdb9298d26c6d1a8fc1",
   },
   zkey: {
     dev: {
       shield: "e4d42271b99faa218faebb38a06f69b5ccf01e328d3dea4381ab567e9fbd2481",
       transfer: "f75bc324f12e1f467f5779a7275737aa0fa514a6c317e3d775f1dba8f0234666",
       unshield: "f4b4c5bfa315cef38634eec1b64b8d9ad1d28725f61fde5e169fef1896360b63",
+      receipt: "600652865c27f9b1dafa4edfe65da7c4f8b7c9c6099bf0c85da0151d91830a9a",
     },
     production: {
       shield: "3054877c35e2e0e9f76c43aa4791ac2b3ac51b8967d51be2215e89c0a5fbb512",
       transfer: "bdbae966705bc85e76571b4945da74a43fc4503a955fd4e3799358bcff749cdb",
       unshield: "5a12073f3f84b52f794feaf862fb1d48301124319db95a9c6d0dc58277fa54ed",
+      receipt: "b6b2352ecb393c7f0709177f89168d9d4fef53282fb24a98c1c08d9adb7cdd86",
     },
   },
 };
 
 /** One circuit's files for a key set, as paths relative to the artifacts root, with their SHA-256. */
 export function circuitArtifactFiles(
-  circuit: PoolCircuit,
+  circuit: GloamCircuit,
   ceremony: CeremonyKind
 ): { wasm: string; zkey: string; sha256: { wasm: string; zkey: string } } {
   return {
@@ -944,7 +1089,7 @@ export function circuitArtifactFiles(
  * (snarkjs proves from local paths there) and check CIRCUIT_SHA256.
  */
 export function circuitArtifactUrls(
-  circuit: PoolCircuit,
+  circuit: GloamCircuit,
   chainId: number,
   base: string = GLOAM_ARTIFACTS_URL
 ): { wasm: string; zkey: string } {

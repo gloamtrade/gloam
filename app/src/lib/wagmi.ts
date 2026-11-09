@@ -3,7 +3,7 @@
 import { http, createConfig, createStorage, cookieStorage } from "wagmi";
 import { injected } from "wagmi/connectors";
 import { robinhood, robinhoodTestnet } from "./chain";
-import { NETWORK_KEYS, baseMainnet, baseTestnet, ethereumMainnet, ethereumTestnet, getNetwork, tempoMainnet, tempoTestnet } from "./networks";
+import { NETWORK_KEYS, baseMainnet, baseTestnet, elysiumMainnet, elysiumTestnet, ethereumMainnet, ethereumTestnet, getNetwork, tempoMainnet, tempoTestnet } from "./networks";
 import { BLOCK_POLL_MS, readTransport } from "./readTransport";
 import { ORIGIN_CHAINS } from "./originChains";
 import { turnkeyConnector } from "./turnkeyConnector";
@@ -26,7 +26,9 @@ const walletConnectFn = lazyWalletConnect();
  * - injected: browser wallets on every network. On Tempo (testnet and mainnet)
  *   it sets a fee token first when the account has none and no pathUSD
  *   (lib/feeSponsor.ts).
- * - Turnkey passkey: Robinhood Chain testnet only, behind NEXT_PUBLIC_TURNKEY_ENABLED.
+ * - Gloam wallet (Turnkey, email or passkey): every chain here, behind
+ *   NEXT_PUBLIC_TURNKEY_ENABLED (lib/embeddedWallet). On Tempo it sets a fee
+ *   token first like a browser wallet; elsewhere lib/embeddedGas picks who pays gas.
  * - Tempo Wallet: passkey sign-in on Tempo testnet, fees sponsored (lib/tempoWallet.ts).
  * - WalletConnect: a wallet app on a phone (or scanned from desktop) when the
  *   browser has no wallet, behind NEXT_PUBLIC_WC_PROJECT_ID (lib/walletConnect.ts).
@@ -36,9 +38,13 @@ const mainnetChains = [
   ...(NETWORK_KEYS.includes("tempo-mainnet") ? [tempoMainnet] : []),
   ...(NETWORK_KEYS.includes("base-mainnet") ? [baseMainnet] : []),
   ...(NETWORK_KEYS.includes("ethereum-mainnet") ? [ethereumMainnet] : []),
+  // Behind NEXT_PUBLIC_ELYSIUM_ENABLED and its values (lib/elysium.ts): only then is it a network.
+  ...(NETWORK_KEYS.includes("elysium-mainnet") ? [elysiumMainnet] : []),
 ];
 const baseTestnetChains = NETWORK_KEYS.includes("base") ? [baseTestnet] : [];
 const ethereumTestnetChains = NETWORK_KEYS.includes("ethereum") ? [ethereumTestnet] : [];
+// Elysium testnet: behind NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED and its pool (lib/elysium.ts).
+const elysiumTestnetChains = NETWORK_KEYS.includes("elysium") ? [elysiumTestnet] : [];
 
 // The chains a wallet can pay a private bridge order from (lib/originChains),
 // only alongside a mainnet: the wallet switches to one to sign there. Base and
@@ -49,13 +55,14 @@ const originChains = mainnetChains.length
   : [];
 
 // wagmi narrows hook `chainId` options to the registered ids. The type names
-// all seven (GloamChainId); at runtime only the testnets and mainnets with a pool
+// all ten (GloamChainId); at runtime only the testnets and mainnets with a pool
 // are there, plus the bridge's origin chains.
 const chains = [
   robinhoodTestnet,
   tempoTestnet,
   ...baseTestnetChains,
   ...ethereumTestnetChains,
+  ...elysiumTestnetChains,
   ...mainnetChains,
   ...originChains,
 ] as unknown as readonly [
@@ -67,6 +74,8 @@ const chains = [
   typeof tempoMainnet,
   typeof baseMainnet,
   typeof ethereumMainnet,
+  typeof elysiumMainnet,
+  typeof elysiumTestnet,
 ];
 
 // Ethereum's 12 s blocks: receipt waits look for a new one every 2 s. Keyed by
@@ -80,7 +89,7 @@ export const wagmiConfig = createConfig({
   chains,
   connectors: [
     tempoFeeAware(injected({ shimDisconnect: true })),
-    turnkeyConnector(),
+    tempoFeeAware(turnkeyConnector()),
     tempoWalletConnector(),
     ...(walletConnectFn ? [tempoFeeAware(walletConnectFn)] : []),
   ],
@@ -99,6 +108,10 @@ export const wagmiConfig = createConfig({
     [ethereumMainnet.id]: rpcListTransport(ethereumMainnet.rpcUrls.default.http, { batch: { wait: 16 }, retryCount: 2 }),
     // Ethereum Sepolia: the list for the head, old logs and state from its history RPC (lib/readTransport)
     [ethereumTestnet.id]: readTransport(getNetwork("ethereum"), { batch: { wait: 16 }, retryCount: 2 }),
+    // Elysium, once it is a network: its one RPC from lib/elysium.ts.
+    ...(NETWORK_KEYS.includes("elysium-mainnet") ? { [elysiumMainnet.id]: rpcListTransport(elysiumMainnet.rpcUrls.default.http, { batch: { wait: 16 }, retryCount: 2 }) } : {}),
+    // Elysium testnet: Kinetiq's RPC, then Conduit's. Only used once it is a network (registered above).
+    [elysiumTestnet.id]: rpcListTransport(elysiumTestnet.rpcUrls.default.http, { batch: { wait: 16 }, retryCount: 2 }),
     ...Object.fromEntries(originChains.map((c) => [c.id, http()])),
   },
   ...(Object.keys(pollingInterval).length ? { pollingInterval } : {}),

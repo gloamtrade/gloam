@@ -19,8 +19,19 @@
  *   receive   the payment is moved into a fresh note only this agent knows
  *             (a sweep) before it counts, since the payer knew the old one.
  *   cash out  the public exit: the asset, the amount and the recipient show,
- *             not which private payment funded it. The pool keeps 0.25% on
- *             mainnet and on Base Sepolia.
+ *             not which private payment funded it. The pool keeps 0.5% on
+ *             mainnet and 0.25% on Base Sepolia. A note behind a proof of
+ *             funds is moved to a fresh note first, so the proof does not
+ *             lead to it.
+ *   x402      a pay to the 402 price's receive tag, handed back as the
+ *             X-PAYMENT value instead of posted to the payment board.
+ *             Scheme gloam-cashout instead cashes out the quoted amount to
+ *             the price's public payTo: the payee and the amount show, the
+ *             agent's wallet and balance do not.
+ *
+ * With a partner API key, private payments, cash outs and payment messages go
+ * through the partner relay and deposits are attributed, so the partner's
+ * dashboard counts them.
  */
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -31,17 +42,29 @@ import {
   createWalletClient,
   encodeFunctionData,
   formatUnits,
+  getAddress,
   http,
   isAddress,
+  isAddressEqual,
+  parseAbi,
+  parseEventLogs,
   parseUnits,
   type Address,
   type Chain,
   type Hex,
+  type Log,
   type PublicClient,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import {
-  CASH_OUT_FEE_BPS,
+  GLOAM_CASHOUT_ASSET,
+  GLOAM_CASHOUT_CHAIN_ID,
+  GLOAM_CASHOUT_SCHEME,
+  GLOAM_CASHOUT_VAULT,
+  GLOAM_X402_SCHEME,
+  GLOAM_X402_VERSION,
+  GloamApiClient,
+  GloamApiError,
   GloamRelayError,
   NATIVE_ASSET,
   POOL_STATE_ABI,
@@ -52,12 +75,14 @@ import {
   buildPrivateSendIntent,
   buildShieldBoundIntent,
   buildUnshieldIntent,
-  cashOutFee,
   cashOutTargetProblem,
   cleanPaymentNote,
+  decodePaymentHeader,
+  encodeGloamCashoutHeader,
   encodeNotePackage,
+  encodePaymentHeader,
   generateReceiveKey,
-  isPaymentsPoolChainId,
+  gloamCashoutProblem,
   isReceiveTag,
   networkName,
   normalizeRequestAmount,
@@ -71,8 +96,12 @@ import {
   sealToReceiveTag,
   sweepReceivedNote,
   type GloamAsset,
+  type GloamCashoutRequirement,
   type GloamIntent,
+  type GloamPaymentPayload,
+  type GloamPaymentRequirements,
   type NoteExport,
+  type PrivateSendIntent,
   type Prover,
   type ReceiveKey,
   type SweepChain,
@@ -93,10 +122,21 @@ import {
   type Spend,
 } from "./limits.js";
 import { describeNetwork, findAsset, defaultAsset, resolveNetwork, type PluginNetwork } from "./networks.js";
-import { agentId as envAgentId, balances, noteStorePath, noteStoreKey, NoteStore, noteView, type NewNote, type NoteOrigin, type StoredNote } from "./noteStore.js";
+import {
+  agentId as envAgentId,
+  balances,
+  noteStorePath,
+  noteStoreKey,
+  NoteStore,
+  noteView,
+  type NewNote,
+  type NoteOrigin,
+  type NoteStoreBackend,
+  type StoredNote,
+} from "./noteStore.js";
 import { holdsSecret, redact, registerSecret, registerUrlSecret, safeErrorMessage } from "./redact.js";
 import { isNotSent, walletCallSender, type Call, type CallSender } from "./sender.js";
-import { SpendLog, counted } from "./spendLog.js";
+import { SpendLog, counted, type SpendEntry } from "./spendLog.js";
 import { decodeProof, encodeProof, proveFunds, provePayment, verifyHolderProof, type ProofReport } from "./proofs.js";
 import { TreeSync, type SyncedVault } from "./treeSync.js";
 
@@ -136,6 +176,17 @@ export interface GloamAgentOptions {
   artifacts?: ArtifactSource;
   /** Where claim links go when the agent pays by claim link. Without it they stay in the encrypted store. */
   onClaimLink?: (out: ClaimLinkOut) => void | Promise<void>;
+  /**
+   * Where the encrypted note store is kept. Default: a local file (GLOAM_NOTE_STORE,
+   * or ~/.gloam/game-notes.<agent>.json). The backend only ever holds ciphertext.
+   */
+  noteBackend?: NoteStoreBackend;
+  /**
+   * A Gloam partner API key (gloam_live_... or gloam_test_...). Default GLOAM_API_KEY.
+   * Private payments, cash outs and payment messages then go through the partner
+   * relay, and deposits are attributed, so gloam.trade/partners/dashboard counts them.
+   */
+  apiKey?: string;
   /** A client to read the chain with (tests). Default: one over `rpc`. */
   publicClient?: PublicClient;
   /** First getLogs range to try when reading the vault. */
@@ -202,6 +253,30 @@ const errMsg = (e: unknown) => safeErrorMessage(e);
 const HOUR_MS = 60 * 60_000;
 const shortTag = (t: string) => (t.length > 30 ? `${t.slice(0, 18)}…${t.slice(-6)}` : t);
 
+const WITHDRAW_FEE_EVENT = parseAbi(["event WithdrawFee(bytes32 indexed nullifier, address indexed asset, uint256 fee)"]);
+
+/**
+ * What the pool kept from one cash out, from its own event: it takes the fee
+ * when the cash out lands, at the rate that day, so no constant can say. It
+ * logs nothing when it kept nothing.
+ */
+export function feeKept(logs: Log[], pool: Address, nullifier: Hex): bigint {
+  const hit = parseEventLogs({ abi: WITHDRAW_FEE_EVENT, logs }).find(
+    (l) => isAddressEqual(l.address, pool) && l.args.nullifier.toLowerCase() === nullifier.toLowerCase()
+  );
+  return hit?.args.fee ?? 0n;
+}
+
+/** A resource as a label: no query or fragment, which can carry a token. */
+function resourceLabel(resource: string): string {
+  try {
+    const u = new URL(resource);
+    return `${u.origin}${u.pathname}`.slice(0, 120);
+  } catch {
+    return String(resource).split(/[?#]/)[0]!.slice(0, 120);
+  }
+}
+
 function toHexBytes(text: string): Hex {
   return `0x${Buffer.from(text, "utf8").toString("hex")}`;
 }
@@ -220,6 +295,7 @@ export class GloamAgent {
   private readonly artifacts: Artifacts;
   private readonly limits?: LimitsConfig;
   private readonly onClaimLink?: GloamAgentOptions["onClaimLink"];
+  private readonly api: GloamApiClient | null;
   private readonly provers = new Map<string, Promise<Prover>>();
 
   constructor(opts: GloamAgentOptions = {}) {
@@ -254,9 +330,12 @@ export class GloamAgent {
     if (submit !== "relay" && submit !== "wallet") throw new Error(`GLOAM_SUBMIT must be "relay" or "wallet", got "${submit}".`);
     this.submitMode = submit;
     this.relayUrl = opts.relayUrl || env.GLOAM_RELAY_URL?.trim() || undefined;
+    const apiKey = opts.apiKey?.trim() || env.GLOAM_API_KEY?.trim() || "";
+    registerSecret(apiKey || undefined);
+    this.api = apiKey ? new GloamApiClient({ apiKey }) : null;
 
     const { key, source } = noteStoreKey(env);
-    this.store = new NoteStore(noteStorePath(this.agentId, env), this.agentId, key, source);
+    this.store = new NoteStore(opts.noteBackend ?? noteStorePath(this.agentId, env), this.agentId, key, source);
     for (const n of this.store.list()) registerSecret(n.secret);
     const rk = this.store.receiveKey();
     if (rk) registerSecret(rk.privateJwk.d);
@@ -321,8 +400,12 @@ export class GloamAgent {
     });
   }
 
-  /** Check a spend against the owner's limits and reserve it in the log before anything is signed. */
-  private gate(spend: Spend): { ok: true; id: string } | { ok: false; refusal: Refusal } {
+  /**
+   * Check a spend against the owner's limits and reserve it in the log before anything is signed.
+   * A retry passes the attempt it repeats (`retryOf`): it is checked like any spend, with the money
+   * that attempt reserved counted once, and that attempt's entry is marked replaced.
+   */
+  private gate(spend: Spend, retryOf?: StoredNote): { ok: true; id: string } | { ok: false; refusal: Refusal } {
     const now = Date.now();
     const loaded = this.loadPolicy();
     const symbol = this.network.assets.find((a) => a.address.toLowerCase() === spend.asset.toLowerCase())?.symbol ?? spend.asset;
@@ -347,13 +430,22 @@ export class GloamAgent {
         return { ok: false, refusal: r };
       }
       let refusal: Refusal | null = null;
+      const replaces = retryOf
+        ? {
+            id: retryOf.spendId,
+            // a note kept before the id was recorded: the latest counted entry for the same spend
+            like: (e: SpendEntry) =>
+              e.action === entry.action && e.chainId === entry.chainId && e.asset.toLowerCase() === entry.asset.toLowerCase() && e.amountWei === entry.amountWei && e.recipient === entry.recipient,
+          }
+        : undefined;
       const res = this.spendLog.reserve(
         entry,
         (c) => {
           refusal = checkSpend(loaded.policy, spend, c, now);
           return refusal?.message ?? null;
         },
-        now
+        now,
+        replaces
       );
       if (!res.ok) return { ok: false, refusal: refusal ?? { code: "refused", message: res.reason } };
       return { ok: true, id: entry.id };
@@ -405,7 +497,7 @@ export class GloamAgent {
 
   /** Send a proven private send or cash out: through the relay, or the agent's wallet. */
   private async submitIntent(intent: GloamIntent): Promise<Hex> {
-    if (this.submitMode === "relay") return relayIntent(intent, { url: this.relayUrl });
+    if (this.submitMode === "relay") return this.api ? (await this.api.relay(intent)).hash : relayIntent(intent, { url: this.relayUrl });
     const exec = intent.exec!;
     let data: Hex;
     if (exec.fn === "transfer") {
@@ -422,7 +514,9 @@ export class GloamAgent {
   private mayHaveSent(err: unknown): boolean {
     if (isNotSent(err)) return false;
     if (this.submitMode !== "relay") return true;
-    return !(err instanceof GloamRelayError) || RELAY_MAYBE_SENT.includes(err.code);
+    // A clear refusal from the relay (or the partner relay) says nothing went out; anything else may have.
+    if (err instanceof GloamRelayError || err instanceof GloamApiError) return RELAY_MAYBE_SENT.includes(err.code);
+    return true;
   }
 
   /**
@@ -525,9 +619,11 @@ export class GloamAgent {
     label?: string;
     memo?: string;
     requestKey?: string;
-    prepare?: (payment: StoredNote, paymentNote: NoteExport) => Promise<Partial<StoredNote> | void>;
+    /** The spending-log entry this send is counted under, kept on the new payment note. */
+    spendId?: string;
+    prepare?: (payment: StoredNote, paymentNote: NoteExport, exec: PrivateSendIntent["exec"]) => Promise<Partial<StoredNote> | void>;
   }): Promise<
-    | { ok: true; hash: Hex; payment: StoredNote; change: StoredNote | null; paymentNote: NoteExport }
+    | { ok: true; hash: Hex; payment: StoredNote; change: StoredNote | null; paymentNote: NoteExport; exec: PrivateSendIntent["exec"] }
     | { ok: false; maybeSent: boolean; hash: Hex | null; error: string; payment: StoredNote | null; change: StoredNote | null }
   > {
     const { input, asset } = args;
@@ -553,9 +649,17 @@ export class GloamAgent {
       if (BigInt(intent.changeNote.amountWei) > 0n) {
         change = this.keep(this.newNote(intent.changeNote, asset, "change", { label: args.label ? `change from ${args.label}` : undefined, ...from }));
       }
-      payment = this.keep(this.newNote(intent.paymentNote, asset, args.payOrigin, { label: args.label, memo: args.memo, requestKey: args.requestKey, ...from }));
+      payment = this.keep(
+        this.newNote(intent.paymentNote, asset, args.payOrigin, {
+          label: args.label,
+          memo: args.memo,
+          requestKey: args.requestKey,
+          ...(args.spendId ? { spendId: args.spendId } : {}),
+          ...from,
+        })
+      );
       if (args.prepare) {
-        const patch = await args.prepare(payment, intent.paymentNote);
+        const patch = await args.prepare(payment, intent.paymentNote, intent.exec);
         if (patch) payment = this.store.update(payment.handle, patch) ?? payment;
       }
       sending = true;
@@ -576,7 +680,7 @@ export class GloamAgent {
       // A payment note is the payee's money once it lands; a claim note stays open until someone claims it.
       const payStatus = args.payOrigin === "payment" ? "spent" : "unspent";
       const paymentDone = this.store.update(payment.handle, { status: payStatus, createdTx: sent }) ?? payment;
-      return { ok: true, hash: sent, payment: paymentDone, change: changeDone, paymentNote: intent.paymentNote };
+      return { ok: true, hash: sent, payment: paymentDone, change: changeDone, paymentNote: intent.paymentNote, exec: intent.exec };
     } catch (e) {
       const reverted = Boolean((e as { reverted?: boolean }).reverted);
       const maybeSent = !reverted && (Boolean(hash) || (sending && this.mayHaveSent(e)));
@@ -625,7 +729,9 @@ export class GloamAgent {
     try {
       const hash =
         this.submitMode === "relay"
-          ? await relayMemo({ chainId: this.network.chainId, paymentCommitment: commitment, memo }, { url: this.relayUrl })
+          ? this.api
+            ? (await this.api.relayMemo({ chainId: this.network.chainId, paymentCommitment: commitment, memo })).hash
+            : await relayMemo({ chainId: this.network.chainId, paymentCommitment: commitment, memo }, { url: this.relayUrl })
           : await this.requireSender("Posting the payment message").sendCalls([
               { to: board.address, data: encodeFunctionData({ abi: MEMO_ABI, functionName: "postMemo", args: [commitment, memo] }) },
             ]);
@@ -859,7 +965,7 @@ export class GloamAgent {
         chainId: this.network.chainId,
         poolAddress: this.network.pool,
         prover: await this.prover("shield"),
-        // the vault's live beta limits, checked before proving (they change through its timelock)
+        // the vault's live deposit limits, checked before proving (they change through its timelock)
         client: this.publicClient,
       });
       held = this.keep(
@@ -902,6 +1008,7 @@ export class GloamAgent {
       }
       this.settle(gate.id, "sent", { hash });
       const stored = this.store.update(held.handle, { status: "unspent", createdTx: hash }) ?? held;
+      const counted = await this.attributeDeposit(hash);
       return {
         status: "done",
         action: "add",
@@ -910,6 +1017,7 @@ export class GloamAgent {
         note: noteView(stored),
         hash,
         explorer: this.explorer(hash),
+        ...(counted ? { partner: counted } : {}),
         public: "The deposit shows the wallet, the asset and the amount. Who can spend the note does not.",
       };
     } catch (e) {
@@ -926,6 +1034,17 @@ export class GloamAgent {
         ...(kept ? { note: noteView(kept) } : {}),
         check: "Refresh the balance before adding again: the note is kept, and refresh() makes it spendable once the deposit is on chain.",
       };
+    }
+  }
+
+  /** With a partner key, count a deposit that landed to the partner. Best effort: the deposit stands either way. */
+  private async attributeDeposit(txHash: Hex): Promise<string | null> {
+    if (!this.api) return null;
+    try {
+      await this.api.attributeDeposit({ chainId: this.network.chainId, txHash });
+      return "Counted to your partner key.";
+    } catch (e) {
+      return `Not counted to your partner key (${errMsg(e)}). The deposit itself landed.`;
     }
   }
 
@@ -975,26 +1094,59 @@ export class GloamAgent {
     } else {
       throw new Error("Pay to a Gloam address (gloamr1.…) or a payment request link. For someone without one, pay by claim link.");
     }
+    return this.payTag({ payTo, asset, amountWei, memo: memo || undefined, label: args.label });
+  }
 
+  /**
+   * Pay a 402 price privately (x402, scheme gloam-private): a private send of
+   * exactly the price to its payTo, sealed to that receive tag. The X-PAYMENT
+   * value comes back as `paymentHeader` and is kept with the payment, so a call
+   * whose answer was lost gets the same header again, never a second payment.
+   * Nothing is posted to the payment board: the header carries the payment.
+   */
+  async payX402(args: { requirements: GloamPaymentRequirements; label?: string }): Promise<Outcome> {
+    const req = args.requirements;
+    if (!req || req.scheme !== GLOAM_X402_SCHEME) throw new Error(`Only Gloam's x402 scheme (${GLOAM_X402_SCHEME}) is paid here.`);
+    if (Number(req.network) !== this.network.chainId) {
+      throw new Error(`That price is on ${networkName(Number(req.network))}, and this agent pays on ${this.where()}.`);
+    }
+    if (!req.poolAddress || req.poolAddress.toLowerCase() !== this.network.pool.toLowerCase()) throw new Error("That price settles through a different vault.");
+    if (!isReceiveTag(String(req.payTo ?? ""))) throw new Error("That price's payTo is not a Gloam address (gloamr1.…), so it cannot be paid privately.");
+    const asset = this.network.assets.find((a) => a.address.toLowerCase() === String(req.asset).toLowerCase());
+    if (!asset) throw new Error(`The ${this.where()} vault does not take ${req.asset}.`);
+    if (!/^[0-9]+$/.test(String(req.maxAmountRequired)) || BigInt(req.maxAmountRequired) <= 0n) throw new Error("That price is not a whole, positive number of base units.");
+    return this.payTag({ payTo: req.payTo, asset, amountWei: BigInt(req.maxAmountRequired), label: args.label ?? `x402: ${resourceLabel(req.resource)}`, x402: true });
+  }
+
+  /** The private send behind pay() and payX402(): limits, one note, sealed to `payTo`, never paid twice. */
+  private async payTag(p: { payTo: string; asset: GloamAsset; amountWei: bigint; memo?: string; label?: string; x402?: boolean }): Promise<Outcome> {
+    const { payTo, asset, amountWei, memo } = p;
+    const args = { label: p.label };
+    const action = p.x402 ? "pay_x402" : "pay";
     // A payment like this one whose answer was lost may still land: never pay it twice.
     const requestKey = this.requestKeyOf(payTo, asset, amountWei, args.label);
     const plan = await this.retryPlan(requestKey, amountWei, memo || undefined, (n) => ({
       status: "done",
-      action: "pay",
+      action,
       alreadyPaid: true,
       network: this.network.key,
       paid: this.fmt(amountWei, asset),
       to: shortTag(payTo),
       payment: n.handle,
       ...(n.createdTx ? { hash: n.createdTx, explorer: this.explorer(n.createdTx) } : {}),
+      ...(p.x402 && n.x402 ? { paymentHeader: this.withTxHash(n.x402, n.createdTx ?? null) } : {}),
       message: "This payment already landed after its answer was lost. It was not sent again.",
     }));
     if (plan.kind === "answer") return plan.outcome;
-    // A retry spends the same note as the attempt it repeats, so only one of them can land. It was counted once already.
-    const gate = plan.kind === "same" ? null : this.gate({ action: "pay", chainId: this.network.chainId, asset: asset.address, amountWei, recipient: payTo });
-    if (gate && !gate.ok) return this.refused(gate.refusal);
+    // A retry spends the same note as the attempt it repeats, so only one of them can land. It is checked against
+    // the limits like a new payment, with that attempt's money counted once.
+    const gate = this.gate({ action: "pay", chainId: this.network.chainId, asset: asset.address, amountWei, recipient: payTo }, plan.kind === "same" ? plan.prior : undefined);
+    if (!gate.ok) {
+      if (plan.kind === "same") this.release(plan.input.handle);
+      return this.refused(gate.refusal);
+    }
     const settle = (status: "sent" | "unconfirmed" | "reverted" | "failed", extra: { hash?: string; reason?: string } = {}) => {
-      if (gate?.ok) this.settle(gate.id, status, extra);
+      this.settle(gate.id, status, extra);
     };
     let input: StoredNote;
     if (plan.kind === "same") {
@@ -1008,6 +1160,7 @@ export class GloamAgent {
       }
     }
     let sealed = "";
+    let header = "";
     const sent = await this.privateSend({
       input,
       asset,
@@ -1016,8 +1169,9 @@ export class GloamAgent {
       label: args.label ?? `payment to ${shortTag(payTo)}`,
       memo: memo || undefined,
       requestKey,
+      spendId: gate.id,
       // Sealed before anything is sent: a payee key that cannot be sealed to stops the payment here.
-      prepare: async (_payment, note) => {
+      prepare: async (_payment, note, exec) => {
         const pack = encodeNotePackage({
           pool: this.network.pool,
           chainId: this.network.chainId,
@@ -1028,12 +1182,27 @@ export class GloamAgent {
           note: memo || undefined,
         });
         sealed = await sealToReceiveTag(pack, payTo);
-        return { deliver: sealed };
+        if (!p.x402) return { deliver: sealed };
+        // x402: the header is the delivery. Kept with the payment (it holds the note sealed, never in the clear).
+        const payload: GloamPaymentPayload = {
+          x402Version: GLOAM_X402_VERSION,
+          scheme: GLOAM_X402_SCHEME,
+          network: this.network.chainId,
+          payload: { paymentNote: sealed, txHash: null, exec },
+        };
+        header = encodePaymentHeader(payload);
+        return { x402: header };
       },
     });
     if (!sent.ok) {
       settle(sent.maybeSent ? "unconfirmed" : "failed", { hash: sent.hash ?? undefined, reason: sent.error });
       if (sent.maybeSent) {
+        if (p.x402) {
+          return this.unconfirmed("The payment", sent, {
+            ...(header ? { paymentHeader: this.withTxHash(header, sent.hash) } : {}),
+            delivered: "Not presented yet. Once refresh() shows the payment landed, present paymentHeader to the resource; asking for the same payment again returns it.",
+          });
+        }
         return this.unconfirmed("The payment", sent, {
           sealedCode: sealed || undefined,
           delivered: "Not posted yet: refresh() posts the sealed payment message once the payment is on chain. The sealed code opens only with the payee's key.",
@@ -1042,6 +1211,25 @@ export class GloamAgent {
       return { status: "error", message: sent.error };
     }
     settle("sent", { hash: sent.hash });
+    if (p.x402) {
+      const paymentHeader = this.withTxHash(header, sent.hash);
+      this.store.update(sent.payment.handle, { x402: paymentHeader });
+      return {
+        status: "done",
+        action,
+        network: this.network.key,
+        paid: this.fmt(amountWei, asset),
+        to: shortTag(payTo),
+        payment: sent.payment.handle,
+        hash: sent.hash,
+        explorer: this.explorer(sent.hash),
+        submittedBy: this.submitMode === "relay" ? "the Gloam relay (this agent's wallet does not appear)" : "this agent's wallet",
+        paymentHeader,
+        delivered: "Present paymentHeader as the X-PAYMENT header. It carries the payment sealed to the payee: only their key opens it.",
+        change: sent.change ? noteView(sent.change) : null,
+        public: "The chain shows a shielded transfer. Not the amount, the sender or the payee.",
+      };
+    }
     const memoPost = await this.postMemo(sent.paymentNote.commitment, sealed);
     if (memoPost.posted) this.store.update(sent.payment.handle, { deliver: undefined });
     return {
@@ -1061,6 +1249,14 @@ export class GloamAgent {
       change: sent.change ? noteView(sent.change) : null,
       public: "The chain shows a shielded transfer. Not the amount, the sender or the payee.",
     };
+  }
+
+  /** An X-PAYMENT value with the settlement transaction filled in (it is made before the send goes out). */
+  private withTxHash(header: string, hash: Hex | null): string {
+    if (!hash) return header;
+    const payload = decodePaymentHeader(header);
+    payload.payload.txHash = hash;
+    return encodePaymentHeader(payload);
   }
 
   /**
@@ -1092,7 +1288,7 @@ export class GloamAgent {
     amountWei: bigint,
     memo: string | null | undefined,
     landed: (n: StoredNote) => Outcome | Promise<Outcome>
-  ): Promise<{ kind: "new" } | { kind: "same"; input: StoredNote } | { kind: "answer"; outcome: Outcome }> {
+  ): Promise<{ kind: "new" } | { kind: "same"; input: StoredNote; prior: StoredNote } | { kind: "answer"; outcome: Outcome }> {
     const prior = () =>
       this.store
         .list()
@@ -1123,7 +1319,7 @@ export class GloamAgent {
     const input = p.spendsHandle ? this.store.get(p.spendsHandle) : undefined;
     if (p.stale && input && input.status === "unspent" && BigInt(input.amountWei) >= amountWei) {
       try {
-        return { kind: "same", input: this.store.reserveForSpend(input.handle) };
+        return { kind: "same", input: this.store.reserveForSpend(input.handle), prior: p };
       } catch {
         /* taken meanwhile: refused below */
       }
@@ -1165,10 +1361,17 @@ export class GloamAgent {
         }))
       : ({ kind: "new" } as const);
     if (plan.kind === "answer") return plan.outcome;
-    const gate = plan.kind === "same" ? null : this.gate({ action: "pay", chainId: this.network.chainId, asset: asset.address, amountWei, recipient: args.sealTo ?? CLAIM_LINK_RECIPIENT });
-    if (gate && !gate.ok) return this.refused(gate.refusal);
+    // a retry is checked like a new link, with the attempt it repeats counted once (see pay)
+    const gate = this.gate(
+      { action: "pay", chainId: this.network.chainId, asset: asset.address, amountWei, recipient: args.sealTo ?? CLAIM_LINK_RECIPIENT },
+      plan.kind === "same" ? plan.prior : undefined
+    );
+    if (!gate.ok) {
+      if (plan.kind === "same") this.release(plan.input.handle);
+      return this.refused(gate.refusal);
+    }
     const settle = (status: "sent" | "unconfirmed" | "reverted" | "failed", extra: { hash?: string; reason?: string } = {}) => {
-      if (gate?.ok) this.settle(gate.id, status, extra);
+      this.settle(gate.id, status, extra);
     };
     let input: StoredNote;
     if (plan.kind === "same") {
@@ -1190,6 +1393,7 @@ export class GloamAgent {
       label: args.label ?? "claim link",
       memo: memo || undefined,
       requestKey,
+      spendId: gate.id,
       // Sealed before anything is sent: an address that cannot be sealed to stops the payment here.
       prepare: args.sealTo
         ? async (payment) => {
@@ -1455,19 +1659,89 @@ export class GloamAgent {
 
   /**
    * Cash out to a public address. A cash out spends a whole note, so for a
-   * smaller amount the note is first split privately (a send to itself).
+   * smaller amount the note is first split privately (a send to itself). A
+   * whole note behind a proof of funds is first moved the same way to a fresh
+   * note, as the app does: the proof carries its nullifier, and a cash out of
+   * it would show next to that nullifier where the money went and how much.
+   * The fresh note's nullifier is in no proof. The move and the cash out still
+   * land close together, so their timing can hint at a link.
    */
   async cashOut(args: { amount: string; asset?: string; to: string; label?: string }): Promise<Outcome> {
     const asset = this.asset(args.asset);
     const amountWei = this.amount(args.amount, asset);
-    const to = String(args.to ?? "").trim();
+    return this.cashOutWei(asset, amountWei, String(args.to ?? "").trim());
+  }
+
+  /**
+   * Pay a 402 price with scheme gloam-cashout: a cash out of exactly the quoted
+   * gross amount G of USDG to the quote's public payTo (a gateway's splitter),
+   * on Robinhood Chain mainnet. The quote is checked first (network, asset,
+   * vault, payTo, amount, quoteId, expiry) and refused above `maxAmount`, which
+   * is required. Like any cash out it splits a note privately first when none
+   * holds exactly G, passes the owner's limits as a cash out to payTo, and is
+   * never sent twice for an answer that was lost.
+   *
+   * The X-PAYMENT value comes back as `paymentHeader`: base64 JSON
+   * { scheme, txHash, quoteId }. It carries a public tx hash and the gateway's
+   * own quoteId, never a note or a key.
+   */
+  async payX402Cashout(args: { requirement: GloamCashoutRequirement; maxAmount: string }): Promise<Outcome> {
+    const req = args.requirement;
+    if (this.network.chainId !== GLOAM_CASHOUT_CHAIN_ID || !isAddressEqual(this.network.pool, GLOAM_CASHOUT_VAULT)) {
+      throw new Error(`A ${GLOAM_CASHOUT_SCHEME} price is paid on Robinhood Chain mainnet, and this agent pays on ${this.where()}.`);
+    }
+    const asset = this.network.assets.find((a) => isAddressEqual(a.address, GLOAM_CASHOUT_ASSET));
+    if (!asset) throw new Error(`The ${this.where()} vault does not take USDG.`);
+    if (args.maxAmount === undefined || args.maxAmount === null || String(args.maxAmount).trim() === "") {
+      return { status: "refused", code: "no_max_amount", message: `A ${GLOAM_CASHOUT_SCHEME} payment needs a maxAmount, the most you will cash out for it. Not paying.` };
+    }
+    const problem = gloamCashoutProblem(req, { maxAmount: this.amount(args.maxAmount, asset) });
+    if (problem) return { status: "refused", code: problem.code, message: problem.message };
+    const gross = BigInt(req.amount);
+    const payTo = getAddress(req.payTo);
+    // One purchase per quote: its cash out note carries a key made from the quote, so the same quote asked again
+    // (a retry whose X-PAYMENT never reached the gateway) presents that cash out and is never paid twice.
+    const quoteLabel = `x402-cashout:${createHash("sha256").update(req.quoteId).digest("hex").slice(0, 32)}`;
+    const quoteKey = this.requestKeyOf(`cash_out:${payTo.toLowerCase()}`, asset, gross, quoteLabel);
+    const paid = this.store.list().find((x) => x.requestKey === quoteKey && x.chainId === this.network.chainId && x.status === "spent");
+    const out: Outcome = paid
+      ? {
+          status: "done",
+          action: "cash_out",
+          alreadyCashedOut: true,
+          network: this.network.key,
+          cashedOut: this.fmt(gross, asset),
+          to: payTo,
+          ...(paid.spentTx ? { hash: paid.spentTx, explorer: this.explorer(paid.spentTx) } : {}),
+          message: "This quote was already paid, so that cash out is presented and nothing new was paid.",
+        }
+      : await this.cashOutWei(asset, gross, payTo, quoteLabel);
+    const tagged: Outcome = { ...out, action: "pay_x402_cashout", scheme: GLOAM_CASHOUT_SCHEME };
+    if (out.status !== "done") return tagged;
+    if (typeof out.hash !== "string") {
+      return {
+        ...tagged,
+        status: "unconfirmed",
+        message: "The cash out landed, but its transaction hash is not known here, so there is no payment header for it. Find the cash out to payTo in the vault's Unshielded logs and present its hash. Asking again with this quote does not pay it twice.",
+      };
+    }
+    return {
+      ...tagged,
+      paymentHeader: encodeGloamCashoutHeader({ txHash: out.hash as Hex, quoteId: req.quoteId }),
+      delivered: "Present paymentHeader as the X-PAYMENT header on the retry. It carries the cash out's tx hash and the quote's id, nothing private.",
+      public: `The chain shows ${this.fmt(gross, asset)} leaving the Gloam vault to ${payTo}, the payee's public address. Not ${this.submitMode === "relay" ? "this agent's wallet, or " : ""}which private payment funded it.`,
+    };
+  }
+
+  /** A cash out of exactly `amountWei` to `to`: behind cashOut() and payX402Cashout(). */
+  private async cashOutWei(asset: GloamAsset, amountWei: bigint, to: string, keyLabel?: string): Promise<Outcome> {
     if (!isAddress(to)) throw new Error("Cash out to a 0x address.");
     // Here and not only in the builder: the split below would already have spent a note by then.
     const problem = cashOutTargetProblem(to, this.network);
     if (problem) throw new Error(problem);
     // The same cash out (address, asset, amount) whose answer was lost may still land: it is never paid twice.
     // Its notes carry this key: the split that makes the exact note, and the note being cashed out.
-    const requestKey = this.requestKeyOf(`cash_out:${to.toLowerCase()}`, asset, amountWei);
+    const requestKey = this.requestKeyOf(`cash_out:${to.toLowerCase()}`, asset, amountWei, keyLabel);
     const carrying = () => this.store.list().filter((x) => x.requestKey === requestKey && x.chainId === this.network.chainId && x.status !== "spent");
     const unconfirmedCashOut = (n: StoredNote): Outcome => ({
       status: "refused",
@@ -1476,7 +1750,9 @@ export class GloamAgent {
     });
     let exact: StoredNote | null = null;
     let input: StoredNote | null = null;
-    let retrying = false;
+    /** The earlier attempt this one repeats (a retry), and how to undo what was reserved for it here. */
+    let retryOf: StoredNote | undefined;
+    let undoReserve: (() => void) | undefined;
     if (carrying().length) {
       const held = carrying().filter((x) => x.status === "pending" && x.pending === "spend").map((x) => x.handle);
       await this.refresh().catch(() => undefined);
@@ -1501,32 +1777,48 @@ export class GloamAgent {
       if (spending) {
         if (!spending.stale) return unconfirmedCashOut(spending);
         exact = spending; // sent again from the same note
-        retrying = true;
+        retryOf = spending;
       } else if (splitting) {
         const from = splitting.spendsHandle ? this.store.get(splitting.spendsHandle) : undefined;
         if (!splitting.stale || !from || from.status !== "unspent") return unconfirmedCashOut(splitting);
         try {
           input = this.store.reserveForSpend(from.handle); // split again from the same note
-          retrying = true;
+          retryOf = splitting;
+          undoReserve = () => this.release(from.handle);
         } catch {
           return unconfirmedCashOut(splitting);
         }
       } else if (ready) {
         try {
-          exact = this.store.reserveForSpend(ready.handle);
-          retrying = true;
+          const kept = this.store.reserveForSpend(ready.handle);
+          // put behind a proof of funds since it was kept: moved to a fresh note first, as below
+          if (kept.fundsProofAt) input = kept;
+          else exact = kept;
+          retryOf = ready;
+          // kept for this cash out: back to waiting for it, its tag kept
+          undoReserve = () => this.store.update(ready.handle, { status: "unspent" });
         } catch {
           /* taken meanwhile: a new cash out below */
         }
       }
     }
-    // A retry spends the note its first attempt did, and was counted once already.
-    const gate = retrying ? null : this.gate({ action: "cash_out", chainId: this.network.chainId, asset: asset.address, amountWei, recipient: to });
-    if (gate && !gate.ok) return this.refused(gate.refusal);
+    // A retry spends the note its first attempt did, so only one of the two can land. It is checked against the
+    // limits like a new cash out, with that attempt's money counted once.
+    const gate = this.gate({ action: "cash_out", chainId: this.network.chainId, asset: asset.address, amountWei, recipient: to }, retryOf);
+    if (!gate.ok) {
+      try {
+        undoReserve?.();
+      } catch {
+        /* the note stays in the store; refresh() settles it */
+      }
+      return this.refused(gate.refusal);
+    }
     const settle = (status: "sent" | "unconfirmed" | "reverted" | "failed", extra: { hash?: string; reason?: string } = {}) => {
-      if (gate?.ok) this.settle(gate.id, status, extra);
+      this.settle(gate.id, status, extra);
     };
     let splitHash: Hex | null = null;
+    // The whole note went to a fresh note first because it is behind a proof of funds (not a split).
+    let moved = false;
     if (!exact) {
       if (!input) {
         try {
@@ -1536,13 +1828,23 @@ export class GloamAgent {
           return { status: "error", message: errMsg(e) };
         }
       }
-      if (BigInt(input.amountWei) > amountWei) {
-        const split = await this.privateSend({ input, asset, amountPay: amountWei, payOrigin: "change", label: `split for a cash out to ${to}`, requestKey });
+      // A split already spends a proven note through a private send; a whole one is moved the same way.
+      moved = BigInt(input.amountWei) === amountWei && Boolean(input.fundsProofAt);
+      if (BigInt(input.amountWei) > amountWei || moved) {
+        const split = await this.privateSend({ input, asset, amountPay: amountWei, payOrigin: "change", label: `${moved ? "move" : "split"} for a cash out to ${to}`, requestKey, spendId: gate.id });
         if (!split.ok) {
           settle(split.maybeSent ? "unconfirmed" : "failed", { hash: split.hash ?? undefined, reason: split.error });
           // Both halves of the split are kept: refresh() makes them spendable once the split is on chain. Nothing was cashed out.
-          if (split.maybeSent) return this.unconfirmed("The private split before the cash out", split, { cashedOut: "nothing yet" });
-          return { status: "error", message: split.error };
+          // A failed move is never followed by a cash out of the proven note itself.
+          if (split.maybeSent) {
+            return this.unconfirmed(moved ? "The private move to a fresh note before the cash out" : "The private split before the cash out", split, { cashedOut: "nothing yet" });
+          }
+          return {
+            status: "error",
+            message: moved
+              ? `This note is behind a proof of funds, so it moves to a fresh note before a cash out, and that move failed (${split.error}). Nothing was cashed out.`
+              : split.error,
+          };
         }
         splitHash = split.hash;
         exact = this.store.reserveForSpend(split.payment.handle);
@@ -1550,10 +1852,15 @@ export class GloamAgent {
         exact = input;
       }
     }
-    exact = this.store.update(exact.handle, { requestKey }) ?? exact;
+    exact = this.store.update(exact.handle, { requestKey, spendId: gate.id }) ?? exact;
+    const firstStep = (): Record<string, unknown> => (!splitHash ? {} : moved ? { moveHash: splitHash } : { splitHash });
     let hash: Hex | null = null;
     let sending = false;
     try {
+      // Read under the lock just above, and a held note can't be marked after: a proven note is never cashed out directly.
+      if (exact.fundsProofAt) {
+        throw new Error("This note is behind a proof of funds and was not moved to a fresh note first, so it was not cashed out. Ask again: the cash out moves it first.");
+      }
       const vault = await this.tree.sync();
       const path = await vault.pathForCommitment(exact.commitment);
       if (!path) throw new Error("That note is not in the vault yet. Wait for it to confirm.");
@@ -1578,7 +1885,7 @@ export class GloamAgent {
       }
       this.store.update(exact.handle, { status: "spent", spentTx: hash });
       settle("sent", { hash });
-      const fee = isPaymentsPoolChainId(this.network.chainId) ? cashOutFee(amountWei, CASH_OUT_FEE_BPS) : 0n;
+      const fee = feeKept(receipt.logs, this.network.pool, exact.nullifier);
       return {
         status: "done",
         action: "cash_out",
@@ -1589,7 +1896,10 @@ export class GloamAgent {
         to,
         hash,
         explorer: this.explorer(hash),
-        ...(splitHash ? { splitHash } : {}),
+        ...firstStep(),
+        ...(moved
+          ? { moved: "This note was behind a proof of funds, so it was moved to a fresh note first. The proof does not lead to this cash out, though the two landing close together can hint at a link." }
+          : {}),
         public: "A cash out is the public exit: the asset, the amount and the recipient show. Which private payment funded it does not.",
       };
     } catch (e) {
@@ -1597,7 +1907,7 @@ export class GloamAgent {
       const maybe = !reverted && (Boolean(hash) || (sending && this.mayHaveSent(e)));
       if (!maybe) this.release(exact!.handle);
       settle(maybe ? "unconfirmed" : reverted ? "reverted" : "failed", { hash: hash ?? undefined, reason: errMsg(e) });
-      if (maybe) return this.unconfirmed("The cash out", { hash, error: errMsg(e) }, splitHash ? { splitHash } : {});
+      if (maybe) return this.unconfirmed("The cash out", { hash, error: errMsg(e) }, firstStep());
       return { status: "error", message: errMsg(e) };
     }
   }
@@ -1622,6 +1932,9 @@ export class GloamAgent {
       use.push(n);
       sum += BigInt(n.amountWei);
     }
+    // Marked before the proof is made, so a cash out that takes one of these notes meanwhile moves it to a
+    // fresh note first. Kept if proving fails: that costs one private move at most.
+    this.store.markFundsProof(use.map((n) => n.handle), new Date().toISOString());
     const vault = await this.tree.sync();
     const withPaths = await Promise.all(
       use.map(async (n) => {
@@ -1650,7 +1963,7 @@ export class GloamAgent {
       for: proof.verifier,
       expiresAt: new Date(proof.expiresAt * 1000).toISOString(),
       proof: text,
-      check: "Anyone can check it at gloam.trade/verify, or with gloam_verify_proof. It does not show the balance. It does carry the nullifiers of the notes behind it (so the reader can check they are unspent), and a reader who keeps them can tell when those notes are spent later.",
+      check: "Anyone can check it at gloam.trade/verify, or with gloam_verify_proof. It does not show the balance. It does carry the nullifiers of the notes behind it (so the reader can check they are unspent), and a reader who keeps them can tell when those notes are spent later. A cash out moves those notes to a fresh note first, so the proof does not lead to where the money went.",
     };
   }
 

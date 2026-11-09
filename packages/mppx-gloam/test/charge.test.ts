@@ -34,6 +34,8 @@ import {
   toPaymentRequirements,
   fromPaymentRequirements,
   transfersInReceipt,
+  transferCheckFromCall,
+  callReverted,
   validateGloamCharge,
   payloadFromPayment,
   GloamChargeError,
@@ -231,6 +233,50 @@ test("pull: the server submits the payer's transfer, so the payer never touches 
   assert.deepEqual(pool.submitted, ["payee", "payee"], "the payee submitted the payment, then the sweep");
   assert.equal(config.stored[0]!.amountWei, "250");
   await rejects(settle(ch, paid.credential.payload, config), /already used/);
+});
+
+test("pull: a transfer the pool would refuse is refused before anything is sent", async () => {
+  const pool = mockPool();
+  const ch = await challengeFor(250n);
+  const paid = await pay(pool, ch, "pull");
+  const payload = paid.credential.payload as { type: "transfer"; transfer: { proof: Hex; root: Hex; nullifier: Hex; newCommitments: [Hex, Hex] } };
+  // The payment note opens and binds the price; the transfer that would fund it is made up.
+  const junk = { ...payload, transfer: { ...payload.transfer, proof: `0x${"ab".repeat(64)}` as Hex, root: `0x${"cd".repeat(32)}` as Hex, nullifier: `0x${"ef".repeat(32)}` as Hex } };
+  const asked: unknown[] = [];
+  const refusing = { ...pool.chain, transferWouldLand: async (_pool: unknown, t: unknown) => (asked.push(t), false) };
+  await rejects(settle(ch, junk, serverConfig(pool, { chain: refusing })), /would not take the presented transfer/);
+  assert.equal(asked.length, 1, "the pool was asked");
+  assert.deepEqual(pool.submitted, [], "nothing submitted");
+  // a node that can't say: submitted as before (and the pool, here the mock, refuses it on chain)
+  const unsure = { ...pool.chain, transferWouldLand: async () => null };
+  await assert.rejects(settle(ch, junk, serverConfig(pool, { chain: unsure })));
+  assert.deepEqual(pool.submitted, ["payee"], "sent once the node couldn't say");
+  // the honest transfer passes the check and settles
+  const pool2 = mockPool();
+  const ch2 = await challengeFor(250n);
+  const honest = await pay(pool2, ch2, "pull");
+  const willing = { ...pool2.chain, transferWouldLand: async () => true };
+  const receipt = await settle(ch2, honest.credential.payload, serverConfig(pool2, { chain: willing }));
+  assert.equal(receipt.status, "success");
+  assert.deepEqual(pool2.submitted, ["payee", "payee"]);
+});
+
+test("transferWouldLand from a call: a revert is a no, a node that fails is unsure", async () => {
+  const revert = Object.assign(new Error("Execution reverted for an unknown reason."), {
+    name: "CallExecutionError",
+    cause: Object.assign(new Error("execution reverted"), { name: "ExecutionRevertedError" }),
+  });
+  const down = Object.assign(new Error("HTTP request failed. Status: 503"), { name: "HttpRequestError" });
+  const t = { proof: "0x1234" as Hex, root: `0x${"11".repeat(32)}` as Hex, nullifier: `0x${"22".repeat(32)}` as Hex, newCommitments: [`0x${"33".repeat(32)}`, `0x${"44".repeat(32)}`] as const };
+  const seen: { to: string; data: string }[] = [];
+  assert.equal(await transferCheckFromCall(async (a) => void seen.push(a))(POOL, t), true);
+  assert.equal(seen[0]!.to, POOL);
+  assert.ok(seen[0]!.data.startsWith("0x"), "an encoded transfer() call");
+  assert.equal(await transferCheckFromCall(async () => { throw revert; })(POOL, t), false);
+  assert.equal(await transferCheckFromCall(async () => { throw down; })(POOL, t), null);
+  assert.equal(callReverted(revert), true);
+  assert.equal(callReverted(down), false);
+  assert.equal(callReverted(new Error("timeout")), false);
 });
 
 test("auto mode prefers pull, falls back to push, and respects the challenge", async () => {

@@ -11,6 +11,7 @@ import { WelcomeModal } from "./WelcomeModal";
 import { PasskeyGate } from "./PasskeyGate";
 import { NetworkSelector } from "./NetworkSelector";
 import { useNetwork } from "./NetworkProvider";
+import { FeeRiseNotice } from "./FeeRiseNotice";
 import { StocksLiveNotice } from "./StocksLiveNotice";
 import { TestFundsNotice } from "./TestFundsNotice";
 import { VaultNavGroup, VaultNavGroupStatic, navActiveFill } from "./VaultNavGroup";
@@ -342,6 +343,7 @@ export function AppShell({
 
       <div className="gl-tabbar-space flex flex-1 flex-col lg:pl-[272px]">
         <main className="mx-auto w-full max-w-[1120px] flex-1 px-4 pb-16 pt-5 sm:px-8 sm:pt-7">
+          <FeeRiseNotice />
           <TestFundsNotice />
           <Suspense fallback={null}>
             <StocksLiveNotice />
@@ -367,7 +369,7 @@ export function AppShell({
               {!networkSettled
                 ? "Gloam. Not investment, legal or tax advice."
                 : !network.testnet
-                ? `Gloam on ${network.label} mainnet. Beta software. Not investment, legal or tax advice.`
+                ? `Gloam on ${network.label} mainnet. Not investment, legal or tax advice.`
                 : isTempo
                   ? "Gloam on Tempo testnet. Private stablecoin payments for people and agents."
                   : `Gloam on ${network.label} testnet. Not investment, legal or tax advice.`}

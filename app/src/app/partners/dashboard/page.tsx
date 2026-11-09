@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { TurnkeyEmbeddedProvider } from "@/components/app/TurnkeyEmbeddedProvider";
 import { PartnerDashboard } from "./PartnerDashboard";
 
 export const metadata: Metadata = {
@@ -8,5 +9,10 @@ export const metadata: Metadata = {
 };
 
 export default function PartnerDashboardPage() {
-  return <PartnerDashboard />;
+  // Gloam wallets (email sign-in) only load when NEXT_PUBLIC_TURNKEY_ENABLED is on; otherwise this is a plain wrapper.
+  return (
+    <TurnkeyEmbeddedProvider>
+      <PartnerDashboard />
+    </TurnkeyEmbeddedProvider>
+  );
 }

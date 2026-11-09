@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 /**
  * The Content-Security-Policy Gloam is moving towards. It is sent as
  * Content-Security-Policy-Report-Only (next.config.ts): browsers report what it
@@ -76,7 +78,14 @@ const SERVICES = [
   "wss://*.walletconnect.com",
   "https://api.web3modal.org",
   "https://*.reown.com",
+  // Gloam wallets (Turnkey): api, authproxy, and the success animation the sign-in sheet loads.
+  // Continue with Google needs no entry of its own: accounts.google.com only ever opens
+  // as a popup window (a navigation, which no directive here covers), Google hands the
+  // token back in the popup's address on our own origin, and the
+  // token goes to Turnkey's authproxy, which is listed here. The page never fetches from,
+  // frames or loads a script from Google. Add a Google host only if that changes.
   "https://*.turnkey.com",
+  "https://lottie.host",
   "https://wallet.tempo.xyz",
   "https://tokenlist.tempo.xyz",
   "https://api.relay.link",
@@ -84,7 +93,60 @@ const SERVICES = [
   "https://va.vercel-scripts.com",
 ];
 
-export const CSP_CONNECT_SOURCES = ["'self'", ...GLOAM_RPCS, ...ORIGIN_RPCS, ...SOLANA_RPCS, ...SERVICES];
+/**
+ * Elysium mainnet's RPC, only while NEXT_PUBLIC_ELYSIUM_ENABLED is on: from
+ * NEXT_PUBLIC_ELYSIUM_RPC_URL, else the rpcUrl written in the SDK's config
+ * (packages/sdk/src/elysium.ts), the same order lib/elysium.ts reads them in.
+ * Its origin only. Empty while the flag is off or no RPC is set.
+ */
+export function elysiumConnectSources(env = process.env) {
+  if (!/^(1|true|on|yes)$/i.test((env.NEXT_PUBLIC_ELYSIUM_ENABLED ?? "").trim())) return [];
+  let url = env.NEXT_PUBLIC_ELYSIUM_RPC_URL?.trim() || null;
+  if (!url) {
+    try {
+      // Only ELYSIUM_MAINNET's block: the file's ELYSIUM_TESTNET has an rpcUrl too.
+      const src = readFileSync(new URL("../packages/sdk/src/elysium.ts", import.meta.url), "utf8");
+      const block = /export const ELYSIUM_MAINNET\b[^{]*\{([\s\S]*?)\n\};/.exec(src)?.[1] ?? "";
+      url = /^\s*rpcUrl:\s*"(https:\/\/[^"]+)",\s*$/m.exec(block)?.[1] ?? null;
+    } catch {
+      url = null;
+    }
+  }
+  try {
+    const u = url ? new URL(url) : null;
+    return u && u.protocol === "https:" ? [u.origin] : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Elysium testnet's RPCs, only while NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED is on:
+ * Kinetiq's and Conduit's (packages/sdk/src/elysium.ts), and
+ * NEXT_PUBLIC_ELYSIUM_TESTNET_RPC_URL's origin if it is set.
+ */
+export function elysiumTestnetConnectSources(env = process.env) {
+  if (!/^(1|true|on|yes)$/i.test((env.NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED ?? "").trim())) return [];
+  const out = ["https://testnet-rpc.elysium.kinetiq.xyz", "https://rpc-elysium-testnet.t.conduit.xyz"];
+  try {
+    const custom = env.NEXT_PUBLIC_ELYSIUM_TESTNET_RPC_URL?.trim();
+    const u = custom ? new URL(custom) : null;
+    if (u && u.protocol === "https:" && !out.includes(u.origin)) out.push(u.origin);
+  } catch {
+    // not a URL: lib/elysium.ts fails the build on it
+  }
+  return out;
+}
+
+export const CSP_CONNECT_SOURCES = [
+  "'self'",
+  ...GLOAM_RPCS,
+  ...elysiumConnectSources(),
+  ...elysiumTestnetConnectSources(),
+  ...ORIGIN_RPCS,
+  ...SOLANA_RPCS,
+  ...SERVICES,
+];
 
 const FRAMES = ["'self'", "https://*.walletconnect.org", "https://*.walletconnect.com", "https://*.turnkey.com", "https://wallet.tempo.xyz"];
 
@@ -104,3 +166,34 @@ export const CSP_REPORT_ONLY = [
   "base-uri 'self'",
   "form-action 'self'",
 ].join("; ");
+
+/**
+ * Enforced on /app while Gloam wallets are on (NEXT_PUBLIC_TURNKEY_ENABLED with both
+ * ids, production builds only: dev reloads code with eval). A Gloam wallet signs with
+ * no prompt, so a script that got into the page could send from it; this policy
+ * stops the page loading scripts, frames or workers from any host not listed, and
+ * talking to any host not listed.
+ *
+ * Still open, until Next's inline scripts carry nonces: 'unsafe-inline' for scripts,
+ * so markup injected into the page could still run inline code. Styles, images and
+ * fonts stay as they are (the Report-Only policy covers them).
+ */
+export const CSP_APP_ENFORCED = [
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "form-action 'self'",
+  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://va.vercel-scripts.com",
+  `connect-src ${CSP_CONNECT_SOURCES.join(" ")}`,
+  `frame-src ${FRAMES.join(" ")}`,
+  "worker-src 'self' blob:",
+].join("; ");
+
+/** Gloam wallets are switched on for this build (the same rule as lib/embeddedWallet). */
+export function embeddedWalletsBuild(env = process.env) {
+  return (
+    env.NEXT_PUBLIC_TURNKEY_ENABLED?.trim() === "true" &&
+    Boolean(env.NEXT_PUBLIC_TURNKEY_ORGANIZATION_ID?.trim()) &&
+    Boolean(env.NEXT_PUBLIC_TURNKEY_AUTH_PROXY_CONFIG_ID?.trim())
+  );
+}

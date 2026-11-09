@@ -21,7 +21,7 @@ const { cashOutTargetProblem } = await import("../src/lib/cashOutTarget");
 const { getNetwork } = await import("../src/lib/networks");
 const { hasNativeCoin, publicSendTokens } = await import("../src/lib/publicSend");
 const { RH_MAINNET_SWAP_TOKENS, addableTokensFor, isNativeAddable, limitGatedAssetsFor, shieldTokensFor, supportsNativeShield } = await import("../src/lib/tokens");
-const { isSwapAsset } = await import("../src/lib/vaultSwap");
+const { isSwapAsset, swapV3Live } = await import("../src/lib/vaultSwap");
 
 let passed = 0;
 function test(name: string, fn: () => void) {
@@ -35,8 +35,8 @@ const WALLET = "0x00000000000000000000000000000000000000b2";
 const SWAPS: Record<string, readonly string[]> = {
   "robinhood-mainnet": ["USDG", "GLOAM", "PONS", "CASHCAT", "AI", "ORBIO"],
   "tempo-mainnet": ["USDC.e", "pathUSD", "USDT0", "OUSD"],
-  "base-mainnet": [],
-  "ethereum-mainnet": [],
+  "base-mainnet": swapV3Live(8453) ? ["USDC", "USDT", "EURC"] : [],
+  "ethereum-mainnet": swapV3Live(1) ? ["USDC", "USDT", "USDG", "EURC"] : [],
 };
 const KEYS = Object.keys(SWAPS) as (keyof typeof SWAPS & Parameters<typeof getNetwork>[0])[];
 /** Every gated asset read open: the app once each limit has landed. */
@@ -68,7 +68,7 @@ for (const key of KEYS) {
   test(`${key}: swaps are what this file says they are`, () => {
     const swaps = tokens.filter((t) => isSwapAsset(net.chainId, t.address)).map((t) => t.symbol);
     assert.deepEqual(swaps.sort(), [...SWAPS[key]!].sort());
-    assert.equal(isSwapAsset(net.chainId, zeroAddress), false, "a native note never swaps");
+    assert.equal(isSwapAsset(net.chainId, zeroAddress), swapV3Live(net.chainId) && supportsNativeShield(net.chainId), "a native note swaps only with v3");
   });
 }
 

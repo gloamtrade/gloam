@@ -5,10 +5,11 @@
  * It talks in the Gloam group (TELEGRAM_GROUP_ID) and, in private, only with
  * the team: the owner (TELEGRAM_OWNER_IDS, else TELEGRAM_OWNER_HANDLES) and the
  * admins (TELEGRAM_ADMIN_IDS or TELEGRAM_ADMIN_HANDLES). Anyone else's private
- * message gets no reply and costs no model call. With the team it chats: it
- * answers in its own voice from the product facts and the group's live
- * numbers, drafts posts and replies, and remembers the last few exchanges for
- * a few hours. The owner also gets /report. A private chat is chat only: it
+ * message gets no reply and costs no model call (the one exception is the
+ * treasure hunt's exact passphrase, lib/hunt, off unless HUNT_ENABLED is set).
+ * With the team it chats: it answers in its own voice from the product facts
+ * and the group's live numbers, drafts posts and replies, and remembers the
+ * last few exchanges for a few hours. The owner also gets /report. A private chat is chat only: it
  * never posts in the group or acts on anything from there. It never starts a
  * DM; the scheduled report goes only to a chat an owner opened. Every other
  * chat is ignored. In the group:
@@ -71,6 +72,7 @@ import {
   wantsGroupAnswer,
   cleanReply,
   defanged,
+  entityLinks,
   escapeHtml,
   explicitReply,
   forwardedCall,
@@ -173,6 +175,7 @@ import {
   getChatAdministrators,
   getFile,
   getMe,
+  linkedChatId,
   muteUser,
   refreshWebhook,
   removeMessage,
@@ -186,6 +189,7 @@ import {
   type TgUser,
 } from "./telegram";
 import { hitRateLimit } from "@/lib/mcpRemote/rateLimit";
+import { HUNT_INPUT_MAX, countHuntStep, glimHuntReply, huntEnabled, huntSubject } from "@/lib/hunt";
 import { isMainnetLive } from "@/lib/mainnet";
 
 /** t.me/gloamhq. TELEGRAM_GROUP_ID overrides it. */
@@ -321,7 +325,7 @@ function groupGuide(c: BotConfig): string {
   return (
     `Hi, I'm ${c.persona}, Gloam's community helper bot. Tag me or reply to me with a question, or just ask in Help.\n\n` +
     `Ideas and bugs go in Feedback, or type /bug and what happened. /ca gives the $GLOAM contract, and replying /spam to a message reports it. ${testing}\n\n` +
-    `Docs live at gloam.trade/docs, news at @gloamtrade, and anything private goes to hello@gloam.trade. Admins never DM first.`
+    `Docs live at gloam.trade/docs, news at @gloamtrade, and anything private goes to hello@gloam.trade. Admins never ask for your keys or funds.`
   );
 }
 
@@ -440,7 +444,7 @@ function pointedWarning(name: string, removed: boolean): string {
   const first = removed
     ? `Thanks for flagging it, ${name}. I took that message down because it repeats the scam's words, so nobody acts on them. You're not in trouble.`
     : `Thanks for flagging it, ${name}.`;
-  return `${first}\n\nGloam admins never DM first and will never ask for your seed phrase, private key or funds. Reply /spam to a scam message and I'll deal with it.`;
+  return `${first}\n\nGloam admins will never ask for your seed phrase, private key or funds. Reply /spam to a scam message and I'll deal with it.`;
 }
 
 /** Words that read like a scam but that members say too ("everyone DM me"): the words go, the person stays. */
@@ -448,7 +452,7 @@ function warnOnlyWarning(name: string, removed: boolean): string {
   const first = removed
     ? `${name}, I took that message down because it reads like the scams that go around here. You're not removed, just keep chats in the group.`
     : `${name}, careful: that reads like the scams that go around here. Keep chats in the group, please.`;
-  return `${first}\n\nGloam admins never DM first and will never ask for your seed phrase, private key or funds.`;
+  return `${first}\n\nGloam admins will never ask for your seed phrase, private key or funds.`;
 }
 
 /** What the owner is told an account was removed for. */
@@ -622,7 +626,14 @@ function okHandles(c: BotConfig, me: TgUser | null): string[] {
 }
 
 function screenInput(msg: TgMessage, from: TgUser, text: string, c: BotConfig, me: TgUser | null): ScreenInput {
-  return { text, name: from, entities: msg.entities ?? msg.caption_entities, forwardedFrom: msg.forward_origin?.type ?? null, okHandles: okHandles(c, me) };
+  return {
+    text,
+    name: from,
+    entities: msg.entities ?? msg.caption_entities,
+    links: entityLinks(msg),
+    forwardedFrom: msg.forward_origin?.type ?? null,
+    okHandles: okHandles(c, me),
+  };
 }
 
 /** Verdicts about a link, which a member asking "is this legit?" about it is not guilty of. */
@@ -974,13 +985,14 @@ async function onCommand(cmd: Command, msg: TgMessage, from: TgUser, c: BotConfi
  */
 async function moderate(msg: TgMessage, target: TgMessage, remove: boolean, c: BotConfig, me: TgUser, threadId: number | undefined): Promise<void> {
   const chatId = msg.chat.id;
-  const who = target.from;
+  // a post made as a chat: the chat is who gets removed, never the shared account Telegram shows for it
+  const who = postedBy(target);
   const say = (text: string) => sendMessage(chatId, text, { threadId, replyTo: msg.message_id });
   if (who?.id === me.id) {
     await deleteMessage(chatId, target.message_id);
     return;
   }
-  if (who && isTrusted(who, c)) {
+  if (who && (isTrusted(who, c) || (target.sender_chat && (await teamChat(target))))) {
     await say("That one's from the team, so I'll leave it.");
     return;
   }
@@ -1027,7 +1039,7 @@ async function moderate(msg: TgMessage, target: TgMessage, remove: boolean, c: B
 function reportsScam(msg: TgMessage, from: TgUser, text: string): boolean {
   const origin = msg.forward_origin;
   if (origin?.type === "hidden_user" || (origin?.type === "user" && origin.sender_user?.id !== from.id)) return true;
-  const scam = (s: string) => memberScam(from, s);
+  const scam = (s: string) => memberScam(from, s, false, entityLinks(msg));
   const quoted = [msg.quote?.text, msg.external_reply?.text, msg.external_reply?.caption]
     .filter((q): q is string => Boolean(q?.trim()))
     .map((q) => scanCodes(q).masked);
@@ -1058,13 +1070,14 @@ async function onReport(msg: TgMessage, from: TgUser, target: TgMessage | null, 
     await say("Reply to the message with /spam and I'll take a look.");
     return;
   }
-  const who = target.from;
-  if (!who || who.id === me.id || isTrusted(who, c) || (await isChatAdmin(chatId, who.id))) {
+  // a post made as a chat is the chat's: the team's own (the group, its linked channel) stays
+  const who = postedBy(target);
+  if (!who || who.id === me.id || (target.sender_chat && (await teamChat(target))) || isTrusted(who, c) || (await isChatAdmin(chatId, who.id))) {
     await say("That one's from the team, so it stays.");
     return;
   }
   const targetText = scanCodes(messageText(target)).masked;
-  const why = impersonates(who) ? "impostor" : memberScam(who, targetText);
+  const why = impersonates(who) ? "impostor" : memberScam(who, targetText, false, entityLinks(target));
   // the reported message was itself someone calling a scam out: never a removal on that
   const pointing = why !== "impostor" && reportsScam(target, who, targetText);
   if (why && !pointing) {
@@ -1108,14 +1121,56 @@ async function onReport(msg: TgMessage, from: TgUser, target: TgMessage | null, 
   }
 }
 
+/** Who a post is from, for the checks: the person, or the chat it was posted as (its negative id, its title as the name). */
+function postedBy(msg: TgMessage): TgUser | undefined {
+  const chat = msg.sender_chat;
+  if (chat) return { id: chat.id, is_bot: false, first_name: chat.title ?? "", ...(chat.username ? { username: chat.username } : {}) };
+  return msg.from;
+}
+
+/** Gloam's own channels, by their username (unique on Telegram, so no one else can post as them). */
+const TEAM_CHANNELS = new Set(["gloamtrade"]);
+/** The group's linked channel, asked once per instance and kept ten minutes. */
+let linked: { chatId: number; id: number | null; at: number } | null = null;
+const LINKED_TTL_MS = 10 * 60_000;
+
+/**
+ * A post made as a chat that is the team's: the group itself (an anonymous
+ * admin), or the channel linked to the group (its automatic forwards, and its
+ * admins posting as it). Telegram is asked which channel is linked; when it
+ * can't say, the last answer stands, and the team's channel by its username.
+ */
+async function teamChat(msg: TgMessage): Promise<boolean> {
+  const chat = msg.sender_chat;
+  if (!chat) return false;
+  if (chat.id === msg.chat.id) return true;
+  if (msg.is_automatic_forward) return true;
+  if (chat.username && TEAM_CHANNELS.has(chat.username.toLowerCase())) return true;
+  const now = Date.now();
+  const known = linked?.chatId === msg.chat.id ? linked : null;
+  if (!known || now - known.at > LINKED_TTL_MS) {
+    const id = await linkedChatId(msg.chat.id).catch(() => undefined);
+    // a definite answer is kept; when Telegram can't say, the last answer stands
+    if (id !== undefined) linked = { chatId: msg.chat.id, id, at: now };
+  }
+  return linked?.chatId === msg.chat.id && linked.id !== null && linked.id === chat.id;
+}
+
 async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Promise<void> {
-  const from = msg.from;
-  // other bots (Rose, the buy bots), channels, anonymous admins and service messages are not people asking
-  if (!from || from.is_bot || msg.sender_chat || msg.via_bot) return;
+  // service messages and other bots (Rose, the buy bots) are not people asking
+  if (!msg.from) return;
+  const asChat = msg.sender_chat;
+  // A post made as a chat: the group itself (an anonymous admin) and its linked channel are the team, and stay.
+  // Any other chat is screened like a member, by its own name, and acted on as that chat.
+  if (asChat && (await teamChat(msg))) return;
+  if (!asChat && msg.from.is_bot) return;
+  const from = postedBy(msg)!;
+  // posted as a chat, or through an inline bot: screened like everything else, never answered
+  const answerable = !asChat && !msg.via_bot;
   const chatId = msg.chat.id;
   const topic = topicOf(msg);
   // an edit is the same message again: counted once, when it was posted
-  if (!edited) await countMessage(topic, from.id).catch(() => {});
+  if (!edited && !asChat) await countMessage(topic, from.id).catch(() => {});
   const trusted = isTrusted(from, c);
   // someone posting as "Gloam", "Glim", "Gloam Support" or a team tag: out, whatever they posted (a bare GIF too), silently
   if (!trusted && impersonates(from) && !(await isChatAdmin(chatId, from.id))) {
@@ -1137,6 +1192,8 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   // codes and links become labels ([Gloam address], [claim link]) for everything that reads the text
   const codes = scanCodes(raw);
   const text = codes.masked;
+  // links Telegram marked, endings the text pattern doesn't know and links behind other words included
+  const links = entityLinks(msg);
   const threadId = msg.is_topic_message ? msg.message_thread_id : undefined;
   const name = firstName(from, c);
 
@@ -1153,12 +1210,12 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   // a scam split over a few messages is read whole: this one with the person's last two minutes
   const earlier = trusted ? [] : await recentThenKeep(chatId, from.id, { id: msg.message_id, t: text.slice(0, 600), at: Date.now() }).catch(() => []);
   let scored = text;
-  let reason = trusted ? null : memberScam(from, text);
+  let reason = trusted ? null : memberScam(from, text, false, links);
   let linkAfterProblem = false;
   if (!trusted && earlier.length && (!reason || WARN_ONLY.has(reason))) {
     // joined as one run of words, so "ALL HOLDERS" then "DM ME NOW" reads as the one sentence it is
     const parts = [...earlier.map((e) => e.t), text];
-    const whole = memberScam(from, parts.join(" "), true);
+    const whole = memberScam(from, parts.join(" "), true, links);
     // only a real scam split over messages: not words members say too read with their next harmless line, not the fake
     // migration unless one message announces it, and not a link someone shares right after describing their own problem
     if (whole === "phishing_link" && !reason && !vouchedOrBranded(text) && (asksAboutLink(text) || earlier.some((e) => looksLikeQuestion(e.t) || looksLikeBugReport(e.t) || PROBLEM_HINT.test(e.t)))) {
@@ -1244,6 +1301,8 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
     if (screened === "acted") return;
     quiet = screened === "quiet";
   }
+  // a post made as a chat or through an inline bot has been screened; it is not kept or answered
+  if (!answerable) return;
 
   // kept 3 days so a team member can link it in a private chat ("answer this")
   const stored = memoryText(text) ?? (ownPicture ? "[picture]" : null);
@@ -1478,8 +1537,34 @@ const DM_KEEP_REPLY = 1500;
 /** Every key and token this deployment holds (public NEXT_PUBLIC_ values aside), so a reply can never carry one, even by accident. */
 function deploymentSecrets(): string[] {
   return Object.entries(process.env)
-    .filter(([k, v]) => /KEY|TOKEN|SECRET|PASSWORD|PRIVATE|PEPPER/i.test(k) && !k.startsWith("NEXT_PUBLIC_") && typeof v === "string" && v.trim().length >= 8)
+    .filter(([k, v]) => /KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|FRAGMENT|NULLIFIER|PRIVATE|PEPPER/i.test(k) && !k.startsWith("NEXT_PUBLIC_") && typeof v === "string" && v.trim().length >= 8)
     .map(([, v]) => v!.trim());
+}
+
+/** Passphrase tries per person per hour, and replies to a right one. */
+const HUNT_TRIES_PER_HOUR = 30;
+const HUNT_REPLIES_PER_HOUR = 5;
+
+/**
+ * The treasure hunt's passphrase (lib/hunt), in a private chat from anyone:
+ * checked before any other handling and any model call, and only ever matched
+ * exactly (case and spaces aside), at most HUNT_TRIES_PER_HOUR tries per person.
+ * A right one gets the next clue and its piece. The group is never checked: a
+ * right guess there is handled like any other message, the same as a wrong one,
+ * so the group can't be used to test guesses (no limit, and no answer that
+ * says which one was right). With the hunt off, or for any other text, this
+ * does nothing and says nothing. True when the message was handled here.
+ */
+async function onHuntPassphrase(msg: TgMessage, from: TgUser): Promise<boolean> {
+  if (!huntEnabled()) return false;
+  const raw = messageText(msg).trim();
+  if (!raw || raw.length > HUNT_INPUT_MAX) return false;
+  if (!(await hitRateLimit(`tg:${from.id}`, "tg-hunt-try", HUNT_TRIES_PER_HOUR, Date.now(), 3600)).allowed) return false;
+  const reply = glimHuntReply(raw);
+  if (!reply) return false;
+  if (!(await hitRateLimit(`tg:${from.id}`, "tg-hunt", HUNT_REPLIES_PER_HOUR, Date.now(), 3600)).allowed) return true;
+  if (await sendMessage(msg.chat.id, reply)) await countHuntStep("glim", huntSubject("tg", from.id));
+  return true;
 }
 
 /**
@@ -1550,6 +1635,7 @@ async function chatWithTeam(
 async function onPrivate(msg: TgMessage, c: BotConfig): Promise<void> {
   const from = msg.from;
   if (!from || from.is_bot) return;
+  if (await onHuntPassphrase(msg, from)) return;
   const owner = isOwner(from, c);
   if (!owner && !isAdmin(from, c)) return;
   const chatId = msg.chat.id;
@@ -1628,8 +1714,9 @@ async function onPrivate(msg: TgMessage, c: BotConfig): Promise<void> {
  * (the model check, the newcomer check) leave them alone.
  */
 async function liftAction(chatId: number, from: TgUser, c: BotConfig, args: string): Promise<void> {
+  // a person's number, or a channel's (negative) for a chat that posted as itself
   const id = Number(args.trim());
-  if (!Number.isSafeInteger(id) || id <= 0) {
+  if (!Number.isSafeInteger(id) || id === 0) {
     await sendMessage(chatId, "Send /unban and the number from /modlog or my removal note, like /unban 123456789.");
     return;
   }

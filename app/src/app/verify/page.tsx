@@ -73,7 +73,7 @@ function assetAddress(asset: string): string {
   }
 }
 
-const GITHUB = "https://github.com/cryptoduke01/gloam";
+const GITHUB = "https://github.com/gloamtrade/gloam";
 
 type Fact = { title: string; body: string; link?: { href: string; label: string } };
 
@@ -112,11 +112,11 @@ const FACTS: Fact[] = [
   },
 ];
 
-/** Once mainnet is live: the beta deposit limits sit next to the facts above. */
+/** Once mainnet is live: the deposit limits sit next to the facts above. */
 const LIVE_FACTS: Fact[] = [
   ...FACTS,
   {
-    title: "Beta deposit limits",
+    title: "Deposit limits",
     body: "On mainnet each stablecoin takes up to 50,000 per deposit and 2,500,000 in total, and $GLOAM 2,500,000 and 25,000,000. Cash outs and private payments are never limited. Raising a limit waits the same three days; lowering one is instant.",
   },
 ];
@@ -502,8 +502,7 @@ export default function VerifyPage() {
                     <Link href="/security" className="text-foreground underline decoration-line-strong underline-offset-4 hover:decoration-foreground">
                       report, 1 November 2026
                     </Link>
-                    ) and found no Critical, High or Medium issues. It is beta
-                    software.
+                    ) and found no Critical, High or Medium issues.
                   </>
                 ) : (
                   <>

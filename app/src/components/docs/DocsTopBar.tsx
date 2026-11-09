@@ -10,7 +10,7 @@ import { DOCS_TABS, DocsNavList, activeTab } from "./DocsNav";
 import { SearchField, SearchIconButton, SearchPalette, useSearchShortcut } from "./DocsSearch";
 import { CloseIcon, GitHubIcon, MenuIcon } from "./docsUi";
 
-const GITHUB_URL = "https://github.com/cryptoduke01/gloam";
+const GITHUB_URL = "https://github.com/gloamtrade/gloam";
 
 /** Desktop and mobile header heights, so sticky rails can sit right under it. */
 export const DOCS_HEADER_OFFSET = "top-[100px] lg:top-[112px]";

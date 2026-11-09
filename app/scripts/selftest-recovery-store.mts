@@ -8,6 +8,8 @@
  *  - versions only go up, the write token is checked, a held lock frees itself,
  *    and delete needs the token
  *  - a save that must find a backup there writes nothing when there is none
+ *  - the marker for a newer key goes on the record and stays there, and a read
+ *    doesn't show it
  *
  * Uses the in-process store (GLOAM_PARTNERS_STORE=memory). The ciphertext here
  * is stand-in base64; the store never reads it.
@@ -118,6 +120,27 @@ await test("a save that must find a backup there and does: the usual checks, the
   assert.equal(text((await readBackup(ID))!.c), "two");
   await assert.rejects(writeBackup({ id: ID, write: "c".repeat(64), c: b64("theirs"), n: 3, mustExist: true }), (e) => status(e) === 403);
   await assert.rejects(writeBackup({ id: ID, write: WRITE, c: b64("old"), n: 2, mustExist: true }), (e) => status(e) === 409);
+});
+
+const stored = async () => JSON.parse(String((await kv([["GET", `gloam:recovery:v1:${ID}`]]))[0])) as { v?: number };
+
+await test("a backup from before the marker has none, and gets it on its next save from a newer key", async () => {
+  await writeBackup({ id: ID, write: WRITE, c: b64("one"), n: 1 });
+  assert.equal((await stored()).v, undefined);
+  await writeBackup({ id: ID, write: WRITE, c: b64("two"), n: 2, v: 2 });
+  assert.equal((await stored()).v, 2);
+});
+
+await test("a save without the marker doesn't take it off the record", async () => {
+  await writeBackup({ id: ID, write: WRITE, c: b64("one"), n: 1, v: 2 });
+  await writeBackup({ id: ID, write: WRITE, c: b64("two"), n: 2, mustExist: true });
+  assert.equal((await stored()).v, 2);
+  assert.equal(text((await readBackup(ID))!.c), "two");
+});
+
+await test("a read shows what it always has, with no marker", async () => {
+  await writeBackup({ id: ID, write: WRITE, c: b64("one"), n: 1, v: 2 });
+  assert.deepEqual(Object.keys((await readBackup(ID))!).sort(), ["c", "n", "t"]);
 });
 
 console.log(`\nrecovery store: ${passed} passed`);

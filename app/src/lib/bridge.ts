@@ -8,6 +8,11 @@
  * balance as usual. Nothing here touches the shielded pool: the bridge is a
  * public step, like any deposit.
  *
+ * What a bridge costs is Relay's fee, plus Gloam's own cut when BRIDGE_FEE_BPS
+ * and BRIDGE_FEE_RECIPIENT are set (bridgeFeeSetting, off by default). Both show
+ * as their own lines before anything is sent. A deposit made directly from a
+ * wallet on the vault's chain stays free.
+ *
  * Relay only delivers to mainnets, so the panel stays hidden while Gloam runs
  * on testnet. NEXT_PUBLIC_BRIDGE_PREVIEW=1 shows it anyway for local review.
  *
@@ -16,6 +21,7 @@
  * without a deposit address, which needs an API key). Logos are kept in
  * public/brand so a browser never calls a third party to draw them.
  */
+import { formatUnits, isAddress } from "viem";
 import type { ChainFamily, GloamNetwork } from "./networks";
 
 export type BridgeChainKind = "evm" | "svm" | "tvm" | "bvm";
@@ -105,6 +111,10 @@ export const BRIDGE_DESTINATIONS: Partial<Record<ChainFamily, BridgeDestination>
     chain: "Ethereum",
     token: { symbol: "USDC", address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6, logo: "/brand/tokens/usdc.png" },
   },
+  // Elysium: not yet. No live Relay route into Elysium USDC has been checked, so
+  // there is no bridge in there and the app shows no bridge panel on Elysium. Add
+  // an entry here (from lib/elysium.ts) once a live Relay quote into it works, and
+  // drop the "not on Elysium yet" lines in Glim and /docs/chain and /docs/bridge.
 };
 
 /** The chains money can come from into `destChainId`: every listed chain but that one. */
@@ -199,6 +209,38 @@ export function validRefundAddress(kind: BridgeChainKind, v: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(v);
 }
 
+/** Gloam's cut of a quote, when it takes one: the rate, and what Relay priced it at in dollars. */
+export type BridgeAppFee = { bps: number; usd: number };
+
+/** Gloam's optional cut of a bridge, from the server's env: on only with a whole rate of 1 to 100 bps and a valid recipient. */
+export function bridgeFeeSetting(env: Record<string, string | undefined>): { bps: number; recipient: string } | null {
+  const bps = Number(env.BRIDGE_FEE_BPS ?? "");
+  const recipient = env.BRIDGE_FEE_RECIPIENT ?? "";
+  return Number.isInteger(bps) && bps > 0 && bps <= 100 && isAddress(recipient) ? { bps, recipient } : null;
+}
+
+/** The appFees Relay takes: left out when Gloam takes no cut. */
+export function relayAppFees(setting: { bps: number; recipient: string } | null): { recipient: string; fee: string }[] | undefined {
+  return setting ? [{ recipient: setting.recipient, fee: String(setting.bps) }] : undefined;
+}
+
+/**
+ * Gloam's cut as a quote should show it. It is what Relay says it charged; when
+ * Relay leaves it out, the rate on what is paid, so a cut that is on always has
+ * a line. Null with no cut.
+ */
+export function quotedAppFee(setting: { bps: number } | null, relayUsd: unknown, paidUsd: number): BridgeAppFee | null {
+  if (!setting) return null;
+  const said = Number(relayUsd ?? NaN);
+  const usd = Number.isFinite(said) && said > 0 ? said : Number.isFinite(paidUsd) ? (paidUsd * setting.bps) / 10_000 : 0;
+  return { bps: setting.bps, usd: Math.round(usd * 100) / 100 };
+}
+
+/** The fee lines of a quote: Relay's, then Gloam's when it takes one. `feeUsd` holds both. */
+export function bridgeFeeLines(q: { feeUsd: number; appFee: BridgeAppFee | null }): { relayUsd: number; app: BridgeAppFee | null } {
+  return { relayUsd: Math.max(Math.round((q.feeUsd - (q.appFee?.usd ?? 0)) * 100) / 100, 0), app: q.appFee };
+}
+
 export type BridgeQuote = {
   requestId: string;
   /** Empty for a swap, which the wallet signs as `tx` instead. */
@@ -206,7 +248,9 @@ export type BridgeQuote = {
   tx: { to: string; data: string; value: string; chainId: number } | null;
   send: { amount: string; symbol: string; chain: string; chainId: number; logo: string; usd: number | null };
   receive: { amount: string; minimum: string; symbol: string; chain: string; logo: string };
+  /** Everything taken in fees: Relay's, and Gloam's own when it takes one (appFee). */
   feeUsd: number;
+  appFee: BridgeAppFee | null;
   /** Relay's estimate in seconds; Bitcoin also waits for its own confirmations. */
   timeSec: number;
   bitcoin: boolean;
@@ -238,13 +282,72 @@ export type PrivateBridgeQuote = {
   sameChain: boolean;
   send: { amount: string; symbol: string; chain: string; chainId: number; logo: string; usd: number | null };
   receive: { amount: string; symbol: string; chain: string; logo: string };
-  /** The swap's price buffer, back to the wallet as the stablecoin. */
+  /** What's left of the swap after the deposit, back to the wallet as the stablecoin (swapLeftover). */
   extra: string | null;
+  /** Everything taken in fees: Relay's, and Gloam's own when it takes one (appFee). */
   feeUsd: number;
+  appFee: BridgeAppFee | null;
   /** The paying chain's own network fee, when Relay prices it. */
   gasUsd: number | null;
   timeSec: number;
 };
+
+/**
+ * The slippage asked of Relay on a same-chain swap into the private balance,
+ * in basis points. Its default is 100. Over 54 live quotes in the real order
+ * shape on 2026-11-02, 30 paid in a median 0.59% over the amount against 1.51%,
+ * and every size still got a route. A swap that misses reverts whole, for the
+ * network fee only.
+ */
+export const SWAP_SLIPPAGE_BPS = "30";
+
+/**
+ * The most of what's paid a buffer takes, as far as a leftover is estimated.
+ * The widest in those quotes when Relay named no leftover was 1.22%. Past
+ * this share the gap is treated as the route's cost, not as money coming back.
+ */
+export const SWAP_BUFFER_MAX_SHARE = 0.015;
+
+/**
+ * What comes back to the wallet from a same-chain swap, as the stablecoin:
+ * the swap sells all the ETH sent, the deposit takes `amount` and the rest is
+ * returned. Relay answers two ways. Some routes state the swap's output above
+ * the amount, and that is the answer. Others (0x) state exactly the amount
+ * while the input is just as padded, so the leftover is what's paid in dollars
+ * less the amount and Relay's fee.
+ *
+ * An estimate stops at SWAP_BUFFER_MAX_SHARE, because routeCost counts this as
+ * money coming out: uncapped it would cancel the very gap a bad route shows up
+ * as, and leaving it out would count an ordinary buffer as a cost. Null when
+ * nothing comes back or it can't be told.
+ */
+export function swapLeftover(q: { out: bigint; amount: bigint; decimals: number; paidUsd: number | null; feeUsd: number }): string | null {
+  if (q.out > q.amount) return formatUnits(q.out - q.amount, q.decimals);
+  if (q.paidUsd === null || !Number.isFinite(q.paidUsd) || !Number.isFinite(q.feeUsd)) return null;
+  const gap = q.paidUsd - Number(formatUnits(q.amount, q.decimals)) - q.feeUsd;
+  const left = Math.min(gap, q.paidUsd * SWAP_BUFFER_MAX_SHARE).toFixed(q.decimals);
+  return Number(left) > 0 ? left : null;
+}
+
+/** "about 11 USDG", or null under a cent. Whole above ten: the figure moves with the price until the swap lands. */
+export function leftoverLabel(q: { extra: string | null; receive: { symbol: string } }): string | null {
+  const n = Number(q.extra ?? 0);
+  if (!(n >= 0.01)) return null;
+  const shown = n < 10 ? n.toFixed(2) : Math.round(n).toLocaleString("en-US");
+  return `about ${shown} ${q.receive.symbol}`;
+}
+
+/**
+ * What the wallet's confirm screen will show for a same-chain swap, said before
+ * it opens. The wallet sees the ETH go out and the leftover come back, and can
+ * never see the deposit. Without a figure, it still may show some.
+ */
+export function swapWalletNote(q: { extra: string | null; receive: { amount: string; symbol: string } }): string {
+  const n = Number(q.receive.amount);
+  const amount = n.toLocaleString("en-US", { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 });
+  const back = leftoverLabel(q);
+  return `Your wallet ${back ? `will show ${back}` : `may show a little ${q.receive.symbol}`} coming back. That's the leftover from the swap. The ${amount} ${q.receive.symbol} goes straight into your private balance, so your wallet won't list it.`;
+}
 
 export type BridgeStage = "waiting" | "moving" | "done" | "failed" | "refunded";
 

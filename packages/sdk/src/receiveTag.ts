@@ -25,6 +25,7 @@ import { FIELD_PRIME, NATIVE_ASSET } from "./constants.js";
 import { noteNullifierPoseidon } from "./note.js";
 import { fieldToHex, hexToField } from "./poseidon.js";
 import { cleanPaymentNote } from "./paymentNote.js";
+import { seedMakesSecret } from "./shortLink.js";
 import type { NoteExport } from "./witness.js";
 
 export const RECEIVE_TAG_PREFIX = "gloamr1.";
@@ -247,6 +248,8 @@ export interface NotePackage {
    * older ones don't, and readers skip a key they don't know.
    */
   chainId?: number;
+  /** The 16-byte seed (hex) the secret was made from, when it was: lets the payment have a short link. */
+  seed?: Hex;
 }
 
 function validChainId(v: unknown): v is number {
@@ -297,6 +300,8 @@ export function encodeNotePackage(pack: Omit<NotePackage, "v" | "type" | "scheme
     ...(validChainId(pack.chainId) ? { ch: pack.chainId } : {}),
     // Only when there is one, so a package without a note keeps the old bytes.
     ...(note ? { n: note } : {}),
+    // The seed, only when it makes the secret (same key as the app's codes).
+    ...(seedMakesSecret(pack.seed, pack.secret) ? { sd: pack.seed } : {}),
   });
   return NOTE_PACKAGE_PREFIX + b64urlEncode(new TextEncoder().encode(json));
 }
@@ -326,6 +331,8 @@ export function decodeNotePackage(input: string): NotePackage {
   if (note) pack.note = note;
   const ch = obj.ch ?? obj.chainId;
   if (validChainId(ch)) pack.chainId = ch;
+  const sd = typeof obj.sd === "string" ? obj.sd : undefined;
+  if (sd && seedMakesSecret(sd, pack.secret)) pack.seed = sd as Hex;
   const problem = noteFieldProblem(pack);
   if (problem) throw new Error(`Not a valid Gloam note package. ${problem}`);
   return pack;

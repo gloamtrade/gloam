@@ -68,6 +68,8 @@ export type TgMessage = {
   new_chat_members?: TgUser[];
   left_chat_member?: TgUser;
   via_bot?: TgUser;
+  /** Set by Telegram on a post its linked channel forwarded into the group by itself. */
+  is_automatic_forward?: boolean;
   /** Set on a forwarded message: who it first came from (a user, a group or a channel). */
   forward_origin?: { type: "user" | "hidden_user" | "chat" | "channel"; chat?: TgChat; sender_chat?: TgChat; sender_user?: TgUser };
   /** A reply quoting a message from another chat (a channel post, usually). */
@@ -201,6 +203,14 @@ export async function sendPhoto(
   return { ok: true, messageId: r.result.message_id, fileId: sizes.length ? sizes[sizes.length - 1]!.file_id : null };
 }
 
+/** The channel linked to a group (its posts come into the group): its id, null when there is none, undefined when Telegram can't say. */
+export async function linkedChatId(chatId: number): Promise<number | null | undefined> {
+  const r = await call<{ linked_chat_id?: number }>("getChat", { chat_id: chatId });
+  if (!r.ok || !r.result) return undefined;
+  const id = r.result.linked_chat_id;
+  return typeof id === "number" && Number.isSafeInteger(id) ? id : null;
+}
+
 /** The group's admins' ids (bots included), or null when Telegram can't say. */
 export async function getChatAdministrators(chatId: number): Promise<number[] | null> {
   const r = await call<TgChatMember[]>("getChatAdministrators", { chat_id: chatId });
@@ -252,8 +262,11 @@ export async function deleteMessage(chatId: number, messageId: number): Promise<
 /**
  * Removes someone from the group and keeps them out, deleting what they posted
  * there (revoke_messages). Works only while the bot is an admin with Ban users.
+ * A negative id is a chat someone posted as (a channel): that chat may no
+ * longer post in the group, and the person behind it still can as themselves.
  */
 export function banUser(chatId: number, userId: number): Promise<ModResult> {
+  if (userId < 0) return modCall("banChatSenderChat", { chat_id: chatId, sender_chat_id: userId });
   return modCall("banChatMember", { chat_id: chatId, user_id: userId, revoke_messages: true });
 }
 
@@ -288,8 +301,12 @@ function permissions(on: boolean): Record<string, boolean> {
   );
 }
 
-/** Mutes someone until `untilSec` (unix seconds). Needs the Ban users right, which covers restricting. */
-export function muteUser(chatId: number, userId: number, untilSec: number): Promise<ModResult> {
+/**
+ * Mutes someone until `untilSec` (unix seconds). Needs the Ban users right, which covers restricting.
+ * A chat someone posted as (a negative id) can't be muted: nothing is done, and the caller's delete stands.
+ */
+export async function muteUser(chatId: number, userId: number, untilSec: number): Promise<ModResult> {
+  if (userId < 0) return { ok: false, noRights: false };
   return modCall("restrictChatMember", {
     chat_id: chatId,
     user_id: userId,
@@ -299,13 +316,15 @@ export function muteUser(chatId: number, userId: number, untilSec: number): Prom
   });
 }
 
-/** Lets someone the bot banned join the group again. Only lifts a ban; never removes a member. */
+/** Lets someone the bot banned join the group again (a chat posted as, by its negative id: post again). Only lifts a ban; never removes a member. */
 export async function unbanMember(chatId: number, userId: number): Promise<boolean> {
+  if (userId < 0) return (await call("unbanChatSenderChat", { chat_id: chatId, sender_chat_id: userId })).ok;
   return (await call("unbanChatMember", { chat_id: chatId, user_id: userId, only_if_banned: true })).ok;
 }
 
 /** Lifts a mute: Telegram's way is every permission on, which leaves the member with the group's defaults. */
 export async function unmuteUser(chatId: number, userId: number): Promise<boolean> {
+  if (userId < 0) return false;
   return (await modCall("restrictChatMember", { chat_id: chatId, user_id: userId, permissions: permissions(true), use_independent_chat_permissions: true })).ok;
 }
 

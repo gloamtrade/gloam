@@ -129,10 +129,13 @@ for (const set of [CIRCUIT_SHA256.wasm, CIRCUIT_SHA256.zkey.dev, CIRCUIT_SHA256.
 }
 
 // ── fees ────────────────────────────────────────────────────────────────────────
-assert(CASH_OUT_FEE_BPS === 25, "0.25% cash-out fee");
-assert(cashOutFee(100_000_000n) === 250_000n, "0.25% of 100 USDC.e is 0.25");
-assert(cashOutFee(399n) === 0n, "rounds down in the user's favour");
-assert(cashOutFee(10_001n, 25) === 25n, "matches the contract's split formula");
+assert(CASH_OUT_FEE_BPS === 50, "0.5% cash-out fee");
+assert(cashOutFee(100_000_000n) === 500_000n, "0.5% of 100 USDC.e is 0.5");
+assert(cashOutFee(199n) === 0n, "rounds down in the user's favour");
+assert(cashOutFee(399n) === 1n, "rounds down, not to the nearest");
+assert(cashOutFee(10_001n) === 50n, "matches the contract's split formula");
+assert(cashOutFee(100_000_000n, 25) === 250_000n, "a pool still at 0.25%, such as Base Sepolia");
+assert(cashOutFee(10_001n, 25) === 25n, "the same formula at 25 bps");
 assert(cashOutFee(1_000n, 0) === 0n, "fee off");
 throws(() => cashOutFee(-1n), /negative/, "negative amount");
 
@@ -224,10 +227,10 @@ for (const [family, chainId, key, assets, native, memo] of [
   assert(net.assets.map((a) => a.address).join() === assets.join(), `${key} assets`);
   assert(live[0].testnet === false, "mainnets come first");
   assert(poolForChainId(chainId) === filled.pool, `${key} pool by chain id`);
-  // Deposits: listed assets only, within the beta per-deposit limit, never native.
+  // Deposits: listed assets only, within the per-deposit limit, never native.
   const usd = net.assets[0];
   assertDepositAllowed(chainId, usd.address, usd.depositLimit.perDeposit);
-  assertDepositAllowed(chainId, usd.address, usd.depositLimit.perDeposit + 1n); // the launch value no longer refuses
+  assertDepositAllowed(chainId, usd.address, usd.depositLimit.perDeposit + 1n); // amounts are read live, never from this table
   if (!native) throws(() => assertDepositAllowed(chainId, NATIVE_ASSET, 1n), /no native deposits/, `${key}: native refused`);
   throws(() => assertDepositAllowed(chainId, "0x00000000000000000000000000000000000000bb", 1n), /does not list/, `${key}: unlisted asset refused`);
   const intent = await buildShieldBoundIntent({ chainId, asset: usd.address, amountWei: usd.depositLimit.perDeposit, prover });
@@ -243,19 +246,23 @@ for (const [family, chainId, key, assets, native, memo] of [
 // Checked on the asset tables directly, so they hold before the pools are in too.
 {
   const { RH_MAINNET_ASSETS, TEMPO_MAINNET_ASSETS, BASE_MAINNET_ASSETS, BASE_SEPOLIA_ASSETS } = await import("../dist/index.js");
-  const baseStables = [...BASE_MAINNET_ASSETS, ...BASE_SEPOLIA_ASSETS].filter((a) => a.symbol !== "ETH" && a.symbol !== "BDX");
-  for (const a of [...TEMPO_MAINNET_ASSETS, RH_MAINNET_ASSETS[0], ...baseStables]) {
-    assert(a.decimals === 6 && a.depositLimit.perDeposit === 500_000_000n && a.depositLimit.total === 25_000_000_000n, `${a.symbol}: 500 per deposit, 25,000 total`);
+  const stable = (a) => a.symbol !== "ETH" && a.symbol !== "BDX";
+  // The mainnet stablecoins as read on chain on 2026-11-02; Base Sepolia keeps its launch value.
+  for (const a of [...TEMPO_MAINNET_ASSETS, RH_MAINNET_ASSETS[0], ...BASE_MAINNET_ASSETS.filter(stable)]) {
+    assert(a.decimals === 6 && a.depositLimit.perDeposit === 50_000_000_000n && a.depositLimit.total === 2_500_000_000_000n, `${a.symbol}: 50,000 per deposit, 2,500,000 total`);
+  }
+  for (const a of BASE_SEPOLIA_ASSETS.filter(stable)) {
+    assert(a.decimals === 6 && a.depositLimit.perDeposit === 500_000_000n && a.depositLimit.total === 25_000_000_000n, `${a.symbol} on Base Sepolia: 500 per deposit, 25,000 total`);
   }
   const g = RH_MAINNET_ASSETS[1];
-  assert(g.symbol === "GLOAM" && g.decimals === 18 && g.depositLimit.perDeposit === 25_000n * 10n ** 18n && g.depositLimit.total === 250_000n * 10n ** 18n, "GLOAM: 25,000 per deposit, 250,000 total");
+  assert(g.symbol === "GLOAM" && g.decimals === 18 && g.depositLimit.perDeposit === 2_500_000n * 10n ** 18n && g.depositLimit.total === 25_000_000n * 10n ** 18n, "GLOAM: 2,500,000 per deposit, 25,000,000 total");
   // The limit queued for each of ETH, AI and ORBIO (contracts/script/QueueRobinhoodAssets.s.sol, 0 on chain
-  // until it lands), and the limit live on PONS and CASHCAT, open since 2026-10-27 with raises queued.
+  // until it lands), and the limit live on PONS and CASHCAT, as read on chain on 2026-11-02.
   const whole = (n) => BigInt(n) * 10n ** 18n;
   const rhLimits = {
     ETH: [NATIVE_ASSET, 11, 110],
-    PONS: [RH_MAINNET_PONS, 3_900, 98_000],
-    CASHCAT: [RH_MAINNET_CASHCAT, 9_600, 240_000],
+    PONS: [RH_MAINNET_PONS, 390_000, 9_800_000],
+    CASHCAT: [RH_MAINNET_CASHCAT, 960_000, 24_000_000],
     AI: [RH_MAINNET_AI, 400_000, 4_000_000],
     ORBIO: [RH_MAINNET_ORBIO, 1_000_000, 10_000_000],
   };
@@ -266,16 +273,16 @@ for (const [family, chainId, key, assets, native, memo] of [
   }
   assert(BASE_MAINNET_ASSETS.map((a) => a.address).join() === [BASE_USDC, BASE_EURC, BASE_USDT, NATIVE_ASSET, BASE_BDX].join(), "Base mainnet lists USDC, EURC, USDT, ETH and BDX");
   // BDX (Beldex, LayerZero OFT): the same address on Base and Ethereum, 9 decimals,
-  // 100,000 per deposit and 2,000,000 in total once its timelocked limit lands.
+  // no limit once its timelocked change lands (0 on chain until then).
   assert(BASE_BDX === "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181" && ETHEREUM_BDX === BASE_BDX, "BDX: one address on Base and Ethereum");
   const bdx = BASE_MAINNET_ASSETS.find((a) => a.symbol === "BDX");
-  assert(bdx.decimals === 9 && bdx.depositLimit.perDeposit === 100_000n * 10n ** 9n && bdx.depositLimit.total === 2_000_000n * 10n ** 9n, "BDX: 100,000 per deposit, 2,000,000 total");
+  assert(bdx.decimals === 9 && bdx.depositLimit.perDeposit === (1n << 128n) - 1n && bdx.depositLimit.total === (1n << 128n) - 1n, "BDX: no limit once it lands");
   assert(!BASE_SEPOLIA_ASSETS.some((a) => a.symbol === "BDX"), "no BDX on Base Sepolia");
   assert(BASE_SEPOLIA_ASSETS.map((a) => a.address).join() === [BASE_SEPOLIA_USDC, BASE_SEPOLIA_EURC, NATIVE_ASSET].join(), "Base Sepolia lists USDC, EURC and ETH (no USDT)");
-  for (const list of [BASE_MAINNET_ASSETS, BASE_SEPOLIA_ASSETS]) {
-    const eth = list.find((a) => a.symbol === "ETH");
-    assert(eth.decimals === 18 && eth.depositLimit.perDeposit === 2n * 10n ** 17n && eth.depositLimit.total === 10n * 10n ** 18n, "Base ETH: 0.2 per deposit, 10 total");
-  }
+  const mainEth = BASE_MAINNET_ASSETS.find((a) => a.symbol === "ETH");
+  assert(mainEth.decimals === 18 && mainEth.depositLimit.perDeposit === 20n * 10n ** 18n && mainEth.depositLimit.total === 1_000n * 10n ** 18n, "Base ETH: 20 per deposit, 1,000 total");
+  const testEth = BASE_SEPOLIA_ASSETS.find((a) => a.symbol === "ETH");
+  assert(testEth.decimals === 18 && testEth.depositLimit.perDeposit === 2n * 10n ** 17n && testEth.depositLimit.total === 10n * 10n ** 18n, "Base Sepolia ETH: 0.2 per deposit, 10 total");
 }
 
 // ── x402 requirements resolve the pool from the network ─────────────────────────

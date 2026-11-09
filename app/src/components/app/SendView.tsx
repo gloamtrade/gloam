@@ -31,6 +31,7 @@ import { Select } from "@/components/ui/Select";
 import { TokenLogo } from "./TokenLogo";
 import { WalletMenu } from "./WalletMenu";
 import { SuccessModal } from "./SuccessModal";
+import { walletErrorForPeople } from "@/lib/walletErrors";
 
 export function SendView() {
   const { address, isConnected, chainId, demo } = useAppAccount();
@@ -109,6 +110,8 @@ export function SendView() {
       return;
     }
     if (settings.confirmSends) setShowSuccess(true);
+    // no pop-up: clear the amount here, so pressing Send again can't repeat the payment by accident
+    else setAmount("");
   }, [isSuccess, hash, receipt, sentSymbol, refetch, refetchToken, settings.confirmSends]);
 
   /** The amount in the asset's base units, or null when it doesn't read as a number. */
@@ -155,7 +158,10 @@ export function SendView() {
       setMaxSend({ ...max, to, chainId: network.chainId });
       setAmount(formatEther(max.value));
     } catch (e) {
-      if (run === maxRun.current) setFormError(e instanceof Error ? e.message : "Could not work out Max. Try again.");
+      // our own words (lib/nativeSend) are shown; an RPC error's text (viem's, with a shortMessage) is not
+      if (run === maxRun.current) {
+        setFormError(e instanceof Error && !("shortMessage" in e) ? e.message : "Could not work out Max. Try again.");
+      }
     } finally {
       // Max is off while it runs, so this is the only estimate in flight
       setEstimatingMax(false);
@@ -395,7 +401,20 @@ export function SendView() {
               role="alert"
               className="mt-4 break-words rounded-xl bg-danger-soft px-4 py-3 text-[13.5px] leading-relaxed text-danger"
             >
-              {formError || sendError?.message.slice(0, 160)}
+              {formError || walletErrorForPeople(sendError)}
+            </p>
+          )}
+          {hash && isSuccess && !settings.confirmSends && receipt?.status !== "reverted" && (
+            <p className="mt-4 flex items-center justify-center gap-2 text-[13.5px] text-mute" aria-live="polite">
+              Sent.
+              <a
+                href={network.explorerTx(hash)}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-foreground underline-offset-4 hover:underline"
+              >
+                View transaction
+              </a>
             </p>
           )}
           {hash && !isSuccess && (

@@ -78,7 +78,7 @@ console.log(`    ${c.cyan}cd ${name}${c.reset}`);
 console.log(`    ${c.cyan}npm install${c.reset}`);
 console.log(`    ${c.cyan}npm run dev${c.reset}   ${c.dim}# fetches the shield circuit, then starts on :3000${c.reset}\n`);
 console.log(`  Open http://localhost:3000, connect a wallet, and shield your first private USDG.`);
-console.log(`  It runs on Robinhood Chain mainnet (4663, beta limits) once your SDK`);
+console.log(`  It runs on Robinhood Chain mainnet (4663, deposit limits) once your SDK`);
 console.log(`  has the mainnet pool, and on testnet (46630) until then.\n`);
 console.log(`  Practice on testnet: ${c.cyan}NEXT_PUBLIC_GLOAM_NETWORK=robinhood npm run dev${c.reset}`);
 console.log(`  Test ETH:            ${c.indigo}https://faucet.testnet.chain.robinhood.com/${c.reset}`);

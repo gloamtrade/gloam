@@ -99,7 +99,7 @@ test("no limit: a vault limit of uint128 max takes any amount and is never quote
   assert.equal(lim?.unlimited, true);
   await assertDepositWithinLiveLimit(vault(MAX, MAX), 1, ETHEREUM_BDX, 10n ** 24n);
   // a finite side under a max one still applies, and its words never carry the max
-  await assert.rejects(assertDepositWithinLiveLimit(vault(500_000_000n, MAX), 1, ETHEREUM_USDT, 500_000_001n), /^Error: Over the beta limit on Ethereum: at most 500 USDT per deposit\.$/);
+  await assert.rejects(assertDepositWithinLiveLimit(vault(500_000_000n, MAX), 1, ETHEREUM_USDT, 500_000_001n), /^Error: Over the deposit limit on Ethereum: at most 500 USDT per deposit\.$/);
 });
 
 test("BDX in limits: 9 decimals, Base's when no network is named, Ethereum's when it is", () => {

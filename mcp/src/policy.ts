@@ -69,16 +69,25 @@ import {
   TEMPO_USDCE,
   TEMPO_USDT0,
   networkName as sdkNetworkName,
+  testnetNetwork,
+  mainnetNetwork,
 } from "@gloamtrade/sdk";
 import type { NetworkKey } from "./networks.js";
 
-export type SpendTool = "pay" | "send" | "shield";
+export type SpendTool = "pay" | "send" | "shield" | "swap";
+/**
+ * The tools an agent may use when its limits list none. "swap" is not among them: an
+ * owner allows private swaps by listing "swap" in tools (or GLOAM_LIMIT_TOOLS).
+ */
 export const SPEND_TOOLS: SpendTool[] = ["pay", "send", "shield"];
+/** Every tool a limits config can name. */
+export const ALL_SPEND_TOOLS: SpendTool[] = ["pay", "send", "shield", "swap"];
 
 const TOOL_WORDS: Record<SpendTool, string> = {
   pay: "pay privately (gloam_execute_private_pay)",
   send: "send publicly (gloam_execute_transfer)",
   shield: "shield into a private balance (gloam_execute_shield)",
+  swap: 'swap privately (gloam_execute_private_swap; the owner lists "swap" in tools to allow it)',
 };
 
 /** One money-moving action an agent asked for, before it is signed. */
@@ -90,7 +99,12 @@ export type Spend = {
   amountWei: bigint;
   /** Who receives it: a Gloam receive tag or 0x address. null for a shield (the agent's own balance). */
   recipient: string | null;
+  /** A swap: the asset it buys. It must be one the owner allows (swapTo, else the agent's assets). */
+  assetOut?: Address;
 };
+
+/** An asset a swap may buy (swapTo): no caps, only which asset on which network. */
+export type SwapTarget = { symbol: string; address: Address; chainId: number | null };
 
 export type AssetLimit = {
   symbol: string;
@@ -111,6 +125,8 @@ export type AgentPolicy = {
   recipients: "any" | string[];
   tools: SpendTool[];
   assets: AssetLimit[];
+  /** What a swap may buy. null: only the agent's own assets (`assets`). */
+  swapTo: SwapTarget[] | null;
 };
 
 /** What the server runs with: enforced limits, an explicit opt-out, or nothing (every spend refused). */
@@ -144,7 +160,18 @@ export const NETWORK_CHAIN_IDS: Record<NetworkKey, number> = {
   "tempo-mainnet": TEMPO_MAINNET_CHAIN_ID,
   "base-mainnet": BASE_MAINNET_CHAIN_ID,
   "ethereum-mainnet": ETHEREUM_MAINNET_CHAIN_ID,
+  // 0 until the SDK has every Elysium value (src/elysium.ts): a limit naming it is refused then.
+  "elysium-mainnet": mainnetNetwork("elysium")?.chainId ?? 0,
+  // Elysium testnet (99801): 0 until the SDK has its pool.
+  elysium: testnetNetwork("elysium")?.chainId ?? 0,
 };
+
+/** The chain id a limit's network names; refuses Elysium while the SDK has no chain id for it. */
+function networkChainId(key: NetworkKey): number {
+  const id = NETWORK_CHAIN_IDS[key];
+  if (!id) throw new Error(`${key} is not available in this version of @gloamtrade/mcp yet. Update the package.`);
+  return id;
+}
 
 // Testnet assets first: a symbol on both sides resolves to the testnet unless a network is named.
 export const KNOWN_ASSETS: KnownAsset[] = [
@@ -165,6 +192,8 @@ export const KNOWN_ASSETS: KnownAsset[] = [
   { symbol: "PYUSD", chainId: ETHEREUM_SEPOLIA_CHAIN_ID, address: ETHEREUM_SEPOLIA_PYUSD, decimals: 6, stable: true },
   { symbol: "EURC", chainId: ETHEREUM_SEPOLIA_CHAIN_ID, address: ETHEREUM_SEPOLIA_EURC, decimals: 6, stable: true },
   { symbol: "ETH", chainId: ETHEREUM_SEPOLIA_CHAIN_ID, address: NATIVE_ASSET, decimals: 18, stable: false },
+  // Elysium testnet, once the SDK has its pool: test USDC only, after the other testnets so a bare "USDC" keeps its old meaning.
+  ...(testnetNetwork("elysium")?.assets ?? []).map((a) => ({ symbol: a.symbol, chainId: testnetNetwork("elysium")!.chainId, address: a.address, decimals: a.decimals, stable: true })),
   // Mainnet: exactly what the mainnet pools list.
   { symbol: "USDG", chainId: RH_MAINNET_CHAIN_ID, address: RH_MAINNET_USDG, decimals: 6, stable: true },
   { symbol: "GLOAM", chainId: RH_MAINNET_CHAIN_ID, address: GLOAM_TOKEN, decimals: 18, stable: false },
@@ -191,6 +220,8 @@ export const KNOWN_ASSETS: KnownAsset[] = [
   { symbol: "EURC", chainId: ETHEREUM_MAINNET_CHAIN_ID, address: ETHEREUM_EURC, decimals: 6, stable: true },
   { symbol: "ETH", chainId: ETHEREUM_MAINNET_CHAIN_ID, address: NATIVE_ASSET, decimals: 18, stable: false },
   { symbol: "BDX", chainId: ETHEREUM_MAINNET_CHAIN_ID, address: ETHEREUM_BDX, decimals: 9, stable: false },
+  // Elysium, once the SDK has its values: USDC only, after the others so a bare "USDC" keeps its old meaning.
+  ...(mainnetNetwork("elysium")?.assets ?? []).map((a) => ({ symbol: a.symbol, chainId: mainnetNetwork("elysium")!.chainId, address: a.address, decimals: a.decimals, stable: true })),
 ];
 
 /** "Robinhood Chain", "Tempo testnet" and so on; "any network" for a limit that names none. */
@@ -207,7 +238,7 @@ export function assetLabel(chainId: number, asset: Address): string {
 // ------------------------------------------------------------------ config shape
 
 const amount = z.union([z.string(), z.number()]).transform((v) => String(v).trim());
-const network = z.enum(["robinhood", "tempo", "base", "ethereum", "robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet"]);
+const network = z.enum(["robinhood", "tempo", "base", "ethereum", "robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "elysium"]);
 
 const assetEntry = z
   .object({
@@ -223,10 +254,12 @@ const agentSchema = z
   .object({
     expiresAt: z.string().optional(),
     recipients: z.union([z.literal("any"), z.array(z.string().min(1)).min(1)]),
-    tools: z.array(z.enum(["pay", "send", "shield"])).min(1).optional(),
+    tools: z.array(z.enum(["pay", "send", "shield", "swap"])).min(1).optional(),
     maxPerPayment: amount.optional(),
     maxPerDay: amount.optional(),
     assets: z.union([z.array(z.string().min(1)).min(1), z.record(assetEntry)]),
+    /** What a private swap may buy; left out, only the assets above. */
+    swapTo: z.union([z.array(z.string().min(1)).min(1), z.record(z.object({ network: network.optional() }).strict())]).optional(),
   })
   .strict();
 
@@ -301,7 +334,7 @@ export function resolveAgent(agent: string, raw: AgentConfig, source: string): A
     let chainId: number | null;
     let decimals: number;
     let symbol: string;
-    const wantChain = entry.network ? NETWORK_CHAIN_IDS[entry.network] : null;
+    const wantChain = entry.network ? networkChainId(entry.network) : null;
     if (isAddress(k)) {
       known = KNOWN_ASSETS.find(
         (a) => a.address.toLowerCase() === k.toLowerCase() && (wantChain == null || a.chainId === wantChain)
@@ -357,7 +390,31 @@ export function resolveAgent(agent: string, raw: AgentConfig, source: string): A
     recipients: cfg.recipients === "any" ? "any" : cfg.recipients.map(normalizeRecipient),
     tools: cfg.tools ?? SPEND_TOOLS,
     assets,
+    swapTo: cfg.swapTo === undefined ? null : resolveSwapTargets(cfg.swapTo),
   };
+}
+
+/** swapTo entries: a symbol Gloam knows, or a 0x token address, each on the network it names (if any). */
+function resolveSwapTargets(raw: string[] | Record<string, { network?: z.infer<typeof network> }>): SwapTarget[] {
+  const entries: [string, { network?: z.infer<typeof network> }][] = Array.isArray(raw) ? raw.map((k) => [k, {}]) : Object.entries(raw);
+  return entries.map(([key, entry]) => {
+    const k = key.trim();
+    const wantChain = entry.network ? networkChainId(entry.network) : null;
+    if (isAddress(k)) {
+      const known = KNOWN_ASSETS.find((a) => a.address.toLowerCase() === k.toLowerCase() && (wantChain == null || a.chainId === wantChain));
+      return { symbol: known?.symbol ?? `${k.slice(0, 6)}…${k.slice(-4)}`, address: k, chainId: wantChain ?? known?.chainId ?? null };
+    }
+    if (/^eth$/i.test(k)) return { symbol: "ETH", address: NATIVE_ASSET, chainId: wantChain };
+    const known = KNOWN_ASSETS.find((a) => a.symbol.toLowerCase() === k.toLowerCase() && (wantChain == null || a.chainId === wantChain));
+    if (!known) throw new Error(`swapTo: unknown asset "${k}". Use a symbol Gloam knows or a 0x token address.`);
+    return { symbol: known.symbol, address: known.address, chainId: known.chainId };
+  });
+}
+
+/** Whether a swap may buy `assetOut` on `chainId`: one of swapTo when the owner set it, else one of the agent's assets. */
+export function swapTargetAllowed(policy: AgentPolicy, chainId: number, assetOut: Address): boolean {
+  const matches = (a: { address: Address; chainId: number | null }) => a.address.toLowerCase() === assetOut.toLowerCase() && (a.chainId == null || a.chainId === chainId);
+  return policy.swapTo ? policy.swapTo.some(matches) : policy.assets.some(matches);
 }
 
 const ENV_KEYS = [
@@ -368,6 +425,7 @@ const ENV_KEYS = [
   "GLOAM_LIMIT_EXPIRES",
   "GLOAM_LIMIT_TOOLS",
   "GLOAM_LIMIT_NETWORK",
+  "GLOAM_LIMIT_SWAP_TO",
 ] as const;
 
 function list(v: string): string[] {
@@ -440,7 +498,7 @@ export function loadPolicy(env: Record<string, string | undefined>, readFile: (p
         mode: "invalid",
         agent,
         source,
-        error: `GLOAM_LIMIT_NETWORK "${limitNetwork}" is not a Gloam network. Use robinhood-mainnet, tempo-mainnet, base-mainnet, ethereum-mainnet, robinhood, tempo, base or ethereum.`,
+        error: `GLOAM_LIMIT_NETWORK "${limitNetwork}" is not a Gloam network. Use robinhood-mainnet, tempo-mainnet, base-mainnet, ethereum-mainnet, ${mainnetNetwork("elysium") ? "elysium-mainnet, " : ""}robinhood, tempo, base${testnetNetwork("elysium") ? ", ethereum or elysium" : " or ethereum"}.`,
       };
     }
     const assetKeys = list(env.GLOAM_LIMIT_ASSETS ?? "");
@@ -453,6 +511,10 @@ export function loadPolicy(env: Record<string, string | undefined>, readFile: (p
     };
     if (env.GLOAM_LIMIT_EXPIRES?.trim()) raw.expiresAt = env.GLOAM_LIMIT_EXPIRES.trim();
     if (env.GLOAM_LIMIT_TOOLS?.trim()) raw.tools = list(env.GLOAM_LIMIT_TOOLS);
+    if (env.GLOAM_LIMIT_SWAP_TO?.trim()) {
+      const to = list(env.GLOAM_LIMIT_SWAP_TO);
+      raw.swapTo = limitNetwork ? Object.fromEntries(to.map((k) => [k, { network: limitNetwork }])) : to;
+    }
     try {
       return { mode: "enforced", policy: resolveAgent(agent, raw as AgentConfig, source) };
     } catch (e) {
@@ -501,8 +563,12 @@ function shortRecipient(r: string): string {
   return r.length > 24 ? `${r.slice(0, 14)}…${r.slice(-6)}` : r;
 }
 
-/** Decide one spend against the policy and what already counts today. null means allowed. */
-export function checkSpend(policy: AgentPolicy, spend: Spend, counted: CountedSpend[], now: number): Refusal | null {
+/**
+ * Decide one spend against the policy and what already counts today. null means allowed.
+ * `capped: false` checks everything but the amount caps, for money that was counted when it
+ * first moved (a swap's exit pays out what the swap already spent).
+ */
+export function checkSpend(policy: AgentPolicy, spend: Spend, counted: CountedSpend[], now: number, opts: { capped?: boolean } = {}): Refusal | null {
   if (policy.expiresAt && now > policy.expiresAt.getTime()) {
     return {
       code: "expired",
@@ -534,6 +600,15 @@ export function checkSpend(policy: AgentPolicy, spend: Spend, counted: CountedSp
       };
     }
   }
+  if (spend.tool === "swap" && spend.assetOut && !swapTargetAllowed(policy, spend.chainId, spend.assetOut)) {
+    return {
+      code: "swap_to_not_allowed",
+      message: `${assetLabel(spend.chainId, spend.assetOut)} on ${networkName(spend.chainId)} is not something this agent may swap into (${
+        policy.swapTo ? `swapTo: ${policy.swapTo.map((a) => a.symbol).join(", ")}` : `its assets: ${policy.assets.map((a) => a.symbol).join(", ")}; the owner can add others in swapTo`
+      }).`,
+    };
+  }
+  if (opts.capped === false) return null;
   if (spend.amountWei > limit.maxPerPayment) {
     return {
       code: "over_per_payment",

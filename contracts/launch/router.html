@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploy the swap router</title>
+<style>
+  :root { --bg:#f4f4f5; --panel:#fff; --ink:#0b0c0e; --mute:#5f636a; --line:#e4e6e9; --sealed:#2e7d53; --warn:#9a5b00; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 system-ui,-apple-system,sans-serif; padding:48px 16px; }
+  main { max-width:680px; margin:0 auto; display:flex; flex-direction:column; gap:16px; }
+  h1 { font-weight:400; font-size:32px; letter-spacing:-.02em; margin:0 0 4px; }
+  p { margin:0; color:var(--mute); }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:20px 22px; display:flex; flex-direction:column; gap:12px; }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+  .name { font-weight:600; }
+  code { font:13px ui-monospace,Menlo,monospace; }
+  button { background:var(--ink); color:#fff; border:0; border-radius:10px; padding:11px 16px; font-size:15px; font-weight:500; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); }
+  button:disabled { opacity:.4; cursor:default; }
+  .status { font-size:14px; color:var(--mute); word-break:break-word; }
+  .facts { font-size:14px; color:var(--mute); display:grid; grid-template-columns:auto 1fr; gap:4px 12px; }
+  .facts b { font-weight:500; color:var(--ink); word-break:break-all; }
+  .ok { color:var(--sealed); }
+  .bad { color:var(--warn); }
+  a { color:var(--sealed); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Deploy the swap router</h1>
+  <p>Deploys GloamVaultSwapV4c on Robinhood Chain, Base and Ethereum, and GloamVaultSwapTempo2 on Tempo, through the CREATE2 factory. Each card is on its own: deploy them in any order, on any day. Deploying moves no funds, needs no timelock, and changes nothing for anyone, because the app keeps using the routers it uses now until its switch is flipped. Follow <code>DEPLOY-ROUTER.md</code>. Connect <code>0x76b7…D4D8</code>.</p>
+
+  <div class="card">
+    <span class="name">What this page signs</span>
+    <div class="status" id="compile">Reading this checkout's compile…</div>
+    <div class="status">The call, the address and the code are worked out from this checkout's compile, never typed or linked in, and the page stops unless they match the pinned fixture. Each Deploy stays shut until the call has been simulated and lands at that address. The bytes are the same whoever sends them, so a contract already at the address is only accepted if its code matches byte for byte.</div>
+    <div class="row"><button class="ghost" id="refresh">Read the chains again</button></div>
+  </div>
+
+  <div id="cards" style="display:contents"></div>
+</main>
+<script>
+const SEL = { vault: "fbfa77cf", treasury: "61d027b3", poolManager: "dc4c90d3", weth: "3fc8cef3", owner: "8da5cb5b", dex: "692058c2", allowedPool: "c6fedc9b" };
+const addrOf = (ret) => "0x" + ret.slice(-40).toLowerCase();
+const word = (hex) => hex.replace(/^0x/, "").toLowerCase().padStart(64, "0");
+const fmt = (wei, digits = 6) => (Number(wei) / 1e18).toFixed(digits);
+let plan = null;
+
+async function rpc(c, method, params) {
+  for (let i = 0; ; i++) {
+    const res = await fetch(c.rpc, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+    if (res.status === 429 && i < 4) { await new Promise((r) => setTimeout(r, 1500 * (i + 1))); continue; }
+    const j = await res.json();
+    if (j.error) throw Object.assign(new Error(j.error.message), { data: j.error.data });
+    return j.result;
+  }
+}
+const read = (c, to, data) => rpc(c, "eth_call", [{ to, data }, "latest"]);
+
+/** Everything that must be true of a deployed router. Each line is [what, passed]. */
+async function readBack(c) {
+  const lines = [];
+  const code = await rpc(c, "eth_getCode", [c.address, "latest"]);
+  lines.push(["Code matches this compile, byte for byte", code.toLowerCase() === c.runtime]);
+  const is = async (label, sel, want) => lines.push([label, addrOf(await read(c, c.address, "0x" + sel)) === want.toLowerCase()]);
+  await is("Vault", SEL.vault, plan.vault);
+  await is("Treasury", SEL.treasury, plan.treasury);
+  if (c.venue === "tempo") {
+    await is("Stablecoin DEX", SEL.dex, c.dex);
+  } else {
+    await is("PoolManager", SEL.poolManager, c.poolManager);
+    await is("WETH", SEL.weth, c.weth);
+    await is("Owner", SEL.owner, plan.owner);
+    let live = 0;
+    for (const id of c.poolIds) if (BigInt(await read(c, c.address, "0x" + SEL.allowedPool + word(id))) === 1n) live++;
+    lines.push([live + " of " + c.poolIds.length + " pools live", live === c.poolIds.length]);
+  }
+  lines.push(["escrowFor agrees with the pinned escrow code", addrOf(await read(c, c.address, c.escrowSample.data)) === c.escrowSample.answer]);
+  return lines;
+}
+
+async function ensureWallet(id, c) {
+  if (!window.ethereum) throw new Error("No wallet found in this browser. Open this page in the browser with your wallet extension.");
+  const [account] = await window.ethereum.request({ method: "eth_requestAccounts" });
+  if (account.toLowerCase() !== plan.owner) throw new Error("Your wallet is on " + account + ". Switch to " + plan.owner + " and press again.");
+  const chainId = "0x" + Number(id).toString(16);
+  try {
+    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId }] });
+  } catch (e) {
+    if (e && (e.code === 4902 || /unrecognized|not added|unknown chain/i.test(e.message || ""))) {
+      await window.ethereum.request({ method: "wallet_addEthereumChain", params: [{ chainId, chainName: c.chainName, rpcUrls: [c.rpc],
+        nativeCurrency: { name: c.native, symbol: c.symbol, decimals: 18 }, blockExplorerUrls: [c.explorer] }] });
+    } else throw e;
+  }
+  const on = await window.ethereum.request({ method: "eth_chainId" });
+  if (Number(on) !== Number(id)) throw new Error("Your wallet is on chain " + Number(on) + ", not " + c.chainName + ". Switch it and press again.");
+  return account;
+}
+
+const refreshers = [];
+function addCard(id, c) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML =
+    '<div class="row"><span class="name"></span><span class="status" data-note></span></div>' +
+    '<div class="facts"></div><div class="row"><button data-act="deploy"></button></div>' +
+    '<div class="status" aria-live="polite"></div>';
+  card.querySelector(".name").textContent = c.chainName;
+  card.querySelector("[data-note]").textContent = c.rehearsal ? "REHEARSAL: a local fork, not the chain" : c.venue === "tempo" ? "GloamVaultSwapTempo2" : "GloamVaultSwapV4c";
+  const btn = card.querySelector("button");
+  btn.textContent = "Deploy on " + c.chainName;
+  document.getElementById("cards").appendChild(card);
+  const facts = card.querySelector(".facts");
+  const out = card.querySelector(".status[aria-live]");
+  const say = (msg, cls = "") => { out.className = "status " + cls; out.innerHTML = msg; };
+  const link = (hash) => '<a href="' + c.explorer + "/tx/" + hash + '" target="_blank" rel="noopener">' + hash + "</a>";
+  let gas = null;
+
+  async function refresh() {
+    btn.disabled = true;
+    gas = null;
+    try {
+      const code = await rpc(c, "eth_getCode", [c.address, "latest"]);
+      let html = "<span>Router</span><b>" + c.address + "</b><span>Init code hash</span><b>" + c.initHash + "</b>";
+      if (code !== "0x") {
+        const lines = await readBack(c);
+        const allOk = lines.every((l) => l[1]);
+        html += "<span>State</span><b>deployed</b>" + lines.map((l) => "<span>" + l[0] + "</span><b>" + (l[1] ? "yes" : "NO: stop") + "</b>").join("");
+        facts.innerHTML = html;
+        say(allOk ? "Deployed and checked. Next is the runbook's switch step for this chain." : "The contract at this address does not match. Do not use it.", allOk ? "ok" : "bad");
+        return;
+      }
+      const landed = await read(c, c.factory, c.data).catch((e) => "reverted: " + e.message);
+      const simOk = landed.toLowerCase() === c.address;
+      const [balance, price] = await Promise.all([rpc(c, "eth_getBalance", [plan.owner, "latest"]), rpc(c, "eth_gasPrice", [])]);
+      if (simOk) gas = BigInt(await rpc(c, "eth_estimateGas", [{ from: plan.owner, to: c.factory, data: c.data }])) * 12n / 10n;
+      const cost = gas === null ? null : gas * BigInt(price);
+      const funded = cost !== null && (c.venue === "tempo" || BigInt(balance) >= cost);
+      html += "<span>State</span><b>not deployed</b>" +
+        "<span>Simulated</span><b>" + (simOk ? "the factory call lands at this address" : landed) + "</b>" +
+        (cost === null ? "" : "<span>Gas limit</span><b>" + gas + "</b>") +
+        (c.venue === "tempo" ? "" : "<span>Owner balance</span><b>" + fmt(balance) + " " + c.symbol + "</b>" +
+          (cost === null ? "" : "<span>Cost now, at most</span><b>" + fmt(cost) + " " + c.symbol + "</b>"));
+      facts.innerHTML = html;
+      if (!simOk) return say("The simulation did not land at this address, so Deploy stays off.", "bad");
+      if (!funded) return say("The owner wallet is short of gas for this deploy.", "bad");
+      btn.disabled = false;
+    } catch (e) {
+      facts.innerHTML = "<span>Read failed</span><b>" + ((e && e.message) || e) + "</b>";
+    }
+  }
+
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      await refresh();
+      if (btn.disabled) return say("Not ready: read the lines above.", "bad");
+      btn.disabled = true;
+      const account = await ensureWallet(id, c);
+      say("Confirm the transaction in your wallet…");
+      const hash = await window.ethereum.request({ method: "eth_sendTransaction",
+        params: [{ from: account, to: c.factory, data: c.data, gas: "0x" + gas.toString(16), chainId: "0x" + Number(id).toString(16) }] });
+      say("Sent: " + link(hash) + ". Waiting for it to land…");
+      let receipt = null;
+      for (let i = 0; i < 100 && !receipt; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        receipt = await rpc(c, "eth_getTransactionReceipt", [hash]);
+      }
+      if (!receipt) return say("Still waiting. Keep this hash and check it on the explorer: " + hash, "bad");
+      if (receipt.status !== "0x1") return say("It failed on chain: " + link(hash), "bad");
+    } catch (e) {
+      say("Stopped: " + ((e && e.message) || e), "bad");
+      return;
+    }
+    await refresh();
+  });
+  refreshers.push(refresh);
+}
+
+async function load() {
+  const res = await fetch("/router/expected");
+  if (!res.ok) throw new Error(await res.text());
+  plan = await res.json();
+  const ids = Object.keys(plan.chains);
+  document.getElementById("compile").textContent = "This checkout's compile matches the fixture on " + ids.length + " chains.";
+  document.getElementById("compile").className = "status ok";
+  for (const id of ids) addCard(id, plan.chains[id]);
+  // One at a time: the public RPCs turn a burst away.
+  for (const r of refreshers) await r();
+}
+document.getElementById("refresh").addEventListener("click", async () => { for (const r of refreshers) await r(); });
+load().catch((e) => {
+  document.getElementById("compile").textContent = "Stopped: " + ((e && e.message) || e);
+  document.getElementById("compile").className = "status bad";
+});
+</script>
+</body>
+</html>

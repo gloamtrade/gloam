@@ -15,6 +15,15 @@ import {Script} from "forge-std/Script.sol";
  * counts as unset.
  */
 abstract contract DeployerBroadcast is Script {
+    /// @dev The address _startDeployerBroadcast sends as: DEPLOYER_PK's, else DEPLOYER.
+    function _deployerAddress() internal view returns (address) {
+        string memory key = vm.envOr("DEPLOYER_PK", string(""));
+        if (bytes(key).length > 0) return vm.addr(vm.parseUint(key));
+        string memory named = vm.envOr("DEPLOYER", string(""));
+        require(bytes(named).length > 0, "set DEPLOYER_PK");
+        return vm.parseAddress(named);
+    }
+
     function _startDeployerBroadcast() internal {
         string memory named = vm.envOr("DEPLOYER", string(""));
         address deployer = bytes(named).length > 0 ? vm.parseAddress(named) : address(0);

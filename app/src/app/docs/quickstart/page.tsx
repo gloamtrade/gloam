@@ -49,7 +49,7 @@ cd my-private-app && npm install && npm run dev`}</code>
           <strong>For mainnet:</strong> USDG on Robinhood Chain
           (chain id <code>4663</code>) plus a little ETH for gas, or USDC.e,
           pathUSD, USDT0 or OUSD on Tempo (<code>4217</code>), where gas is paid
-          in stablecoins. Beta limits cap each stablecoin deposit at 50,000. See{" "}
+          in stablecoins. Deposit limits cap each stablecoin deposit at 50,000. See{" "}
           <Link href="/docs/chain#mainnet">Networks</Link>.
         </li>
         <li>
@@ -127,7 +127,7 @@ const wallet = createWalletClient({ account, chain: net.chain, transport: http(n
 // reads at the chain head, old logs from the network's full-history RPC where it names one
 const publicClient = createPublicClient({ chain: net.chain, transport: gloamReadTransport(net) });
 
-const amount = parseUnits("25", 6);   // 25 USDG (6 decimals); beta cap is 50,000 per deposit
+const amount = parseUnits("25", 6);   // 25 USDG (6 decimals); the limit is 50,000 per deposit
 
 // mint the note + generate the shield proof with this chain's keys
 const intent = await buildShieldBoundIntent({
@@ -219,7 +219,7 @@ saveSecret(intent.note.commitment, intent.note.secret);`}</code>
         root matches even after transfers); <code>buildUnshieldIntent</code>{" "}
         builds the witness and proof. The amount, asset, and recipient become
         public on exit; the source note stays unlinkable via the nullifier. On
-        mainnet a cash out costs 0.25%: <code>cashOutFee(amount)</code> is what
+        mainnet a cash out costs 0.5%: <code>cashOutFee(amount)</code> is what
         the pool keeps.
       </p>
       <pre>
@@ -243,7 +243,7 @@ const exit = await buildUnshieldIntent({
   prove: artifactProver(circuitArtifactUrls("unshield", net.chainId)),
 });
 
-// mainnet: the pool keeps cashOutFee(amount), 0.25%, and pays the rest to "to"
+// mainnet: the pool keeps cashOutFee(amount), 0.5%, and pays the rest to "to"
 console.log("fee", cashOutFee(amount));
 
 await wallet.writeContract({
@@ -277,14 +277,14 @@ await wallet.writeContract({
 
       <h2>Honesty</h2>
       <p>
-        Mainnet is beta software. It runs on the final keys
-        from the 13-contributor ceremony, under beta deposit limits, after an
+        Mainnet runs on the final keys
+        from the 13-contributor ceremony, under deposit limits, after an
         internal review. Kann Audits has since reviewed the vault contracts (
         <Link href="/security">report, 1 November 2026</Link>) and found no Critical, High or Medium issues. The testnets run on
         dev-ceremony keys with test funds. Everything here is real: real proofs,
-        real on-chain state, no mocks. Private swaps run in the app on both
-        mainnets (<Link href="/docs/private-swaps">private swaps</Link>); the
-        SDK does not build them yet. The old sealed trade is retired. See{" "}
+        real on-chain state, no mocks. Private swaps run in the app and the
+        SDK (<Link href="/docs/private-swaps">private swaps</Link>), and hide who
+        swapped, not the tokens or the amounts. The old sealed trade is retired. See{" "}
         <Link href="/docs/production">the production gate</Link>.
       </p>
     </DocsLayout>

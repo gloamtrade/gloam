@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 import path from "node:path";
-import { CSP_REPORT_ONLY } from "./csp.config.mjs";
+import { CSP_APP_ENFORCED, CSP_REPORT_ONLY, embeddedWalletsBuild } from "./csp.config.mjs";
 
 /**
  * When this package is the Vercel Root Directory (`app`), keep tracing
@@ -61,6 +61,16 @@ const nextConfig: NextConfig = {
           ...(process.env.NODE_ENV === "production" ? [{ key: "Content-Security-Policy-Report-Only", value: CSP_REPORT_ONLY }] : []),
         ],
       },
+      // Gloam wallets sign with no prompt: with them on, /app and the partner portal
+      // (email sign-in) enforce where scripts, frames, workers and connections may
+      // come from (csp.config.mjs). Last, so it replaces the framing-only policy above
+      // on these pages.
+      ...(process.env.NODE_ENV === "production" && embeddedWalletsBuild()
+        ? [
+            { source: "/app/:path*", headers: [{ key: "Content-Security-Policy", value: CSP_APP_ENFORCED }] },
+            { source: "/partners/dashboard/:path*", headers: [{ key: "Content-Security-Policy", value: CSP_APP_ENFORCED }] },
+          ]
+        : []),
     ];
   },
   // The pitch deck is one static page in public/pitch.

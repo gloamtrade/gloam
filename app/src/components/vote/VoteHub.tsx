@@ -5,6 +5,7 @@ import { useCallback, useRef, useState } from "react";
 import { whenPhrase, type Ballot } from "@/lib/vote/core";
 import type { VoteSummary } from "@/lib/vote/results";
 import { FeedbackBox } from "./FeedbackBox";
+import { OptionArt } from "./OptionArt";
 import { ResultsButton, ResultsDrawer } from "./ResultsDrawer";
 import m from "./vote.module.css";
 import { BallotCard, CheckIcon, ClosingLine, HowItWorks, Progress, ResultsCard, ShareVoted, Welcome } from "./VoteParts";
@@ -13,6 +14,7 @@ import { useLiveVotes, useMe, useVoteWallet } from "./voteHooks";
 const WalletConnectSheet = dynamic(() => import("@/components/app/WalletConnectSheet").then((m) => m.WalletConnectSheet), { ssr: false });
 
 const isActive = (v: VoteSummary) => v.status === "open" || v.status === "upcoming" || v.draft;
+const leader = (v: VoteSummary) => v.totals.options.reduce((a, b) => (BigInt(b.weight) > BigInt(a.weight) ? b : a), v.totals.options[0]!);
 
 /**
  * /vote: every open question as one guided ballot, a question per screen,
@@ -24,6 +26,8 @@ export function VoteHub({ initial }: { initial: VoteSummary[] }) {
   const { votes, updatedAt, refresh } = useLiveVotes(initial, "all");
   const active = votes.filter(isActive);
   const past = votes.filter((v) => !isActive(v));
+  // closed with the final count in and a plan to show: what the page leads with until the next vote
+  const decided = active.length === 0 ? votes.filter((v) => v.outcome) : [];
 
   const voted = useCallback((id: string) => Boolean(me?.votes[id]?.ballot), [me]);
   const firstOpen = active.findIndex((v) => !voted(v.id));
@@ -86,16 +90,48 @@ export function VoteHub({ initial }: { initial: VoteSummary[] }) {
               Help decide what Gloam builds next
             </h1>
             <p className="mt-6 max-w-[52ch] text-[16.5px] leading-relaxed text-soft sm:text-[18px]">
+              {decided.length > 0 ? (
+                "The votes are closed. Here's what holders chose and what we're doing about it."
+              ) : (
+                <>
               {active.length > 1 ? `${["", "One", "Two", "Three", "Four", "Five"][active.length] ?? active.length} questions.` : "One question."} Each
               answer is a free signature,{" "}
               {closesAt ? "weighted by the $GLOAM in your wallet when voting closes." : `weighted by the $GLOAM you held at block ${block.toLocaleString("en-US")}.`}
+                </>
+              )}
             </p>
             {shared && <ClosingLine s={shared} className="mt-6" />}
           </div>
         </div>
       </section>
 
-      {active.length === 0 ? (
+      {decided.length > 0 ? (
+        <section className="mx-auto max-w-[760px] px-5 pt-12 sm:px-7" aria-labelledby="decided-title">
+          <h2 id="decided-title" className="t-display-m">
+            The votes are in
+          </h2>
+          <p className="mt-3 text-[15px] leading-relaxed text-soft">
+            {Math.max(...decided.map((v) => v.totals.wallets)).toLocaleString("en-US")} wallets voted. The results are advisory, and this is what we&apos;re doing with them.
+          </p>
+          <ol className="mt-6 divide-y divide-line border-y border-line">
+            {decided.map((v) => {
+              const won = leader(v);
+              return (
+                <li key={v.id} className="py-5">
+                  <p className="text-[13.5px] text-mute">{v.question}</p>
+                  <p className="mt-2 flex items-center gap-2.5 text-[19px] leading-snug tracking-[-0.01em] text-foreground">
+                    <OptionArt voteId={v.id} index={won.option} size={22} />
+                    <span className="min-w-0">{won.label}</span>
+                    <span className="tnum ml-auto shrink-0 text-[17px] text-soft">{won.percent}%</span>
+                  </p>
+                  <p className="mt-2 max-w-[60ch] text-[15px] leading-relaxed text-soft">{v.outcome}</p>
+                </li>
+              );
+            })}
+          </ol>
+          <p className="mt-4 text-[14.5px] leading-relaxed text-mute">The next vote is announced on X @gloamtrade and in the Telegram group.</p>
+        </section>
+      ) : active.length === 0 ? (
         <section className="mx-auto max-w-[760px] px-5 pt-12 sm:px-7">
           <div className="border-y border-line py-8">
             <p className="text-[17px] text-foreground">No vote is open right now.</p>
@@ -204,14 +240,12 @@ export function VoteHub({ initial }: { initial: VoteSummary[] }) {
       {/* live results: in a drawer, opened from the sticky button */}
       {votes.length > 0 && (
         <>
-          <ResultsDrawer
-            votes={active.length ? active : votes}
-            mine={(id) => me?.votes[id]?.ballot ?? null}
-            updatedAt={updatedAt}
-            open={drawer}
-            onClose={() => setDrawer(false)}
-          />
-          {!drawer && <ResultsButton onOpen={() => setDrawer(true)} wallets={Math.max(0, ...(active.length ? active : votes).map((v) => v.totals.wallets))} />}
+          {active.length > 0 && (
+            <>
+              <ResultsDrawer votes={active} mine={(id) => me?.votes[id]?.ballot ?? null} updatedAt={updatedAt} open={drawer} onClose={() => setDrawer(false)} />
+              {!drawer && <ResultsButton onOpen={() => setDrawer(true)} wallets={Math.max(0, ...active.map((v) => v.totals.wallets))} />}
+            </>
+          )}
           {active.length === 0 && (
             <section className="mx-auto max-w-[760px] px-5 pt-16 sm:px-7" aria-labelledby="final-title">
               <h2 id="final-title" className="t-display-m">

@@ -21,7 +21,7 @@
  * for it overlap, one of them is served.
  */
 
-import { keccak256, toBytes, type Address, type Hex } from "viem";
+import { encodeFunctionData, keccak256, toBytes, type Address, type Hex } from "viem";
 import {
   fieldToHex,
   hexToField,
@@ -75,9 +75,67 @@ export interface MinimalReceipt {
 }
 
 /** What a gloam charge server needs from the chain: the sweep reads plus transaction receipts. */
+/** A payer's proven transfer, as a pull credential carries it. */
+export interface PullTransfer {
+  proof: Hex;
+  root: Hex;
+  nullifier: Hex;
+  newCommitments: readonly [Hex, Hex];
+}
+
 export interface GloamChargeChain extends SweepChain {
   /** The receipt of `hash` with its logs, or null while it is not mined (or unknown). */
   getReceipt(hash: Hex): Promise<MinimalReceipt | null>;
+  /**
+   * Whether `pool` takes this transfer now: a call of transfer() that sends
+   * nothing runs the pool's own checks (an unspent note, a known root, a proof
+   * that holds). true: it would; false: the pool refuses it; null: the node
+   * could not say. Optional: without it, a pull transfer is submitted as before.
+   */
+  transferWouldLand?(pool: Address, transfer: PullTransfer): Promise<boolean | null>;
+}
+
+const POOL_TRANSFER_ABI = [
+  {
+    type: "function",
+    name: "transfer",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "proof", type: "bytes" },
+      { name: "root", type: "bytes32" },
+      { name: "nullifier", type: "bytes32" },
+      { name: "newCommitments", type: "bytes32[2]" },
+    ],
+    outputs: [],
+  },
+] as const;
+
+/** A node's answer that the call reverted, as against one that never ran (a timeout, a node down). */
+export function callReverted(e: unknown): boolean {
+  for (let x: unknown = e, depth = 0; x && depth < 8; x = (x as { cause?: unknown }).cause, depth++) {
+    const err = x as { name?: string; message?: string; details?: string; data?: unknown };
+    if (err.name === "ExecutionRevertedError" || err.name === "ContractFunctionRevertedError" || err.name === "RawContractError") return true;
+    if (/execution reverted|reverted/i.test(`${err.details ?? ""} ${err.message ?? ""}`)) return true;
+  }
+  return false;
+}
+
+/**
+ * transferWouldLand for a viem public client: an eth_call of the pool's
+ * transfer() (anyone may submit a proven transfer, so no sender is needed).
+ */
+export function transferCheckFromCall(call: (args: { to: Address; data: Hex }) => Promise<unknown>): NonNullable<GloamChargeChain["transferWouldLand"]> {
+  return async (pool, t) => {
+    try {
+      await call({
+        to: pool,
+        data: encodeFunctionData({ abi: POOL_TRANSFER_ABI, functionName: "transfer", args: [t.proof, t.root, t.nullifier, [t.newCommitments[0], t.newCommitments[1]]] }),
+      });
+      return true;
+    } catch (e) {
+      return callReverted(e) ? false : null;
+    }
+  };
 }
 
 /** topic0 of ShieldPoolPoseidon's Transferred(bytes32 indexed nullifier, bytes32[2] newCommitments). */
@@ -110,6 +168,7 @@ type SdkPublicClient = Parameters<typeof sweepChainFromClient>[0];
 export function gloamChargeChainFromClient(client: SdkPublicClient, params: { pool: Address; fromBlock?: bigint }): GloamChargeChain {
   return {
     ...sweepChainFromClient(client, params),
+    transferWouldLand: transferCheckFromCall((a) => client.call(a)),
     async getReceipt(hash) {
       try {
         const r = await client.getTransactionReceipt({ hash });
@@ -340,6 +399,11 @@ export async function validateGloamCharge(args: {
     if (!landed && !pending && (await chain.isSpent(t.nullifier))) {
       throw fail("The note that funds this transfer was already spent elsewhere, so the transfer cannot land.");
     }
+    // The pool's own checks run first, sending nothing: a transfer it would refuse is never submitted.
+    if (!landed && !pending && chain.transferWouldLand && t.proof && t.root) {
+      const would = await chain.transferWouldLand(md.pool, { proof: t.proof, root: t.root, nullifier: t.nullifier, newCommitments: t.newCommitments }).catch(() => null);
+      if (would === false) throw fail("The pool would not take the presented transfer (its proof, root or note does not hold), so nothing was sent.");
+    }
   }
 
   return { challengeId: challenge.id, realm: challenge.realm, request, payload, mode, note, paymentNullifier, transfer, landed, pending };
@@ -515,6 +579,9 @@ export async function settleGloamCharge(args: {
       prove: config.prove,
       chain,
       submit: config.submit,
+      // the x402 binding is for X-PAYMENT: this credential's own binding, keyed by the same note
+      // secret over this challenge (challengeBinding), was checked in validateGloamCharge
+      allowUnbound: true,
       beforeSubmit: async (fresh, intent) => {
         // The note first: a failure here means nothing went out, and a sent record would block every retry.
         await config.beforeSubmit(fresh, intent);

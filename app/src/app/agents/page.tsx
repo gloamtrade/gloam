@@ -246,7 +246,7 @@ export default function AgentsPage() {
                 Spending limits
               </Link>
               <a
-                href="https://github.com/cryptoduke01/gloam/tree/main/packages/sdk/examples/receive-and-credit.ts"
+                href="https://github.com/gloamtrade/gloam/tree/main/packages/sdk/examples/receive-and-credit.ts"
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1.5 text-soft transition-colors hover:text-foreground"
@@ -291,7 +291,7 @@ export default function AgentsPage() {
               <p className="mt-6 max-w-[62ch] text-[14px] leading-relaxed text-mute">
                 Everything after the # stays in the browser and never reaches a
                 server. A 0x address or ENS name is paid through Cash out: the
-                relay sends it from the user&apos;s private balance for 0.25%,
+                relay sends it from the user&apos;s private balance for 0.5%,
                 and the agent&apos;s wallet, the token and the amount are
                 public. A Gloam address gets a private payment instead: free,
                 with the amount hidden.
@@ -344,18 +344,18 @@ export default function AgentsPage() {
             <div className="border-t border-foreground pt-5">
               <p className="text-[18px] leading-snug tracking-[-0.01em]">Free to pay privately</p>
               <p className="mt-3 text-[14px] leading-relaxed text-mute">
-                Deposits and private payments cost nothing, and the relay pays
-                the gas. Cash outs and swaps cost 0.25%.
+                Direct deposits and private payments cost nothing, and the relay
+                pays the gas. Cash outs and swaps cost 0.5%.
               </p>
             </div>
             <div className="border-t border-foreground pt-5">
-              <p className="text-[18px] leading-snug tracking-[-0.01em]">Mainnet, in beta</p>
+              <p className="text-[18px] leading-snug tracking-[-0.01em]">Live on mainnet</p>
               <p className="mt-3 text-[14px] leading-relaxed text-mute">
-                Beta deposit limits apply. Kann Audits reviewed the vault contracts (
+                Deposit limits apply. Kann Audits reviewed the vault contracts (
                 <Link href="/security" className="text-soft underline decoration-line-strong underline-offset-4 transition-colors hover:text-foreground">
                   report
                 </Link>
-                ) and found no Critical, High or Medium issues. It is still beta, so start with small amounts.
+                ) and found no Critical, High or Medium issues.
               </p>
             </div>
             <div className="border-t border-foreground pt-5">

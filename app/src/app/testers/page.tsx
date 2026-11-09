@@ -12,8 +12,8 @@ export function generateMetadata(): Metadata {
   return {
     title: "Become a tester",
     description: isMainnetLive()
-      ? `Join the private Gloam testers group. Gloam is live on ${liveMainnetNames()} mainnet. Try what is new on the testnet first, tell us what breaks, and get rewarded.`
-      : "Join the private Gloam testers group. Use private payments on Tempo and Robinhood Chain testnet, tell us what breaks, and get rewarded.",
+      ? `Join the private Gloam testers group. Gloam is live on ${liveMainnetNames()} mainnet. Try what is new on the testnet first, and tell us what breaks.`
+      : "Join the private Gloam testers group. Use private payments on Tempo and Robinhood Chain testnet, and tell us what breaks.",
     alternates: { canonical: "/testers" },
   };
 }

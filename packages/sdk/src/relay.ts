@@ -1,15 +1,16 @@
 /**
  * Gloam relay client.
  *
- * Sends an already-proven private send or cash out through the Gloam relay,
- * so the sender's wallet (a person's or an agent's) never appears next to the
- * payment on a block explorer. The proof is the authorization and the cash-out
+ * Sends an already-proven private send, cash out or private swap through the
+ * Gloam relay, so the sender's wallet (a person's or an agent's) never appears
+ * next to the payment on a block explorer. The proof is the authorization and the cash-out
  * recipient is bound inside the proof, so a relay can only submit or refuse,
  * never redirect money. Deposits (shield) still come from the depositor's own
  * wallet, since that is where the money starts.
  */
 import type { Address, Hex } from "viem";
 import type { GloamIntent } from "./intents.js";
+import { assertSwapSendable, type SwapRelayCall } from "./swapIntent.js";
 
 export const GLOAM_RELAY_URL = "https://gloam.trade/api/relay";
 
@@ -27,6 +28,10 @@ export interface RelayNetworkStatus {
   relayer: Address | null;
   memo: boolean;
   lowBalance: boolean;
+  /** Gas is over the relay's ceiling on this chain: nothing is sent until it falls. */
+  gasHigh?: boolean;
+  /** Where gas is dear: the smallest one-hop private swap the relay sends right now, in dollars. */
+  swapFloorUsd?: number | null;
 }
 
 export class GloamRelayError extends Error {
@@ -98,4 +103,16 @@ export async function relayMemo(
   opts: RelayOptions = {}
 ): Promise<Hex> {
   return post({ action: "memo", ...args }, opts);
+}
+
+/**
+ * Send a private swap, its refund or its exit (buildSwapIntent's `relay`,
+ * buildSwapRefund's or buildSwapExit's) through the relay. Store the swap's
+ * recovery record first (sendSwap does it for you). A swap whose deadline is
+ * too close is refused here, as the relay would refuse it.
+ */
+export async function relaySwapCall(call: SwapRelayCall, opts: RelayOptions = {}): Promise<Hex> {
+  if (call.action !== "swap" && call.action !== "swapExit") throw new GloamRelayError("Only a swap or a swap exit goes through relaySwapCall.", "unsupported");
+  assertSwapSendable(call);
+  return post({ ...call.body, action: call.action }, opts);
 }

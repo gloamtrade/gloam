@@ -4,15 +4,17 @@
  * The vault has one address on all four mainnets (and Base Sepolia), so a
  * builder can't tell the chain from `poolAddress`, and the Robinhood Chain
  * testnet default is wrong for it. Each builder refuses that before any proof
- * is made and asks for `chainId`, in any spelling of the address. With `chainId`
- * the mainnet's own rules apply and the intent names it. Everything else keeps
- * the testnet default: no pool at all, a testnet pool, a pool of the caller's.
+ * is made and asks for `chainId`, in any spelling of the address, and refuses
+ * Ethereum Sepolia's vault the same way. With `chainId` the chain's own rules
+ * apply and the intent names it. Everything else keeps the testnet default: no
+ * pool at all, a Robinhood or Tempo testnet pool, a pool of the caller's.
  *
  * Run after build:  node test/chainGuard.selftest.mjs
  */
 import { getAddress } from "viem";
 import {
   BASE_SEPOLIA_CHAIN_ID,
+  ETHEREUM_SEPOLIA_CHAIN_ID,
   IncrementalMerkleTreePoseidon,
   MAINNET_POOLS,
   NATIVE_ASSET,
@@ -27,6 +29,7 @@ import {
   buildShieldBoundIntent,
   buildShieldIntent,
   buildUnshieldIntent,
+  ethereumSepoliaPool,
   fieldToHex,
   mainnetNetwork,
   poseidon3,
@@ -122,6 +125,26 @@ for (const name of ["buildShieldIntent", "buildPrivateTradeIntent"]) {
 // Base Sepolia shares the address, and its chainId is all it takes.
 const onSepolia = await BUILDERS.buildUnshieldIntent({ chainId: BASE_SEPOLIA_CHAIN_ID, poolAddress: baseSepoliaPool().pool });
 is(onSepolia.chainId, BASE_SEPOLIA_CHAIN_ID, "Base Sepolia keeps its chain");
+
+// Ethereum Sepolia's vault has its own address, and never falls to the Robinhood testnet default.
+const sepoliaVault = ethereumSepoliaPool().pool;
+assert(!vaults.some((v) => v.toLowerCase() === sepoliaVault.toLowerCase()), "Ethereum Sepolia's vault is not the mainnet address");
+const sepoliaHex = sepoliaVault.slice(2);
+for (const [name, build] of Object.entries(BUILDERS)) {
+  for (const poolAddress of [sepoliaVault, `0x${sepoliaHex.toLowerCase()}`, getAddress(sepoliaVault), `0x${sepoliaHex.toUpperCase()}`]) {
+    for (const over of [{ poolAddress }, { poolAddress, chainId: undefined }, { poolAddress, chainId: null }]) {
+      proofs = 0;
+      const err = await refused(build(over));
+      assert(err && /Ethereum Sepolia.*Pass chainId/.test(err.message), `${name} refuses ${poolAddress} with no chainId: ${err?.message ?? "built"}`);
+      is(proofs, 0, `${name} makes no proof first`);
+    }
+  }
+}
+const overSepolia = { chainId: ETHEREUM_SEPOLIA_CHAIN_ID, poolAddress: sepoliaVault };
+for (const intent of [await BUILDERS.buildUnshieldIntent(overSepolia), await BUILDERS.buildPrivateSendIntent(overSepolia)]) {
+  is(intent.chainId, ETHEREUM_SEPOLIA_CHAIN_ID, `${intent.intent} keeps Ethereum Sepolia when chainId is passed`);
+  is(intent.exec.poolAddress, sepoliaVault, `${intent.intent} targets the vault passed in`);
+}
 
 // The testnet default is unchanged for everything else.
 for (const [name, build] of Object.entries(BUILDERS)) {

@@ -30,6 +30,8 @@ export type SpendEntry = {
   /** display units */
   amount: string;
   recipient: string | null;
+  /** false: logged and checked, never counted against the caps (a swap's exit pays out what its swap already counted). */
+  counts?: boolean;
   status: SpendStatus;
   /** why it was refused or failed */
   reason?: string;
@@ -114,6 +116,6 @@ export class SpendLog {
 /** The entries that count against an agent's limits, in the policy's shape. */
 export function counted(entries: SpendEntry[], agent: string): CountedSpend[] {
   return entries
-    .filter((e) => e.agent === agent && COUNTED_STATUSES.includes(e.status))
+    .filter((e) => e.agent === agent && e.counts !== false && COUNTED_STATUSES.includes(e.status))
     .map((e) => ({ chainId: e.chainId, asset: e.asset, amountWei: BigInt(e.amountWei), at: Date.parse(e.at) }));
 }

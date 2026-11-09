@@ -29,7 +29,7 @@ anything.
 **1. Get the code** (about a minute)
 
 ```bash
-git clone --depth 1 https://github.com/cryptoduke01/gloam.git
+git clone --depth 1 https://github.com/gloamtrade/gloam.git
 cd gloam/contracts/ceremony
 npm ci
 ```
@@ -39,10 +39,10 @@ npm ci
 **2. Download the round you were given**
 
 Replace `NNN` with your round number. It is always the newest release named
-`ceremony-round-NNN` on https://github.com/cryptoduke01/gloam/releases.
+`ceremony-round-NNN` on https://github.com/gloamtrade/gloam/releases.
 
 ```bash
-curl -LO https://github.com/cryptoduke01/gloam/releases/download/ceremony-round-NNN/round-NNN.zip
+curl -LO https://github.com/gloamtrade/gloam/releases/download/ceremony-round-NNN/round-NNN.zip
 unzip round-NNN.zip
 ```
 

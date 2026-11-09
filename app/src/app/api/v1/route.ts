@@ -20,7 +20,9 @@ export async function GET() {
       endpoints: [
         { method: "GET", path: "/api/v1/me", what: "The partner and key behind your key" },
         { method: "GET", path: "/api/v1/relay", what: "Relay readiness per network" },
-        { method: "POST", path: "/api/v1/relay", what: "Submit a proven private payment, cash out or payment message, attributed to you" },
+        { method: "POST", path: "/api/v1/relay", what: "Submit a proven private payment, cash out, private swap (or its refund or exit) or payment message, attributed to you" },
+        { method: "GET", path: "/api/v1/swaps", what: "Private swaps per network: router, assets, earlier routers kept for refunds" },
+        { method: "POST", path: "/api/v1/swaps/quote", what: "Quote a private swap (read only): price, route, and anything that would stop it" },
         { method: "POST", path: "/api/v1/deposits", what: "Attribute a deposit your app made, by transaction hash" },
         { method: "GET", path: "/api/v1/activity", what: "Your attributed volume and would-be commissions" },
         { method: "GET", path: "/api/v1/vaults", what: "Vault status on every network" },

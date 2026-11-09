@@ -30,8 +30,11 @@
  * costs a stranger far less than the 0.25 USDG per wallet looks like: well under
  * $1. Doing so pauses only this feature until the next day.
  *
- * The counts are kept apart on purpose: the wallet's count has no IP in its key,
- * and the sender's has no wallet, so nothing here ties the two together.
+ * The counts are kept apart: the wallet's count has no IP in its key, and the
+ * sender's has no wallet. Both names are keyed hashes (GLOAM_RATE_LIMIT_KEY,
+ * lib/mcpRemote/rateLimit) and each key's expiry has a random part, so the two
+ * keys one request writes can't be paired by their names or by when they
+ * expire. Only the moment they are written is the same.
  */
 import { STATION_MAX_PUMP_USDG, STATION_MIN_USDG, type StationState } from "@/lib/gasStation";
 

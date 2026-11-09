@@ -21,6 +21,8 @@
  * (and the refusal) for an operator to check, not verified here.
  */
 
+import { guardBody, guardTimeoutMs, keyMayGoTo, plainText, postToGuard } from "./guardCall.js";
+
 type Env = Record<string, string | undefined>;
 
 export const WORMHOLE_CHECK_URL = "https://dashboard.agentwormhole.com/api/v1/check";
@@ -53,8 +55,6 @@ export type WormholeOutcome =
 /** Answers that let a payment through. Anything else is a refusal. */
 const PASSING = new Set(["allow", "clean", "clean_by_rules"]);
 
-const loopback = (host: string) => host === "localhost" || host === "127.0.0.1" || host === "[::1]";
-
 /**
  * Off (null) unless GLOAM_WORMHOLE_KEY is set. A key with an unusable
  * GLOAM_WORMHOLE_URL is an error, so a typo can't quietly turn the check off.
@@ -69,24 +69,20 @@ export function wormholeConfig(env: Env): WormholeConfig | { error: string } | n
   } catch {
     return { error: `GLOAM_WORMHOLE_URL "${raw}" is not a URL.` };
   }
-  // The key rides along as a bearer token, so only https, or plain http on this machine (tests, a local proxy).
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback(url.hostname))) {
+  if (!keyMayGoTo(url)) {
     return { error: `GLOAM_WORMHOLE_URL must be https (or http on localhost), not ${url.protocol}//${url.host}.` };
   }
-  const ms = Number(env.GLOAM_WORMHOLE_TIMEOUT_MS?.trim() || WORMHOLE_TIMEOUT_MS);
-  const timeoutMs = Number.isFinite(ms) ? Math.min(Math.max(Math.round(ms), 500), 30_000) : WORMHOLE_TIMEOUT_MS;
-  return { key, url: url.toString(), timeoutMs };
+  return { key, url: url.toString(), timeoutMs: guardTimeoutMs(env.GLOAM_WORMHOLE_TIMEOUT_MS, WORMHOLE_TIMEOUT_MS) };
 }
 
 /** Codes and severities only, in plain characters: findings describe attacker text and must not carry it to the model. */
 function readFindings(raw: unknown): WormholeFinding[] {
   if (!Array.isArray(raw)) return [];
-  const plain = (v: unknown) => (typeof v === "string" ? v.replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 40) : "");
   return raw.map((f) => {
-    if (typeof f === "string") return { code: plain(f) || "finding" };
+    if (typeof f === "string") return { code: plainText(f) || "finding" };
     const o = (f ?? {}) as Record<string, unknown>;
-    const code = plain(o.code) || plain(o.rule) || plain(o.id) || "finding";
-    const severity = plain(o.severity);
+    const code = plainText(o.code) || plainText(o.rule) || plainText(o.id) || "finding";
+    const severity = plainText(o.severity);
     return severity ? { code, severity } : { code };
   });
 }
@@ -111,31 +107,17 @@ export async function checkBeforePay(content: string, env: Env, fetchImpl: typeo
   });
   if ("error" in config) return refuse("unchecked", `The Agent Wormhole check is on but misconfigured: ${config.error}`);
 
-  let res: Response;
-  try {
-    res = await fetchImpl(config.url, {
-      method: "POST",
-      headers: { authorization: `Bearer ${config.key}`, "content-type": "application/json" },
-      body: JSON.stringify({ content }),
-      redirect: "error",
-      signal: AbortSignal.timeout(config.timeoutMs),
-    });
-  } catch (e) {
-    const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
-    return refuse("unchecked", timedOut ? `Agent Wormhole did not answer within ${config.timeoutMs / 1000}s.` : "Agent Wormhole could not be reached.");
+  const call = await postToGuard(config, { content }, fetchImpl);
+  if ("failed" in call) {
+    return refuse("unchecked", call.failed === "timeout" ? `Agent Wormhole did not answer within ${config.timeoutMs / 1000}s.` : "Agent Wormhole could not be reached.");
   }
+  const { res } = call;
   if (res.status === 402) return refuse("unchecked", "Agent Wormhole answered 402: the account is out of checks.");
   if (res.status === 401 || res.status === 403) return refuse("unchecked", `Agent Wormhole refused the key (HTTP ${res.status}).`);
   if (res.status !== 200) return refuse("unchecked", `Agent Wormhole answered HTTP ${res.status}, so nothing was checked.`);
 
-  let body: Record<string, unknown>;
-  try {
-    const parsed: unknown = await res.json();
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
-    body = parsed as Record<string, unknown>;
-  } catch {
-    return refuse("unchecked", "Agent Wormhole's answer was not readable, so nothing was checked.");
-  }
+  const body = await guardBody(res);
+  if (!body) return refuse("unchecked", "Agent Wormhole's answer was not readable, so nothing was checked.");
   const decision = String(body.decision ?? body.verdict ?? "").toLowerCase() || "unknown";
   const findings = readFindings(body.findings);
   // Kept for the operator, but only at a size an attestation has; anything bigger is not passed to the agent.

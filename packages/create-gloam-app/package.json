@@ -1,6 +1,6 @@
 {
   "name": "create-gloam-app",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "description": "Scaffold a private payments app on Robinhood Chain (mainnet or testnet), powered by @gloamtrade/sdk.",
   "type": "module",
   "license": "MIT",
@@ -14,11 +14,11 @@
   "homepage": "https://gloam.trade/docs/sdk",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cryptoduke01/gloam.git",
+    "url": "git+https://github.com/gloamtrade/gloam.git",
     "directory": "packages/create-gloam-app"
   },
   "bugs": {
-    "url": "https://github.com/cryptoduke01/gloam/issues"
+    "url": "https://github.com/gloamtrade/gloam/issues"
   },
   "keywords": [
     "gloam",

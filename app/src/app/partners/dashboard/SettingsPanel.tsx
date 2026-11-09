@@ -138,7 +138,7 @@ export function SettingsPanel({ partner, onSaved }: { partner: PartnerAccount; o
       <Card title="Your app">
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           <Field label="Name" htmlFor="acct-name">
-            <input id="acct-name" className="gl-input" maxLength={60} value={name} onChange={(e) => setName(e.target.value)} />
+            <input id="acct-name" className="gl-input" maxLength={32} value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
           <Field label="Website" htmlFor="acct-site">
             <input id="acct-site" className="gl-input" placeholder="https://" value={website} onChange={(e) => setWebsite(e.target.value)} />

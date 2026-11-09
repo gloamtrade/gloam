@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { erc20Abi, formatUnits, parseUnits, type Address, type Hex } from "viem";
 import { useAccount, useConfig, useReadContract } from "wagmi";
-import { getAccount, sendTransaction, switchChain, waitForTransactionReceipt } from "wagmi/actions";
+import { getAccount, getTransactionReceipt, sendTransaction, switchChain, waitForTransactionReceipt } from "wagmi/actions";
 import {
   BRIDGE_CHAINS,
   bridgeSources,
@@ -13,10 +13,14 @@ import {
   BRIDGE_MAX_USD,
   BRIDGE_MIN_USD,
   SWAP_GAS_RESERVE_WEI,
+  bridgeFeeLines,
   chainLogo,
   expensiveRoute,
+  leftoverLabel,
   privateBridgeable,
   swapSource,
+  type BridgeAppFee,
+  swapWalletNote,
   type BridgeChain,
   type BridgeQuote,
   type BridgeStatus,
@@ -28,14 +32,19 @@ import { useAppBalance, useAppSendTransaction, useAppTxReceipt, useDemo } from "
 import { MAINNET_ENABLED, type GloamChainId } from "@/lib/networks";
 import { originChain } from "@/lib/originChains";
 import { useVaultStatus } from "@/lib/passkey";
-import { dropUnsentNote, saveLocalNote, updateLocalNote, type LocalNote } from "@/lib/shield";
+import { dropUnsentNote, formatFeePercent, saveLocalNote, updateLocalNote, type LocalNote } from "@/lib/shield";
 import { connectSolana, paySolana, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
 import { track } from "@/lib/track";
+import type { TrackEvent } from "@/lib/trackEvents";
 import { failedBeforeSend, solanaDeclined, solanaSurelyNotSent, surelyNotSent, walletDeclined, walletErrorText } from "@/lib/walletErrors";
+import { SealedField } from "@/components/ui/SealedField";
+import { useModalFocus } from "@/hooks/useModalFocus";
 import { useNetwork } from "./NetworkProvider";
 import { AmountProblem } from "./AmountProblem";
+import { SuccessReceipt } from "./SuccessModal";
 
 const noopSubscribe = () => () => {};
+const noop = () => {};
 
 /** Solana needs a Relay API key on the server, so it stays off until that is set. */
 const CHAINS = BRIDGE_CHAINS.filter((c) => !c.needsKey || process.env.NEXT_PUBLIC_BRIDGE_SOLANA === "1");
@@ -111,20 +120,27 @@ function TokenMark({ src, size = 20 }: { src: string; size?: number }) {
  * "Money on another chain?" on the add-money screen: opens the bridge panel.
  * `onArrived` gets the delivered amount so the screen can fill it in;
  * `onPrivate` runs after money went straight into the private balance.
+ * `startOpen` opens the panel once a wallet is there (a link with ?bridge=open,
+ * from a new Gloam wallet's Add funds).
  */
 export function BridgeInCard({
   recipient,
   onArrived,
   onPrivate,
+  startOpen = false,
 }: {
   recipient?: string;
   onArrived?: (amount: string) => void;
   onPrivate?: () => void;
+  startOpen?: boolean;
 }) {
   const { network } = useNetwork();
   const dest = BRIDGE_DESTINATIONS[network.family];
   const swap = swapSource(network);
-  const [open, setOpen] = useState(false);
+  const [opened, setOpen] = useState(false);
+  // Closing it, or opening it by hand, uses up the link's one opening.
+  const [startUsed, setStartUsed] = useState(false);
+  const open = opened || (startOpen && !startUsed && Boolean(recipient));
   // never offer the chain the money lands on as where it comes from
   const sources = dest ? bridgeSources(CHAINS, dest.chainId) : CHAINS;
   const featured = FEATURED.filter((id) => sources.some((c) => c.id === id));
@@ -157,13 +173,18 @@ export function BridgeInCard({
         <BridgeSheet
           open={open}
           recipient={recipient}
-          onClose={() => setOpen(false)}
+          onClose={() => {
+            setOpen(false);
+            setStartUsed(true);
+          }}
           onArrived={(amount) => {
             setOpen(false);
+            setStartUsed(true);
             onArrived?.(amount);
           }}
           onPrivate={() => {
             setOpen(false);
+            setStartUsed(true);
             onPrivate?.();
           }}
         />
@@ -316,6 +337,16 @@ function BridgeSheet({
     resetSend();
   }, [resetSend]);
 
+  const finishPrivate = useCallback(() => {
+    reset();
+    setAmount("");
+    backToNetwork();
+    onPrivate?.();
+  }, [reset, backToNetwork, onPrivate]);
+  // The success screen is the end of the flow: however it is closed, the sheet opens fresh next time.
+  const landed = priv.kind === "landed";
+  const dismiss = landed ? finishPrivate : onClose;
+
   // A live price for the swap while the amount is typed, refreshed every 20 seconds,
   // so the rate and fees show before review. It is the same quote the review uses.
   const [preview, setPreview] = useState<{ amount: string; at: number; quote: BridgeQuote | null; error: string | null } | null>(null);
@@ -387,7 +418,7 @@ function BridgeSheet({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (picking) setPicking(false);
-      else onClose();
+      else dismiss();
     };
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -396,7 +427,7 @@ function BridgeSheet({
       document.body.style.overflow = prev;
       window.removeEventListener("keydown", onKey);
     };
-  }, [open, onClose, picking]);
+  }, [open, dismiss, picking]);
 
   // Follow the transfer while the address (or a private payment) is on screen and it isn't finished.
   const requestId =
@@ -434,7 +465,7 @@ function BridgeSheet({
 
   // Funnel events for /admin: chain and token names only, never amounts, addresses or hashes.
   const counted = useRef(new Set<string>());
-  const once = useCallback((key: string, event: string, meta: Record<string, string>) => {
+  const once = useCallback((key: string, event: TrackEvent, meta: Record<string, string>) => {
     if (counted.current.has(key)) return;
     counted.current.add(key);
     track(event, meta);
@@ -485,7 +516,11 @@ function BridgeSheet({
     const { hash, note, quote } = sentPriv;
     let live = true;
     void (async () => {
-      const rec = await waitForTransactionReceipt(config, { hash, chainId: network.chainId as GloamChainId }).catch(() => null);
+      const chainId = network.chainId as GloamChainId;
+      // wagmi throws on a reverted receipt, so the failed branch below needs the receipt read once more
+      const rec = await waitForTransactionReceipt(config, { hash, chainId }).catch(() =>
+        getTransactionReceipt(config, { hash, chainId }).catch(() => null)
+      );
       if (!live) return;
       if (rec?.status === "reverted") {
         updateLocalNote(note.id, { status: "recovered", sweepPending: false });
@@ -699,7 +734,12 @@ function BridgeSheet({
         if (last) {
           hash = sent;
         } else {
-          const rec = await waitForTransactionReceipt(config, { hash: sent, chainId });
+          // wagmi throws on a reverted receipt, with a reason decoded from raw bytes: read it plainly then
+          const rec = await waitForTransactionReceipt(config, { hash: sent, chainId }).catch(async (e) => {
+            const plain = await getTransactionReceipt(config, { hash: sent, chainId }).catch(() => null);
+            if (plain) return plain;
+            throw e;
+          });
           if (rec.status !== "success") throw new Error("The approval didn't go through.");
           approved = true;
           // Some wallets check the payment against a node that hasn't seen the approval yet
@@ -828,7 +868,7 @@ function BridgeSheet({
         aria-hidden="true"
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
         aria-label="Close"
-        onClick={onClose}
+        onClick={dismiss}
         initial={reduce ? false : { opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.2 }}
@@ -839,34 +879,41 @@ function BridgeSheet({
         animate={{ opacity: 1, y: 0 }}
         transition={{ type: "spring", stiffness: 420, damping: 36 }}
       >
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h2 id="bridge-title" className="text-[20px] font-medium tracking-[-0.01em] text-foreground">
-              {picking ? "Where is the money?" : swapping ? `Swap to ${dest.token.symbol}` : "Bring money over"}
-            </h2>
-            <p className="mt-1.5 text-[13.5px] leading-relaxed text-mute">
-              {picking
-                ? `${sources.length} chains. Sending from an exchange works too: pick the chain you withdraw on.`
-                : swapping
-                  ? privately
-                    ? `Swap ${token.symbol} for ${dest.token.symbol}, straight into your private balance.`
-                    : `Swap ${token.symbol} for ${dest.token.symbol} in your wallet on ${dest.chain}.`
-                  : privately
-                    ? `From ${chain.kind === "svm" ? "your Solana wallet" : `this wallet on ${chain.name}`}, straight into your private balance on ${dest.chain}.`
-                    : `From another chain or an exchange, into your wallet on ${dest.chain}.`}
-            </p>
+        {landed && (
+          <div className="absolute inset-0 overflow-hidden">
+            <SealedField tone="soft" />
           </div>
-          <button
-            type="button"
-            onClick={picking ? () => setPicking(false) : onClose}
-            aria-label={picking ? "Back" : "Close"}
-            className="-mr-2 -mt-1 grid h-10 w-10 shrink-0 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
+        )}
+        {!landed && (
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h2 id="bridge-title" className="text-[20px] font-medium tracking-[-0.01em] text-foreground">
+                {picking ? "Where is the money?" : swapping ? `Swap to ${dest.token.symbol}` : "Bring money over"}
+              </h2>
+              <p className="mt-1.5 text-[13.5px] leading-relaxed text-mute">
+                {picking
+                  ? `${sources.length} chains. Sending from an exchange works too: pick the chain you withdraw on.`
+                  : swapping
+                    ? privately
+                      ? `Swap ${token.symbol} for ${dest.token.symbol}, straight into your private balance.`
+                      : `Swap ${token.symbol} for ${dest.token.symbol} in your wallet on ${dest.chain}.`
+                    : privately
+                      ? `From ${chain.kind === "svm" ? "your Solana wallet" : `this wallet on ${chain.name}`}, straight into your private balance on ${dest.chain}.`
+                      : `From another chain or an exchange, into your wallet on ${dest.chain}.`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={picking ? () => setPicking(false) : onClose}
+              aria-label={picking ? "Back" : "Close"}
+              className="-mr-2 -mt-1 grid h-10 w-10 shrink-0 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        )}
 
         {network.chain.testnet && !picking && (
           <p className="mt-4 rounded-2xl bg-surface px-4 py-3 text-[12.5px] leading-relaxed text-soft">
@@ -1194,24 +1241,25 @@ function BridgeSheet({
         )}
 
         {!picking && (priv.kind === "sent" || priv.kind === "landed" || priv.kind === "late" || priv.kind === "failed") && (
-          <PrivateProgress
-            stage={priv}
-            status={status}
-            onDone={() => {
-              reset();
-              setAmount("");
-              backToNetwork();
-              onPrivate?.();
-            }}
-            onReset={() => {
-              reset();
-              backToNetwork();
-            }}
-            onGiveUp={() => {
-              // The note is kept: a payment Relay fills late still lands in it.
-              reset();
-            }}
-          />
+          <div aria-live="polite">
+            {priv.kind === "landed" ? (
+              <PrivateLanded quote={priv.quote} onDone={finishPrivate} />
+            ) : (
+              <PrivateProgress
+                stage={priv}
+                status={status}
+                onDone={finishPrivate}
+                onReset={() => {
+                  reset();
+                  backToNetwork();
+                }}
+                onGiveUp={() => {
+                  // The note is kept: a payment Relay fills late still lands in it.
+                  reset();
+                }}
+              />
+            )}
+          </div>
         )}
 
         {!picking && stage.kind === "address" && stage.quote.tx && (
@@ -1278,10 +1326,12 @@ function BridgeSheet({
                   {Number(stage.quote.receive.minimum).toFixed(2)} {stage.quote.receive.symbol}
                 </dd>
               </div>
-              <div className="flex min-h-11 items-center justify-between gap-3">
-                <dt className="text-mute">Bridge fee</dt>
-                <dd className="tnum text-right text-foreground">about ${stage.quote.feeUsd.toFixed(2)}</dd>
-              </div>
+              {feeRows(stage.quote, "Bridge fee").map(([k, v]) => (
+                <div key={k} className="flex min-h-11 items-center justify-between gap-3">
+                  <dt className="text-mute">{k}</dt>
+                  <dd className="tnum text-right text-foreground">{v}</dd>
+                </div>
+              ))}
               <div className="flex min-h-11 items-center justify-between gap-3">
                 <dt className="text-mute">Arrives</dt>
                 <dd className="text-right text-foreground">
@@ -1306,7 +1356,7 @@ function BridgeSheet({
             {status?.stage === "done" ? (
               <button
                 type="button"
-                onClick={() => onArrived(Number(stage.quote.receive.amount).toFixed(2))}
+                onClick={() => onArrived(floor2(stage.quote.receive.minimum))}
                 className="btn btn-ink btn-lg btn-block mt-4"
               >
                 Add it privately
@@ -1408,6 +1458,7 @@ function PrivateReview({
       : q.sameChain
         ? "Swap and add privately"
         : "Confirm in your wallet";
+  const back = leftoverLabel(q);
   const rows: [string, React.ReactNode][] = [
     [
       "Added privately",
@@ -1417,15 +1468,13 @@ function PrivateReview({
       </span>,
     ],
     ["On", q.receive.chain],
-    [q.sameChain ? "Swap fee" : "Bridge fee", q.feeUsd < 0.01 ? "Under a cent" : `about $${fmtMoney(q.feeUsd)}`],
+    ...feeRows(q, q.sameChain ? "Swap fee" : "Bridge fee"),
     ...(q.gasUsd !== null && q.gasUsd >= 0.01
       ? ([["Network fee", `about $${fmtMoney(q.gasUsd)} on ${q.send.chain}`]] as [string, React.ReactNode][])
       : q.evmTxs
         ? ([["Network fee", `Shown in your wallet, on ${q.send.chain}`]] as [string, React.ReactNode][])
         : []),
-    ...(q.extra && Number(q.extra) >= 0.01
-      ? ([["Back to your wallet", `about ${fmtMoney(Number(q.extra))} ${q.receive.symbol}`]] as [string, React.ReactNode][])
-      : []),
+    ...(back ? ([["Back to your wallet", back]] as [string, React.ReactNode][]) : []),
     ["Arrives", arrivesText(q)],
   ];
   return (
@@ -1453,6 +1502,10 @@ function PrivateReview({
 
       <CostWarning quote={q} />
 
+      {q.sameChain && (
+        <p className="mt-4 rounded-xl bg-surface px-4 py-3 text-[13px] leading-relaxed text-soft">{swapWalletNote(q)}</p>
+      )}
+
       {review.signing && review.progress && (
         <p className="mt-4 flex items-center gap-2.5 rounded-2xl bg-surface px-4 py-3 text-[13.5px] text-foreground">
           <span aria-hidden className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-foreground/50" />
@@ -1476,7 +1529,7 @@ function PrivateReview({
       )}
       <p className="mt-3 text-[12px] leading-relaxed text-mute">
         {q.sameChain
-          ? `One transaction swaps it and adds it to your private balance. The few cents of price buffer come back to your wallet as ${q.receive.symbol}.`
+          ? "One transaction swaps it and adds it to your private balance."
           : `It goes into your private balance as it arrives. If that can't happen, Relay sends it to your wallet on ${q.receive.chain} instead, and you add it privately from there.`}
         {steps > 1 && " Your wallet asks twice: once to approve, once to pay."}
       </p>
@@ -1484,7 +1537,45 @@ function PrivateReview({
   );
 }
 
-/** A private payment on its way, landed, slower than expected, or failed. */
+/** The money is in the private balance: the same receipt as every other success, on the token's own mark. */
+function PrivateLanded({ quote: q, onDone }: { quote: PrivateBridgeQuote; onDone: () => void }) {
+  // The button that sent it is gone, so the keyboard lands on the one thing left to do. Escape is the sheet's.
+  const receipt = useRef<HTMLDivElement>(null);
+  const done = useRef<HTMLButtonElement>(null);
+  useModalFocus(receipt, noop, { initial: done });
+  const back = leftoverLabel(q);
+  return (
+    <div ref={receipt} className="relative pt-3 text-center">
+      <SuccessReceipt
+        titleId="bridge-title"
+        title="Added privately"
+        logo={<TokenMark src={q.receive.logo} size={56} />}
+        amount={
+          <>
+            {fmtMoney(Number(q.receive.amount))}{" "}
+            <span className="text-[16px] tracking-normal text-mute">{q.receive.symbol}</span>
+          </>
+        }
+        body="Only you can see it."
+        detail={
+          back && (
+            <dl className="rounded-xl bg-surface px-4 text-[13.5px]">
+              <div className="flex min-h-11 items-center justify-between gap-3">
+                <dt className="text-mute">Back to your wallet</dt>
+                <dd className="tnum text-right text-foreground">{back}</dd>
+              </div>
+            </dl>
+          )
+        }
+      />
+      <button ref={done} type="button" onClick={onDone} className="btn btn-ink btn-lg btn-block mt-8">
+        Done
+      </button>
+    </div>
+  );
+}
+
+/** A private payment on its way, slower than expected, or failed. */
 function PrivateProgress({
   stage,
   status,
@@ -1492,7 +1583,7 @@ function PrivateProgress({
   onReset,
   onGiveUp,
 }: {
-  stage: Extract<PrivateStage, { kind: "sent" | "landed" | "late" | "failed" }>;
+  stage: Extract<PrivateStage, { kind: "sent" | "late" | "failed" }>;
   status: BridgeStatus | null;
   onDone: () => void;
   onReset: () => void;
@@ -1504,40 +1595,37 @@ function PrivateProgress({
   const failed =
     stage.kind === "failed" || (stage.kind === "sent" && !q.sameChain && (relay === "refunded" || relay === "failed"));
   const text =
-    stage.kind === "landed"
-      ? `Added privately. ${amount} is in your private balance. Only you can see it.`
-      : stage.kind === "late"
-        ? `It arrived on ${q.receive.chain}. It shows in your private balance within a few minutes. If it doesn't, it's in your wallet as ${q.receive.symbol}: add it privately from there.`
-        : stage.kind === "failed"
-          ? "The swap didn't go through, so nothing was added. Only the network fee was spent."
-          : failed
-            ? `It didn't go through. Relay returns the money to the wallet that paid, or sends it as ${q.receive.symbol} to your wallet on ${q.receive.chain}.`
-            : q.sameChain
-              ? `Swapping and adding ${amount} to your private balance…`
-              : relay === "waiting"
-                ? stage.unsure
-                  ? stage.expired
-                    ? `Relay hasn't seen a payment from ${stage.payer}, so it most likely didn't go out. If it did, it shows in your private balance by itself. Start over to try again.`
-                    : `Checking whether ${stage.payer} sent it…`
-                  : `Sent from ${stage.payer}. Waiting for ${q.send.chain} to confirm…`
-                : `Received. Adding ${amount} to your private balance on ${q.receive.chain}…`;
-  const done = stage.kind === "landed";
+    stage.kind === "late"
+      ? `It arrived on ${q.receive.chain}. It shows in your private balance within a few minutes. If it doesn't, it's in your wallet as ${q.receive.symbol}: add it privately from there.`
+      : stage.kind === "failed"
+        ? "The swap didn't go through, so nothing was added. Only the network fee was spent."
+        : failed
+          ? `It didn't go through. Relay returns the money to the wallet that paid, or sends it as ${q.receive.symbol} to your wallet on ${q.receive.chain}.`
+          : q.sameChain
+            ? `Swapping and adding ${amount} to your private balance…`
+            : relay === "waiting"
+              ? stage.unsure
+                ? stage.expired
+                  ? `Relay hasn't seen a payment from ${stage.payer}, so it most likely didn't go out. If it did, it shows in your private balance by itself. Start over to try again.`
+                  : `Checking whether ${stage.payer} sent it…`
+                : `Sent from ${stage.payer}. Waiting for ${q.send.chain} to confirm…`
+              : `Received. Adding ${amount} to your private balance on ${q.receive.chain}…`;
   return (
-    <div className="mt-5" aria-live="polite">
+    <div className="mt-5">
       <p
         className={`flex items-start gap-2.5 rounded-2xl bg-surface px-4 py-3 text-[13.5px] leading-relaxed ${
-          done ? "text-sealed" : failed ? "text-danger" : "text-foreground"
+          failed ? "text-danger" : "text-foreground"
         }`}
       >
         <span
           aria-hidden
           className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${
-            done ? "bg-sealed" : failed ? "bg-danger" : stage.kind === "late" ? "bg-foreground/50" : "animate-pulse bg-foreground/50"
+            failed ? "bg-danger" : stage.kind === "late" ? "bg-foreground/50" : "animate-pulse bg-foreground/50"
           }`}
         />
         {text}
       </p>
-      {done || stage.kind === "late" ? (
+      {stage.kind === "late" ? (
         <button type="button" onClick={onDone} className="btn btn-ink btn-lg btn-block mt-4">
           Done
         </button>
@@ -1633,12 +1721,12 @@ function SwapReview({
             {Number(quote.receive.minimum).toFixed(2)} {quote.receive.symbol}
           </dd>
         </div>
-        <div className="flex min-h-11 items-center justify-between gap-3">
-          <dt className="text-mute">Swap fee</dt>
-          <dd className="tnum text-right text-foreground">
-            {quote.feeUsd < 0.01 ? "Under a cent" : `about $${quote.feeUsd.toFixed(2)}`}
-          </dd>
-        </div>
+        {feeRows(quote, "Swap fee").map(([k, v]) => (
+          <div key={k} className="flex min-h-11 items-center justify-between gap-3">
+            <dt className="text-mute">{k}</dt>
+            <dd className="tnum text-right text-foreground">{v}</dd>
+          </div>
+        ))}
         <div className="flex min-h-11 items-center justify-between gap-3">
           <dt className="text-mute">Network fee</dt>
           <dd className="text-right text-foreground">A few cents of {quote.send.symbol}</dd>
@@ -1663,7 +1751,7 @@ function SwapReview({
 
       {error && !hash && (
         <p role="alert" className="mt-4 rounded-xl bg-danger-soft px-4 py-3 text-[13px] leading-relaxed text-danger">
-          {cancelled ? "You cancelled it in your wallet. Nothing moved." : error.message.split("\n")[0]}
+          {cancelled ? "You cancelled it in your wallet. Nothing moved." : walletErrorText(error) || "It didn't send. Try again."}
         </p>
       )}
 
@@ -1726,7 +1814,7 @@ function SwapPrice({ quote, from, to }: { quote: BridgeQuote | null; from: strin
     ],
     ["Rate", quote ? rateLine(quote) : wait],
     ["At least", quote ? `${fmtMoney(Number(quote.receive.minimum))} ${to}` : wait],
-    ["Swap fee", quote ? (quote.feeUsd < 0.01 ? "Under a cent" : `about $${fmtMoney(quote.feeUsd)}`) : wait],
+    ...(quote ? feeRows(quote, "Swap fee") : ([["Swap fee", wait]] as [string, React.ReactNode][])),
     ["Network fee", `A few cents of ${from}`],
   ];
   return (
@@ -1742,6 +1830,13 @@ function SwapPrice({ quote, from, to }: { quote: BridgeQuote | null; from: strin
       {quote && <CostWarning quote={quote} />}
     </>
   );
+}
+
+/** Relay's fee under `label`, then Gloam's own on a line of its own when it takes one (BRIDGE_FEE_BPS). */
+function feeRows(q: { feeUsd: number; appFee: BridgeAppFee | null }, label: string): [string, string][] {
+  const { relayUsd, app } = bridgeFeeLines(q);
+  const said = (usd: number) => (usd < 0.01 ? "Under a cent" : `about $${fmtMoney(usd)}`);
+  return [[label, said(relayUsd)], ...(app ? ([[`Gloam fee (${formatFeePercent(app.bps)})`, said(app.usd)]] as [string, string][]) : [])];
 }
 
 /**

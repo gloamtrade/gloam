@@ -1,6 +1,6 @@
 {
   "name": "@gloamtrade/mppx-gloam",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": false,
   "type": "module",
   "description": "Private payments for the Machine Payments Protocol (MPP). The \"gloam\" payment method for mppx: a charge settles as a shielded transfer through the Gloam pool, sealed to the payee's receive tag and swept before access, so the public sees a shielded transfer and nothing else.",
@@ -8,11 +8,11 @@
   "homepage": "https://gloam.trade/docs/sdk",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cryptoduke01/gloam.git",
+    "url": "git+https://github.com/gloamtrade/gloam.git",
     "directory": "packages/mppx-gloam"
   },
   "bugs": {
-    "url": "https://github.com/cryptoduke01/gloam/issues"
+    "url": "https://github.com/gloamtrade/gloam/issues"
   },
   "keywords": [
     "mpp",

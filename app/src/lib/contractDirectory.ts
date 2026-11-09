@@ -17,6 +17,7 @@
 import { getAddress, isAddressEqual, parseAbi, zeroAddress, type Address, type PublicClient } from "viem";
 import { getNetwork, isNetworkKey, networkName, type GloamNetwork, type NetworkKey } from "./networks";
 import { swapRoutersOn } from "./vaultSwap";
+import { ELYSIUM_FLAG, ELYSIUM_TESTNET_FLAG } from "./elysium";
 
 /**
  * Owner of every mainnet vault, and of Base Sepolia's and Ethereum Sepolia's.
@@ -104,8 +105,22 @@ export type DirectoryEntry = {
 };
 
 /** Mainnets first, in the order Gloam names them, then the testnets. */
-const MAINNET_ORDER: readonly NetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet"];
-const TESTNET_ORDER: readonly NetworkKey[] = ["robinhood", "tempo", "base", "ethereum"];
+const MAINNET_ORDER: readonly NetworkKey[] = [
+  "robinhood-mainnet",
+  "tempo-mainnet",
+  "base-mainnet",
+  "ethereum-mainnet",
+  // Only while its flag is on (lib/elysium): with the flag off it is not named at all.
+  ...(ELYSIUM_FLAG ? (["elysium-mainnet"] as const) : []),
+];
+const TESTNET_ORDER: readonly NetworkKey[] = [
+  "robinhood",
+  "tempo",
+  "base",
+  "ethereum",
+  // Elysium testnet, only while its own switch is on: listed as next until its pool is in.
+  ...(ELYSIUM_TESTNET_FLAG ? (["elysium"] as const) : []),
+];
 
 /** What a network is called here: "Base" on mainnet, "Base Sepolia testnet", "Tempo Moderato testnet". */
 export function directoryName(n: GloamNetwork): string {
@@ -115,7 +130,8 @@ export function directoryName(n: GloamNetwork): string {
   return networkName(n);
 }
 
-function routerContract(chainId: number, version: 1 | 2): string {
+function routerContract(chainId: number, version: 1 | 2 | 3): string {
+  if (version === 3) return chainId === 4217 ? "GloamVaultSwapTempo2" : "GloamVaultSwapV4c";
   if (version === 2) return "GloamVaultSwapV4b";
   return chainId === 4217 ? "GloamVaultSwapTempo" : "GloamVaultSwapV4";
 }
@@ -154,7 +170,7 @@ function appRows(n: GloamNetwork): DirectoryRow[] {
       what:
         i > 0
           ? "Kept for refunds of swaps made through it. New swaps use the router above."
-          : r.version === 2
+          : r.venue === "v4" && r.version >= 2
             ? "Swaps one note through a public DEX and back into the vault. No upgrade; its owner can only add a pool, with 3 days of public notice, or take one off."
             : "Swaps one note through a public DEX and back into the vault. No owner, no admin, no upgrade.",
       address: getAddress(r.address),
@@ -162,12 +178,25 @@ function appRows(n: GloamNetwork): DirectoryRow[] {
       source: "app",
     });
   }
-  if (n.paymentsPool) {
+  if (n.paymentsPool && n.family === "elysium") {
+    // Elysium's vault was born guarded: its owner is a VaultOwnerGuard made by the
+    // deploy itself (its address is in the live read above and in
+    // contracts/deployments/elysium-mainnet.json), never the owner wallet.
+    rows.push({
+      role: "fee_recipient",
+      name: "Treasury",
+      contract: null,
+      what: "Receives the cash-out fee.",
+      address: GLOAM_TREASURY,
+      deployBlock: null,
+      source: "app",
+    });
+  } else if (n.paymentsPool) {
     rows.push({
       role: "owner",
       name: "Owner",
       contract: null,
-      what: "Queues rule changes, which wait 3 days in public. Can lower a limit or the fee at once. Cannot move anyone's balance.",
+      what: "Queues rule changes, which wait 3 days in public. Can lower a limit or the fee at once. Has no function to withdraw a balance.",
       address: GLOAM_OWNER,
       deployBlock: null,
       source: "app",
@@ -188,8 +217,8 @@ function appRows(n: GloamNetwork): DirectoryRow[] {
       name: "Treasury",
       contract: null,
       what: swapRoutersOn(n.chainId).length
-        ? "Receives the 0.25% cash-out fee and what a swap's price buffer does not use."
-        : "Receives the 0.25% cash-out fee.",
+        ? "Receives the cash-out fee and what a swap's price buffer does not use."
+        : "Receives the cash-out fee.",
       address: GLOAM_TREASURY,
       deployBlock: null,
       source: "app",

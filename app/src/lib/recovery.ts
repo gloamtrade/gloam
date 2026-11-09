@@ -21,17 +21,18 @@
  * when any other site asks for it. Turning on and restoring use version 2. A
  * version 1 signature is only asked for when the person says they have an older
  * backup (restoreOlderBackup), or to update the key in Settings; either way the
- * backup moves across (see moveBackup). A browser still on version 1 saves to it
- * until VERSION1_SAVES_UNTIL. Version 1 backups stay on the server after that,
- * and can always be opened.
+ * backup moves across (see moveBackup). A browser still on version 1 saves to the
+ * backup it has until VERSION1_SAVES_UNTIL, and starts none. The server holds both
+ * rules. Version 1 backups stay on the server after that, and can always be opened.
  */
 import { getAddress, hexToBytes, keccak256, type Address, type Hex } from "viem";
 import { readDemo } from "./demoFlag";
-import { getAllNotes, onNotesSaved, openJson, sealJson, setAllNotes, storedNotesOpen, syncFromDisk, unlockNoteVault } from "./noteVault";
+import { dataKeyLocked, getAllNotes, onNotesSaved, openJson, sealJson, setAllNotes, storedNotesOpen, syncFromDisk, unlockNoteVault } from "./noteVault";
 import { PROMPT_DID_NOT_OPEN } from "./passkey";
 import type { PayrollBatch } from "./payroll";
 import { PAYROLL_SAVED_EVENT, pendingPayrollRuns, restorePayrollRuns } from "./payrollStore";
 import { RECEIVE_IDENTITY_EVENT, exportReceiveKeys, importReceiveKeys } from "./receiveTag";
+import { NEWER_KEY, VERSION1_SAVES_UNTIL } from "./recoveryEnd";
 import type { SentLink } from "./sentLinks";
 import { openSentLinks, restoreSentLinks, subscribeSentLinks } from "./sentLinksStore";
 import type { LocalNote } from "./shield";
@@ -50,11 +51,7 @@ export const RECOVERY_MESSAGE = [
   "Version 1",
 ].join("\n");
 
-/**
- * When a browser still on version 1 stops saving. Nothing is deleted then, and
- * updating the key works the same after this as before it.
- */
-export const VERSION1_SAVES_UNTIL = Date.parse("2026-12-01T00:00:00Z");
+export { VERSION1_SAVES_UNTIL };
 
 /**
  * The one host version 2 of the message names, in its domain and its URI.
@@ -259,6 +256,11 @@ function randomBytes(n: number): Uint8Array<ArrayBuffer> {
 
 const NO_PRF =
   "This browser or passkey can't create a recovery key. Use Chrome, Safari or Edge with a passkey saved to your Google or Apple account, or use your wallet.";
+
+/** The browser or passkey can't give a recovery key at all (no PRF), as opposed to a prompt that was closed. */
+export function noPasskeyRecovery(e: unknown): boolean {
+  return e instanceof RecoveryError && e.code === "unsupported" && e.message === NO_PRF;
+}
 
 /** A passkey call that fails this fast never showed a prompt: the browser refused it outright. */
 const NO_PROMPT_MS = 1_000;
@@ -527,13 +529,17 @@ async function fetchRemote(id: string): Promise<Remote | null> {
   return json.data;
 }
 
-/** With `mustExist`, the server answers 410 and writes nothing when no backup is there. */
-async function putBackup(keys: RecoveryKeys, c: string, n: number, mustExist = false): Promise<Response> {
+/**
+ * A newer key says so on every save. A version 1 key says nothing and must find
+ * a backup there: with none, or past the end date, the server answers 410 and
+ * writes nothing.
+ */
+async function putBackup(keys: RecoveryKeys, c: string, n: number): Promise<Response> {
   try {
     return await fetch("/api/recovery", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: keys.id, write: keys.write, c, n, ...(mustExist ? { mustExist } : {}) }),
+      body: JSON.stringify({ id: keys.id, write: keys.write, c, n, ...(isVersion1(keys) ? { mustExist: true } : { v: NEWER_KEY }) }),
     });
   } catch {
     throw new RecoveryError("No connection. Your balance is safe here and backs up when you're back online.");
@@ -554,6 +560,27 @@ function deleteRemote(backup: { id: string; write: string }): Promise<Response |
 const CONFIG_KEY = "gloam.recovery.v1";
 /** contentMark of the last save, to tell on a page load whether something since never went up. */
 const MARK_KEY = "gloam.recovery.mark.v1";
+/** Set when the person turns recovery off on this browser, cleared when it is turned on again. */
+const TURNED_OFF_KEY = "gloam.recovery.off.v1";
+
+/** The person turned recovery off on this browser, so nothing may offer to turn it on for them. */
+export function recoveryTurnedOffHere(): boolean {
+  try {
+    return localStorage.getItem(TURNED_OFF_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** A storage that refuses (private mode, a full quota) must not stop recovery turning on or off. */
+function markTurnedOff(off: boolean) {
+  try {
+    if (off) localStorage.setItem(TURNED_OFF_KEY, "1");
+    else localStorage.removeItem(TURNED_OFF_KEY);
+  } catch {
+    /* the mark is a courtesy: the setting itself is saved */
+  }
+}
 
 /**
  * What this browser keeps, sealed by the note vault. Settings saved before
@@ -571,20 +598,22 @@ type Config = RecoveryKeys & {
   retire?: { id: string; write: string };
   /** This version 1 backup vanished from the server: another device moved or deleted it. */
   gone?: boolean;
+  /** The server refused this version 1 backup for the end date, whatever this browser's clock says. */
+  ended?: boolean;
 };
 
 /** A wallet key from the version 1 message. */
-function isVersion1(c: Config): boolean {
+function isVersion1(c: Pick<RecoveryKeys, "source" | "wallet">): boolean {
   return c.source === "wallet" && !c.wallet;
 }
 
 /**
- * This browser no longer saves to its version 1 backup: the backup left the
- * server, or the end date passed. Everything stays here, and updating the key
- * starts saving again.
+ * This browser no longer saves under its version 1 key: it never made a backup,
+ * and the server starts no new ones; the backup left the server; or the end date
+ * passed. Everything stays here, and updating the key starts saving again.
  */
 function savesPaused(c: Config): boolean {
-  return isVersion1(c) && (Boolean(c.gone) || Date.now() >= VERSION1_SAVES_UNTIL);
+  return isVersion1(c) && (c.n === 0 || Boolean(c.gone || c.ended) || Date.now() >= VERSION1_SAVES_UNTIL);
 }
 
 export type RecoveryState = {
@@ -604,9 +633,9 @@ export type RecoveryState = {
   newerKey: boolean;
   /** A version 1 backup is moving to the newer key, and needs no more signatures. */
   moving: boolean;
-  /** Another device moved or deleted this version 1 backup. */
+  /** Another device moved or deleted this version 1 backup. Never true on a browser that didn't save to it. */
   gone: boolean;
-  /** On with a version 1 wallet key that no longer saves, until it is updated. */
+  /** On with a version 1 wallet key that no longer saves, until it is updated. With savedAt null, it never did. */
   paused: boolean;
 };
 
@@ -660,7 +689,7 @@ function shownState(c: Config | null): Partial<RecoveryState> {
     olderKey: c ? isVersion1(c) : false,
     newerKey: Boolean(c?.wallet),
     moving: Boolean(c?.next),
-    gone: Boolean(c?.gone),
+    gone: Boolean(c && c.gone && isVersion1(c) && c.n > 0),
     paused: c ? savesPaused(c) : false,
   };
 }
@@ -738,15 +767,20 @@ function retryDelay(e: unknown, tries: number): number {
   return Math.min(BACKOFF_START_MS * 2 ** tries, BACKOFF_MAX_MS);
 }
 
-/** Saves this browser's private balance to the backup. One retry after a conflict. */
-async function upload(c: Config): Promise<void> {
+/**
+ * Saves this browser's private balance to the backup. One retry after a conflict.
+ * With `skipSame`, a save holding exactly what the backup already holds (the last
+ * save, or a pull that found it all there) isn't sent.
+ */
+async function upload(c: Config, { skipSame = false }: { skipSame?: boolean } = {}): Promise<void> {
   let current = c;
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!stillOn(current) || savesPaused(current)) return;
     const payload = await collect();
+    if (skipSame && attempt === 0 && localStorage.getItem(MARK_KEY) === (await contentMark(payload))) return;
     const blob = await seal(current, payload);
     if (!stillOn(current)) return;
-    const res = await putBackup(current, blob, current.n + 1, isVersion1(current) && current.n > 0);
+    const res = await putBackup(current, blob, current.n + 1);
     if (res.ok) {
       const { data } = (await res.json()) as { data: { n: number; t: number } };
       const mark = await contentMark(payload);
@@ -758,9 +792,11 @@ async function upload(c: Config): Promise<void> {
       return;
     }
     if (res.status === 410) {
-      // Saved to before, yet the server holds nothing, and nothing was written.
-      // This browser keeps its copy, and the panel asks to bring the devices back together.
-      if (stillOn(current)) await saveConfig({ ...config!, retryAt: undefined, gone: true });
+      // Nothing was written, and this browser keeps its copy. A backup still there
+      // means the end date passed on the server's clock, whatever this one says. One
+      // that isn't left the server. Either way the panel asks to update.
+      const held = await fetchRemote(current.id);
+      if (stillOn(current)) await saveConfig({ ...config!, retryAt: undefined, ...(held ? { ended: true } : { gone: true }) });
       return;
     }
     if (res.status === 409 && attempt === 0) {
@@ -936,7 +972,7 @@ async function runSync(trigger: "change" | "retry" | "button"): Promise<Recovery
   return alone(async () => {
     try {
       if (save && config) {
-        await upload(config);
+        await upload(config, { skipSame: trigger === "change" && !saveOwed(config) });
         failures = 0;
         setState({ error: null });
       }
@@ -964,6 +1000,62 @@ function resume() {
   armRetry();
   // a wait in the settings has its own timer, and a save now would only go twice
   if (unfinished(config) && !config.retryAt && !config.next) schedule();
+  void pullBackup();
+}
+
+/** How often coming back to the tab reads the backup for what other devices saved. */
+const PULL_EVERY_MS = 30_000;
+let lastPull = 0;
+
+/**
+ * Brings in what another device saved to this backup since this browser last
+ * saw it, so the balance is the same on every device without a save here first.
+ * Uses the keys already in the settings: no prompt. Read only: the backup is
+ * opened here and nothing about it changes on the server. A newer copy is taken
+ * in the way a save conflict takes one in (absorb), and a change it brings is
+ * saved back up as usual. Quiet on any failure: the next focus tries again.
+ */
+export async function pullBackup({ force = false }: { force?: boolean } = {}): Promise<number> {
+  if (typeof window === "undefined" || readDemo()) return 0;
+  const c = config ?? (await loadConfig());
+  // A vault behind its passkey opens only when the person unlocks it, and a pull must not hold the saves up meanwhile.
+  if (!c || stopping || dataKeyLocked()) return 0;
+  if (!force && Date.now() - lastPull < PULL_EVERY_MS) return 0;
+  lastPull = Date.now();
+  try {
+    // A look first, outside `alone`: most of the time nothing is newer, and nothing should show as busy.
+    const peek = await fetchRemote(c.id);
+    if (!peek || peek.n <= c.n || !stillOn(c)) return 0;
+    return await alone(async () => {
+      const now = config;
+      if (!now || !stillOn(now)) return 0;
+      const remote = await fetchRemote(now.id);
+      if (!remote || remote.n <= now.n) return 0;
+      const theirs = await open(now, remote.c);
+      const added = await absorb(theirs);
+      if (!stillOn(now)) return added;
+      await saveConfig({ ...config!, n: remote.n, savedAt: remote.t, gone: undefined });
+      // Everything here is already in the backup: say so, so the change this pull made saves nothing.
+      // Anything the backup lacks still goes up, as a change always does.
+      const mine = await collect().catch(() => null);
+      if (mine && holdsAll(theirs, mine)) localStorage.setItem(MARK_KEY, await contentMark(mine));
+      return added;
+    });
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Whether `backup` already holds everything `here` would save: every note (or
+ * this browser has seen it spent), every receive key, every open sent code and
+ * every payroll run.
+ */
+function holdsAll(backup: Payload, here: Payload): boolean {
+  if (!carriedOver(here, backup)) return false;
+  const codes = new Set((backup.links ?? []).map((l) => l.code));
+  const runs = new Set((backup.payroll ?? []).map((b) => b.id));
+  return (here.links ?? []).every((l) => codes.has(l.code)) && (here.payroll ?? []).every((b) => runs.has(b.id));
 }
 
 /**
@@ -1048,6 +1140,7 @@ export async function connectRecovery(
     }
     const next: Config = { ...keys, n: remote?.n ?? 0, savedAt: remote?.t ?? null };
     await saveConfig(next);
+    markTurnedOff(false);
     if (save) {
       try {
         await tracked(upload(next));
@@ -1184,6 +1277,8 @@ export async function turnOffRecovery({ deleteBackup }: { deleteBackup: boolean 
     window.clearTimeout(timer);
     await saveConfig(null);
     off = true;
+    // Remembered so nothing offers to turn it back on (lib/embeddedRecovery). Turning it on clears it.
+    markTurnedOff(true);
     setState({ error: null });
   } finally {
     stopping = false;

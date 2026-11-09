@@ -17,6 +17,7 @@ import type { Address } from "viem";
 import { getGloamNetwork, networkForChainId, type GloamAsset, type GloamNetwork, type GloamNetworkKey } from "./constants.js";
 import { PAYMENT_NOTE_MAX, cleanText } from "./paymentNote.js";
 import { assertReceiveTag } from "./receiveTag.js";
+import { decodeShortRequest, encodeShortRequest, shortRequestLink } from "./shortLink.js";
 
 /** Same cap as the private note a payment carries. */
 export const REQUEST_NOTE_MAX = PAYMENT_NOTE_MAX;
@@ -79,6 +80,41 @@ export function normalizeRequestAmount(input: string, asset: Pick<GloamAsset, "d
  * (an agent ID must never arrive cut short, so it is refused, not trimmed).
  */
 export function buildPaymentRequestLink(params: PaymentRequestParams): string {
+  const { net, asset, amount, note, name } = checkedRequest(params);
+
+  // Same fields, in the same order, as the app's buildPaymentRequestLink.
+  const p = new URLSearchParams();
+  p.set("to", params.payTo.trim());
+  if (amount) p.set("amount", amount);
+  p.set("asset", asset.address);
+  if (note) p.set("note", note);
+  p.set("chain", net.key);
+  if (name) p.set("name", name);
+  const origin = (params.origin ?? GLOAM_APP_ORIGIN).replace(/\/+$/, "");
+  return `${origin}/app/vault?tab=move&mode=pay#${p.toString()}`;
+}
+
+/**
+ * The same request as a short link (https://gloam.trade/r#<letters and digits>),
+ * exactly as the Gloam app builds it, with the same checks as
+ * buildPaymentRequestLink. parsePaymentRequestLink reads both.
+ */
+export function buildShortPaymentRequestLink(params: PaymentRequestParams): string {
+  const { net, asset, amount, note, name } = checkedRequest(params);
+  const body = encodeShortRequest({
+    to: params.payTo.trim(),
+    chainId: net.chainId,
+    asset: asset.address,
+    decimals: asset.decimals,
+    ...(amount ? { amount } : {}),
+    ...(note ? { note } : {}),
+    ...(name ? { name } : {}),
+  });
+  if (!body) return buildPaymentRequestLink(params);
+  return shortRequestLink(body, params.origin ?? GLOAM_APP_ORIGIN);
+}
+
+function checkedRequest(params: PaymentRequestParams) {
   assertReceiveTag(params.payTo, "payTo");
   const net = resolveNetwork(params.network);
   const asset = findRequestAsset(net, params.asset);
@@ -92,17 +128,7 @@ export function buildPaymentRequestLink(params: PaymentRequestParams): string {
     throw new Error(`The note is ${Array.from(note).length} characters. A payment note holds at most ${REQUEST_NOTE_MAX}.`);
   }
   const name = cleanText(params.name, REQUEST_NAME_MAX);
-
-  // Same fields, in the same order, as the app's buildPaymentRequestLink.
-  const p = new URLSearchParams();
-  p.set("to", params.payTo.trim());
-  if (amount) p.set("amount", amount);
-  p.set("asset", asset.address);
-  if (note) p.set("note", note);
-  p.set("chain", net.key);
-  if (name) p.set("name", name);
-  const origin = (params.origin ?? GLOAM_APP_ORIGIN).replace(/\/+$/, "");
-  return `${origin}/app/vault?tab=move&mode=pay#${p.toString()}`;
+  return { net, asset, amount, note, name };
 }
 
 /** A request read back from a link the SDK or the app built. */
@@ -118,6 +144,20 @@ export interface ParsedPaymentRequest {
 /** Reads a request link's fields (fragment first, then the query string), without checking them. */
 export function parsePaymentRequestLink(link: string): ParsedPaymentRequest {
   const url = new URL(link);
+  if (/\/r\/?$/.test(url.pathname) && /^#[0-9A-Za-z]+$/.test(url.hash)) {
+    const r = decodeShortRequest(url.hash.slice(1), (chainId, asset) => {
+      const n = networkForChainId(chainId);
+      return n ? findRequestAsset(n, asset)?.decimals ?? null : null;
+    });
+    return {
+      payTo: r.to,
+      networkKey: networkForChainId(r.chainId)?.key ?? null,
+      asset: r.asset,
+      amount: r.amount ?? null,
+      note: r.note ?? null,
+      name: r.name ?? null,
+    };
+  }
   const out = new URLSearchParams(url.search);
   const frag = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
   if (frag && !frag.startsWith("claim=")) for (const [k, v] of new URLSearchParams(frag)) out.set(k, v);

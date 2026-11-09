@@ -4,7 +4,7 @@ Private payments for the [Machine Payments Protocol](https://mpp.dev) (MPP).
 
 MPP is HTTP 402 done properly: a server answers `WWW-Authenticate: Payment …`, the client pays and retries with `Authorization: Payment …`, and gets a `Payment-Receipt`. Every method so far (tempo, evm, stripe, solana) settles in public, so the ledger shows which agent paid which service, how much, how often.
 
-This package adds the **`gloam`** method. A charge is paid with a private transfer inside a Gloam shielded pool on Tempo, Robinhood Chain, Base or Ethereum, on mainnet (beta) or testnet:
+This package adds the **`gloam`** method. A charge is paid with a private transfer inside a Gloam shielded pool on Tempo, Robinhood Chain, Base or Ethereum, on mainnet or testnet (Elysium mainnet support is coming):
 
 - the payment note is sealed to the payee's receive tag, so only the payee can open it;
 - the server checks it binds the price, that it is the payment output of a `Transferred` event in the official pool, and that the credential is bound to this exact challenge;
@@ -103,6 +103,8 @@ It also exports the Payment scheme codec (challenges, credentials, receipts, the
 | If the server refuses | the value already moved (sealed to the payee) | nothing moved |
 | What the server learns | the payer's sending address, unless relayed | nothing about the payer's wallet |
 
+In pull mode the server checks the payer's transfer against the pool before it submits anything: `gloamChargeChainFromClient` makes an `eth_call` of `transfer()` (`transferWouldLand`), and a transfer the pool would refuse is refused with nothing sent. A custom `GloamChargeChain` can set `transferWouldLand` the same way (`transferCheckFromCall` builds it from any call function); without it the transfer is submitted as before.
+
 ## Networks
 
 | `network` | Chain | Default currency | Keys |
@@ -118,6 +120,8 @@ Base: `"base"` (Base Sepolia `84532`, test USDC by default, also EURC and ETH, o
 
 Ethereum too (0.3.0): `"ethereum-mainnet"` (Ethereum `1`, USDC by default, also USDT, USDG, PYUSD, EURC and ETH), live since 26 October 2026, works the same way with SDK 0.4.1 or later. Its testnet is Ethereum Sepolia, below.
 
+Elysium is coming: `"elysium-mainnet"` (Elysium mainnet, USDC only, gas in HYPE, final keys) and `"elysium"` (Elysium testnet `99801`, test USDC) are known to this package, and are coming in a build whose SDK has Elysium's values. Until then each is refused with a plain error.
+
 Ethereum Sepolia: `"ethereum"` (`11155111`, test USDC by default, also USDG, PYUSD, EURC and ETH, on the final keys) is known to 0.3.0 and works with SDK 0.4.0, which has its pool (deployed 25 October 2026). Built with an older SDK it is refused with a plain error.
 
 ### The chain reader must say which chain it reads
@@ -130,7 +134,7 @@ Gloam's vault has one address on every chain, and ETH is `0x0` on all of them. A
 
 ## Status
 
-Mainnet (beta) on Tempo, Robinhood Chain, Base and Ethereum (Base and Ethereum need a build with SDK 0.4.1 or later), payments only, with the trusted setup's final keys and beta deposit limits on the pools; reviewed internally before launch, and Kann Audits reviewed the vault contracts (report, 1 November 2026: gloam.trade/security) and found no Critical, High or Medium issues. The testnets stay up.
+Mainnet on Tempo, Robinhood Chain, Base and Ethereum (Base and Ethereum need a build with SDK 0.4.1 or later; Elysium support is coming), payments only, with the trusted setup's final keys and deposit limits on the pools; reviewed internally before launch, and Kann Audits reviewed the vault contracts (report, 1 November 2026: gloam.trade/security) and found no Critical, High or Medium issues. The testnets stay up.
 
 ## Tests
 

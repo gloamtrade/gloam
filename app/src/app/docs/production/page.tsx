@@ -2,17 +2,18 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
-import { mainnetPool } from "@/lib/mainnet";
+import { joinNames, mainnetPool } from "@/lib/mainnet";
+import { ELYSIUM, ELYSIUM_LIVE_SINCE } from "@/lib/elysium";
 
 /** Base and Ethereum mainnet move from "still ahead" to live once their pools are in (lib/mainnet.ts). */
 const BASE_LIVE = mainnetPool(8453) !== null;
 const ETHEREUM_LIVE = mainnetPool(1) !== null;
-const LATER = [BASE_LIVE ? "Base (8453)" : null, ETHEREUM_LIVE ? "Ethereum (1)" : null].filter(Boolean).join(" and ");
+const LATER = joinNames([BASE_LIVE ? "Base (8453)" : null, ETHEREUM_LIVE ? "Ethereum (1)" : null, ELYSIUM ? `Elysium (${ELYSIUM.chainId})` : null].filter((n): n is string => n !== null));
 
 export const metadata: Metadata = {
   title: "Production gate",
   description:
-    "What was in place before Gloam launched on mainnet, what came after, and what is still ahead: final ceremony keys, beta limits, timelock, internal review, the Kann Audits vault review, multisig.",
+    "What was in place before Gloam launched on mainnet, what came after, and what is still ahead: final ceremony keys, deposit limits, timelock, internal review, the Kann Audits vault review, multisig.",
 };
 
 export default function DocsProductionPage() {
@@ -29,12 +30,12 @@ export default function DocsProductionPage() {
     >
       <h2>Why this page exists</h2>
       <p>
-        Mainnet is beta software, so we keep a plain list of
+        Mainnet is live, and we keep a plain list of
         what had to be true before it opened, what is in place now, and what is
         not done yet. The app proves shield, unshield, and private send in the
         browser, and that is real cryptography. On mainnet the proofs use the
         final keys from the production trusted setup (see the{" "}
-        <a href="https://github.com/cryptoduke01/gloam/releases/tag/ceremony-final">transcript</a>).
+        <a href="https://github.com/gloamtrade/gloam/releases/tag/ceremony-final">transcript</a>).
         The Robinhood Chain and Tempo testnets keep development keys, which
         are <strong>not</strong> safe for mainnet, so they stay testnet only.
         Base Sepolia and Ethereum Sepolia run the final keys.
@@ -56,12 +57,12 @@ export default function DocsProductionPage() {
           {
             n: "3",
             title: "Limits and timelock (in place)",
-            body: "Beta deposit limits cap what the pools take. Raising a limit, adding an asset or changing a verifier waits a public 3-day timelock. The owner can lower limits or close deposits at once.",
+            body: "Deposit limits cap what the pools take. Raising a limit, adding an asset or changing a verifier waits a public 3-day timelock. The owner can lower limits or close deposits at once.",
           },
           {
             n: "4",
             title: "Mainnet deploy (done)",
-            body: "New ShieldPoolPayments pools on Robinhood Chain and Tempo mainnet (21 October 2026), then Base and Ethereum mainnet (26 October 2026): payments only, no sealed swap. The app proves with the final keys there.",
+            body: `New ShieldPoolPayments pools on Robinhood Chain and Tempo mainnet (21 October 2026), then Base and Ethereum mainnet (26 October 2026)${ELYSIUM ? `, then Elysium mainnet (${ELYSIUM_LIVE_SINCE}), owned by a VaultOwnerGuard from its deploy` : ""}: payments only, no sealed swap. The app proves with the final keys there.`,
           },
           {
             n: "5",
@@ -114,7 +115,7 @@ export default function DocsProductionPage() {
           <Link href="/docs/chain#mainnet">Networks</Link>.
         </li>
         <li>
-          <strong>Beta deposit limits.</strong> Each stablecoin: 50,000 per
+          <strong>Deposit limits.</strong> Each stablecoin: 50,000 per
           deposit and 2,500,000 in total. $GLOAM: 2,500,000 per deposit and
           25,000,000 in total.
           Cash outs and private payments are never limited.
@@ -124,8 +125,9 @@ export default function DocsProductionPage() {
           pooled funds. Notes leave only through an unshield proof.
         </li>
         <li>
-          <strong>Fees.</strong> Deposits and private payments are free. A cash
-          out costs 0.25%. Half of Gloam&apos;s fees buy back $GLOAM; half of
+          <strong>Fees.</strong> Direct deposits and private payments are free. A
+          cash out costs 0.5%. Money bridged in from another chain pays the
+          bridge&apos;s fees. Half of Gloam&apos;s fees buy back $GLOAM; half of
           that is burned and half goes to the treasury.
         </li>
       </ul>
@@ -153,7 +155,7 @@ export default function DocsProductionPage() {
           <strong>External review beyond the vault.</strong> The{" "}
           <Link href="/security">Kann Audits report</Link> covers the vault
           contracts only. The swap routers, circuits, app and relay were not
-          part of it. Beta limits cap how much the pools can hold.
+          part of it. Deposit limits cap how much the pools can hold.
         </li>
         <li>
           <strong>Multisig owner.</strong> One wallet is the owner (

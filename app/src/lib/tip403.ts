@@ -20,6 +20,12 @@
  * early, clear stop, not the guarantee. If the RPC cannot be reached, callers
  * fail open and the chain still decides.
  *
+ * A recipient's own receive policy (TIP-1028) is different: a payment it refuses
+ * does not revert. Tempo holds it, and only the sender can claim it back, which
+ * for a cash out is the vault or a swap router, and neither can. So the receive
+ * policy must answer before anything is paid out: checkReceivePolicy throws
+ * when it can't be read, and the relay refuses the send then.
+ *
  * Everything here is eth_call only, through an injected reader, so it can be
  * tested without a network. See tip403Server.ts for the wired-up version.
  */
@@ -285,7 +291,9 @@ export const TIP403_POOL_RECEIVE_MESSAGE =
 export const TIP403_POOL_SEND_MESSAGE =
   "This stablecoin's issuer is blocking transfers out of the Gloam vault right now, so it can't be cashed out. Balances stay in the vault until the issuer allows it again.";
 export const TIP403_RECEIVE_POLICY_MESSAGE =
-  "The receiving wallet's Tempo receive policy doesn't accept payments from the Gloam vault, so this cash out would be held instead of arriving. Change that policy or cash out to another wallet.";
+  "The receiving wallet's Tempo receive policy doesn't accept payments from Gloam, so this cash out would be held instead of arriving. Change that policy or cash out to another wallet.";
+export const TIP403_RECEIVE_UNCHECKED_MESSAGE =
+  "Couldn't read the receiving wallet's Tempo receive policy, so nothing was sent. Try again shortly.";
 
 /**
  * The warning for the vault itself, if the issuer's policy (or a pause) would
@@ -302,23 +310,66 @@ export type Tip403Verdict =
   | { allowed: true }
   | {
       allowed: false;
-      /** pool: the issuer's policy stops the vault. wallet: it stops this address. receive: the recipient's own TIP-1028 policy. */
-      reason: "pool" | "wallet" | "receive";
+      /**
+       * pool: the issuer's policy stops the vault. wallet: it stops this address.
+       * receive: the recipient's own TIP-1028 policy. unchecked: that policy could not be read.
+       */
+      reason: "pool" | "wallet" | "receive" | "unchecked";
       message: string;
     };
 
 /**
+ * TIP-1028: whether each recipient's own receive policy accepts `token` from
+ * `sender`, the contract that pays it out. A virtual address is checked as the
+ * wallet it forwards to. Throws when any of it can't be read, a virtual address
+ * that can't be resolved included: a payment the policy refuses is held, not
+ * reverted, so a caller that pays out refuses then.
+ */
+export async function checkReceivePolicy(
+  reader: Tip403Reader,
+  token: Address,
+  sender: Address,
+  addresses: readonly Address[]
+): Promise<Tip403Verdict> {
+  const accepted = await Promise.all(
+    addresses.map(async (a) => {
+      const to = isVirtualAddress(a)
+        ? ((await reader.readContract({
+            address: TEMPO_ADDRESS_REGISTRY,
+            abi: addressRegistryAbi,
+            functionName: "resolveRecipient",
+            args: [a],
+          })) as Address)
+        : a;
+      const [authorized] = (await reader.readContract({
+        address: TIP403_REGISTRY,
+        abi: tip403RegistryAbi,
+        functionName: "validateReceivePolicy",
+        args: [token, sender, to],
+      })) as readonly [boolean, number];
+      return authorized === true;
+    })
+  );
+  if (accepted.some((ok) => !ok)) return { allowed: false, reason: "receive", message: TIP403_RECEIVE_POLICY_MESSAGE };
+  return { allowed: true };
+}
+
+/**
  * Check public addresses against a stablecoin's TIP-403 policy for one edge of
  * the vault. On deposit each address must be an authorized sender; on cash out
- * an authorized recipient (and its own TIP-1028 receive policy must accept the
- * vault); with no flow, both. A wallet the issuer blocks gets the same neutral
- * line as sanctions screening. Throws on RPC failure; callers decide.
+ * an authorized recipient, and unless `receive` is false its own TIP-1028
+ * receive policy must accept `sender` (the vault unless set: a swap's exit pays
+ * from its escrow); with no flow, both. A wallet the issuer blocks gets the
+ * same neutral line as sanctions screening. Throws on RPC failure; callers
+ * decide, and refuse a payout whose receive policy could not be read.
  */
 export async function checkTip403(input: {
   reader: Tip403Reader;
   status: Tip403AssetStatus;
   addresses: readonly Address[];
   flow?: Tip403Flow;
+  sender?: Address;
+  receive?: boolean;
 }): Promise<Tip403Verdict> {
   const { reader, status, addresses, flow } = input;
   const notice = poolNotice(status, flow);
@@ -338,28 +389,10 @@ export async function checkTip403(input: {
     return { allowed: false, reason: "wallet", message: SCREEN_BLOCKED_MESSAGE };
   }
 
-  if (flow === "cashout") {
+  if (flow === "cashout" && input.receive !== false) {
     // TIP-1028: a recipient can refuse senders itself; the payment would then be
-    // held by Tempo's receive-policy guard rather than arrive. Chains without
-    // receive policies do not answer, which counts as accepted.
-    const held = await Promise.all(
-      addresses.map(async (a) => {
-        try {
-          const [authorized] = (await reader.readContract({
-            address: TIP403_REGISTRY,
-            abi: tip403RegistryAbi,
-            functionName: "validateReceivePolicy",
-            args: [status.token, status.pool, await effectiveRecipient(reader, a)],
-          })) as readonly [boolean, number];
-          return authorized === false;
-        } catch {
-          return false;
-        }
-      })
-    );
-    if (held.some(Boolean)) {
-      return { allowed: false, reason: "receive", message: TIP403_RECEIVE_POLICY_MESSAGE };
-    }
+    // held by Tempo's receive-policy guard rather than arrive.
+    return checkReceivePolicy(reader, status.token, input.sender ?? status.pool, addresses);
   }
   return { allowed: true };
 }

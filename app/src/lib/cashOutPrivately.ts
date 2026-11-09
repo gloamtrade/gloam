@@ -52,7 +52,7 @@ export type PrivateCashOutDeps = {
   pathOf: (n: LocalNote) => Promise<PoseidonMerklePath | null>;
   split: (a: SplitArgs) => Promise<{ part: LocalNote; change: LocalNote | null }>;
   prove: (n: LocalNote, to: Address, path: PoseidonMerklePath, chainId: number) => Promise<CashOutCall>;
-  schedule: (n: LocalNote, call: CashOutCall, when: CashOutWhen) => Promise<OwnedCashOutJob>;
+  schedule: (n: LocalNote, call: CashOutCall, when: CashOutWhen, feeBps?: number) => Promise<OwnedCashOutJob>;
   newId: () => string;
 };
 
@@ -137,6 +137,8 @@ export async function runPrivateCashOut(args: {
   window: CashOutWindow;
   owner: Address;
   topUp?: TopUpRun;
+  /** The fee the screen showed, kept on each job: the vault takes the rate of the day it lands. */
+  feeBps?: number;
   /** The fewest pieces this run takes: 2 unless the caller means less, like funding a wallet that needs no gas. */
   least?: number;
   onStatus?: (s: string) => void;
@@ -212,7 +214,7 @@ export async function runPrivateCashOut(args: {
       const call = await d.prove(target, to[i]!, path, target.chainId);
       piece(i, { state: "scheduling" });
       status(`${label}: scheduling with the Gloam relay…`);
-      const job = await d.schedule(target, call, whenOf(i));
+      const job = await d.schedule(target, call, whenOf(i), args.feeBps);
       jobs.push(job);
       piece(i, { state: "scheduled", at: job.sendAfter });
     } catch (e) {
@@ -321,12 +323,12 @@ export function savePrivatePref(patch: Partial<PrivateCashOutPref>) {
  * the same address and window, or for a top-up its day (the next one if that
  * has passed). The caller checks the address first, as for any cash out.
  */
-export async function schedulePiece(note: LocalNote, deps: Partial<PrivateCashOutDeps> = {}): Promise<OwnedCashOutJob> {
+export async function schedulePiece(note: LocalNote, deps: Partial<PrivateCashOutDeps> = {}, feeBps?: number): Promise<OwnedCashOutJob> {
   const tag = note.cashOutPlan;
   if (!tag) throw new Error("This is not a piece of a private cash out.");
   const d: PrivateCashOutDeps = { ...appDeps, ...deps };
   const path = await d.pathOf(note);
   if (!path) throw new Error(NO_PATH);
   const call = await d.prove(note, tag.to, path, note.chainId);
-  return d.schedule(note, call, tag.topUp ? { day: nextSendDay(tag.topUp.day, Date.now()), webhook: tag.topUp.webhook } : tag.window);
+  return d.schedule(note, call, tag.topUp ? { day: nextSendDay(tag.topUp.day, Date.now()), webhook: tag.topUp.webhook } : tag.window, feeBps);
 }

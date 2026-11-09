@@ -32,7 +32,9 @@ import { formatUsd } from "@/lib/markets";
 import { addableTokensFor, approvalsBeforeDeposit, isDollarStable, isNativeAddable } from "@/lib/tokens";
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
 import { hasCoingeckoMarks, useCoingeckoMarks } from "@/hooks/useCoingeckoMarks";
-import { surelyNotSent } from "@/lib/walletErrors";
+import { surelyNotSent, walletErrorForPeople } from "@/lib/walletErrors";
+import { publicClientFor } from "@/lib/rhClient";
+
 import { isNoLimit } from "@gloamtrade/sdk";
 import { APPROVE_GAS_LIMIT, gasFor, HASH_SCHEME, NATIVE_ASSET, SHIELD_GAS_LIMIT, SHIELD_BOUND_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, dropUnsentNote, formatAssetAmount, isNativeAsset, isShieldDeployed, makeNoteMaterial, markAllNotesRecovered, saveLocalNote, shieldPoolAbi } from "@/lib/shield";
 import { makeBoundNotePoseidon } from "@/lib/notePoseidon";
@@ -58,6 +60,12 @@ import { TempoFaucetButton } from "./TempoFaucetButton";
 
 type TxKind = "shield" | "approve" | "pull" | null;
 type AssetChoice = "eth" | string; // eth | token id
+
+/** The receipt wait gave up; the deposit may still land. */
+const DEPOSIT_SLOW =
+  "Your deposit was sent, but the network is slow to confirm it. It's saved in this browser and shows in your private balance as soon as it lands. Check the link below.";
+const DEPOSIT_REVERTED =
+  "This deposit didn't go through on chain, so nothing was added to your private balance. Only the network fee was spent. Check the link below.";
 
 /** A wallet error that may have come after the deposit went out (a timeout, a lost reply): the note is kept. */
 export const DEPOSIT_MAYBE_SENT =
@@ -257,7 +265,7 @@ export function ShieldView() {
     poolData?.[6]?.status === "success"
       ? (poolData[6].result as string)
       : null;
-  // Beta deposit limits. Pools from before them fail this read: no limits.
+  // Deposit limits. Pools from before them fail this read: no limits.
   const limitsOn = poolData?.[7]?.status === "success" && poolData[7].result === true;
   const limit =
     limitsOn && poolData?.[8]?.status === "success"
@@ -378,7 +386,8 @@ export function ShieldView() {
   const walletBalance = selectedToken
     ? (tokenBal as bigint | undefined)
     : ethBal?.value;
-  const symbol = selectedToken?.symbol ?? "ETH";
+  // The chain's own gas coin (HYPE on Elysium), never a hardcoded "ETH".
+  const symbol = selectedToken?.symbol ?? network.primaryAsset.symbol;
   const decimals = selectedToken?.decimals ?? 18;
 
   const mark = selectedToken
@@ -557,19 +566,19 @@ export function ShieldView() {
     return `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${symbol}`;
   }
 
-  /** Why the vault's beta limits refuse this amount, or null. */
+  /** Why the vault's deposit limits refuse this amount, or null. */
   function limitProblem(value: bigint): string | null {
     if (!limitsOn) return null;
     if (!limit || limit[1] === BigInt(0)) {
       return `${symbol} deposits are closed right now. Private payments and cash out still work.`;
     }
     if (limitPer !== null && value > limitPer) {
-      return `During the beta, one deposit can be up to ${limitText(limitPer)}.`;
+      return `One deposit can be up to ${limitText(limitPer)}.`;
     }
     if (limitRoom !== null && value > limitRoom) {
       return limitRoom === BigInt(0)
-        ? `The vault is at its beta limit for ${symbol}. Try again later.`
-        : `The vault has room for ${limitText(limitRoom)} more during the beta.`;
+        ? `The vault is at its deposit limit for ${symbol}. Try again later.`
+        : `The vault has room for ${limitText(limitRoom)} more right now.`;
     }
     return null;
   }
@@ -586,11 +595,9 @@ export function ShieldView() {
     const overLimit = limitProblem(value);
     if (overLimit) return overLimit;
     if (!selectedToken && ethBal) {
-      if (
-        value > ethBal.value - 50_000_000_000_000n &&
-        ethBal.value > value
-      ) {
-        return "Leave a little ETH for gas.";
+      // value is at most the balance here (checked above), so this also catches the whole balance
+      if (value > ethBal.value - 50_000_000_000_000n) {
+        return `Leave a little ${network.primaryAsset.symbol} for gas.`;
       }
     }
     return null;
@@ -677,8 +684,11 @@ export function ShieldView() {
           chainId: networkNow.current.chainId,
         } as Parameters<typeof writeContract>[0]);
       } catch (err) {
+        // The note store's own words say what to do; a prover or chunk-load error is no use to read.
         setFormError(
-          err instanceof Error ? err.message : "Could not prepare your private deposit. Try again."
+          err instanceof Error && err.name === "NoteSaveError"
+            ? err.message
+            : "Could not prepare your private deposit. Try again."
         );
         stopDeposit(note);
       }
@@ -731,6 +741,9 @@ export function ShieldView() {
     let ready: { note: LocalNote; commitment: Hex; steps: bigint[] } | null = null;
     try {
       ready = await prepareDeposit(value, network.pool, address);
+    } catch {
+      // nothing is saved or sent before prepareDeposit returns
+      setFormError("Could not prepare your private deposit. Try again.");
     } finally {
       submitting.current = false;
       setChecking(false);
@@ -894,12 +907,22 @@ export function ShieldView() {
     setApproved(false);
     pendingShieldArgs.current = null;
     depositProof.current = null;
-    setFormError(
-      "Your deposit was sent, but the network is slow to confirm it. It's saved in this browser and shows in your private balance as soon as it lands. Check the link below."
-    );
+    setFormError(DEPOSIT_SLOW);
+    // The wait also gives up when the deposit reverted (wagmi throws on a reverted
+    // receipt). Read the receipt once more and say so then: only the message changes.
+    if (hash) {
+      void publicClientFor(network)
+        .getTransactionReceipt({ hash })
+        .then(
+          (r) => {
+            if (r.status === "reverted") setFormError((cur) => (cur === DEPOSIT_SLOW ? DEPOSIT_REVERTED : cur));
+          },
+          () => undefined
+        );
+    }
     const t = window.setTimeout(() => refreshNotes(), 15_000);
     return () => window.clearTimeout(t);
-  }, [receiptLost, hash, pendingKind, refreshNotes, txLog]);
+  }, [receiptLost, hash, pendingKind, refreshNotes, txLog, network]);
 
   // The wait for an approval's receipt gave up (a busy RPC). It may have landed
   // anyway: read the allowance and go on to the deposit when it covers it,
@@ -1056,7 +1079,7 @@ export function ShieldView() {
             : liveLimit
               ? limit && limit[1] === BigInt(0)
                 ? `${symbol} deposits are closed`
-                : "Over the beta limit"
+                : "Over the deposit limit"
               : null;
   const faucet = network.testnet ? faucetFor(network.key) : null;
   // A long list reads worse than a short one: name the first two and say there are more.
@@ -1242,7 +1265,7 @@ export function ShieldView() {
             </div>
             {limitsOn && limitPer !== null && limitPer > BigInt(0) && (
               <div className="flex h-11 items-center justify-between gap-3">
-                <dt className="text-mute">Beta limit</dt>
+                <dt className="text-mute">Deposit limit</dt>
                 <dd className="tnum text-foreground">{limitText(limitPer)} per deposit</dd>
               </div>
             )}
@@ -1306,8 +1329,8 @@ export function ShieldView() {
             >
               {formError ||
                 (writeError?.message.includes("OverDepositLimit")
-                  ? "This deposit is over the vault's beta limit. Try a smaller amount."
-                  : writeError?.message.slice(0, 180))}
+                  ? "This deposit is over the vault's deposit limit. Try a smaller amount."
+                  : walletErrorForPeople(writeError))}
             </p>
           )}
           {hash && !isSuccess && (
@@ -1351,6 +1374,7 @@ export function ShieldView() {
           {bridgeVisible(network) && (!demo || process.env.NEXT_PUBLIC_BRIDGE_PREVIEW === "1") && (
             <BridgeInCard
               recipient={address ?? undefined}
+              startOpen={searchParams.get("bridge") === "open"}
               onArrived={(arrived) => {
                 // By address on mainnet (Tempo lists Relay's USDC as USDC.e), by symbol in a testnet preview.
                 const dest = BRIDGE_DESTINATIONS[network.family]?.token;

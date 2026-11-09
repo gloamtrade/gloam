@@ -34,7 +34,7 @@ g.window = {
 };
 
 const { takeFirstClaim, canSwapAfterClaim } = await import("../src/lib/afterClaim");
-const { VAULT_SWAP_ASSETS } = await import("../src/lib/vaultSwap");
+const { VAULT_SWAP_ASSETS, swapV3Live } = await import("../src/lib/vaultSwap");
 
 let passed = 0;
 function test(name: string, fn: () => void) {
@@ -75,7 +75,7 @@ test("Swap shows only where a router is live and the claimed token can be swappe
   assert.equal(canSwapAfterClaim(4663, rhUsdg, undefined), true, "Robinhood Chain mainnet, USDG");
   assert.equal(canSwapAfterClaim(4663, rhUsdg.toUpperCase().replace("0X", "0x"), "0x0000000000000000000000000000000000000001"), true, "any case");
   assert.equal(canSwapAfterClaim(4217, tempoUsdc, undefined), true, "Tempo mainnet, USDC.e");
-  assert.equal(canSwapAfterClaim(4663, "0x0000000000000000000000000000000000000000", undefined), false, "native ETH is not a swap start");
+  assert.equal(canSwapAfterClaim(4663, "0x0000000000000000000000000000000000000000", undefined), swapV3Live(4663), "native ETH is a swap start only with v3");
   assert.equal(canSwapAfterClaim(46630, rhUsdg, undefined), false, "Robinhood Chain testnet has no router");
   assert.equal(canSwapAfterClaim(42431, tempoUsdc, undefined), false, "Tempo testnet has no router");
 });

@@ -261,9 +261,15 @@ const good = await makeProof([run]);
 
 // ── expired, relabelled, wrong vault, offline ──
 {
-  const r = await checkPayrollProof(good, deps({ now: EXPIRES + 1 }));
+  let looked = 0;
+  const r = await checkPayrollProof(good, deps({ now: EXPIRES + 1, findPayment: async () => { looked++; return { state: "not-found" }; } }));
   assert(!r.ok && r.expired && stateOf(r, "Expired") === "fail", "expired proof is not ok");
-  assert(r.checks.filter((c) => c.label !== "Expired").every((c) => c.state === "pass"), "expired but otherwise true");
+  assert(looked === 0 && stateOf(r, "Each one is a private payment") === "unknown", "an expired proof is not looked up on chain");
+  assert(/expired/.test(detailOf(r, "Each one is a private payment")), "says why the payments were not looked up");
+  assert(
+    r.checks.filter((c) => c.label !== "Expired" && !c.label.startsWith("Each one is a private payment")).every((c) => c.state === "pass"),
+    "expired but otherwise true"
+  );
 }
 {
   const p = clone(good);
@@ -327,6 +333,67 @@ const good = await makeProof([run]);
   p.parts[0].publicSignals = p.parts[0].publicSignals.slice(0, 4);
   const r = await checkPayrollProof(p, deps());
   assert(!r.ok && r.checks.length === 1, "a damaged proof stops early");
+}
+
+// ── lookups stop at the first payment not found ──
+{
+  const long = [];
+  for (let i = 0; i < 13; i++) long.push(await payment(500 + i, 1_000_000n + BigInt(i)));
+  const p = await makeProof([long]);
+  const honest = await checkPayrollProof(p, deps());
+  assert(honest.ok, "a run of 13 passes");
+  let looked = 0;
+  const counting = (over) => deps({ findPayment: async (pay) => { looked++; return over(pay); } });
+  const unnamed = clone(p);
+  unnamed.payments[0].txHash = null;
+  const r = await checkPayrollProof(unnamed, counting(async () => ({ state: "not-found" })));
+  assert(!r.ok && stateOf(r, "Each one is a private payment") === "unknown", "a payment not found is not a pass");
+  assert(looked === 6, `lookups stop after the first batch with a payment not found (${looked} of 13 looked up)`);
+  looked = 0;
+  const r2 = await checkPayrollProof(p, counting(async () => ({ state: "no-tx" })));
+  assert(!r2.ok && stateOf(r2, "Each one is a private payment") === "fail" && looked === 6, "lookups stop after a payment that fails");
+}
+
+// ── a group looked up in one call, two block times read ──
+{
+  let calls = 0;
+  let timed = 0;
+  const grouped = deps({
+    findPayment: undefined,
+    findPayments: async (pays) => {
+      calls++;
+      return pays.map((pay, i) => ({ state: "found", txHash: pay.txHash, block: 100n + BigInt(i) }));
+    },
+    blockTime: async (b) => {
+      timed++;
+      return NOW - 7200 + Number(b - 100n) * 9;
+    },
+  });
+  const r = await checkPayrollProof(good, grouped);
+  assert(r.ok && calls === 1 && timed === 2, `one call for the group and two block times (${calls} calls, ${timed} times)`);
+  assert(r.paidBetween?.[0] === NOW - 7200 && r.paidBetween?.[1] === NOW - 7200 + 36, "time span from the first and last block");
+  const capped = await checkPayrollProof(
+    good,
+    deps({
+      findPayment: undefined,
+      findPayments: async (pays) => pays.map((pay, i) => (i < 2 ? { state: "found", txHash: pay.txHash, block: 1n } : i === 2 ? { state: "over-limit" } : undefined)),
+      blockTime: async () => NOW,
+    })
+  );
+  assert(!capped.ok && stateOf(capped, "Each one is a private payment") === "unknown", "a check past its read limit is not a pass");
+  assert(/more network reads/.test(detailOf(capped, "Each one is a private payment")), "says the check hit its read limit");
+  const partial = await checkPayrollProof(
+    good,
+    deps({ findPayment: undefined, findPayments: async (pays) => pays.map((pay, i) => (i < 4 ? { state: "found", txHash: pay.txHash, paidAt: NOW } : undefined)) })
+  );
+  assert(!partial.ok && stateOf(partial, "Each one is a private payment") === "unknown", "a payment left unread is not a pass");
+  const unclocked = await checkPayrollProof(
+    good,
+    deps({ findPayment: undefined, findPayments: async (pays) => pays.map((pay) => ({ state: "found", txHash: pay.txHash, block: 7n })), blockTime: async () => { throw new Error("offline"); } })
+  );
+  assert(!unclocked.ok && stateOf(unclocked, "When the payments landed") === "unknown", "a time that could not be read is not a pass");
+  const offline = await checkPayrollProof(good, deps({ findPayment: undefined, findPayments: async () => { throw new Error("offline"); } }));
+  assert(!offline.ok && stateOf(offline, "Each one is a private payment") === "unknown", "a group lookup offline is not a pass");
 }
 
 globalThis.curve_bn128?.terminate?.();

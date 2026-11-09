@@ -56,11 +56,11 @@ contract VaultSwapReviewTest is VaultSwapTest {
 
     // ───────────────────────────── the escrow address the app works out
 
-    function test_escrow_creation_code_is_pinned() public pure {
+    function test_escrow_creation_code_is_pinned() public view virtual {
         assertEq(keccak256(type(SwapEscrow).creationCode), ESCROW_CODE_HASH);
     }
 
-    function test_escrow_address_is_create2_of_the_key() public view {
+    function test_escrow_address_is_create2_of_the_key() public view virtual {
         GloamVaultSwap.EscrowKey memory key = GloamVaultSwap.EscrowKey(
             bytes32(uint256(1)), NOTE, bytes32(uint256(2)), address(gloam), 39e18, bytes32(uint256(3)), 99e6, keccak256("r")
         );
@@ -88,10 +88,10 @@ contract VaultSwapReviewTest is VaultSwapTest {
     function test_review_F1_copied_call_lands_first_and_the_relay_tx_reverts() public {
         Call memory k = _call(router, 501, address(gloam), 39e18, 0xF1, _route1(direct));
         vm.prank(outsider);
-        router.swap(k.s, k.d, k.r, k.route);
+        _go(router, k);
         vm.prank(relayer);
         vm.expectRevert(GloamVaultSwap.BadRefund.selector);
-        router.swap(k.s, k.d, k.r, k.route);
+        _go(router, k);
         assertTrue(pool.isSpent(k.s.nullifier));
         assertTrue(pool.commitmentSeen(k.d.commitment), "the owner's new note landed");
     }
@@ -102,12 +102,12 @@ contract VaultSwapReviewTest is VaultSwapTest {
         Call memory k = _call(router, 502, address(gloam), 41e18, 0xF2, _route1(direct));
         vm.prank(relayer);
         vm.expectRevert(abi.encodeWithSelector(GloamVaultSwap.OverInput.selector, 102_500_000, ARRIVES));
-        router.swap(k.s, k.d, k.r, k.route);
+        _go(router, k);
         assertFalse(pool.isSpent(k.s.nullifier));
 
         vm.startPrank(outsider);
         pool.unshield(k.s.proof, k.s.root, k.s.nullifier, k.s.asset, _escrow(k), k.s.amount);
-        router.swap(k.s, k.d, k.r, k.route);
+        _go(router, k);
         vm.stopPrank();
         assertTrue(pool.commitmentSeen(k.r.commitment), "the value sits in the owner's refund note");
         assertEq(usd.balanceOf(treasury), ARRIVES - k.r.amount);
@@ -118,10 +118,10 @@ contract VaultSwapReviewTest is VaultSwapTest {
         Call memory k = _call(router, 503, address(gloam), 41e18, 0xF3, _route1(direct));
         vm.prank(relayer);
         vm.expectRevert(abi.encodeWithSelector(GloamVaultSwap.OverInput.selector, 102_500_000, ARRIVES));
-        router.swap(k.s, k.d, k.r, k.route);
+        _go(router, k);
         _rate(direct, address(usd), 24, 10 ** 13); // 41 gloam now costs 98.4
         vm.prank(outsider);
-        router.swap(k.s, k.d, k.r, k.route);
+        _go(router, k);
         assertTrue(pool.commitmentSeen(k.d.commitment));
     }
 
@@ -136,7 +136,7 @@ contract VaultSwapReviewTest is VaultSwapTest {
         assertFalse(pool.commitmentSeen(k.d.commitment));
         assertFalse(pool.commitmentSeen(k.r.commitment));
         assertEq(usd.balanceOf(_escrow(k)), ARRIVES, "the money is waiting, not gone");
-        router.swap(k.s, k.d, k.r, k.route);
+        _go(router, k);
         assertTrue(pool.commitmentSeen(k.r.commitment));
     }
 
@@ -145,12 +145,10 @@ contract VaultSwapReviewTest is VaultSwapTest {
     function test_review_F2_refund_needs_only_the_refund_proof() public {
         Call memory k = _call(router, 508, address(gloam), 39e18, 0xF8, _route1(direct));
         pool.unshield(k.s.proof, k.s.root, k.s.nullifier, k.s.asset, _escrow(k), k.s.amount);
-        GloamVaultSwap.Spend memory s = k.s;
-        s.proof = new bytes(64);
-        s.root = bytes32(0);
-        GloamVaultSwap.Deposit memory d = k.d;
-        d.proof = new bytes(64);
-        router.swap(s, d, k.r, k.route);
+        k.s.proof = new bytes(64);
+        k.s.root = bytes32(0);
+        k.d.proof = new bytes(64);
+        _go(router, k);
         assertTrue(pool.commitmentSeen(k.r.commitment));
     }
 
@@ -169,7 +167,7 @@ contract VaultSwapReviewTest is VaultSwapTest {
         Call memory k = _call(router, 504, address(gloam), 39e18, 0xF4, _route1(direct));
         pool.unshield(k.s.proof, k.s.root, k.s.nullifier, k.s.asset, _escrow(k), k.s.amount);
         assertEq(usd.balanceOf(_escrow(k)), k.r.amount);
-        router.swap(k.s, k.d, k.r, k.route);
+        _go(router, k);
         assertTrue(pool.commitmentSeen(k.r.commitment));
         assertEq(usd.balanceOf(treasury), 0);
     }
@@ -186,11 +184,11 @@ contract VaultSwapReviewTest is VaultSwapTest {
         vm.stopPrank();
 
         vm.expectRevert(ShieldPoolCore.OverDepositLimit.selector);
-        router.swap(k.s, k.d, k.r, k.route);
+        _go(router, k);
         assertEq(usd.balanceOf(_escrow(k)), ARRIVES, "waits at the escrow");
 
         pool.setDepositLimit(address(usd), 500e6, 30_000e6);
-        router.swap(k.s, k.d, k.r, k.route);
+        _go(router, k);
         assertTrue(pool.commitmentSeen(k.r.commitment));
     }
 
@@ -209,14 +207,14 @@ contract VaultSwapReviewTest is VaultSwapTest {
         Call memory k = _callFrom(router, 506, address(ft), NOTE, address(gloam), 39e18, 0xF6, _route1(direct));
         pool.unshield(k.s.proof, k.s.root, k.s.nullifier, k.s.asset, _escrow(k), k.s.amount);
         ft.freeze(treasury, true);
-        router.swap(k.s, k.d, k.r, k.route);
+        _go(router, k);
         assertTrue(pool.commitmentSeen(k.r.commitment), "the refund landed");
         assertEq(ft.balanceOf(address(router)), ARRIVES - k.r.amount, "the margin waits in the router");
 
         // a later refund of the same token still lands, and uses only what its own escrow paid
         Call memory k2 = _callFrom(router, 509, address(ft), NOTE, address(gloam), 39e18, 0xF9, _route1(direct));
         pool.unshield(k2.s.proof, k2.s.root, k2.s.nullifier, k2.s.asset, _escrow(k2), k2.s.amount);
-        router.swap(k2.s, k2.d, k2.r, k2.route);
+        _go(router, k2);
         assertTrue(pool.commitmentSeen(k2.r.commitment));
         assertEq(ft.balanceOf(address(router)), 2 * (ARRIVES - k.r.amount));
 
@@ -225,7 +223,7 @@ contract VaultSwapReviewTest is VaultSwapTest {
         pool.setDepositLimit(address(gloam), 25_000e18, 250_000e18);
         Call memory k3 = _callFrom(router, 510, address(ft), NOTE, address(gloam), 39e18, 0xFA, _route1(direct));
         pool.unshield(k3.s.proof, k3.s.root, k3.s.nullifier, k3.s.asset, _escrow(k3), k3.s.amount);
-        router.swap(k3.s, k3.d, k3.r, k3.route);
+        _go(router, k3);
         assertEq(ft.balanceOf(address(router)), 0);
         assertEq(ft.balanceOf(treasury), 3 * (ARRIVES - k.r.amount));
     }
@@ -238,7 +236,7 @@ contract VaultSwapReviewTest is VaultSwapTest {
             address(gloam), abi.encodeWithSelector(0xa9059cbb, treasury, uint256(1e18)), bytes("blocked")
         );
         Call memory k = _call(router, 511, address(gloam), 39e18, 0xFB, _route1(direct));
-        router.swap(k.s, k.d, k.r, k.route);
+        _go(router, k);
         assertTrue(pool.commitmentSeen(k.d.commitment));
         assertEq(gloam.balanceOf(address(router)), 1e18);
         vm.clearMockedCalls();

@@ -4,6 +4,7 @@ import { AppLink } from "@/components/AppLink";
 import { Header } from "@/components/Header";
 import { FlowField } from "@/components/ui/FlowField";
 import { SealDots } from "@/components/ui/SealDots";
+import { RECOVER_SCRIPT } from "@/lib/mangledLink";
 
 // Its own tab title, and noindex alone (the root layout's index, follow would sit next to it).
 export const metadata: Metadata = {
@@ -14,6 +15,8 @@ export const metadata: Metadata = {
 export default function NotFound() {
   return (
     <div className="relative flex min-h-screen flex-col bg-panel text-foreground">
+      {/* a short link whose "#" became "%23" lands here: put it back as /c#<body> first (lib/mangledLink) */}
+      <script dangerouslySetInnerHTML={{ __html: RECOVER_SCRIPT }} />
       <Header />
 
       <main className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col px-4 pb-4 pt-3 sm:px-7 sm:pb-7 sm:pt-6">

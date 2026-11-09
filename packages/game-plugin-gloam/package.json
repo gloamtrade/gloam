@@ -1,6 +1,6 @@
 {
   "name": "@gloamtrade/game-plugin-gloam",
-  "version": "0.1.2",
+  "version": "0.2.1",
   "private": false,
   "type": "module",
   "description": "Gloam plugin for the GAME framework: private stablecoin payments for Virtuals agents on Base and Robinhood Chain, under per-asset spending limits the agent cannot lift.",
@@ -8,11 +8,11 @@
   "homepage": "https://gloam.trade/docs/agents",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cryptoduke01/gloam.git",
+    "url": "git+https://github.com/gloamtrade/gloam.git",
     "directory": "packages/game-plugin-gloam"
   },
   "bugs": {
-    "url": "https://github.com/cryptoduke01/gloam/issues"
+    "url": "https://github.com/gloamtrade/gloam/issues"
   },
   "keywords": [
     "gloam",
@@ -36,6 +36,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./engine": {
+      "types": "./src/engine.ts",
+      "default": "./src/engine.ts"
     }
   },
   "sideEffects": false,
@@ -47,6 +51,10 @@
       ".": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
+      },
+      "./engine": {
+        "types": "./dist/engine.d.ts",
+        "default": "./dist/engine.js"
       }
     }
   },
@@ -67,7 +75,7 @@
     "prepack": "npm run typecheck && npm run build",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "tsc --noEmit -p tsconfig.test.json && tsx --test test/*.test.mts",
-    "test:fork": "tsx --test --test-concurrency=1 test/fork.test.mts test/fork.money.test.mts test/fork.retry.test.mts",
+    "test:fork": "tsx --test --test-concurrency=1 test/fork.test.mts test/fork.money.test.mts test/fork.retry.test.mts test/fork.feerise.test.mts",
     "example": "tsx src/example.ts"
   },
   "dependencies": {

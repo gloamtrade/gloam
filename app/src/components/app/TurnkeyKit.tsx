@@ -1,21 +1,25 @@
 "use client";
 
-import { useMemo, useSyncExternalStore, type ReactNode } from "react";
+import { useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   TurnkeyProvider,
   type TurnkeyProviderConfig,
 } from "@turnkey/react-wallet-kit";
+import {
+  TURNKEY_AUTH_PROXY_CONFIG_ID,
+  TURNKEY_GOOGLE_CLIENT_ID,
+  TURNKEY_ORGANIZATION_ID,
+  embeddedRpId,
+  oauthRedirectFor,
+} from "@/lib/embeddedWallet";
 import { TurnkeyWagmiSync } from "./TurnkeyWagmiSync";
+import { GloamSignInSheet } from "./GloamSignInSheet";
 import { ClientOnly } from "./ClientOnly";
 
-const ORG_ID = process.env.NEXT_PUBLIC_TURNKEY_ORGANIZATION_ID;
-const AUTH_PROXY_CONFIG_ID =
-  process.env.NEXT_PUBLIC_TURNKEY_AUTH_PROXY_CONFIG_ID;
-
 /**
- * Turnkey's modal renders outside our token system, so it takes literal
- * colours. These mirror the Gloam tokens in globals.css: ink on paper with cool
- * greys, and the sealed green only for the success state.
+ * Sign-in is Gloam's own sheet (GloamSignInSheet), so nothing opens the kit's
+ * modal today. Its colours stay set in case a kit screen ever shows: they take
+ * literal values, mirroring the Gloam tokens in globals.css.
  */
 const TURNKEY_COLORS: NonNullable<
   NonNullable<TurnkeyProviderConfig["ui"]>["colors"]
@@ -67,17 +71,45 @@ const serverDark = () => false;
  */
 export default function TurnkeyKitProvider({ children }: { children: ReactNode }) {
   const dark = useSyncExternalStore(subscribeTheme, readDark, serverDark);
+  // The kit builds its passkey signer once, from the config of the first render
+  // in the browser, so the relying party is read then (it never reaches the page's
+  // markup). On the server there is no host and no signer.
+  const [rpId] = useState(() => (typeof window === "undefined" ? undefined : embeddedRpId(window.location.hostname)));
+  // Continue with Google, when its client ID is set: Google sends its window back to
+  // this origin, where the kit reads the token off the address (lib/embeddedWallet).
+  const [oauthRedirectUri] = useState(() =>
+    typeof window === "undefined" || !TURNKEY_GOOGLE_CLIENT_ID ? undefined : oauthRedirectFor(window.location.origin)
+  );
 
   // Memoised so the provider only rebuilds its config when the theme flips,
   // not on every parent render.
   const config = useMemo<TurnkeyProviderConfig>(
     () => ({
-      organizationId: ORG_ID!,
-      authProxyConfigId: AUTH_PROXY_CONFIG_ID!,
+      organizationId: TURNKEY_ORGANIZATION_ID,
+      authProxyConfigId: TURNKEY_AUTH_PROXY_CONFIG_ID,
+      ...(rpId ? { passkeyConfig: { rpId } } : {}),
+      ...(oauthRedirectUri
+        ? { auth: { oauthConfig: { oauthRedirectUri, google: { primaryClientId: TURNKEY_GOOGLE_CLIENT_ID } } } }
+        : {}),
+      // Browser wallets connect through wagmi, not the kit. The kit still needs
+      // its wallet manager: refreshWallets asks it for providers first and throws
+      // "Wallet manager is not initialized" without one, so the wallet list never
+      // loads. `auth` can't do it: the kit replaces it with authModal's
+      // walletAuthEnabled (false below). So `connecting` is on, and it needs at
+      // least one wallet interface (the connector throws on none), so native
+      // Ethereum is on too. Nothing calls the kit's connect flow; a browser wallet
+      // already connected through wagmi can appear in the kit's list as
+      // "connected", and every reader picks the Gloam wallet with
+      // pickEmbeddedWallet, which takes embedded wallets only.
+      walletConfig: {
+        features: { auth: false, connecting: true },
+        chains: { ethereum: { native: true }, solana: { native: false } },
+      },
       ui: {
         darkMode: dark,
         logoLight: "/brand/logo.png",
-        logoDark: "/brand/logo.png",
+        // the ink tile disappears into the dark sheet; the white tile keeps the mark visible
+        logoDark: "/brand/kit/gloam-mark-white-1024.png",
         borderRadius: 16,
         preferLargeActionButtons: true,
         authModal: {
@@ -88,18 +120,24 @@ export default function TurnkeyKitProvider({ children }: { children: ReactNode }
         colors: TURNKEY_COLORS,
       },
     }),
-    [dark]
+    [dark, rpId, oauthRedirectUri]
+  );
+
+  // One object for the provider's life: the kit's methods (refreshWallets, logout)
+  // are rebuilt whenever this changes, and every page change re-renders this component.
+  const callbacks = useMemo(
+    () => ({ onError: (error: unknown) => console.error("[Gloam] Turnkey:", error) }),
+    []
   );
 
   return (
     <TurnkeyProvider
       config={config}
-      callbacks={{
-        onError: (error) => console.error("Turnkey error:", error),
-      }}
+      callbacks={callbacks}
     >
       <ClientOnly>
         <TurnkeyWagmiSync />
+        <GloamSignInSheet />
       </ClientOnly>
       {children}
     </TurnkeyProvider>

@@ -27,6 +27,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+
+/** What the MPP guide pins: the SDK package's own version, read from its package.json (never a copy here that goes stale). */
+const SDK_PIN = new RegExp(`@gloamtrade/sdk@\\^${(JSON.parse(readFileSync(new URL("../../packages/sdk/package.json", import.meta.url), "utf8")) as { version: string }).version.replace(/\./g, "\\.")}`);
 
 delete process.env.UPSTASH_REDIS_REST_URL;
 delete process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -51,7 +55,7 @@ const nets = await import("../src/lib/networks");
 const tokens = await import("../src/lib/tokens");
 const { bridgeVisible, bridgeChain, BRIDGE_DESTINATIONS } = await import("../src/lib/bridge");
 const { ORIGIN_CHAINS } = await import("../src/lib/originChains");
-const { vaultSwapRouter } = await import("../src/lib/vaultSwap");
+const { VAULT_SWAP_V3_ADDRESS, swapV3Live, vaultSwapRouter } = await import("../src/lib/vaultSwap");
 const { faucetFor } = await import("../src/lib/faucet");
 const { requestAssetsFor, claimNetworkProblem } = await import("../src/lib/paymentRequest");
 const { walkTuning } = await import("../src/lib/leafIndex");
@@ -155,7 +159,7 @@ check("a bridge origin and a bridge into Ethereum (USDC), no swaps", () => {
   assert.ok(origin, "Ethereum stays a chain money can be brought over from");
   assert.deepEqual(origin.tokens.map((t) => t.symbol), ["USDC", "USDT", "USDG", "PYUSD", "ETH"]);
   assert.ok(ORIGIN_CHAINS.some((c) => c.id === 1));
-  assert.equal(vaultSwapRouter(1), null);
+  assert.equal(vaultSwapRouter(1), swapV3Live(1) ? VAULT_SWAP_V3_ADDRESS[1] : null);
   assert.equal(faucetFor("ethereum-mainnet"), null);
 });
 
@@ -281,7 +285,7 @@ if (CONFIGURED) {
     assert.equal(mpp.isError, false);
     assert.match(mpp.text, /mainnetNetwork\(\\"ethereum\\"\)/);
     assert.match(mpp.text, /ETHEREUM_USDC/);
-    assert.match(mpp.text, /@gloamtrade\/sdk@\^0\.4\.5/);
+    assert.match(mpp.text, SDK_PIN, "the SDK version the guide installs is the SDK's own");
     assert.doesNotMatch(mpp.text, /GLOAM_NETWORKS\.ethereum/);
     const info = await toolJson("gloam_info");
     assert.match(info.text, /Ethereum \(1\)/);

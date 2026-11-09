@@ -1,17 +1,17 @@
 {
   "name": "@gloamtrade/sdk",
-  "version": "0.4.6",
+  "version": "0.6.0",
   "type": "module",
   "description": "Gloam SDK: shielded balances, private payments, and selective disclosure on Robinhood Chain, Tempo, Base and Ethereum. The private path other apps and agents plug into.",
   "license": "MIT",
   "homepage": "https://gloam.trade/docs/sdk",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cryptoduke01/gloam.git",
+    "url": "git+https://github.com/gloamtrade/gloam.git",
     "directory": "packages/sdk"
   },
   "bugs": {
-    "url": "https://github.com/cryptoduke01/gloam/issues"
+    "url": "https://github.com/gloamtrade/gloam/issues"
   },
   "keywords": [
     "gloam",
@@ -60,7 +60,7 @@
     "prepublishOnly": "node scripts/publish-guard.mjs && npm run build",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "test": "tsc && node test/rates.selftest.mjs && node test/note.selftest.mjs && node test/witness.selftest.mjs && node test/proofs.selftest.mjs && node test/intents.selftest.mjs && node test/sync.selftest.mjs && node test/x402.selftest.mjs && node test/x402.edge.selftest.mjs && node test/receiveTag.selftest.mjs && node test/sweep.selftest.mjs && node test/limits.selftest.mjs && node test/cashOutRecipient.selftest.mjs && node test/chainGuard.selftest.mjs && node test/api.selftest.mjs && node test/mainnet.selftest.mjs && node test/base.selftest.mjs && node test/ethereum-sepolia.selftest.mjs && node test/ethereum.selftest.mjs && node test/rpc.selftest.mjs && node test/requests.selftest.mjs && node test/incoming.selftest.mjs && node test/commerce.selftest.mjs && node test/examples.selftest.mjs"
+    "test": "tsc && node test/rates.selftest.mjs && node test/note.selftest.mjs && node test/witness.selftest.mjs && node test/proofs.selftest.mjs && node test/intents.selftest.mjs && node test/sync.selftest.mjs && node test/x402.selftest.mjs && node test/x402.edge.selftest.mjs && node test/x402Cashout.selftest.mjs && node test/receiveTag.selftest.mjs && node test/sweep.selftest.mjs && node test/limits.selftest.mjs && node test/cashOutRecipient.selftest.mjs && node test/chainGuard.selftest.mjs && node test/api.selftest.mjs && node test/mainnet.selftest.mjs && node test/base.selftest.mjs && node test/ethereum-sepolia.selftest.mjs && node test/ethereum.selftest.mjs && node test/elysium.selftest.mjs && node test/rpc.selftest.mjs && node test/requests.selftest.mjs && node test/shortLink.selftest.mjs && node test/shortLinkTable.selftest.mjs && node test/incoming.selftest.mjs && node test/commerce.selftest.mjs && node test/examples.selftest.mjs && node test/swap.selftest.mjs && node test/swapIntent.selftest.mjs"
   },
   "dependencies": {
     "viem": "^2.55.2",

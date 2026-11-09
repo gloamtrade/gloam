@@ -10,13 +10,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { BASE_SEPOLIA_USDC, encodeNotePackage, generateReceiveKey, makeBoundNotePoseidon } from "@gloamtrade/sdk";
-import type { Address, Hex, PublicClient } from "viem";
+import { encodeAbiParameters, encodeEventTopics, parseAbi, type Address, type Hex, type Log, type PublicClient } from "viem";
+import { feeKept } from "../src/agent.ts";
 import GloamPlugin, { GloamAgent, claimLinkFor, redact, registerSecret, registerUrlSecret, shutdownProver, walletCallSender, type CallSender } from "../src/index.ts";
 
 const CIRCUITS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "app", "public", "circuits");
 const POOL = "0x39e28cde55cab798874746ac52cb4b5cc99a0194" as Address;
 const LIMITS = { recipients: "any" as const, assets: { USDC: { maxPerPayment: "25", maxPerDay: "100" } } };
 const BAD_TAG = "gloamr1." + Buffer.from("3059301306072a8648ce3d020106082a8648ce3d03010703420004" + "01".repeat(64), "hex").toString("base64url");
+const WITHDRAW_FEE_ABI = parseAbi(["event WithdrawFee(bytes32 indexed nullifier, address indexed asset, uint256 fee)"]);
 const hashOf = (n: number) => `0x${n.toString(16).padStart(64, "0")}` as Hex;
 
 /** A chain that answers the reads a deposit and a refresh make. */
@@ -135,6 +137,28 @@ test("a Gloam address whose key is not a P-256 point is refused before the limit
   await assert.rejects(agent.pay({ to: BAD_TAG, amount: "4" }), /Gloam address/);
   await assert.rejects(agent.payByClaimLink({ amount: "4", sealTo: BAD_TAG }), /Gloam address/);
   assert.equal((agent.limitsReport() as { assets: { usedLast24h: string }[] }).assets[0]!.usedLast24h, "0");
+});
+
+test("a cash out reports the fee the pool kept, whatever the rate that day", () => {
+  const pool = "0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194" as Address;
+  const nullifier = hashOf(7);
+  const log = (fee: bigint, at: Address = pool, spent: Hex = nullifier) =>
+    ({
+      address: at,
+      data: encodeAbiParameters([{ type: "uint256" }], [fee]),
+      topics: encodeEventTopics({ abi: WITHDRAW_FEE_ABI, eventName: "WithdrawFee", args: { nullifier: spent, asset: BASE_SEPOLIA_USDC as Address } }),
+      blockNumber: 1n,
+      blockHash: hashOf(1),
+      logIndex: 0,
+      transactionHash: hashOf(2),
+      transactionIndex: 0,
+      removed: false,
+    }) as unknown as Log;
+  assert.equal(feeKept([log(25_000n)], pool, nullifier), 25_000n, "5 USDC at 0.5%");
+  assert.equal(feeKept([log(12_500n)], pool, nullifier), 12_500n, "5 USDC at 0.25%, as Base Sepolia charges");
+  assert.equal(feeKept([], pool, nullifier), 0n, "no event: a pool with no fee kept nothing");
+  assert.equal(feeKept([log(9n, BASE_SEPOLIA_USDC as Address)], pool, nullifier), 0n, "another contract's log is not the pool's");
+  assert.equal(feeKept([log(9n, pool, hashOf(8))], pool, nullifier), 0n, "another cash out in the same transaction is not this one");
 });
 
 test("a decimal comma is refused, never read as a bigger number", async () => {

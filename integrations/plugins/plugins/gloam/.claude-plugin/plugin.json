@@ -2,14 +2,14 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "gloam",
   "displayName": "Gloam",
-  "version": "0.6.4",
-  "description": "Private stablecoin payments for agents on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet: pay x402 and MPP resources, shield, get paid, with onchain spending limits.",
+  "version": "0.8.0",
+  "description": "Private stablecoin payments for agents on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet (Elysium support coming): pay x402 and MPP resources, shield, get paid, with onchain spending limits.",
   "author": {
     "name": "Gloam",
     "email": "hello@gloam.trade"
   },
   "homepage": "https://gloam.trade/docs/agents",
-  "repository": "https://github.com/cryptoduke01/gloam",
+  "repository": "https://github.com/gloamtrade/gloam",
   "license": "MIT",
   "keywords": [
     "gloam",
@@ -25,7 +25,7 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "documentationUrl": "https://gloam.trade/docs/agents",
-  "supportUrl": "https://github.com/cryptoduke01/gloam-plugins/issues",
+  "supportUrl": "https://github.com/gloamtrade/gloam-plugins/issues",
   "privacyPolicyUrl": "https://www.gloam.trade/privacy",
   "termsOfServiceUrl": "https://www.gloam.trade/terms"
 }

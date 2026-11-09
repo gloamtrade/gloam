@@ -18,10 +18,11 @@
  *   4. hand the proofs to the Gloam relay. The wallet never submits a swap:
  *      that would put it next to the swap on the explorer.
  *
- * The new notes are dropped only when the swap surely never went out (the
- * relay refused it before sending). A send that may have gone out keeps them,
- * and the next sync settles them either way. So does one that landed and
- * reverted, but its unshield proof stays valid until the note is spent, so that
+ * The new notes stay saved however the send ends, even when the relay refused it,
+ * as the unshield proof stays valid until the note is spent: its refund note and
+ * exit key are the way back if that proof ever lands. The next sync settles them,
+ * and a note that never moved gets moved after SWAP_UNSEEN_MS, which ends the proof.
+ * A swap that landed and reverted is the same, but its proof is public, so that
  * note is marked (swapProofAt) and moved to a fresh note right away, and the
  * sync keeps trying if that try fails (lib/claimSweep moveRevertedNotes). A swap
  * with no saved hash that shows nothing for an hour goes the same way
@@ -36,16 +37,24 @@ import type { PoseidonMerklePath } from "./merklePoseidon";
 import { prepareBridgeNote } from "./bridgePrivate";
 import { moveRevertedNotes } from "./claimSweep";
 import { freshPath, networkOfNote, spendPlanFor, spendWaitMessage, splitForCashOut } from "./cashOutSplit";
-import { relayVaultSwap, RelaySubmitError, waitForTx } from "./relay/client";
+import { relayVaultSwap, relayVaultSwapExit, RelaySubmitError, waitForTx } from "./relay/client";
 import { publicClientFor } from "./rhClient";
-import { assertNoteOnNetwork, dropUnsentNote, saveLocalNote, shieldPoolAbi, updateLocalNote, type LocalNote } from "./shield";
+import { assertNoteOnNetwork, saveLocalNote, shieldPoolAbi, updateLocalNote, type LocalNote } from "./shield";
+import { walkLogs, walkTuning } from "./leafIndex";
 import type { GloamNetwork } from "./networks";
 import {
+  UNSHIELDED_EVENT,
   encodeRoute,
   escrowAddress,
+  exitAccount,
+  exitDigest,
   refundAmountFor,
+  refundEscrowKey,
   replanVaultSwap,
+  swapDeadlineSeconds,
+  swapRouterFor,
   vaultSwapAbi,
+  vaultSwapV3Abi,
   type EscrowKey,
   type SwapPlan,
   type VaultSwapRefundInfo,
@@ -94,8 +103,8 @@ export async function sendVaultSwap(
     hash = await send.relay(call);
   } catch (e) {
     if (e instanceof RelaySubmitError && MAYBE_SENT.has(e.code)) throw new Error(SWAP_MAYBE_SENT);
-    dropUnsentNote(notes.outId);
-    dropUnsentNote(notes.refund.id);
+    // Refused, but the relay has seen the proofs, and they stay valid until the note
+    // moves: both notes stay saved, out of the balance, until the sync settles them.
     throw e;
   }
   // Kept in case this tab never hears how it ended (it closes, the wait gives
@@ -140,6 +149,8 @@ export async function runVaultSwap(args: {
   /** The note's tree path, read fresh. */
   pathFor: (note: LocalNote) => Promise<PoseidonMerklePath | null>;
   onStatus: (s: string) => void;
+  /** A partner's link code: it goes to the relay with the swap, which counts it to them once it lands. */
+  partnerCode?: string;
 }): Promise<SwapResult> {
   const { network, note, amount, router } = args;
   if (!network.pool) throw new Error("This network has no vault yet.");
@@ -177,7 +188,9 @@ export async function runVaultSwap(args: {
   //    again, as close to sending as the proofs allow: the new note and the
   //    escrow below are bound to amountOut.
   args.onStatus("Proving privately, this takes 10 to 30 seconds…");
-  const back = await prepareBridgeNote(refundAmountFor(targetWei), target.asset, network, args.owner);
+  const swapRouter = swapRouterFor(network.chainId, router);
+  const withExit = swapRouter?.version === 3;
+  const back = await prepareBridgeNote(refundAmountFor(targetWei, withExit ? args.feeBps : undefined), target.asset, network, args.owner);
   if (args.plan.router.toLowerCase() !== router.toLowerCase()) {
     throw new Error("This quote was for another swap router. Get a new quote and try again.");
   }
@@ -196,6 +209,10 @@ export async function runVaultSwap(args: {
       ? target.nullifier
       : (fieldToHex(await noteNullifierPoseidon(hexToField(target.secret), hexToField(target.commitment))) as Hex);
   const routeBytes = encodeRoute(plan.route);
+  // v3 names a one-time exit key, from the refund note's own secret, in the escrow key.
+  const exitKey = withExit ? exitAccount(back.note.secret).address : undefined;
+  // and a deadline, from the chain's clock rather than this device's
+  const deadline = exitKey ? (await client.getBlock()).timestamp + BigInt(swapDeadlineSeconds(network.chainId)) : undefined;
   const key: EscrowKey = {
     nullifier,
     amountIn: targetWei,
@@ -205,14 +222,12 @@ export async function runVaultSwap(args: {
     refundCommitment: back.note.commitment,
     refundAmount: BigInt(back.note.amountWei),
     routeHash: keccak256(routeBytes),
+    ...(exitKey ? { exitKey, deadline } : {}),
   };
   const escrow = escrowAddress(router, target.asset, key);
-  const routerSays = await client.readContract({
-    address: router,
-    abi: vaultSwapAbi,
-    functionName: "escrowFor",
-    args: [target.asset, key],
-  });
+  const routerSays = exitKey
+    ? await client.readContract({ address: router, abi: vaultSwapV3Abi, functionName: "escrowFor", args: [target.asset, { ...key, exitKey, deadline: deadline! }] })
+    : await client.readContract({ address: router, abi: vaultSwapAbi, functionName: "escrowFor", args: [target.asset, key] });
   if (routerSays.toLowerCase() !== escrow.toLowerCase()) {
     throw new Error("This swap's address didn't check out, so nothing was sent. Refresh and try again.");
   }
@@ -240,6 +255,7 @@ export async function runVaultSwap(args: {
     amountIn: targetWei.toString(),
     out: { commitment: out.note.commitment, asset: args.assetOut, amount: plan.amountOut.toString() },
     route: plan.route,
+    ...(exitKey ? { exitKey, deadline: deadline!.toString() } : {}),
   };
   const outNote: LocalNote = { ...out.note, id: `sw-${now}`, sweptFrom: { id: target.id, nullifier }, sweepPending: true };
   const refundNote: LocalNote = {
@@ -263,6 +279,8 @@ export async function runVaultSwap(args: {
       deposit: { proof: out.proof, commitment: outNote.commitment, asset: args.assetOut, amount: plan.amountOut },
       refund: { proof: back.proof, commitment: refundNote.commitment, asset: target.asset, amount: BigInt(refundNote.amountWei) },
       route: plan.route,
+      ...(exitKey ? { exitKey, deadline } : {}),
+      ...(args.partnerCode ? { partnerCode: args.partnerCode } : {}),
     },
     { spentId: target.id, outId: outNote.id, refund: refundNote },
     {
@@ -297,6 +315,36 @@ export async function runVaultSwap(args: {
   };
 }
 
+/**
+ * The transaction that paid a swap's escrow: what a refund or an exit shows the relay.
+ * Found by its nullifier and kept on the note, as anyone may have sent it. The note came
+ * first, so the search starts where the chain stood then, at up to 12 blocks a second
+ * (Robinhood Chain makes about 10). If nothing is found there, it searches again from
+ * the vault's first block, in case a chain ran faster than that.
+ */
+async function unshieldTxOf(note: LocalNote, escrow: Address): Promise<Hex | null> {
+  const info = note.vaultSwap;
+  const net = networkOfNote(note);
+  if (!info || !note.sweptFrom || !net?.pool) return null;
+  if (info.unshieldTx) return info.unshieldTx;
+  const client = publicClientFor(net);
+  const head = await client.getBlockNumber();
+  const floor = net.deployBlock ?? 0n;
+  const age = Number.isFinite(note.createdAt) ? Math.ceil((Date.now() - note.createdAt) / 1000) + 3600 : null;
+  const back = age === null ? null : head - BigInt(age) * 12n;
+  const from = back !== null && back > floor ? back : floor;
+  const search = (start: bigint, end: bigint) =>
+    walkLogs(client, net.pool!, start, end, { ...walkTuning(net.chainId, net.logRange), span: net.logRange }, {
+      event: UNSHIELDED_EVENT,
+      args: { nullifier: note.sweptFrom!.nullifier, asset: info.assetIn, to: escrow },
+    });
+  let logs = await search(from, head);
+  if (!logs.length && from > floor) logs = await search(floor, from - 1n);
+  const hash = logs[0]?.transactionHash ?? null;
+  if (hash) await updateLocalNote(note.id, { vaultSwap: { ...info, unshieldTx: hash } }).catch(() => {});
+  return hash;
+}
+
 /** Proof bytes and a root the router never reads on the refund path (64 zero bytes, a zero root). */
 const UNUSED_PROOF = `0x${"00".repeat(64)}` as Hex;
 const UNUSED_ROOT = `0x${"00".repeat(32)}` as Hex;
@@ -323,6 +371,11 @@ export async function finishVaultSwapRefund(note: LocalNote): Promise<boolean> {
   if (last !== undefined && Date.now() - last < (note.refundHeld === "blocked" ? BLOCKED_RETRY_MS : RETRY_MS)) return false;
   lastTry.set(note.id, Date.now());
 
+  // nothing to show the relay yet, so no proof to make: the next sync asks again
+  const key = refundEscrowKey(info, from.nullifier, note.commitment, BigInt(note.amountWei));
+  const unshieldTx = await unshieldTxOf(note, escrowAddress(info.router, info.assetIn, key)).catch(() => null);
+  if (!unshieldTx) return false;
+
   const { proofBytes } = await proveShieldInBrowser({
     commitment: BigInt(note.commitment).toString(),
     amount: note.amountWei,
@@ -337,9 +390,47 @@ export async function finishVaultSwapRefund(note: LocalNote): Promise<boolean> {
     deposit: { proof: UNUSED_PROOF, commitment: info.out.commitment, asset: info.out.asset, amount: BigInt(info.out.amount) },
     refund: { proof: proofBytes, commitment: note.commitment, asset: note.asset, amount: BigInt(note.amountWei) },
     route: info.route,
+    unshieldTx,
+    ...(info.exitKey ? { exitKey: info.exitKey, deadline: BigInt(info.deadline ?? "0") } : {}),
   });
   // the receipt is read on the note's own chain, whatever the page shows by now
   const net = networkOfNote(note);
   await waitForTx(hash, undefined, net ? publicClientFor(net) : undefined).catch(() => null);
   return true;
+}
+
+/**
+ * Takes a swap's waiting money out to `to`, in the clear, when its refund can't land
+ * (GloamVaultSwap2.exit). The key that signs comes from the refund note's secret and
+ * stays here; the signature names `to`, so the relay can only send it there. The whole
+ * escrow leaves, so the refund note is retired once the chain says it landed.
+ */
+export async function exitVaultSwap(note: LocalNote, to: Address): Promise<Hex> {
+  const info = note.vaultSwap;
+  const from = note.sweptFrom;
+  if (!info?.exitKey || !from) throw new Error("A swap through this router has no exit. Its refund lands once the vault has room.");
+  const key = refundEscrowKey(info, from.nullifier, note.commitment, BigInt(note.amountWei));
+  const account = exitAccount(note.secret);
+  if (account.address.toLowerCase() !== info.exitKey.toLowerCase()) throw new Error("This note doesn't hold this swap's exit key.");
+  const escrow = escrowAddress(info.router, info.assetIn, key);
+  // the router refuses these (BadExit): the money would stop there for good
+  const stops = [escrow, info.router, networkOfNote(note)?.pool ?? null, info.assetIn].filter(Boolean) as Address[];
+  if (stops.some((a) => a.toLowerCase() === to.toLowerCase())) throw new Error("An exit can't go to that address. Pick a wallet address.");
+  const unshieldTx = await unshieldTxOf(note, escrow).catch(() => null);
+  if (!unshieldTx) throw new Error("The vault's payment to this swap can't be read yet. Try again in a minute.");
+  const signature = await account.sign({ hash: exitDigest(note.chainId, info.router, escrow, to) });
+  const hash = await relayVaultSwapExit({
+    chainId: note.chainId,
+    router: info.router,
+    asset: info.assetIn,
+    key: { ...key, exitKey: info.exitKey, deadline: BigInt(info.deadline ?? "0") },
+    to,
+    signature,
+    unshieldTx,
+  });
+  const net = networkOfNote(note);
+  const outcome = await waitForTx(hash, undefined, net ? publicClientFor(net) : undefined);
+  if (outcome !== "success") throw new Error("The exit didn't go through, and the money is still waiting. Try again in a minute.");
+  await updateLocalNote(note.id, { status: "recovered", sweepPending: false, refundHeld: undefined, txHash: hash });
+  return hash;
 }

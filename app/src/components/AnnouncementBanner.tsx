@@ -1,20 +1,17 @@
 "use client";
 
-import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { AppLink } from "./AppLink";
-import { compactRemaining, remainingUntil, type Remaining } from "@/lib/mainnet";
+import { useState, useSyncExternalStore } from "react";
+import { ELYSIUM_ENABLED } from "@/lib/elysium";
 
-/** Private stock swaps on Robinhood Chain open at this time. */
-export const STOCKS_LIVE_MS = Date.parse("2026-10-27T12:00:00Z");
+/** The day-one announcement on X, where the note points. */
+const ANNOUNCEMENT_URL = "https://x.com/gloamtrade/status/2119148611095433322";
 
-// Their own keys, so someone who closed the mainnet note still hears about stocks,
-// and someone who closed the countdown still hears that they are live.
-const KEY = "gloam:announce-dismissed:stocks-v1";
-const LIVE_KEY = "gloam:announce-dismissed:stocks-live-v1";
+// Its own key per note, so someone who closed the "coming" note still hears it is live.
+const KEY = ELYSIUM_ENABLED ? "gloam:announce-dismissed:elysium-live-v1" : "gloam:announce-dismissed:elysium-v1";
 
-// Keep the note on marketing + docs; stay out of the working app (it has its own notice).
+// Keep the note on marketing + docs; stay out of the working app (it has its own notices).
 const HIDDEN_ON = ["/app", "/admin", "/verify", "/pitch", "/claim", "/mainnet"];
 
 const DISMISSED_EVENT = "gloam-announce-dismissed";
@@ -28,97 +25,65 @@ function subscribeDismissed(onChange: () => void) {
   };
 }
 
-/** "countdown closed" then "live note closed", one digit each, as this browser saved them. */
-function dismissedSnapshot(): string {
+function dismissedSnapshot(): boolean {
   try {
-    return `${localStorage.getItem(KEY) === "1" ? 1 : 0}${localStorage.getItem(LIVE_KEY) === "1" ? 1 : 0}`;
+    return localStorage.getItem(KEY) === "1";
   } catch {
-    return "00";
+    return false;
   }
-}
-
-const LAUNCHED: Remaining = remainingUntil(STOCKS_LIVE_MS, STOCKS_LIVE_MS);
-
-/**
- * The time left to the stocks launch, ticking once a second. Before it, null
- * until mounted so the server and the first render agree; after it, done from
- * the first render, server included.
- */
-function useStocksRemaining(): Remaining | null {
-  const [r, setR] = useState<Remaining | null>(() => (Date.now() >= STOCKS_LIVE_MS ? LAUNCHED : null));
-  useEffect(() => {
-    if (Date.now() >= STOCKS_LIVE_MS) return;
-    let id = 0;
-    const tick = () => {
-      const next = remainingUntil(Date.now(), STOCKS_LIVE_MS);
-      setR(next);
-      if (next.done) window.clearInterval(id);
-    };
-    id = window.setInterval(tick, 1000);
-    tick();
-    return () => window.clearInterval(id);
-  }, []);
-  return r;
 }
 
 const linkClass =
   "gl-tap shrink-0 text-[13px] font-medium text-white underline decoration-white/40 underline-offset-4 transition-colors hover:decoration-white";
 
-/** Slim site-wide private-stocks countdown, then the news that they are live. Dismissible per browser. */
+/** Slim site-wide note about Gloam on Elysium: coming, then live once the flag is on. Dismissible per browser. */
 export function AnnouncementBanner() {
   const pathname = usePathname();
   // The server can't see what this browser closed, so it renders the note.
-  const stored = useSyncExternalStore(subscribeDismissed, dismissedSnapshot, () => "00");
+  const stored = useSyncExternalStore(subscribeDismissed, dismissedSnapshot, () => false);
   // Closed here, for when storage refuses the write.
-  const [closed, setClosed] = useState<{ countdown: boolean; live: boolean }>({ countdown: false, live: false });
-  const dismissed = { countdown: closed.countdown || stored[0] === "1", live: closed.live || stored[1] === "1" };
-  const remaining = useStocksRemaining();
-  const live = Boolean(remaining?.done);
+  const [closed, setClosed] = useState(false);
 
-  if (live ? dismissed.live : dismissed.countdown) return null;
+  if (closed || stored) return null;
   if (HIDDEN_ON.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
     return null;
   }
 
   const dismiss = () => {
     try {
-      localStorage.setItem(live ? LIVE_KEY : KEY, "1");
+      localStorage.setItem(KEY, "1");
       window.dispatchEvent(new Event(DISMISSED_EVENT));
     } catch {
       /* ignore */
     }
-    setClosed((d) => (live ? { ...d, live: true } : { ...d, countdown: true }));
+    setClosed(true);
   };
 
   return (
     <div className="relative z-[60] w-full border-b border-transparent bg-[#0b0c0e] text-white dark:border-line dark:bg-[#111214]">
-      <div className="mx-auto flex max-w-[1400px] items-center justify-center gap-3 px-4 py-2 sm:px-7">
-        <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#8fd3ad]" />
+      <div className="mx-auto flex max-w-[1400px] items-center justify-center gap-3 py-2 pl-4 pr-12 sm:px-14">
+        <Image src="/brand/chains/elysium.png" alt="" width={16} height={16} className="shrink-0 rounded-full" />
         <p className="min-w-0 truncate text-[13px] leading-tight">
-          {live ? (
+          {ELYSIUM_ENABLED ? (
             <>
-              <span className="font-medium">Private stocks are live.</span>{" "}
-              <span className="text-white/60 max-sm:hidden">Swap TSLA, NVDA, AAPL and more on Robinhood Chain from your private balance.</span>
+              <span className="font-medium">Gloam is live on Elysium.</span>{" "}
+              <span className="text-white/60 max-sm:hidden">Private payments on Hyperliquid&apos;s new L2.</span>
             </>
           ) : (
             <>
-              <span className="font-medium">Private stocks go live at 12:00 UTC.</span>{" "}
-              {remaining && (
-                <span className="text-white/60">
-                  In <span className="tnum">{compactRemaining(remaining)}</span>
-                </span>
-              )}
+              <span className="font-medium">Elysium is coming.</span>{" "}
+              <span className="text-white/60 max-sm:hidden">Private payments on Hyperliquid&apos;s new L2, from day one.</span>
             </>
           )}
         </p>
-        {live ? (
-          <AppLink href="/app/vault?tab=swap" className={linkClass}>
-            Swap privately
-          </AppLink>
+        {ELYSIUM_ENABLED ? (
+          <a href="/app" className={linkClass}>
+            Open the app
+          </a>
         ) : (
-          <Link href="/docs/private-swaps" className={linkClass}>
-            How it works
-          </Link>
+          <a href={ANNOUNCEMENT_URL} target="_blank" rel="noopener noreferrer" className={linkClass}>
+            See the announcement
+          </a>
         )}
         <button
           type="button"

@@ -1,9 +1,11 @@
 /**
  * Browser side of the partner portal: finding a wallet, signing in with it
- * (EIP-4361), and calling the portal's own endpoints.
+ * (EIP-4361), and calling the portal's own endpoints. A Gloam wallet made with
+ * an email (Turnkey) signs the same message through signInWithSigner.
  */
 import { getAddress, toHex, type Address } from "viem";
 import { createSiweMessage } from "viem/siwe";
+import type { ActivityRecord, PartnerStats } from "@/lib/partners";
 
 type Eip1193 = { request(args: { method: string; params?: unknown[] }): Promise<unknown> };
 
@@ -83,6 +85,35 @@ function walletError(e: unknown): PortalError {
   return new PortalError("Your wallet did not answer. Unlock it and try again.", "wallet", 0);
 }
 
+/** Builds the sign-in message for this site, has `sign` sign it, and opens a session. */
+export async function signInWithSigner(
+  address: Address,
+  chainId: number,
+  sign: (message: string) => Promise<string>,
+  fail: (e: unknown) => PortalError = walletError
+): Promise<{ wallet: Address }> {
+  const n = await portal<{ nonce: string; statement: string; maxLifetimeSec: number }>("/nonce");
+  const now = new Date();
+  const message = createSiweMessage({
+    domain: window.location.host,
+    address,
+    statement: n.statement,
+    uri: window.location.origin,
+    version: "1",
+    chainId,
+    nonce: n.nonce,
+    issuedAt: now,
+    expirationTime: new Date(now.getTime() + Math.min(n.maxLifetimeSec, 600) * 1000),
+  });
+  let signature: string;
+  try {
+    signature = await sign(message);
+  } catch (e) {
+    throw fail(e);
+  }
+  return portal<{ wallet: Address }>("/session", { method: "POST", body: { message, signature } });
+}
+
 /** Connect, build the sign-in message, have the wallet sign it, and open a session. */
 export async function signInWith(provider: Eip1193): Promise<{ wallet: Address }> {
   let address: Address;
@@ -97,28 +128,9 @@ export async function signInWith(provider: Eip1193): Promise<{ wallet: Address }
   } catch (e) {
     throw walletError(e);
   }
-
-  const n = await portal<{ nonce: string; statement: string; maxLifetimeSec: number }>("/nonce");
-  const now = new Date();
-  const message = createSiweMessage({
-    domain: window.location.host,
-    address,
-    statement: n.statement,
-    uri: window.location.origin,
-    version: "1",
-    chainId,
-    nonce: n.nonce,
-    issuedAt: now,
-    expirationTime: new Date(now.getTime() + Math.min(n.maxLifetimeSec, 600) * 1000),
-  });
-
-  let signature: string;
-  try {
-    signature = (await provider.request({ method: "personal_sign", params: [toHex(message), address] })) as string;
-  } catch (e) {
-    throw walletError(e);
-  }
-  return portal<{ wallet: Address }>("/session", { method: "POST", body: { message, signature } });
+  return signInWithSigner(address, chainId, async (message) =>
+    (await provider.request({ method: "personal_sign", params: [toHex(message), address] })) as string
+  );
 }
 
 export type FeeSetting = { privatePaymentCents: number; cashoutBps: number; depositBps: number };
@@ -130,6 +142,10 @@ export type PartnerAccount = {
   website: string | null;
   payout: Partial<Record<"robinhood" | "tempo", Address>>;
   fees: FeeSetting;
+  /** The name Gloam approved to show in links, or null. */
+  approvedName?: string | null;
+  /** The account's name differs from the approved one (or none is approved yet). */
+  nameAwaitingApproval?: boolean;
   createdAt: number;
   updatedAt: number;
 };
@@ -145,35 +161,24 @@ export type KeyView = {
   lastUsedAt: number | null;
 };
 
-export type Activity = {
-  id: string;
-  kind: "private_payment" | "cash_out" | "deposit";
-  network: "robinhood" | "tempo";
-  chainId: number;
-  txHash: string;
-  ts: number;
-  asset: string | null;
-  symbol: string | null;
-  decimals: number | null;
-  amount: string | null;
-  volumeUsd: number | null;
-  feeUsd: number | null;
-  feeToken: string | null;
-  feeBasis: string;
+/** One counted transaction (lib/partners ActivityRecord): public facts only. */
+export type Activity = ActivityRecord;
+
+/** The signed-in partner's own figures (GET /api/partners/stats). */
+export type Stats = PartnerStats & {
+  recent: Activity[];
+  days: number;
+  charged: false;
+  notMatched?: { privatePayments: string; swaps: string };
 };
 
-export type Stats = {
-  totals: {
-    privatePayments: number;
-    cashOuts: number;
-    deposits: number;
-    publicVolumeUsd: number;
-    commissionUsd: number;
-    unpriced: number;
-  };
-  byNetwork: Record<"robinhood" | "tempo", Record<Activity["kind"], number>>;
-  byAsset: { network: "robinhood" | "tempo"; chainId: number; asset: string; symbol: string; volume: string; commission: string }[];
-  daily: { day: string; privatePayments: number; cashOuts: number; deposits: number; volumeUsd: number; commissionUsd: number }[];
-  lastActivity: number | null;
-  recent: Activity[];
+/** A partner link code, as its partner sees it. */
+export type LinkCodeView = {
+  code: string;
+  label: string;
+  createdAt: number;
+  createdBy: "partner" | "admin";
+  expiresAt: number | null;
+  revokedAt: number | null;
+  state: "live" | "revoked" | "expired";
 };

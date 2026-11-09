@@ -17,7 +17,10 @@
  *      spent, not a deposit, a trade, change, or someone else's payment to them
  *   7. when the first and last payment landed
  *   8. not expired
- * Checks 6 and 7 read the chain, so they only run when 1 to 5 all passed.
+ * Checks 6 and 7 read the chain, so they only run when 1 to 5 all passed and
+ * the proof has not expired. Payments are looked up a group at a time, and the
+ * lookups stop at the first group with a payment that is not found as it should
+ * be: the answer is already "not confirmed" then, and the rest would not change it.
  *
  * What it does not show: who was paid. A payment to yourself, or to a second
  * wallet, looks the same as one to someone else, so the claim is "a run of N
@@ -42,9 +45,13 @@ import {
   type VerifyResult,
 } from "./types";
 
-/** How one payment was found on chain. */
+/**
+ * How one payment was found on chain. A found payment carries when it landed,
+ * or the block it landed in (then only the first and last block are timed).
+ */
 export type PaymentLookup =
-  | { state: "found"; txHash: Hex; paidAt: number }
+  | { state: "found"; txHash: Hex; paidAt: number; block?: undefined }
+  | { state: "found"; txHash: Hex; block: bigint; paidAt?: undefined }
   /** The note exists, but a deposit or a private trade made it, not a payment. */
   | { state: "wrong-origin"; origin: "deposit" | "trade" }
   /** The transfer exists, but this note is its change, which went back to the sender. */
@@ -54,7 +61,9 @@ export type PaymentLookup =
   /** The named transaction is not on this network. */
   | { state: "no-tx" }
   /** No transaction named, and the payment is older than the bounded scan. */
-  | { state: "not-found" };
+  | { state: "not-found" }
+  /** Not looked up: the check already made the most chain reads one check makes. */
+  | { state: "over-limit" };
 
 /** A decoded pool event, as viem's parseEventLogs returns it. */
 export type PoolEventLog = { eventName: string; address: string; args: Record<string, unknown> };
@@ -95,7 +104,16 @@ export type PayrollCheckDeps = {
   /** Gloam's network for the proof's chain, when the proof's vault is Gloam's own; else null. */
   vault: { label: string } | null;
   /** Looks one payment up on chain; throws when the network cannot be reached. */
-  findPayment: (pay: PayrollPayment) => Promise<PaymentLookup>;
+  findPayment?: (pay: PayrollPayment) => Promise<PaymentLookup>;
+  /**
+   * Looks a group of payments up together (lib/proofs/chain: receipts, and one
+   * log query per block range for the ones that name no transaction). An entry
+   * left undefined was not looked up. Throws when the network cannot be reached.
+   * Used instead of findPayment when given.
+   */
+  findPayments?: (pays: PayrollPayment[]) => Promise<(PaymentLookup | undefined)[]>;
+  /** When a block landed (unix seconds), for lookups that name a block instead of a time. */
+  blockTime?: (block: bigint) => Promise<number>;
   /** Unix seconds, for expiry. */
   now: number;
   /** How a time reads on the page. */
@@ -103,6 +121,8 @@ export type PayrollCheckDeps = {
 };
 
 const LOOKUP_PARALLEL = 6;
+/** Payments looked up together: one part's worth. */
+const LOOKUP_GROUP = 32;
 
 function sameHex(a: unknown, b: bigint): boolean {
   try {
@@ -131,12 +151,57 @@ function signalsOf(part: PayrollProofPart): ReturnType<typeof readPayrollSignals
   }
 }
 
-async function inBatches<T, R>(items: T[], size: number, fn: (x: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = [];
-  for (let i = 0; i < items.length; i += size) {
-    out.push(...(await Promise.all(items.slice(i, i + size).map(fn))));
+type Looked = PaymentLookup | null;
+
+/** Anything but a plain find ends the lookups: the result can no longer be a pass. */
+const settled = (r: Looked) => r?.state !== "found";
+
+/**
+ * Looks the payments up in order, a group at a time, and stops after the first
+ * group holding a payment that was not found as it should be (or could not be
+ * read). null is a lookup the network did not answer.
+ */
+async function lookUp(payments: PayrollPayment[], deps: PayrollCheckDeps): Promise<Looked[]> {
+  const out: Looked[] = [];
+  for (let i = 0; i < payments.length; i += LOOKUP_GROUP) {
+    const group = payments.slice(i, i + LOOKUP_GROUP);
+    let got: Looked[];
+    if (deps.findPayments) {
+      try {
+        got = (await deps.findPayments(group)).filter((r): r is PaymentLookup => r !== undefined);
+      } catch {
+        got = [null];
+      }
+    } else {
+      got = [];
+      for (let j = 0; j < group.length; j += LOOKUP_PARALLEL) {
+        const batch = await Promise.all(group.slice(j, j + LOOKUP_PARALLEL).map((x) => deps.findPayment!(x).catch(() => null)));
+        got.push(...batch);
+        if (batch.some(settled)) break;
+      }
+    }
+    out.push(...got);
+    if (got.length < group.length || got.some(settled)) break;
   }
   return out;
+}
+
+/** When the first and last payment landed, reading at most two block times. */
+async function paidSpan(found: Extract<PaymentLookup, { state: "found" }>[], deps: PayrollCheckDeps): Promise<[number, number]> {
+  const times = found.flatMap((r) => (r.paidAt !== undefined ? [r.paidAt] : []));
+  const blocks = found.flatMap((r) => (r.block !== undefined ? [r.block] : []));
+  if (blocks.length) {
+    if (!deps.blockTime) throw new Error("no block clock");
+    let lo = blocks[0]!;
+    let hi = blocks[0]!;
+    for (const b of blocks) {
+      if (b < lo) lo = b;
+      if (b > hi) hi = b;
+    }
+    times.push(await deps.blockTime(lo));
+    if (hi !== lo) times.push(await deps.blockTime(hi));
+  }
+  return [Math.min(...times), Math.max(...times)];
 }
 
 export async function checkPayrollProof(p: PayrollProof, deps: PayrollCheckDeps): Promise<VerifyResult> {
@@ -257,12 +322,29 @@ export async function checkPayrollProof(p: PayrollProof, deps: PayrollCheckDeps)
     expiry();
     return finish();
   }
+  // An expired proof is never ok, so nothing it lists is looked up.
+  if (expired) {
+    add("Each one is a private payment in the vault", "unknown", "Not looked up, because this proof has expired.");
+    expiry();
+    return finish();
+  }
 
   // 6) Every payment is a private payment out of a note the prover spent, in that vault.
-  const looked = await inBatches(payments, LOOKUP_PARALLEL, (x) => deps.findPayment(x).catch(() => null));
+  const looked = await lookUp(payments, deps);
   const offline = looked.some((r) => r === null);
-  const bad = looked.find((r) => r && r.state !== "found" && r.state !== "not-found");
-  const missing = looked.filter((r) => r?.state === "not-found").length;
+  const bad = looked.find((r) => r && r.state !== "found" && r.state !== "not-found" && r.state !== "over-limit");
+  const missing = looked.some((r) => r?.state === "not-found");
+  const capped = looked.some((r) => r?.state === "over-limit");
+  let span: [number, number] | null = null;
+  let spanUnread = false;
+  const allFound = !offline && looked.length === payments.length && looked.every((r) => r?.state === "found");
+  if (allFound) {
+    try {
+      span = await paidSpan(looked as Extract<PaymentLookup, { state: "found" }>[], deps);
+    } catch {
+      spanUnread = true;
+    }
+  }
   if (bad) {
     add(
       "Each one is a private payment in the vault",
@@ -277,13 +359,15 @@ export async function checkPayrollProof(p: PayrollProof, deps: PayrollCheckDeps)
             ? "A transaction named in the proof is not on this network."
             : "A transaction named in the proof did not make that payment."
     );
-  } else if (offline || missing > 0) {
+  } else if (offline || capped || missing || !allFound) {
     add(
       "Each one is a private payment in the vault",
       "unknown",
       offline
         ? "Could not reach the network to find every payment. Try again."
-        : `Can't confirm ${missing} of ${payments.length} payments: they are older than the blocks this check reads, and the proof does not name their transactions.`
+        : capped
+          ? "Could not finish: this proof needs more network reads than one check makes."
+          : "Can't confirm every payment: at least one is older than the blocks this check reads, and the proof does not name its transaction."
     );
   } else {
     add(
@@ -292,15 +376,17 @@ export async function checkPayrollProof(p: PayrollProof, deps: PayrollCheckDeps)
       "Each was paid privately inside the vault, from a note the prover spent."
     );
     // 7) When they landed.
-    const times = (looked as { paidAt: number }[]).map((r) => r.paidAt);
-    const first = Math.min(...times);
-    const last = Math.max(...times);
-    paidBetween = [first, last];
-    add(
-      "When the payments landed",
-      "pass",
-      last - first < 60 ? `${deps.when(first)}.` : `Between ${deps.when(first)} and ${deps.when(last)}.`
-    );
+    if (span) {
+      const [first, last] = span;
+      paidBetween = [first, last];
+      add(
+        "When the payments landed",
+        "pass",
+        last - first < 60 ? `${deps.when(first)}.` : `Between ${deps.when(first)} and ${deps.when(last)}.`
+      );
+    } else if (spanUnread) {
+      add("When the payments landed", "unknown", "Could not read when they landed. Try again.");
+    }
   }
 
   // 8) Expiry.

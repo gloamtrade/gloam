@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { liveMainnetNames } from "@/lib/mainnet";
 import Link from "next/link";
 import { LegalLayout } from "@/components/LegalLayout";
 
@@ -20,8 +21,8 @@ export default function TermsPage() {
       <p>
         Gloam runs on mainnet and on testnets. On mainnet (Robinhood Chain and
         Tempo, from Gloam&apos;s mainnet launch on 21 October 2026) you use
-        real assets, and you can lose them. Mainnet is beta software: deposits
-        have limits, a cash out costs 0.25% of its amount, and the contracts
+        real assets, and you can lose them. On mainnet, deposits
+        have limits, a cash out costs 0.5% of its amount, and the contracts
         were reviewed internally before launch. Kann Audits then reviewed the
         vault contracts (<Link href="/security">report, 1 November 2026</Link>)
         and found no Critical, High or Medium issues. That review did not cover
@@ -44,8 +45,8 @@ export default function TermsPage() {
       </p>
       <h2>2. Experimental software</h2>
       <p>
-        Gloam is early-stage, beta software for interacting with blockchain
-        networks, including Robinhood Chain, Tempo, Base and Ethereum. Features
+        Gloam is early-stage software for interacting with blockchain
+        networks, including {liveMainnetNames()}. Features
         such as private balances, private payments, payroll, proofs and
         private swaps may be incomplete, unavailable, or change without notice. Stock tokens are on
         testnet only. A private swap trades on a public exchange, so its tokens

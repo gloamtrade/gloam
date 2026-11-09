@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { useSignTypedData } from "wagmi";
 import { FEEDBACK_CATEGORIES, FEEDBACK_MAX, cleanFeedback, feedbackTypedData, type FeedbackCategory } from "@/lib/vote/core";
 import { CheckIcon } from "./VoteParts";
+import { Spinner } from "@/components/ui/Spinner";
 
 type Phase = { k: "edit" } | { k: "signing" } | { k: "sending" } | { k: "sent" } | { k: "error"; message: string };
 
@@ -107,7 +108,8 @@ export function FeedbackBox({ address }: { address: `0x${string}` }) {
       </div>
 
       <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <button type="button" onClick={send} disabled={busy || message.length < 3} className="btn btn-ghost btn-lg w-full sm:w-auto">
+        <button type="button" onClick={send} disabled={busy || message.length < 3} aria-busy={busy} className="btn btn-ghost btn-lg w-full sm:w-auto">
+          {busy && <Spinner />}
           {phase.k === "signing" ? "Sign in your wallet…" : phase.k === "sending" ? "Sending…" : "Sign and send"}
         </button>
         <p className="text-[13px] leading-relaxed text-mute">You sign your note so we know it&apos;s from a holder. It&apos;s free and nothing goes on chain.</p>

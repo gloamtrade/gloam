@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/docs/agents/commitments" },
 };
 
-const REPO = "https://github.com/cryptoduke01/gloam/tree/main";
+const REPO = "https://github.com/gloamtrade/gloam/tree/main";
 const EXAMPLE = `${REPO}/examples/san-verano`;
 
 const CHECKS: { id: string; confirms: string; needs: string }[] = [
@@ -313,11 +313,11 @@ const result = await checkPaymentReceipt(record, {
           verifier contract, which does not exist yet.
         </li>
         <li>
-          <strong>Beta.</strong> Mainnet runs on the final keys of the
-          13-contributor trusted setup, with beta deposit limits. It had an
+          <strong>Mainnet.</strong> Mainnet runs on the final keys of the
+          13-contributor trusted setup, with deposit limits. It had an
           internal review on 20 October 2026, and Kann Audits reviewed the vault
           contracts (<Link href="/security">report, 1 November 2026</Link>) and found no Critical, High or Medium issues.
-          The circuits and the SDK were not part of that review. Start small.
+          The circuits and the SDK were not part of that review.
         </li>
       </ul>
 

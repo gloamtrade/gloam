@@ -15,17 +15,22 @@
  * or may have gone out, never
  * puts its note back; neither does a relay that can't be read or no longer
  * holds the job. The chain settles those.
+ *
+ * A proof fixes the amount and the address, not the fee. The vault takes its
+ * fee when the cash out lands, at the rate that day, so a job set up before the
+ * fee rises still lands, and pays that much less. feeRise says so on its row,
+ * and cancelling before it goes keeps the money in the private balance.
  */
 import { isAddress, type Address, type Hex } from "viem";
 import type { CashOutCall } from "./cashOutProof";
 import { readDemo } from "./demoFlag";
 import { demoCancelCashOut, demoCashOutStatus, demoReplaceCashOutProof, demoScheduleCashOut } from "./demo/chain";
-import { getActiveNetwork } from "./networks";
+import { getActiveNetwork, type GloamNetwork } from "./networks";
 import { getAllNotes } from "./noteVault";
 import { noteNullifierPoseidon } from "./notePoseidon";
 import { fieldToHex, hexToField } from "./poseidon";
 import { publicClientFor } from "./rhClient";
-import { HANDOVER_MS, endedPlan, markCleared, shieldPoolAbi, updateLocalNote, type CashOutMark, type LocalNote } from "./shield";
+import { HANDOVER_MS, endedPlan, formatAssetLabel, formatFeePercent, markCleared, shieldPoolAbi, updateLocalNote, withdrawFeeOf, type CashOutMark, type LocalNote } from "./shield";
 import { JOB_DONE_TTL_SEC, type DelayWindow } from "./relay/scheduled";
 
 /** The windows the relay offers (lib/relay/scheduled DELAY_WINDOWS): about an hour, 6 hours or a day. */
@@ -71,15 +76,83 @@ function isOwnedJob(v: unknown): v is OwnedCashOutJob {
   return Boolean(j && typeof j.id === "string" && typeof j.sendAfter === "number" && typeof j.status === "string" && isAddress(j.to ?? ""));
 }
 
-/** The note's mark for a job the relay holds: where it really pays, and whether it still waits. */
-export function markFor(job: OwnedCashOutJob, proof?: { root: Hex; at: number }): CashOutMark {
+/** The note's mark for a job the relay holds: where it really pays, whether it still waits, and the fee it was set up at. */
+export function markFor(job: OwnedCashOutJob, proof?: { root: Hex; at: number }, feeBps?: number): CashOutMark {
   return {
     job: job.id,
     at: job.sendAfter,
     to: job.to,
     state: job.status === "scheduled" ? "scheduled" : "sent",
     ...(proof ? { root: proof.root, provenAt: proof.at } : {}),
+    ...(feeBps !== undefined ? { feeBps } : {}),
   };
+}
+
+/** What to say when the fee on screen is no longer the vault's. Null when it still is, or when either side isn't known. */
+export function feeMovedLine(shownBps: number | null, liveBps: unknown): string | null {
+  if (shownBps === null || typeof liveBps !== "number" || liveBps === shownBps) return null;
+  return `The cash-out fee just changed to ${formatFeePercent(liveBps)}. Check the new numbers, then confirm again.`;
+}
+
+/**
+ * Asked right before anything moves, so nobody confirms a number that just
+ * changed. A failed read says nothing: the screen's own read, a minute old at
+ * most, stands.
+ */
+export async function feeMoved(net: Pick<GloamNetwork, "chainId" | "chain" | "historyRpc" | "pool">, shownBps: number | null): Promise<string | null> {
+  if (shownBps === null || !net.pool || readDemo()) return null;
+  const live = await publicClientFor(net)
+    .readContract({ address: net.pool, abi: shieldPoolAbi, functionName: "withdrawFeeBps" })
+    .catch(() => null);
+  return feeMovedLine(shownBps, live);
+}
+
+/** What every vault charged until 3 November 2026: a mark with no feeBps was set up at this. */
+const FEE_BEFORE_MARKS_KEPT_IT = 25;
+
+export type FeeRise = {
+  shownBps: number;
+  liveBps: number;
+  /** What it showed the recipient would get. */
+  shownGets: bigint;
+  /** What the recipient gets at today's rate. */
+  nowGets: bigint;
+};
+
+/**
+ * A waiting cash out that will pay less than it showed: the vault's fee has
+ * risen since it was set up. Null when it pays what it showed (or more), once
+ * it is on its way and can't be stopped, or with no live fee to compare.
+ */
+export function feeRise(n: Pick<LocalNote, "amountWei" | "cashOut">, liveBps: number | null): FeeRise | null {
+  if (n.cashOut?.state !== "scheduled" || liveBps === null) return null;
+  const shownBps = n.cashOut.feeBps ?? FEE_BEFORE_MARKS_KEPT_IT;
+  if (liveBps <= shownBps) return null;
+  const amount = BigInt(n.amountWei);
+  return { shownBps, liveBps, shownGets: amount - withdrawFeeOf(amount, shownBps), nowGets: amount - withdrawFeeOf(amount, liveBps) };
+}
+
+export type WaitingRise = { note: LocalNote; rise: FeeRise };
+
+/** The jobs in `notes` that will pay less than they showed, each against its own vault's live fee. */
+export function waitingFeeRises(notes: LocalNote[], liveBpsOf: (n: LocalNote) => number | null): WaitingRise[] {
+  return notes.flatMap((note) => {
+    const rise = note.status === "recovered" ? null : feeRise(note, liveBpsOf(note));
+    return rise ? [{ note, rise }] : [];
+  });
+}
+
+/** One row's line: what it pays now against what it showed. */
+export function feeRiseLine(rise: FeeRise, asset: string): string {
+  return `Pays ${formatAssetLabel(rise.nowGets, asset)}, not the ${formatAssetLabel(rise.shownGets, asset)} it showed.`;
+}
+
+/** Said above the rows: why, and what the person can do. `what` names them: "cash out", "top-up". */
+export function feeRiseNotice(rises: FeeRise[], what: string): string {
+  const fee = formatFeePercent(rises[0]!.liveBps);
+  return rises.length === 1
+    ? `The cash-out fee went up to ${fee} after you set up this ${what}. The vault takes the fee when it goes out, so it pays less than it showed. Cancel it before it goes to keep the money in your private balance.`
+    : `The cash-out fee went up to ${fee} after you set up ${rises.length} ${what}s. The vault takes the fee when each one goes out, so they pay less than they showed. Cancel any of them before it goes to keep that money in your private balance.`;
 }
 
 /**
@@ -99,6 +172,8 @@ export async function scheduleCashOut(p: {
   window?: CashOutWindow;
   day?: number;
   webhook?: { url: string; series: string };
+  /** A partner's link code: the relay registers the cash out under it when scheduling (lib/partnerAttribution). */
+  partnerCode?: string;
 }): Promise<OwnedCashOutJob> {
   // Recording demo: the pretend relay keeps the job (lib/demo/chain), by the same rules.
   if (readDemo()) {
@@ -155,10 +230,21 @@ export async function cashOutJobStatus(id: string): Promise<CashOutJobView | "go
  */
 export type CancelResult = "cancelled" | "over" | "going" | "gone" | null;
 
-export async function cancelCashOut(id: string): Promise<CancelResult> {
+/**
+ * Asks the relay to cancel `note`'s cash out (job `id`). The relay cancels only
+ * for whoever holds the note: the request carries the note's nullifier, worked
+ * out here from its secret.
+ */
+export async function cancelCashOut(id: string, note: LocalNote): Promise<CancelResult> {
   if (readDemo()) return demoCancelCashOut(id);
+  const nullifier = await nullifierOf(note);
+  if (!nullifier) return null;
   try {
-    const res = await fetch(`/api/relay/scheduled?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    const res = await fetch(`/api/relay/scheduled?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nullifier }),
+    });
     if (res.status === 404) return "gone";
     if (!res.ok) return null;
     const json = (await res.json().catch(() => ({}))) as { ok?: boolean; status?: string };
@@ -177,13 +263,21 @@ export async function cancelCashOut(id: string): Promise<CancelResult> {
  * relay holds, not the one asked for: when this money already has a cash out
  * waiting to another address, the note is marked with that one and this throws.
  */
-export async function scheduleNoteCashOut(note: LocalNote, call: CashOutCall, when: CashOutWhen): Promise<OwnedCashOutJob> {
+export async function scheduleNoteCashOut(
+  note: LocalNote,
+  call: CashOutCall,
+  when: CashOutWhen,
+  feeBps?: number,
+  opts: { partnerCode?: string } = {}
+): Promise<OwnedCashOutJob> {
   // Every scheduled cash out comes through here. On disk before the proof goes:
   // however this ends, a closed tab included, the note can't be spent past that
   // proof. The lease keeps any tab's sync from moving it until the reply says how
   // it went (shield HANDOVER_MS).
   await updateLocalNote(note.id, { proofOutAt: Date.now(), handoverUntil: Date.now() + HANDOVER_MS });
   const lease = { handoverUntil: undefined };
+  // A job already waiting for this money keeps the fee it was set up at.
+  const shown = note.cashOut?.feeBps ?? feeBps;
   const series = note.cashOutPlan?.plan;
   const at =
     typeof when === "string"
@@ -191,13 +285,13 @@ export async function scheduleNoteCashOut(note: LocalNote, call: CashOutCall, wh
       : { day: when.day, ...(when.webhook && series ? { webhook: { url: when.webhook, series } } : {}) };
   let job: OwnedCashOutJob;
   try {
-    job = await scheduleCashOut({ ...call, ...at });
+    job = await scheduleCashOut({ ...call, ...at, ...(opts.partnerCode ? { partnerCode: opts.partnerCode } : {}) });
   } catch (e) {
-    await updateLocalNote(note.id, e instanceof CashOutLaterError && e.job ? { cashOut: markFor(e.job), ...lease } : lease);
+    await updateLocalNote(note.id, e instanceof CashOutLaterError && e.job ? { cashOut: markFor(e.job, undefined, shown), ...lease } : lease);
     throw e;
   }
   // The relay may hand back the job already waiting for this money: its proof's root is not this one.
-  await updateLocalNote(note.id, { cashOut: markFor(job, job.existing ? undefined : { root: call.root, at: Date.now() }), ...lease });
+  await updateLocalNote(note.id, { cashOut: markFor(job, job.existing ? undefined : { root: call.root, at: Date.now() }, shown), ...lease });
   return job;
 }
 

@@ -166,7 +166,9 @@ check("every write is logged before it goes to the wallet, and the deposit-lost 
 
 check("Checking… holds until the approvals are worked out, and the asset is fixed while a deposit is under way (L-2)", () => {
   assert.ok(/if \(submitting\.current\) return;\s*\n\s*submitting\.current = true;\s*\n\s*setChecking\(true\);/.test(view));
-  assert.ok(/ready = await prepareDeposit\([^)]*\);\s*\n\s*\} finally \{\s*\n\s*submitting\.current = false;\s*\n\s*setChecking\(false\);/.test(view));
+  assert.ok(/ready = await prepareDeposit\([^)]*\);\s*\n\s*\}(?: catch \{[^}]{0,200}\})? finally \{\s*\n\s*submitting\.current = false;\s*\n\s*setChecking\(false\);/.test(view));
+  // a failure while preparing (the Poseidon load, say) is said in the form, not dropped
+  assert.ok(/ready = await prepareDeposit\([^)]*\);\s*\n\s*\} catch \{[^}]*setFormError\(/.test(view));
   assert.ok(!/screenWallets\([^)]*\)[\s\S]{0,120}\.finally\(\(\) => setChecking\(false\)\)/.test(view), "screening no longer ends Checking… early");
   assert.ok(/label="Asset to add"[\s\S]{0,200}disabled=\{working \|\| pendingKind !== null\}/.test(view));
 });

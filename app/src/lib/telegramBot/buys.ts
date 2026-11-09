@@ -1,10 +1,10 @@
 /**
- * $GLOAM buy alerts in the group's Buys topic. Every token leaving the Uniswap
- * v4 PoolManager on Robinhood Chain is someone buying (the launch liquidity is
- * locked, so nothing else takes $GLOAM out), so the helper reads those
- * transfers, adds them up per transaction, and posts each buy with its rough
- * dollar value from DEX Screener. No model call, no price talk beyond the
- * value of the buy.
+ * $GLOAM buy alerts in the group's Buys topic. The helper reads $GLOAM leaving
+ * the Uniswap v4 PoolManager on Robinhood Chain, adds it up per transaction,
+ * and posts each buy with its rough dollar value from DEX Screener. A buy is a
+ * transaction that swapped through the PoolManager and changed no liquidity:
+ * $GLOAM taken out of a position is not a buy, and is never posted. No model
+ * call, no price talk beyond the value of the buy.
  *
  * It runs after Telegram updates (at most every BUY_CHECK_SEC) and from the
  * once-a-minute cron at /api/telegram/buys. The first run starts at the
@@ -28,6 +28,10 @@ import { CAPTION_MAX, sendPhoto, trySendMessage } from "./telegram";
 const RPC = "https://rpc.mainnet.chain.robinhood.com";
 const POOL_MANAGER = "0x8366a39cc670b4001a1121b8f6a443a643e40951";
 const TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+/** PoolManager Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24). */
+const SWAP = "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f";
+/** PoolManager ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32): liquidity added or taken out. */
+const MODIFY_LIQUIDITY = "0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec";
 const EXPLORER = "robin.etherscan.io";
 /** Checks at least this far apart; with MAX_POSTS that stays well under Telegram's 20 posts a minute in a group. */
 export const BUY_CHECK_SEC = 30;
@@ -43,6 +47,18 @@ const MAX_LAG = 60_000;
 const MAX_POSTS = 6;
 
 type Log = { transactionHash: string; blockNumber: string; data: string; topics: string[] };
+type Receipt = { from?: string; status?: string; logs?: { address?: string; topics?: string[] }[] };
+
+/**
+ * A transaction is a buy when it swapped through the PoolManager and changed
+ * no liquidity there: $GLOAM taken out of a position, alone or with a swap
+ * beside it, is not a buy.
+ */
+export function isSwapBuy(r: Receipt): boolean {
+  if (r.status !== undefined && r.status !== "0x1") return false;
+  const events = (r.logs ?? []).filter((l) => l.address?.toLowerCase() === POOL_MANAGER).map((l) => l.topics?.[0]?.toLowerCase());
+  return events.includes(SWAP) && !events.includes(MODIFY_LIQUIDITY);
+}
 
 async function rpc<T>(method: string, params: unknown[]): Promise<T | null> {
   try {
@@ -216,8 +232,16 @@ async function checkBuys(groupId: number, deadline: number): Promise<number> {
         return posted;
       }
       if (!(await claimBuy(tx))) continue;
-      const t = await rpc<{ from: string }>("eth_getTransactionByHash", [tx]);
-      const b: Buy = { amount, usd, buyer: t?.from ?? "0x0000000000000000000000000000000000000000", tx, price, marketCap: m?.marketCap ?? null };
+      const r = await rpc<Receipt>("eth_getTransactionReceipt", [tx]);
+      if (!r) {
+        // can't tell yet whether it was a buy: the next check starts at it
+        await releaseBuy(tx);
+        await setBuysLastBlock(block - 1);
+        return posted;
+      }
+      // not a swap (liquidity taken out, say): stays claimed, never posted
+      if (!isSwapBuy(r)) continue;
+      const b: Buy = { amount, usd, buyer: r.from ?? "0x0000000000000000000000000000000000000000", tx, price, marketCap: m?.marketCap ?? null };
       const sent = await postBuy(groupId, topic, buyText(b));
       if (sent.ok) {
         posted++;

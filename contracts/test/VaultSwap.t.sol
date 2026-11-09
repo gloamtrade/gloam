@@ -345,7 +345,8 @@ contract VaultSwapTest is Test {
         // the refund note: the amount less the vault's highest possible fee (1%)
         k.r = GloamVaultSwap.Deposit(hex"00", bytes32(c + 0x1000), assetIn, amount - amount / 100);
         k.route = route;
-        address escrow = on.escrowFor(
+        address escrow = _escrowOf(
+            on,
             assetIn,
             GloamVaultSwap.EscrowKey(
                 bytes32(nul), amount, k.d.commitment, assetOut, amountOut, k.r.commitment, k.r.amount, keccak256(route)
@@ -354,8 +355,23 @@ contract VaultSwapTest is Test {
         k.s = GloamVaultSwap.Spend(abi.encode(escrow), pool.currentRoot(), bytes32(nul), assetIn, amount);
     }
 
-    function _go(GloamVaultSwap on, Call memory k) internal returns (uint256) {
+    /// The escrow a swap's unshield must name, on the router under test.
+    function _escrowOf(GloamVaultSwap on, address assetIn, GloamVaultSwap.EscrowKey memory key)
+        internal
+        view
+        virtual
+        returns (address)
+    {
+        return on.escrowFor(assetIn, key);
+    }
+
+    function _go(GloamVaultSwap on, Call memory k) internal virtual returns (uint256) {
         return on.swap(k.s, k.d, k.r, k.route);
+    }
+
+    /// The swap call as calldata, for a contract that re-enters with it.
+    function _swapData(Call memory k) internal view virtual returns (bytes memory) {
+        return abi.encodeCall(GloamVaultSwap.swap, (k.s, k.d, k.r, k.route));
     }
 
     function _route1(PoolKey memory k) internal pure returns (bytes memory) {
@@ -563,7 +579,7 @@ contract VaultSwapTest is Test {
         assertFalse(pool.isSpent(bytes32(uint256(13))));
     }
 
-    function test_same_asset_native_and_zero_are_refused() public {
+    function test_same_asset_native_and_zero_are_refused() public virtual {
         Call memory k = _call(router, 14, address(usd), 1e6, 0xB4, _route1(direct));
         vm.expectRevert(GloamVaultSwap.SameAsset.selector);
         _go(router, k);
@@ -621,7 +637,7 @@ contract VaultSwapTest is Test {
         GloamVaultSwap r2 = _newRouter(allow);
         Call memory inner = _call(r2, 19, address(evil), 1e18, 0xB9, _route1(k));
         // when the pool manager pays the router, the token re-enters swap()
-        evil.arm(address(r2), abi.encodeCall(GloamVaultSwap.swap, (inner.s, inner.d, inner.r, inner.route)));
+        evil.arm(address(r2), _swapData(inner));
         Call memory outer = _call(r2, 18, address(evil), 1e18, 0xB8, _route1(k));
         vm.expectRevert(GloamVaultSwap.Reentrancy.selector);
         _go(r2, outer);
@@ -642,7 +658,7 @@ contract VaultSwapTest is Test {
 
     // ───────────────────────────────────────────────────────────── tempo
 
-    function test_tempo_swap_between_stablecoins() public {
+    function test_tempo_swap_between_stablecoins() public virtual {
         MockERC20 usdt = new MockERC20();
         pool.setDepositLimit(address(usdt), 500e6, 25_000e6);
         MockStableDex dex = new MockStableDex();

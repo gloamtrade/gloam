@@ -8,9 +8,14 @@
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { faucetFor } from "@/lib/faucet";
+import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
 import { MAINNET_ENABLED, getNetwork, NETWORK_KEYS, isNetworkKey, networkName, type NetworkKey } from "@/lib/networks";
 import { MAINNET_LAUNCH_ISO } from "@/lib/mainnet";
-import { vaultSwapRouter } from "@/lib/vaultSwap";
+import { parseUnits, type Address } from "viem";
+import { swapMainnets, swapRouterFor, vaultSwapRouter } from "@/lib/vaultSwap";
+import { SWAP_PUBLIC_LINE, SWAP_QUOTE_PER_MINUTE, SwapQuoteError, quoteSwapServer, type SwapQuote } from "@/lib/swapQuote";
+import { knownTokens } from "@/lib/tokens";
+import { redactRpcUrl } from "@gloamtrade/sdk";
 import { formatGwei, maxGasPriceWei } from "@/lib/relay/gasCeiling";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
 import {
@@ -25,8 +30,9 @@ import {
 } from "@/lib/paymentRequest";
 import { LEGACY_DISCLOSURE } from "@/lib/disclosure";
 import { MAX_PROOF_TEXT, ProofInputError, verifyProofText, type ApiVerifyResult } from "@/lib/proofsServer";
-import { hitRateLimit } from "./rateLimit";
+import { SharedCountUnavailable, hitRateLimit } from "./rateLimit";
 import { findSecret, secretWarning } from "./safety";
+import { HUNT_INPUT_MAX, countHuntStep, huntEnabled, huntMcpArg, huntMcpPiecesArg, huntSubject, mcpHuntFinal } from "@/lib/hunt";
 
 export const SITE = "https://www.gloam.trade";
 export const MCP_URL = `${SITE}/mcp`;
@@ -67,6 +73,8 @@ function optString(args: Args, key: string, max: number): string | undefined {
 const BASE_TESTNET = NETWORK_KEYS.includes("base");
 /** So is Ethereum Sepolia. */
 const ETHEREUM_TESTNET = NETWORK_KEYS.includes("ethereum");
+/** Elysium testnet, once its switch is on and its pool is in (lib/elysium). */
+const ELYSIUM_TESTNET_ON = NETWORK_KEYS.includes("elysium");
 
 /** The network names a caller may pass: the testnets, then each mainnet once its pool is in. */
 const NETWORK_CHOICES: NetworkKey[] = [
@@ -106,22 +114,25 @@ const TESTNET_PROP_TEXT = `Gloam network: ${andList([
   '"robinhood" (Robinhood Chain testnet)',
   ...(BASE_TESTNET ? ['"base" (Base Sepolia testnet)'] : []),
   ...(ETHEREUM_TESTNET ? ['"ethereum" (Ethereum Sepolia testnet)'] : []),
+  ...(ELYSIUM_TESTNET_ON ? ['"elysium" (Elysium testnet: test USDC; gas in HYPE)'] : []),
 ]).replace(/ and (?=[^,]*$)/, " or ")}.`;
 
 const MAINNET_PROP_TEXT: Partial<Record<NetworkKey, string>> = {
   "tempo-mainnet": '"tempo-mainnet" (Tempo mainnet: USDC.e, pathUSD, USDT0, OUSD)',
-  "robinhood-mainnet": '"robinhood-mainnet" (Robinhood Chain mainnet: USDG, GLOAM, PONS, CASHCAT; ETH, AI and ORBIO once their limits land)',
+  "robinhood-mainnet": '"robinhood-mainnet" (Robinhood Chain mainnet: USDG, GLOAM, PONS, CASHCAT, ETH, AI and ORBIO)',
   "base-mainnet": '"base-mainnet" (Base mainnet: USDC, EURC, USDT, ETH)',
   "ethereum-mainnet": '"ethereum-mainnet" (Ethereum mainnet: USDC, USDT, USDG, PYUSD, EURC, ETH)',
+  "elysium-mainnet": '"elysium-mainnet" (Elysium mainnet: USDC; gas in HYPE)',
 };
 
 /** What each live mainnet takes as a deposit, for the networks tool. */
 const MAINNET_DEPOSITS_TEXT = (
   [
     ["tempo-mainnet", "USDC.e, pathUSD, USDT0 and OUSD on Tempo"],
-    ["robinhood-mainnet", "USDG, GLOAM, PONS and CASHCAT on Robinhood Chain, then ETH, AI and ORBIO once their limits land"],
+    ["robinhood-mainnet", "USDG, GLOAM, PONS, CASHCAT, ETH, AI and ORBIO on Robinhood Chain"],
     ["base-mainnet", "USDC, EURC, USDT and ETH on Base"],
     ["ethereum-mainnet", "USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum"],
+    ["elysium-mainnet", "USDC on Elysium"],
   ] as const
 )
   .filter(([k]) => (NETWORK_KEYS as readonly string[]).includes(k))
@@ -137,6 +148,7 @@ const TESTNET_CHOICES_TEXT = andList([
   '"robinhood" (Robinhood Chain testnet)',
   ...(BASE_TESTNET ? ['"base" (Base Sepolia)'] : []),
   ...(ETHEREUM_TESTNET ? ['"ethereum" (Ethereum Sepolia)'] : []),
+  ...(ELYSIUM_TESTNET_ON ? ['"elysium" (Elysium testnet)'] : []),
 ]).replace(/ and (?=[^,]*$)/, " or ");
 
 const NETWORK_PROP = {
@@ -162,17 +174,17 @@ const ETHEREUM_LINE = NETWORK_KEYS.includes("ethereum-mainnet")
 /** Base Sepolia, when it is in: a testnet on the mainnet vault and keys. */
 const BASE_TESTNET_LINE =
   (BASE_TESTNET
-    ? " Base Sepolia (84532) is a testnet too, but runs the mainnet vault with the final keys, beta limits and the cash-out fee."
+    ? " Base Sepolia (84532) is a testnet too, but runs the mainnet vault with the final keys, deposit limits and the cash-out fee."
     : "") +
   (ETHEREUM_TESTNET
-    ? " Ethereum Sepolia (11155111) is a testnet on the mainnet vault as well, with the final keys, beta limits and the cash-out fee."
+    ? " Ethereum Sepolia (11155111) is a testnet on the mainnet vault as well, with the final keys, deposit limits and the cash-out fee."
     : "");
 
 /** Where Gloam runs, as one honest line. Testnets only until a mainnet pool is filled in. */
 const STATUS = MAINNET_ENABLED
   ? `Mainnet: ${andList(
       NETWORK_KEYS.filter((k) => !getNetwork(k).testnet).map((k) => `${getNetwork(k).label} (${getNetwork(k).chainId})`)
-    )}, with the trusted setup's final keys (13 contributors) and beta deposit limits. Deposits and private payments are free; a cash out costs 0.25%. Beta software: reviewed internally before launch, and Kann Audits reviewed the vault contracts (report, 1 November 2026: gloam.trade/security) and found no Critical, High or Medium issues; the swap routers, circuits, app and relay were not part of it. Testnets: Tempo Moderato (42431) and Robinhood Chain testnet (46630), with development keys.${BASE_TESTNET_LINE}${ETHEREUM_LINE} Private swaps are live in the app on Robinhood Chain and Tempo mainnet (Vault > Swap): who swapped stays private, the tokens and amounts are public, and this server does not swap. The old private trade (sealed swaps) is retired.`
+    )}, with the trusted setup's final keys (13 contributors) and deposit limits. Direct deposits and private payments are free; a cash out costs 0.5%. Reviewed internally before launch, and Kann Audits reviewed the vault contracts (report, 1 November 2026: gloam.trade/security) and found no Critical, High or Medium issues; the swap routers, circuits, app and relay were not part of it. Testnets: Tempo Moderato (42431) and Robinhood Chain testnet (46630), with development keys.${BASE_TESTNET_LINE}${ETHEREUM_LINE} Private swaps are live on ${swapMainnets()} mainnet: who swapped stays private, the tokens and amounts are public. This server quotes them (gloam_swap_quote) and never makes one: swap in the app (Vault > Swap) or with the local server (${LOCAL_SERVER}). The old private trade (sealed swaps) is retired.`
   : `Testnet only: Tempo Moderato (42431) and Robinhood Chain testnet (46630). Testnet proofs use development keys; the production ceremony is done (13 contributors) and mainnet deploys its final keys.${BASE_TESTNET_LINE} The old private trade (sealed swaps) is retired.`;
 
 const WHAT_IS_PUBLIC =
@@ -212,7 +224,7 @@ export const TOOLS: Tool[] = [
     name: "gloam_networks",
     title: "Networks and assets",
     description: MAINNET_ENABLED
-      ? `The networks Gloam runs on, mainnets first, with each vault (pool) address, the private swap routers (Robinhood Chain and Tempo mainnet), the assets you can deposit (on mainnet: ${MAINNET_DEPOSITS_TEXT}; on testnet: OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain, and more on Base Sepolia and Ethereum Sepolia), explorers, RPCs and the testnet faucets.`
+      ? `The networks Gloam runs on, mainnets first, with each vault (pool) address, the private swap routers (${swapMainnets()} mainnet), the assets you can deposit (on mainnet: ${MAINNET_DEPOSITS_TEXT}; on testnet: OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain, and more on Base Sepolia and Ethereum Sepolia${ELYSIUM_TESTNET_ON ? ", and test USDC on Elysium testnet" : ""}), explorers, RPCs and the testnet faucets.`
       : "The networks Gloam runs on, with each vault (pool) address, the assets you can deposit (OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain), explorers, RPCs and faucets.",
     inputSchema: {
       type: "object",
@@ -300,10 +312,27 @@ export const TOOLS: Tool[] = [
     annotations: { title: "Private payments over MPP", ...READ, openWorldHint: false },
   },
   {
+    name: "gloam_swap_quote",
+    title: "Quote a private swap",
+    description:
+      "Quote a private swap from a private Gloam balance: what you would get, the route, the vault's fee, and the first thing that would stop the swap (too thin a pool, a refund the vault could not take back, the relay's floor where gas is dear), or none. Read only: it never builds or sends a swap. A private swap hides who swapped; the tokens and amounts are public. To swap, use the Gloam app or the local server (npx -y @gloamtrade/mcp, gloam_execute_private_swap).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        network: { ...NETWORK_PROP, default: "robinhood-mainnet" },
+        from: { type: "string", description: "The asset you pay with: a symbol (USDG, ETH, USDC.e) or a token address." },
+        to: { type: "string", description: "The asset you receive: a symbol or a token address." },
+        amount: { type: "string", description: 'How much of `from` to swap, in whole units, e.g. "100" or "0.05".' },
+      },
+      required: ["from", "to", "amount"],
+    },
+    annotations: { title: "Quote a private swap", ...READ, openWorldHint: true },
+  },
+  {
     name: "gloam_connect_full_agent",
     title: "Connect the full Gloam agent",
     description:
-      "Commands to install the local Gloam MCP server, which can sign and pay (shield, private pay, x402 and MPP, spending limits) with keys kept on your machine: Claude Code, Codex, Cursor, VS Code, Claude Desktop and any MCP client, plus the plugin marketplace cryptoduke01/gloam-plugins.",
+      "Commands to install the local Gloam MCP server, which can sign and pay (shield, private pay, x402 and MPP, spending limits) with keys kept on your machine: Claude Code, Codex, Cursor, VS Code, Claude Desktop and any MCP client, plus the plugin marketplace gloamtrade/gloam-plugins.",
     inputSchema: {
       type: "object",
       properties: {
@@ -344,11 +373,12 @@ function info(ctx: ToolContext) {
       "gloam_verify_proof: check a proof of funds, proof of payment, payroll total or exact balance",
       "gloam_plan_deposit: steps and app link for a private deposit",
       "gloam_mpp_how_to: pay or charge privately over MPP (HTTP 402), with code",
+      "gloam_swap_quote: quote a private swap (price, route, and anything that would stop it); read only",
       "gloam_connect_full_agent: install the local server that can sign and pay, with spending limits",
     ],
     status: STATUS,
     whatIsPublic: WHAT_IS_PUBLIC,
-    links: { ...appLinks(ctx.origin), github: "https://github.com/cryptoduke01/gloam", email: "hello@gloam.trade" },
+    links: { ...appLinks(ctx.origin), github: "https://github.com/gloamtrade/gloam", email: "hello@gloam.trade" },
   };
 }
 
@@ -363,7 +393,8 @@ function networkView(key: NetworkKey, origin: string) {
     testnet: n.chain.testnet === true,
     status: n.status,
     note: n.note,
-    rpc: n.chain.rpcUrls.default.http[0] ?? null,
+    // Shown redacted: an Elysium RPC from the env may carry an API key (lib/elysium).
+    rpc: n.chain.rpcUrls.default.http[0] ? redactRpcUrl(n.chain.rpcUrls.default.http[0]) : null,
     // Where the RPC above keeps only recent blocks (Ethereum Sepolia): read logs and
     // state older than recentBlocks from historyRpc, and everything else from rpc.
     ...(n.historyRpc
@@ -375,7 +406,12 @@ function networkView(key: NetworkKey, origin: string) {
     deployBlock: n.deployBlock?.toString() ?? null,
     paymentMessageBoard: n.payMemo?.address ?? null,
     swapRouter: vaultSwapRouter(n.chainId),
-    gas: n.family === "tempo" ? "Paid in stablecoins; Tempo has no gas coin. Deposits are tokens only." : "ETH",
+    gas:
+      n.family === "tempo"
+        ? "Paid in stablecoins; Tempo has no gas coin. Deposits are tokens only."
+        : n.family === "elysium"
+          ? "HYPE (Elysium's gas coin). Deposits are USDC only; HYPE is not listed."
+          : "ETH",
     // The relay pays the gas of relayed payments; over this price it waits (Ethereum)
     relayMaxGasGwei: (() => {
       const c = maxGasPriceWei(n.chainId);
@@ -533,7 +569,14 @@ function verdict(r: ApiVerifyResult): string {
 async function verifyProof(args: Args, ctx: ToolContext): Promise<CallToolResult> {
   const proof = optString(args, "proof", MAX_PROOF_TEXT)?.trim();
   if (!proof) return fail("Paste the full proof text, starting gloamfunds1:, gloampay1:, gloamroll1: or gloambal1:.");
-  const rl = await hitRateLimit(ctx.ip, "verify", VERIFY_PER_MINUTE);
+  // counted in Redis across every instance (a check can read the chain), and refused when that count can't be kept
+  let rl: Awaited<ReturnType<typeof hitRateLimit>>;
+  try {
+    rl = await hitRateLimit(ctx.ip, "verify", VERIFY_PER_MINUTE, Date.now(), 60, { failClosed: true });
+  } catch (e) {
+    if (!(e instanceof SharedCountUnavailable)) throw e;
+    return fail(`Proof checks are paused for a moment. Try again in a minute, or check it in the browser at ${ctx.origin}/verify.`);
+  }
   if (!rl.allowed) return fail(`Too many proofs checked from here in the last minute. Try again in ${rl.retryAfterSec} seconds.`);
   let r: ApiVerifyResult;
   try {
@@ -575,10 +618,12 @@ function planDeposit(args: Args, ctx: ToolContext): CallToolResult {
   const steps = [
     faucetUrl
       ? `Get test funds: ${faucetUrl}${network === "robinhood" && asset.symbol === "USDG" ? " (test USDG: https://faucet.paxos.com/)" : ""}.`
-      : `Have the ${asset.symbol} in your own wallet on ${n.label}. This is mainnet, with beta deposit limits the app shows before you sign.`,
-    n.testnet
-      ? `Open ${ctx.origin}/app/vault?tab=shield, connect a wallet (or sign in with a passkey), and choose ${n.label} in the network menu.`
-      : `Open ${ctx.origin}/app/vault?tab=shield, connect a wallet, and choose ${n.label} mainnet in the network menu.`,
+      : `Have the ${asset.symbol} in your own wallet on ${n.label}. This is mainnet, with deposit limits the app shows before you sign.`,
+    EMBEDDED_WALLETS
+      ? `Open ${ctx.origin}/app/vault?tab=shield, sign in with your email or a passkey (or connect a wallet), and choose ${n.label}${n.testnet ? "" : " mainnet"} in the network menu.`
+      : n.testnet
+        ? `Open ${ctx.origin}/app/vault?tab=shield, connect a wallet${network === "tempo" ? " (or sign in with a passkey, which works on Tempo testnet only)" : ""}, and choose ${n.label} in the network menu.`
+        : `Open ${ctx.origin}/app/vault?tab=shield, connect a wallet, and choose ${n.label} mainnet in the network menu.`,
     `Pick ${asset.symbol} and enter ${amount.value ? amount.value : "the amount"}.`,
     ...(asset.native ? [] : [`Approve ${asset.symbol} for the Gloam vault: one signature in your wallet.`]),
     `Your browser makes a zero-knowledge proof that the deposit matches a new private note, then you sign one transaction to the vault (${n.pool}).`,
@@ -603,6 +648,90 @@ function planDeposit(args: Args, ctx: ToolContext): CallToolResult {
         : "Before you sign, the app checks the depositing wallet against the OFAC sanctions list.",
     fasterWay: `Rather not click through it? Add the local server (${LOCAL_SERVER}) with a capped key and the agent can make this deposit for you with gloam_execute_shield, inside limits you set. See gloam_connect_full_agent.`,
     status: STATUS,
+  });
+}
+
+/** A swap asset on a chain by symbol or address, from the router's own list. */
+function findSwapAsset(chainId: number, assets: readonly Address[], input: string): { address: Address; symbol: string; decimals: number } | null {
+  const want = input.trim().toLowerCase();
+  for (const a of assets) {
+    const native = BigInt(a) === 0n;
+    const t = native ? null : knownTokens(chainId).find((k) => k.address.toLowerCase() === a.toLowerCase());
+    const symbol = native ? "ETH" : t?.symbol;
+    const decimals = native ? 18 : t?.decimals;
+    if (symbol == null || decimals == null) continue;
+    if (a.toLowerCase() === want || symbol.toLowerCase() === want) return { address: a, symbol, decimals };
+  }
+  return null;
+}
+
+/** "12.5" in whole units to base units, or an error in plain words. */
+function wholeUnits(input: string, decimals: number, symbol: string): bigint | string {
+  const v = input.trim();
+  if (!/^\d{1,30}(\.\d+)?$/.test(v)) return `amount must be a plain number of ${symbol}, like "100" or "0.05".`;
+  const frac = v.split(".")[1] ?? "";
+  if (frac.length > decimals) return `${symbol} has ${decimals} decimal places at most.`;
+  const units = parseUnits(v, decimals);
+  return units > 0n ? units : "amount must be above 0.";
+}
+
+function fmtUnits(raw: string | null, decimals: number): string | null {
+  if (raw == null) return null;
+  const v = BigInt(raw);
+  const base = 10n ** BigInt(decimals);
+  const frac = (v % base).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return frac ? `${v / base}.${frac}` : `${v / base}`;
+}
+
+async function swapQuote(args: Args, ctx: ToolContext): Promise<CallToolResult> {
+  const fallback = NETWORK_KEYS.includes("robinhood-mainnet") ? "robinhood-mainnet" : NETWORK_KEYS[0]!;
+  const network = optNetwork(args, fallback)!;
+  const n = getNetwork(network);
+  const r = n.pool ? swapRouterFor(n.chainId) : null;
+  if (!r) {
+    return fail(`Private swaps are not live on ${networkName(n)}. They are live on ${swapMainnets()} mainnet. Pick one of those networks.`);
+  }
+  const fromIn = optString(args, "from", 64);
+  const toIn = optString(args, "to", 64);
+  const amountIn = optString(args, "amount", 40);
+  if (!fromIn || !toIn || !amountIn) return fail("from, to and amount are all needed, e.g. from USDG, to ETH, amount 100.");
+  const names = () => r.assets.map((a) => findSwapAsset(n.chainId, [a], a)?.symbol).filter(Boolean).join(", ");
+  const from = findSwapAsset(n.chainId, r.assets, fromIn);
+  const to = findSwapAsset(n.chainId, r.assets, toIn);
+  if (!from || !to) return fail(`On ${networkName(n)} a private swap goes between: ${names()}.`);
+  if (from.address === to.address) return fail("Pick two different assets.");
+  const units = wholeUnits(amountIn, from.decimals, from.symbol);
+  if (typeof units === "string") return fail(units);
+  const rl = await hitRateLimit(ctx.ip, "swap-quote", SWAP_QUOTE_PER_MINUTE);
+  if (!rl.allowed) return fail(`Too many swap quotes from here in the last minute. Try again in ${rl.retryAfterSec} seconds.`);
+  let q: SwapQuote;
+  try {
+    q = await quoteSwapServer(n, { assetIn: from.address, assetOut: to.address, amountIn: units.toString() });
+  } catch (e) {
+    if (e instanceof SwapQuoteError) return fail(e.message);
+    return fail(`Could not get a price right now. Try again shortly, or see the swap tab: ${appLinks(ctx.origin).swap}`);
+  }
+  return ok({
+    network,
+    chainId: n.chainId,
+    pay: { amount: fmtUnits(q.amountIn, from.decimals), symbol: from.symbol, address: from.address },
+    receive: q.amountOut == null ? null : { amount: fmtUnits(q.amountOut, to.decimals), symbol: to.symbol, address: to.address },
+    canSwap: q.stop === null && q.amountOut !== null,
+    stop: q.stop,
+    warnings: q.warnings,
+    vaultFee: `${(q.feeBps / 100).toFixed(2)}% of what you pay, kept by the vault`,
+    priceImpactBps: q.impactBps,
+    hops: q.hops,
+    router: q.router,
+    quotedAt: new Date(q.quotedAt).toISOString(),
+    goodFor: `About ${Math.round((2 * q.ttlMs) / 1000)} seconds. A swap prices it again just before it goes.`,
+    whatIsPublic: SWAP_PUBLIC_LINE,
+    marketCheck: q.valueNote,
+    toSwap: {
+      app: appLinks(ctx.origin).swap,
+      localServer: `${LOCAL_SERVER}: gloam_swap_quote, then gloam_execute_private_swap, under the spending limits you set. See gloam_connect_full_agent.`,
+      thisServer: "Quotes only. It never builds, signs or sends a swap.",
+    },
   });
 }
 
@@ -704,8 +833,8 @@ const MPP_TAIL = {
   keys: "Keys, receive keys and notes stay in your own code or the local server. Never paste them into a chat or this hosted server.",
   links: {
     package: "https://www.npmjs.com/package/@gloamtrade/mppx-gloam",
-    readme: "https://github.com/cryptoduke01/gloam/tree/main/packages/mppx-gloam",
-    spec: "https://github.com/cryptoduke01/gloam/blob/main/docs/mpp/draft-gloam-charge-00.md",
+    readme: "https://github.com/gloamtrade/gloam/tree/main/packages/mppx-gloam",
+    spec: "https://github.com/gloamtrade/gloam/blob/main/docs/mpp/draft-gloam-charge-00.md",
   },
 };
 
@@ -737,7 +866,7 @@ function mppHowToMainnet(role: "pay" | "charge" | "both", network: NetworkKey): 
             : { import: "ETHEREUM_USDC", line: "      currency: ETHEREUM_USDC, decimals: 6,               // or ETHEREUM_USDT, ETHEREUM_USDG, ETHEREUM_PYUSD" }
           : { import: "RH_MAINNET_USDG", line: "      currency: RH_MAINNET_USDG, decimals: 6,             // or GLOAM_TOKEN, RH_MAINNET_PONS, RH_MAINNET_CASHCAT with decimals: 18" };
   const getter = n.testnet ? "testnetNetwork" : "mainnetNetwork";
-  const sdkVersion = "0.4.6";
+  const sdkVersion = "0.6.0";
   const netLines = `const net = ${getter}("${family}");                   // null until the pool is published
 if (!net) throw new Error("${where} pool not published yet");`;
   const charge = {
@@ -777,7 +906,7 @@ export async function handler(request: Request) {
   };
   const pay = {
     steps: [
-      `The payer needs a private note in the same ${where} vault and asset (deposit first: see gloam_plan_deposit). Deposits are capped during the beta.`,
+      `The payer needs a private note in the same ${where} vault and asset (deposit first: see gloam_plan_deposit). Deposit limits apply.`,
       "Add the gloam method to an mppx client. On a 402 it checks the vault is Gloam's and the price is inside your policy, proves a private transfer to the payee's tag, and retries with Authorization: Payment.",
       'mode "pull" lets the server broadcast your transfer, so you need no gas and the server learns nothing about your wallet; "push" broadcasts it yourself or through the Gloam relay.',
       "Proofs for this vault must use the final keys: circuitArtifactUrls(\"transfer\", net.chainId).",
@@ -809,8 +938,8 @@ const res = await mppx.fetch("https://api.example.com/answer");`,
     network,
     mainnet: n.testnet
       ? `${family === "base" ? `${where} (Base Sepolia)` : where}: a testnet on the mainnet vault, with its final keys and deposit limits. testnetNetwork("${family}") in @gloamtrade/sdk ${sdkVersion} returns this vault (pool ${n.pool}, deploy block ${n.deployBlock}, chain ${n.chainId}); getGloamNetwork("${network}") is the same network by key.`
-      : `${where}: beta software with deposit limits. mainnetNetwork("${family}") in @gloamtrade/sdk ${sdkVersion} returns this vault (pool ${n.pool}, deploy block ${n.deployBlock}, chain ${n.chainId}); getGloamNetwork("${network}") is the same network by key.${family === "base" || family === "ethereum" ? "" : ` GLOAM_NETWORKS.${family} stays the testnet.`}`,
-    install: `npm i mppx @gloamtrade/mppx-gloam@^0.4.0 @gloamtrade/sdk@^${sdkVersion}`,
+      : `${where}: live, with deposit limits. mainnetNetwork("${family}") in @gloamtrade/sdk ${sdkVersion} returns this vault (pool ${n.pool}, deploy block ${n.deployBlock}, chain ${n.chainId}); getGloamNetwork("${network}") is the same network by key.${family === "base" || family === "ethereum" ? "" : ` GLOAM_NETWORKS.${family} stays the testnet.`}`,
+    install: `npm i mppx @gloamtrade/mppx-gloam@^0.4.1 @gloamtrade/sdk@^${sdkVersion}`,
     ...(role !== "pay" ? { charge } : {}),
     ...(role !== "charge" ? { pay } : {}),
     ...MPP_TAIL,
@@ -831,12 +960,12 @@ function connectFullAgent(args: Args): CallToolResult {
   const local = {
     "claude-code": {
       server: "claude mcp add gloam -- npx -y @gloamtrade/mcp",
-      plugin: ["claude plugin marketplace add cryptoduke01/gloam-plugins", "claude plugin install gloam@gloam"],
+      plugin: ["claude plugin marketplace add gloamtrade/gloam-plugins", "claude plugin install gloam@gloam"],
       setup: "Then run /gloam:gloam-setup to give the agent a capped key.",
     },
     codex: {
       server: "codex mcp add gloam -- npx -y @gloamtrade/mcp",
-      plugin: ["codex plugin marketplace add cryptoduke01/gloam-plugins", "codex plugin add gloam@gloam"],
+      plugin: ["codex plugin marketplace add gloamtrade/gloam-plugins", "codex plugin add gloam@gloam"],
     },
     cursor: {
       install: CURSOR_DEEPLINK,
@@ -858,9 +987,9 @@ function connectFullAgent(args: Args): CallToolResult {
     localServer: LOCAL_SERVER,
     commands: chosen,
     pluginMarketplace: {
-      repo: "https://github.com/cryptoduke01/gloam-plugins",
+      repo: "https://github.com/gloamtrade/gloam-plugins",
       adds: "The local server plus two skills: gloam (pay, get paid and check limits safely) and gloam-setup (connect, and give the agent a capped Tempo access key).",
-      skillsOnly: ["gh skill install cryptoduke01/gloam-plugins gloam", "gh skill install cryptoduke01/gloam-plugins gloam-setup"],
+      skillsOnly: ["gh skill install gloamtrade/gloam-plugins gloam", "gh skill install gloamtrade/gloam-plugins gloam-setup"],
     },
     letItSpend: [
       "Out of the box the local server only reads and plans too. Nothing is signed until it has a key.",
@@ -879,8 +1008,31 @@ function connectFullAgent(args: Args): CallToolResult {
       codex: `~/.codex/config.toml: [mcp_servers.gloam-hosted] url = "${MCP_URL}"`,
     },
     docs: `${SITE}/docs/agents`,
-    readme: "https://github.com/cryptoduke01/gloam/tree/main/mcp",
+    readme: "https://github.com/gloamtrade/gloam/tree/main/mcp",
   });
+}
+
+/** Treasure hunt key tries per IP per hour (lib/hunt). */
+const HUNT_TRIES_PER_HOUR = 20;
+
+/**
+ * gloam_info with the treasure hunt's key (lib/hunt). With the three pieces
+ * from the earlier steps, in order, it answers with the prize link, whole;
+ * without them, only how to bring them. Neither argument is in the tool's
+ * schema; any call without the key, with the hunt off, or with a wrong key gets
+ * the usual answer, so a wrong key looks the same as no key.
+ */
+async function huntInfo(args: Args, ctx: ToolContext): Promise<Record<string, unknown> | null> {
+  if (!huntEnabled()) return null;
+  const value = args[huntMcpArg()];
+  if (typeof value !== "string" || !value.trim() || value.length > HUNT_INPUT_MAX) return null;
+  const tries = await hitRateLimit(ctx.ip, "hunt-mcp", HUNT_TRIES_PER_HOUR, Date.now(), 3600).catch(() => null);
+  if (!tries?.allowed) return null;
+  const final = mcpHuntFinal(value, args[huntMcpPiecesArg()]);
+  if (!final) return null;
+  if (!final.link) return { message: final.message };
+  await countHuntStep("mcp", huntSubject("ip", ctx.ip));
+  return { message: final.message, link: final.link };
 }
 
 /** Runs a tool. Secrets are refused before any tool runs. */
@@ -891,7 +1043,7 @@ export async function callTool(name: string, rawArgs: unknown, ctx: ToolContext)
   try {
     switch (name) {
       case "gloam_info":
-        return ok(info(ctx));
+        return ok((await huntInfo(args, ctx)) ?? info(ctx));
       case "gloam_networks":
         return ok(networks(args, ctx));
       case "gloam_vault_stats":
@@ -904,6 +1056,8 @@ export async function callTool(name: string, rawArgs: unknown, ctx: ToolContext)
         return planDeposit(args, ctx);
       case "gloam_mpp_how_to":
         return mppHowTo(args);
+      case "gloam_swap_quote":
+        return await swapQuote(args, ctx);
       case "gloam_connect_full_agent":
         return connectFullAgent(args);
       default:

@@ -77,7 +77,7 @@ export default function AgentsShouldNotDoBusinessInPublicPost() {
             Read the docs
           </Link>
           <a
-            href="https://github.com/cryptoduke01/gloam/tree/main/packages/game-plugin-gloam"
+            href="https://github.com/gloamtrade/gloam/tree/main/packages/game-plugin-gloam"
             target="_blank"
             rel="noreferrer"
             className="btn btn-quiet"
@@ -285,8 +285,8 @@ export default function AgentsShouldNotDoBusinessInPublicPost() {
         The <Link href="/docs/virtuals">docs for Virtuals agents</Link> cover
         setup, every function, the limits and the networks.{" "}
         {BASE_MAINNET_LIVE
-          ? "The plugin works on Robinhood Chain and Base mainnet, with beta deposit limits, and on Base Sepolia, a testnet, by default."
-          : "The plugin works on Robinhood Chain mainnet today, with beta deposit limits, and on Base Sepolia, a testnet, by default. Base mainnet follows on the same vault address."}{" "}
+          ? "The plugin works on Robinhood Chain and Base mainnet, with deposit limits, and on Base Sepolia, a testnet, by default."
+          : "The plugin works on Robinhood Chain mainnet today, with deposit limits, and on Base Sepolia, a testnet, by default. Base mainnet follows on the same vault address."}{" "}
         Both pieces run their whole flows on a local fork with one command each,
         so you can watch the explorer for yourself.
       </p>

@@ -59,7 +59,7 @@ export type CreatorFees = {
   unclaimedEth: number;
   /** Trades that paid the creator a share. */
   trades: number;
-  /** ETH earned per UTC day, oldest first. */
+  /** ETH earned per UTC day, oldest first; `usd` at that day's ETH price (its mean so far today), else today's. */
   daily: { day: string; eth: number; usd: number | null }[];
   scannedTo: string;
   latestBlock: string | null;
@@ -84,7 +84,7 @@ let client: PublicClient | null = null;
 function rh(): PublicClient {
   if (client) return client;
   const n = getNetwork("robinhood-mainnet");
-  client = createPublicClient({ chain: n.chain, transport: serverTransport(n, { timeout: 20_000, retryCount: 4, retryDelay: 500 }) });
+  client = createPublicClient({ chain: n.chain, ccipRead: false, transport: serverTransport(n, { timeout: 20_000, retryCount: 4, retryDelay: 500 }) });
   return client;
 }
 
@@ -197,10 +197,16 @@ async function midnightBlocks(days: string[], head: { b: number; t: number }): P
 const eth = (wei: bigint) => Number(formatEther(wei));
 
 /**
- * Creator fees for `days` (UTC days, oldest first). ETH is priced with `ethUsd`.
+ * Creator fees for `days` (UTC days, oldest first). The totals are priced with
+ * `ethUsd` (today's price, labelled "now" on /admin); each day's row with that
+ * day's ETH price from `dayEthUsd` when it has one, else today's.
  * On a failed read the last figures read come back with the error.
  */
-export async function readCreatorFees(days: string[], ethUsd: () => Promise<number | null>): Promise<CreatorFees> {
+export async function readCreatorFees(
+  days: string[],
+  ethUsd: () => Promise<number | null>,
+  dayEthUsd?: () => Promise<Map<string, number> | null>
+): Promise<CreatorFees> {
   const prev = await loadState();
   let state = prev;
   let latest: number | null = null;
@@ -261,7 +267,10 @@ export async function readCreatorFees(days: string[], ethUsd: () => Promise<numb
     console.warn("gloam_creator_fees", error);
   }
 
-  const price = await ethUsd().catch(() => null);
+  const [price, dayPrices] = await Promise.all([
+    ethUsd().catch(() => null),
+    dayEthUsd ? dayEthUsd().catch(() => null) : Promise.resolve(null),
+  ]);
   const earnedAll = eth(BigInt(state.earned));
   const claimedAll = eth(BigInt(state.claimed));
   const earnedEth = { ...windows, all: earnedAll };
@@ -281,7 +290,8 @@ export async function readCreatorFees(days: string[], ethUsd: () => Promise<numb
     trades: state.trades,
     daily: days.map((d) => {
       const v = eth(byDay.get(d) ?? 0n);
-      return { day: d, eth: v, usd: price == null ? null : v * price };
+      const p = dayPrices?.get(d) ?? price;
+      return { day: d, eth: v, usd: p == null ? null : v * p };
     }),
     scannedTo: String(state.scannedTo),
     latestBlock: latest == null ? null : String(latest),

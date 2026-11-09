@@ -17,9 +17,11 @@ with options, one getter per `GameFunction`, and `getWorker()`.
 | `base` (default) | Base Sepolia, testnet | USDC, EURC, ETH |
 | `robinhood-mainnet` | Robinhood Chain, mainnet | USDG, GLOAM, PONS, CASHCAT; ETH, AI, ORBIO and GRIFT once each limit lands |
 | `base-mainnet` | Base, mainnet, once Gloam's Base vault is live | USDC, EURC, USDT, ETH |
+| `elysium-mainnet` | Elysium, mainnet: coming, once the SDK has its values (gas in HYPE) | USDC |
+| `elysium` | Elysium testnet (99801): coming, once the SDK has its pool (gas in HYPE) | Test USDC |
 
 The same vault address on each: `0x39e28cde55cab798874746ac52cb4b5cc99a0194`.
-Mainnet is in beta, with deposit limits (50,000 of a stablecoin per deposit).
+Mainnet has deposit limits (50,000 of a stablecoin per deposit).
 
 ## Install
 
@@ -79,7 +81,7 @@ An ACP agent's Privy smart wallet can be the sender instead of a local key:
 | `gloam_add_privately` | Deposit from the wallet into the private balance | The deposit: wallet, asset, amount |
 | `gloam_pay_privately` | Pay a Gloam address (`gloamr1.…`), a payment request link, or by claim link | A shielded transfer only |
 | `gloam_receive` | `address`, `request` (a payment request link), `check` (pick up payments sent to it), `claim` (a claim link or a code sealed to the agent) | A shielded transfer only |
-| `gloam_cash_out` | Private balance to a 0x address (0.25% fee on mainnet and Base Sepolia) | The exit: asset, amount, recipient |
+| `gloam_cash_out` | Private balance to a 0x address (0.5% fee on mainnet, 0.25% on Base Sepolia) | The exit: asset, amount, recipient |
 | `gloam_prove_funds` | A proof it holds at least an amount, for one named reader | Nothing (the proof itself carries the backing notes' nullifiers) |
 | `gloam_verify_proof` | Check a `gloamfunds1:` or `gloampay1:` proof against the chain | Nothing |
 
@@ -93,14 +95,35 @@ vault, the network's payment-message board, a token contract, a Gloam swap
 router and the zero address.
 
 The engine is `GloamAgent` (`plugin.agent`), usable without GAME: `add`, `pay`,
-`payByClaimLink`, `requestPayment`, `checkIncoming`, `claim`, `cashOut`,
-`proveFunds`, `provePayment`, `verifyProof`, `refresh`.
+`payX402`, `payX402Cashout`, `payByClaimLink`, `requestPayment`, `checkIncoming`, `claim`, `cashOut`,
+`proveFunds`, `provePayment`, `verifyProof`, `refresh`. Import it from
+`@gloamtrade/game-plugin-gloam/engine` to load no GAME code. Two options are
+for agent kits: `noteBackend` keeps the encrypted note store somewhere other
+than a local file (it only ever sees ciphertext), and `apiKey` (or
+`GLOAM_API_KEY`), a Gloam partner key, sends private payments and cash outs
+through the partner relay and attributes deposits, so they count on the partner
+dashboard. `payX402(requirements)` pays a Gloam x402 price privately and returns
+the `X-PAYMENT` value. `payX402Cashout({ requirement, maxAmount })` pays an x402
+price with scheme `gloam-cashout` on Robinhood Chain: it cashes out exactly the
+quoted amount of USDG to the price's public `payTo` and returns the
+`X-PAYMENT` value (`{ scheme, txHash, quoteId }`, base64 JSON). The payee and
+the amount show on chain; the agent's wallet and private balance do not. The
+tool pack in
+[`examples/agent-kit-tools`](https://github.com/gloamtrade/gloam/tree/main/examples/agent-kit-tools)
+is built on it.
 
 What the proofs show:
 
 - A proof of funds (`gloamfunds1:`) does not show the balance. It does carry
   the nullifiers of the notes behind it, so the reader can check they are
   unspent, and a reader who keeps them can tell when those notes are spent later.
+  The notes behind it are marked, and a cash out of one first moves it to a
+  fresh note with a private send to itself, as the app does, so the proof does
+  not lead to where the money went or how much. If that move fails, nothing is
+  cashed out. The move and the cash out land close together, so their timing
+  can still hint at a link. Proofs made with an earlier version of this plugin
+  left no mark: to be safe, pay those notes to the agent's own Gloam address
+  (then `checkIncoming`) before cashing them out.
 - A proof of payment (`gloampay1:`) shows that a private payment of an amount
   was made into a note, and when. It does not show who received it: the payer
   chose the payee note's key, so the payer could make the same proof. Ask the

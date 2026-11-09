@@ -10,6 +10,7 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { shortAddress } from "@/lib/chain";
 import { getNetwork, isNetworkKey, type GloamNetwork } from "@/lib/networks";
+import { ELYSIUM_LOGO } from "@/lib/chainLogo";
 import type { NetworkMetrics, RecentRow } from "@/lib/onchainMetrics";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 
@@ -41,6 +42,14 @@ function ago(ts: number): string {
 
 /** The chain's own logo, by family, so a testnet shows its mainnet's mark. */
 function ChainMark({ net, size = 28 }: { net: GloamNetwork; size?: number }) {
+  if (net.family === "elysium") {
+    return (
+      <span className="relative inline-block shrink-0 overflow-hidden rounded-full" style={{ width: size, height: size }}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- small local logos */}
+        <img src={ELYSIUM_LOGO} alt="" width={size} height={size} className="h-full w-full object-cover" />
+      </span>
+    );
+  }
   const id = { robinhood: 4663, tempo: 4217, base: 8453, ethereum: 1 }[net.family];
   const dark = id !== 4217;
   return (
@@ -129,7 +138,7 @@ export function MovedHero({
           )}
           <p className="mt-5 max-w-[62ch] text-[13px] leading-relaxed text-mute">
             Deposits and cash-outs are public on chain, so their amounts are added up here. Private payment amounts stay
-            hidden, so they are not in this number.
+            hidden, and a private swap stays inside the vault, so neither is in this number.
           </p>
         </div>
         {moved && (
@@ -204,7 +213,7 @@ export function VolumeChart({ days, caption }: { days: VolumeDay[]; caption: str
     return () => ro.disconnect();
   }, [wrap]);
 
-  const H = 260;
+  const H = 320;
   const padL = 56;
   const padR = 8;
   const padT = 10;
@@ -215,8 +224,10 @@ export function VolumeChart({ days, caption }: { days: VolumeDay[]; caption: str
   const top = niceMax(Math.max(0, ...days.map((d) => Math.max(d.inUsd, d.outUsd))));
   const band = days.length ? plotW / days.length : plotW;
   const bw = Math.max(3, Math.min(24, band * 0.56));
-  const y = (v: number) => (v / top) * (half - 1);
-  const ticks = [top, top / 2, 0, top / 2, top];
+  // Square-root scale: a record day still fits under the top tick, and quiet days stay visible
+  // instead of flattening into the baseline. Ticks are labelled with their real values.
+  const y = (v: number) => Math.sqrt(Math.max(0, v) / top) * (half - 1);
+  const ticks = [top, top / 4, 0, top / 4, top];
   const every = Math.max(1, Math.ceil(days.length / Math.max(1, Math.floor(plotW / 64))));
   const h = hover != null ? days[hover] : null;
 
@@ -352,6 +363,23 @@ export function VolumeChart({ days, caption }: { days: VolumeDay[]; caption: str
   );
 }
 
+/**
+ * "0.065 ETH, 433.48 GLOAM in; 0.065 ETH out": what moved that is not a
+ * dollar stablecoin, in its own units, so a dollar figure priced at the time
+ * can be checked against the chain. Null when only stablecoins moved.
+ */
+function tokensMoved(m: NetworkMetrics): string | null {
+  const side = (pick: (a: NetworkMetrics["assets"][number]) => string) =>
+    m.assets
+      .filter((a) => !a.stable && Number(pick(a)) > 0)
+      .map((a) => `${Number(pick(a)).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${a.symbol}`)
+      .join(", ");
+  const inS = side((a) => a.deposited);
+  const outS = side((a) => a.cashedOut);
+  if (!inS && !outS) return null;
+  return [inS && `${inS} in`, outS && `${outS} out`].filter(Boolean).join("; ");
+}
+
 /** One card per chain: what moved there, its share, and what it holds. */
 export function ChainCards({ nets, totalMoved, name }: { nets: NetworkMetrics[]; totalMoved: number; name: (m: NetworkMetrics) => string }) {
   if (!nets.length) return null;
@@ -361,6 +389,7 @@ export function ChainCards({ nets, totalMoved, name }: { nets: NetworkMetrics[];
         const net = getNetwork(m.key);
         const moved = m.revenue ? m.revenue.depositVolume.all + m.revenue.cashoutVolume.all : null;
         const share = moved != null && totalMoved > 0 ? (moved / totalMoved) * 100 : 0;
+        const tokens = tokensMoved(m);
         return (
           <section key={m.key} className="gl-card min-w-0 p-5 sm:p-6">
             <div className="flex items-center justify-between gap-3">
@@ -385,6 +414,7 @@ export function ChainCards({ nets, totalMoved, name }: { nets: NetworkMetrics[];
             <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface" aria-hidden>
               <div className="h-full rounded-full" style={{ width: `${Math.max(share, moved ? 2 : 0)}%`, background: "var(--chart-in)" }} />
             </div>
+            {tokens && <p className="mt-2.5 truncate text-[12.5px] text-mute" title={tokens}>{tokens}</p>}
             <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 text-[13px] sm:grid-cols-4">
               {(
                 [

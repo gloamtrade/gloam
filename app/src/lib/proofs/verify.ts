@@ -29,10 +29,10 @@ import {
   clientFor,
   commitmentSeen,
   findNoteTx,
-  findPayrollPayment,
   isKnownRoot,
   isSpent,
   networkForChain,
+  payrollLookups,
   type NoteTx,
 } from "./chain";
 import { displayLabel, isPlainLabel } from "./label";
@@ -99,21 +99,25 @@ async function verifyPayroll(p: PayrollProof): Promise<VerifyResult> {
   const net = networkForChain(p.chainId);
   const official = Boolean(net?.pool && typeof p.pool === "string" && net.pool.toLowerCase() === p.pool.toLowerCase());
 
-  let findPayment: (pay: PayrollProof["payments"][number]) => Promise<PaymentLookup>;
+  let lookups: Pick<Parameters<typeof checkPayrollProof>[1], "findPayment" | "findPayments" | "blockTime">;
   if (demo) {
     // The run finished about two hours ago, a few seconds per payment.
     await demoHolderChecks();
     const start = Math.floor(Date.now() / 1000) - 2 * 3600;
     const index = new Map(p.payments.map((x, i) => [x.commitment, i]));
-    findPayment = async (x) => ({
-      state: "found",
-      txHash: (x.txHash ?? x.commitment) as Hex,
-      paidAt: start + (index.get(x.commitment) ?? 0) * 9,
-    });
+    lookups = {
+      findPayment: async (x): Promise<PaymentLookup> => ({
+        state: "found",
+        txHash: (x.txHash ?? x.commitment) as Hex,
+        paidAt: start + (index.get(x.commitment) ?? 0) * 9,
+      }),
+    };
+  } else if (official && net) {
+    const l = payrollLookups(clientFor(net), net, net.pool!);
+    lookups = { findPayments: l.find, blockTime: l.blockTime };
   } else {
-    const client = net ? clientFor(net) : null;
-    const blockTimes = new Map<bigint, Promise<number>>();
-    findPayment = (x) => findPayrollPayment(client!, net!, net!.pool!, x, blockTimes);
+    // not Gloam's vault: the check fails before any lookup
+    lookups = { findPayment: async () => ({ state: "not-found" }) };
   }
 
   return checkPayrollProof(p, {
@@ -123,7 +127,7 @@ async function verifyPayroll(p: PayrollProof): Promise<VerifyResult> {
       return snarkjs.groth16.verify(await verificationKey("payroll", ceremonyForChain(p.chainId)), part.publicSignals, part.proof);
     },
     vault: official && net ? { label: networkName(net) } : null,
-    findPayment,
+    ...lookups,
     now: Math.floor(Date.now() / 1000),
     when: localWhen,
   });

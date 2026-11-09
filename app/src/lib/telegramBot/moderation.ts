@@ -294,6 +294,8 @@ export type ScreenInput = {
   name: { first_name?: string; last_name?: string };
   /** Entities, for links hidden behind words (text_link) and mentions. */
   entities?: TgEntity[];
+  /** Every link Telegram marked in the message (rules.entityLinks): url entities as written, text_link targets. */
+  links?: string[];
   /** Where a forward came from, when it is one. */
   forwardedFrom?: string | null;
   /** Handles anyone may name: the bot, the team, the official accounts. Lower case, no "@". */
@@ -317,10 +319,11 @@ export type Screen = {
   quiet: boolean;
 };
 
-function linksOf(text: string, entities: TgEntity[] = []): string[] {
+function linksOf(text: string, entities: TgEntity[] = [], marked: string[] = []): string[] {
   const hidden = entities.filter((e) => e.type === "text_link" && typeof e.url === "string").map((e) => e.url!);
-  // an email's domain is not a link
-  return [...(text.replace(EMAIL_RE, " ").match(LINK_RE) ?? []), ...hidden];
+  // an email's domain is not a link; a link Telegram marked is one, whatever its ending
+  const found = [...(text.replace(EMAIL_RE, " ").match(LINK_RE) ?? []), ...hidden, ...marked];
+  return [...new Set(found)];
 }
 
 function handlesOf(text: string): string[] {
@@ -392,7 +395,7 @@ export function screen(i: ScreenInput): Screen {
   const raw = i.text;
   const own = ownWords(raw);
   const readings = spellings(scorable(own));
-  const links = linksOf(raw, i.entities);
+  const links = linksOf(raw, i.entities, i.links);
   const hosts = links.map(hostOf);
   const tgLinks = hosts.filter((h) => foreignTelegram(h.host, h.path));
   // links to anywhere but the official pages, explorers, faucets, bridges, charts, wallets and file hosts (t.me apart)

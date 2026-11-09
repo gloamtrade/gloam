@@ -1,10 +1,10 @@
 # Tempo expansion: design and positioning
 
-Status: **live on Tempo mainnet (`4217`) from 21 October 2026, in beta.** Pool
+Status: **live on Tempo mainnet (`4217`) from 21 October 2026.** Pool
 `0x39e28cde55cab798874746ac52cb4b5cc99a0194` (`ShieldPoolPayments`, payments only, deploy block
 `45172561`) on the trusted setup's final keys, listing USDC.e, pathUSD,
-USDT0 and OUSD with beta deposit limits (50,000 per deposit, 2,500,000 in total
-for each). Deposits and private payments are free; a cash out costs 0.25%. It was
+USDT0 and OUSD with deposit limits (50,000 per deposit, 2,500,000 in total
+for each). Direct deposits and private payments are free; a cash out costs 0.5%. It was
 reviewed internally before launch, and Kann Audits has since reviewed the vault
 contracts (report, 1 November 2026) and found no Critical, High or Medium issues. Tempo Moderato
 stays up as the testnet: current pool
@@ -150,7 +150,7 @@ selective disclosure it lacks:
 - Tempo: private, self-custodial stablecoin payments. The permissionless
   complement to Zones, with selective disclosure a user can hand an issuer or
   auditor.
-- Say "live on Tempo mainnet, in beta", with Moderato as the
+- Say "live on Tempo mainnet", with Moderato as the
   testnet. Never say "fully audited": it was reviewed internally, and Kann
   Audits reviewed the vault contracts only. Never claim private trading is live.
 
@@ -187,4 +187,4 @@ selective disclosure it lacks:
 4. Phase 2 (done on testnet): x402 + MCP private-pay surface.
 5. Phase 3 (open): issuer-viewing-key selective disclosure as a headline feature.
 6. Mainnet (21 October 2026): `ShieldPoolPayments` on Tempo mainnet, final keys,
-   beta deposit limits, payments only.
+   deposit limits, payments only.

@@ -7,7 +7,10 @@
  * both squeeze under the daily cap. The entry is then settled: "sent",
  * "unconfirmed" (broadcast, receipt unknown), "reverted" or "failed" (nothing
  * moved). Pending, sent and unconfirmed count against the cap; refusals are
- * logged too, so the owner can see what an agent tried. No secrets are written
+ * logged too, so the owner can see what an agent tried. A retry of a spend that
+ * never landed is checked like a new one; once it is reserved, the attempt it
+ * repeats is marked "replaced" (it spends the same note, so only one of the two
+ * can land) and stops counting, so the money is counted once. No secrets are written
  * here: amounts, assets, recipients (Gloam addresses or 0x addresses) and hashes.
  */
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -15,7 +18,7 @@ import type { Address } from "viem";
 import { withFileLock } from "./fileLock.js";
 import { DAY_MS, type CountedSpend, type SpendAction } from "./limits.js";
 
-export type SpendStatus = "pending" | "sent" | "unconfirmed" | "reverted" | "failed" | "refused";
+export type SpendStatus = "pending" | "sent" | "unconfirmed" | "reverted" | "failed" | "refused" | "replaced";
 
 export const COUNTED_STATUSES: SpendStatus[] = ["pending", "sent", "unconfirmed"];
 
@@ -75,15 +78,33 @@ export class SpendLog {
     renameSync(tmp, this.path);
   }
 
-  /** Check and reserve in one step: `decide` sees what counts now and returns a refusal, or null to reserve. */
+  /**
+   * Check and reserve in one step: `decide` sees what counts now and returns a refusal, or null to reserve.
+   * `replaces` names the earlier attempt a retry repeats (by its id, or else the latest counted entry `like`
+   * matches): `decide` sees what counts without it, and once this one is reserved it is marked "replaced".
+   */
   reserve(
     entry: Omit<SpendEntry, "status">,
     decide: (counted: CountedSpend[]) => string | null,
-    now: number = Date.now()
+    now: number = Date.now(),
+    replaces?: { id?: string; like?: (e: SpendEntry) => boolean }
   ): { ok: true } | { ok: false; reason: string } {
     return this.locked(() => {
       const entries = this.read();
-      const reason = decide(counted(entries, entry.agent));
+      const counts = (e: SpendEntry) => COUNTED_STATUSES.includes(e.status) && e.agent === entry.agent;
+      let prior = replaces?.id ? entries.findIndex((e) => e.id === replaces.id && counts(e)) : -1;
+      if (prior < 0 && replaces?.like) {
+        for (let i = entries.length - 1; i >= 0; i--) {
+          if (counts(entries[i]!) && replaces.like(entries[i]!)) {
+            prior = i;
+            break;
+          }
+        }
+      }
+      const reason = decide(counted(entries.filter((_, i) => i !== prior), entry.agent));
+      if (!reason && prior >= 0) {
+        entries[prior] = { ...entries[prior]!, status: "replaced", reason: `sent again as ${entry.id}`, settledAt: new Date(now).toISOString() };
+      }
       entries.push(reason ? { ...entry, status: "refused", reason } : { ...entry, status: "pending" });
       this.write(entries, now);
       return reason ? { ok: false as const, reason } : { ok: true as const };

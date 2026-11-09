@@ -9,7 +9,7 @@
 import type { ReactNode } from "react";
 import type { Address } from "viem";
 import { shortAddress } from "@/lib/chain";
-import type { CashOutWindow } from "@/lib/cashOutLater";
+import { feeRise, feeRiseLine, type CashOutWindow } from "@/lib/cashOutLater";
 import type { PieceProgress, PieceState } from "@/lib/cashOutPrivately";
 import { assetLabel, formatAssetAmount, formatAssetLabel, type LocalNote } from "@/lib/shield";
 
@@ -247,7 +247,7 @@ export function SpreadOver({
       </div>
       <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
         Each piece goes out at its own random time in that window, sent by the Gloam relay so your wallet stays out of
-        it. Once they are scheduled you can close Gloam.
+        it. The vault takes its fee as each one goes out, at the rate then. Once they are scheduled you can close Gloam.
       </p>
       <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
         Each proof shows roughly when it was made, so pieces made together can be grouped. While Gloam is open it
@@ -311,6 +311,48 @@ export function scheduledLine(n: LocalNote, now = Date.now(), gasWait = false): 
   const waiting = gasWait && n.cashOut?.state === "scheduled" && n.cashOut.at <= now;
   const when = n.cashOut?.state === "sent" ? "On its way" : waiting ? "Waiting for gas to come down" : capital(aboutTime(n.cashOut!.at, now));
   return `${piece}${when} · to ${shortAddress(n.cashOut!.to)}`;
+}
+
+/**
+ * Scheduled cash outs: when each goes, and, for one set up before the vault's
+ * fee rose (lib/cashOutLater feeRise), what it pays now.
+ */
+export function ScheduledCashOuts({
+  rows,
+  liveFeeBps,
+  gasHigh,
+  onCancel,
+}: {
+  rows: LocalNote[];
+  liveFeeBps: number | null;
+  gasHigh: boolean;
+  onCancel: (n: LocalNote) => Promise<void>;
+}) {
+  if (!rows.length) return null;
+  return (
+    <div className="rounded-[16px] bg-surface px-4 py-3">
+      <p className="text-[13px] text-mute">Scheduled cash outs</p>
+      <ul className="mt-1 divide-y divide-line">
+        {rows.map((n) => {
+          const rise = feeRise(n, liveFeeBps);
+          return (
+            <li key={n.id} className="flex items-center justify-between gap-3 py-2.5 text-[13.5px]">
+              <span className="min-w-0">
+                <span className="tnum block text-foreground">{formatAssetLabel(n.amountWei, n.asset)}</span>
+                <span className="block truncate text-[12px] text-mute">{scheduledLine(n, undefined, gasHigh)}</span>
+                {rise && <span className="tnum block text-[12px] leading-relaxed text-warn">{feeRiseLine(rise, n.asset)}</span>}
+              </span>
+              {n.cashOut?.state === "scheduled" && (
+                <button type="button" className="btn btn-ghost btn-sm shrink-0" onClick={() => void onCancel(n)}>
+                  Cancel
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
 
 function Dot() {

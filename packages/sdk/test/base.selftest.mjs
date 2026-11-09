@@ -5,7 +5,7 @@
  * addresses are written into MAINNET_POOLS and BASE_SEPOLIA_POOL (that state is
  * checked in mainnet.selftest.mjs). Here both get placeholder pools before the
  * networks are built, so the rest of the SDK can be checked against them: the
- * mainnet keys on both, payments only, the listed assets and beta limits, ETH
+ * mainnet keys on both, payments only, the listed assets and deposit limits, ETH
  * listed, Base Sepolia's memo board (and Base mainnet's once its deploy has
  * filled it in next to the vault), and Base Sepolia after the older testnets.
  *
@@ -116,7 +116,7 @@ assert(testnetNetwork("tempo") === GLOAM_NETWORKS.tempo && !("base" in GLOAM_NET
 assert(networkName(84532) === "Base testnet" && networkName(8453) === "Base", "names");
 assert(circuitArtifactUrls("unshield", 84532).zkey.endsWith("/final/unshield_final.zkey"), "Sepolia proves with the final keys");
 
-// ── deposits: listed assets only, within the beta limits ─────────────────────────
+// ── deposits: listed assets only, within the deposit limits ─────────────────────────
 assertDepositAllowed(84532, BASE_SEPOLIA_USDC, 500_000_000n);
 assertDepositAllowed(84532, BASE_SEPOLIA_EURC, 500_000_001n); // amounts are read live (limits.selftest)
 throws(() => assertDepositAllowed(84532, BASE_USDC, 1n), /does not list/, "mainnet USDC is not listed on Sepolia");
@@ -140,7 +140,7 @@ throws(() => assertDepositAllowed(8453, BASE_SEPOLIA_USDC, 1n), /does not list/,
         // the vault's own answer, read live: 0.2 per deposit
         client: { readContract: async ({ functionName }) => (functionName === "depositLimitsOn" ? true : functionName === "depositLimit" ? [eth("0.2"), eth("10")] : 0n) },
       }),
-    /beta limit/,
+    /deposit limit/,
     "builder checks the vault's live limit before proving"
   );
   await throwsAsync(() => buildShieldIntent({ chainId: 84532, amountWei: 1n }), /Plain shield\(\) is off/, "no plain shield on Sepolia");

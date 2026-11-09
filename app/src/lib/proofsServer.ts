@@ -22,7 +22,7 @@
  */
 import { LEGACY_DISCLOSURE, decodeDisclosure } from "@/lib/disclosure";
 import { decodeProof, isGloamProof, type AnyProof, type VerifyResult } from "@/lib/proofs";
-import { clientFor, findPayrollPayment, networkForChain } from "@/lib/proofs/chain";
+import { clientFor, networkForChain, payrollLookups } from "@/lib/proofs/chain";
 import { checkPayrollProof } from "@/lib/proofs/payrollCheck";
 import { checkHolderProof } from "@/lib/proofs/verify";
 import fundsVkey from "../../public/circuits/funds_vkey.json";
@@ -144,12 +144,13 @@ const FORMAT: Record<AnyProof["kind"], ProofFormat> = {
 async function verifyPayrollServer(p: Extract<AnyProof, { kind: "payroll" }>): Promise<VerifyResult> {
   const net = networkForChain(p.chainId);
   const official = Boolean(net?.pool && typeof p.pool === "string" && net.pool.toLowerCase() === p.pool.toLowerCase());
-  const client = net ? clientFor(net) : null;
-  const blockTimes = new Map<bigint, Promise<number>>();
+  // one check's lookups share its reads and its limit (PAYROLL_MAX_READS)
+  const lookups = official && net ? payrollLookups(clientFor(net), net, net.pool!) : null;
   return checkPayrollProof(p, {
     verifySnark: (part) => groth16Verify(VKEYS[ceremonyForChain(p.chainId)].payroll, part.publicSignals, part.proof),
     vault: official && net ? { label: networkName(net) } : null,
-    findPayment: (x) => findPayrollPayment(client!, net!, net!.pool!, x, blockTimes),
+    findPayments: lookups ? lookups.find : async (pays) => pays.map(() => undefined),
+    blockTime: lookups?.blockTime,
     now: Math.floor(Date.now() / 1000),
     when,
   });

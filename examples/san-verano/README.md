@@ -171,10 +171,10 @@ verify page fails a proof past its expiry; the default is 30 days, set it with
   deployed.
 - **GRIFT is queued, not live.** Its deposit limit is behind the vault's 3-day
   timelock and deposits revert until it lands. USDG works now.
-- **Beta.** Mainnet runs on the final keys of the 13-contributor trusted setup,
-  with beta deposit limits. It had an internal review on 20 October 2026, and
+- **Mainnet.** Mainnet runs on the final keys of the 13-contributor trusted setup,
+  with deposit limits. It had an internal review on 20 October 2026, and
   Kann Audits reviewed the vault contracts (report, 1 November 2026) and found no
-  Critical, High or Medium issues. Start small.
+  Critical, High or Medium issues.
 
 ## Run it on Robinhood Chain testnet
 
@@ -223,7 +223,7 @@ balance), the supplier's fresh note when it sweeps, the receipt leaf, every
 check against the chain, the record as JSON and as `gloampay1:…`.
 
 On mainnet (`GLOAM_NETWORK=robinhood-mainnet`) the same code proves with the
-final keys. Deposits and private payments are free; a cash out costs 0.25%.
+final keys. Direct deposits and private payments are free; a cash out costs 0.5%.
 
 See the [SDK docs](https://gloam.trade/docs/sdk) and
 [private commerce with commitments](https://gloam.trade/docs/agents/commitments).

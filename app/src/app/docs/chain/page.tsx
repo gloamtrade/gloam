@@ -1,17 +1,18 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
-import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, mainnetPool, type MainnetChainId } from "@/lib/mainnet";
-import { BASE_MAINNET_TOKENS, BASE_SEPOLIA_TOKENS, ETHEREUM_MAINNET_TOKENS, ETHEREUM_SEPOLIA_TOKENS, RH_MAINNET_TOKENS, TEMPO_MAINNET_TOKENS } from "@/lib/tokens";
+import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, liveMainnetCountWords, liveMainnetNames, mainnetPool, type MainnetChainId } from "@/lib/mainnet";
+import { BASE_MAINNET_TOKENS, BASE_SEPOLIA_TOKENS, ELYSIUM_MAINNET_TOKENS, ETHEREUM_MAINNET_TOKENS, ETHEREUM_SEPOLIA_TOKENS, RH_MAINNET_TOKENS, TEMPO_MAINNET_TOKENS } from "@/lib/tokens";
 import { DEFAULT_MAX_GAS_GWEI } from "@/lib/relay/gasCeiling";
 import { getNetwork } from "@/lib/networks";
-import { VAULT_SWAP_ROUTERS } from "@/lib/vaultSwap";
+import { VAULT_SWAP_ROUTERS, swapMainnets, swapV3Live } from "@/lib/vaultSwap";
 import { GLOAM_OWNER, GLOAM_RELAYERS, GLOAM_TREASURY, MAINNET_POSEIDON_T3 } from "@/lib/contractDirectory";
+import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_LIVE_SINCE, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET, ELYSIUM_TESTNET_FLAG } from "@/lib/elysium";
 
 export const metadata: Metadata = {
   title: "Networks",
   description:
-    "Gloam runs one private core on four mainnets, Robinhood Chain, Tempo, Base and Ethereum, each with a testnet. Chain IDs, RPCs, pools, assets, beta limits, and the integration details for each chain.",
+    `Gloam runs one private core on ${liveMainnetCountWords()}, ${liveMainnetNames()}, ${ELYSIUM && !ELYSIUM_TESTNET ? "each but Elysium with a testnet" : "each with a testnet"}. Chain IDs, RPCs, pools, assets, deposit limits, and the integration details for each chain.`,
 };
 
 /** A mainnet pool address, or a placeholder until it is filled in on deploy day. */
@@ -45,6 +46,11 @@ const ETHEREUM_SEPOLIA = ethereumSepoliaPool();
 const ETHEREUM_SEPOLIA_MEMO = ethereumSepoliaPayMemo();
 
 
+/** "Four mainnets", "Five mainnets": the count as the heading writes it. */
+const MAINNETS_HEADING = liveMainnetCountWords().replace(/^./, (c) => c.toUpperCase());
+/** Elysium's vault sits at the address the other mainnets share, when its deployer nonce was 0 (DEPLOY-ELYSIUM.md). */
+const ELYSIUM_SAME_VAULT = ELYSIUM !== null && ELYSIUM.pool.toLowerCase() === "0x39e28cde55cab798874746ac52cb4b5cc99a0194";
+
 /** A mainnet swap router, or "Not deployed" where there is none. */
 function SwapRouterAddress({ chainId }: { chainId: MainnetChainId }) {
   const r = VAULT_SWAP_ROUTERS[chainId];
@@ -55,38 +61,43 @@ export default function DocsNetworksPage() {
   return (
     <DocsLayout
       title="Networks"
-      lede="One private core, four mainnets. Robinhood Chain, Tempo, Base and Ethereum, each with a testnet."
+      lede={`One private core, ${liveMainnetCountWords()}. ${liveMainnetNames()}, ${ELYSIUM && !ELYSIUM_TESTNET ? "each but Elysium with a testnet" : "each with a testnet"}.`}
       glance={[
         { label: "Robinhood mainnet", value: "4663" },
         { label: "Tempo mainnet", value: "4217" },
         { label: "Base mainnet", value: "8453" },
         { label: "Ethereum mainnet", value: "1" },
-        { label: "Testnets", value: "46630 · 42431 · 84532 · 11155111" },
-        { label: "Gas", value: "ETH; stablecoins on Tempo" },
+        ...(ELYSIUM ? [{ label: "Elysium mainnet", value: String(ELYSIUM.chainId) }] : []),
+        { label: "Testnets", value: ELYSIUM_TESTNET ? "46630 · 42431 · 84532 · 11155111 · 99801" : "46630 · 42431 · 84532 · 11155111" },
+        { label: "Gas", value: ELYSIUM ? "ETH; stablecoins on Tempo; HYPE on Elysium" : "ETH; stablecoins on Tempo" },
       ]}
     >
-      <h2>Four mainnets, one shielded pool design</h2>
+      <h2>{MAINNETS_HEADING}, one shielded pool design</h2>
       <p>
         Gloam is not a chain. It is a shielded-pool contract plus verifiers,
         deployed to the chains where the money already moves. The same circuits,
         the same vault design, and the same SDK run on every network. What
         differs is the asset each chain leads with: USDG, $GLOAM, PONS and CASHCAT
         on Robinhood Chain, dollar stablecoins on Tempo, USDC, EURC, USDT and ETH on Base and
-        Ethereum, with USDG and PYUSD on Ethereum too. The app switches networks at runtime
+        Ethereum, with USDG and PYUSD on Ethereum too{ELYSIUM ? ", and USDC on Elysium" : ""}. The app switches networks at runtime
         and points at the right pool for each.
       </p>
 
       <h2 id="mainnet">Mainnet</h2>
       <p>
         Gloam went live on Robinhood Chain and Tempo mainnet on 21 October 2026,
-        13:00 UTC, and on Base and Ethereum mainnet on 26 October 2026. The
-        vault has the same address on all four. This is beta software. The mainnet pools
+        13:00 UTC, and on Base and Ethereum mainnet on 26 October 2026
+        {ELYSIUM ? `, then on Elysium mainnet on ${ELYSIUM_LIVE_SINCE}` : ""}. The
+        vault has the same address on{" "}
+        {ELYSIUM && !ELYSIUM_SAME_VAULT ? "the first four" : `all ${liveMainnetCountWords().split(" ")[0]}`}. The mainnet pools
         (<code>ShieldPoolPayments</code>) take shield, private send, cash out
         and proofs, and have no swap code.{" "}
         <Link href="/docs/private-swaps">Private swaps</Link>{" "}
-        run through a separate router on Robinhood Chain and Tempo, which uses
-        only the vault&apos;s normal calls; Base and Ethereum have no swap
-        router yet.
+        run through a separate router on {swapMainnets()}, which uses
+        only the vault&apos;s normal calls
+        {swapV3Live(8453) && swapV3Live(1)
+          ? "."
+          : `; ${[...(swapV3Live(8453) ? [] : ["Base"]), ...(swapV3Live(1) ? [] : ["Ethereum"])].join(" and ")} ${swapV3Live(8453) || swapV3Live(1) ? "has" : "have"} no swap router yet.`}
       </p>
       <div className="overflow-x-auto">
         <table>
@@ -97,6 +108,7 @@ export default function DocsNetworksPage() {
               <th>Tempo</th>
               <th>Base</th>
               <th>Ethereum</th>
+              {ELYSIUM && <th>Elysium</th>}
             </tr>
           </thead>
           <tbody>
@@ -114,6 +126,11 @@ export default function DocsNetworksPage() {
               <td>
                 <code>1</code>
               </td>
+              {ELYSIUM && (
+                <td>
+                  {<code>{ELYSIUM.chainId}</code>}
+                </td>
+              )}
             </tr>
             <tr>
               <td>RPC</td>
@@ -129,6 +146,11 @@ export default function DocsNetworksPage() {
               <td>
                 <code>https://rpc.mevblocker.io</code>
               </td>
+              {ELYSIUM && (
+                <td>
+                  <code>{ELYSIUM_RPC_DISPLAY}</code>
+                </td>
+              )}
             </tr>
             <tr>
               <td>Explorer</td>
@@ -152,6 +174,13 @@ export default function DocsNetworksPage() {
                   etherscan.io
                 </a>
               </td>
+              {ELYSIUM && (
+                <td>
+                  {<a href={ELYSIUM.explorerUrl} target="_blank" rel="noreferrer">
+                    {ELYSIUM.explorerUrl.replace(/^https:\/\//, "")}
+                  </a>}
+                </td>
+              )}
             </tr>
             <tr>
               <td>Pool</td>
@@ -167,6 +196,11 @@ export default function DocsNetworksPage() {
               <td>
                 <MainnetPoolAddress chainId={1} />
               </td>
+              {ELYSIUM && (
+                <td>
+                  {<code>{ELYSIUM.pool}</code>}
+                </td>
+              )}
             </tr>
             <tr>
               <td>Deploy block</td>
@@ -182,6 +216,11 @@ export default function DocsNetworksPage() {
               <td>
                 <MainnetDeployBlock chainId={1} />
               </td>
+              {ELYSIUM && (
+                <td>
+                  {<code>{ELYSIUM.deployBlock.toString()}</code>}
+                </td>
+              )}
             </tr>
             <tr>
               <td>Swap router</td>
@@ -197,26 +236,29 @@ export default function DocsNetworksPage() {
               <td>
                 <SwapRouterAddress chainId={1} />
               </td>
+              {ELYSIUM && <td>Not deployed</td>}
             </tr>
             <tr>
               <td>Swaps on</td>
               <td>Uniswap v4 (USDG, $GLOAM, PONS, CASHCAT, WETH, stock tokens and more)</td>
               <td>Tempo&apos;s stablecoin exchange (the four stablecoins)</td>
-              <td>Not yet</td>
-              <td>Not yet</td>
+              <td>{swapV3Live(8453) ? "Uniswap v4 (USDC, USDT, EURC, ETH)" : "Not yet"}</td>
+              <td>{swapV3Live(1) ? "Uniswap v4 (USDC, USDT, USDG, EURC, ETH)" : "Not yet"}</td>
+              {ELYSIUM && <td>Not yet</td>}
             </tr>
             <tr>
               <td>Gas</td>
-              <td>ETH, also a pool asset once its limit lands</td>
+              <td>ETH, also a pool asset</td>
               <td>Paid in stablecoins</td>
               <td>ETH, also a pool asset</td>
               <td>ETH, also a pool asset; the relay waits while gas is above {DEFAULT_MAX_GAS_GWEI[1]} gwei</td>
+              {ELYSIUM && <td>HYPE, not a pool asset</td>}
             </tr>
           </tbody>
         </table>
       </div>
 
-      <h3>Assets and beta limits</h3>
+      <h3>Assets and deposit limits</h3>
       <div className="overflow-x-auto">
         <table>
           <thead>
@@ -270,6 +312,16 @@ export default function DocsNetworksPage() {
                   <td>{t.decimals}</td>
                 </tr>
               ))}
+            {ELYSIUM_MAINNET_TOKENS.map((t) => (
+              <tr key={`elysium-${t.address}`}>
+                <td>{t.symbol}</td>
+                <td>Elysium</td>
+                <td>
+                  <code>{t.address}</code>
+                </td>
+                <td>{t.decimals}</td>
+              </tr>
+            ))}
             {["Robinhood Chain", BASE_MAINNET_LIVE ? "Base" : null, ETHEREUM_LIVE ? "Ethereum" : null]
               .filter((c): c is string => c !== null)
               .map((c) => (
@@ -285,11 +337,12 @@ export default function DocsNetworksPage() {
       </div>
       <ul>
         <li>
-          <strong>Beta deposit limits.</strong> Each stablecoin: 50,000 per
+          <strong>Deposit limits.</strong> Each stablecoin: 50,000 per
           deposit and 2,500,000 in total. ETH on Base and Ethereum: 20 per
           deposit and 1,000 in total. $GLOAM: 2,500,000 per deposit and
           25,000,000 in total. PONS: 390,000 and 9,800,000. CASHCAT: 960,000 and
-          24,000,000. The app shows the room left before you sign.
+          24,000,000.{ELYSIUM ? " USDC on Elysium: 500 per deposit and 25,000 in total at launch." : ""} The app
+          shows the room left before you sign.
         </li>
         <li>
           <strong>Never limited:</strong> private payments and cash outs.
@@ -300,10 +353,13 @@ export default function DocsNetworksPage() {
           close deposits at once, which never stops a withdrawal.
         </li>
         <li>
-          <strong>Fees.</strong> Deposits and private payments are free. A cash
-          out costs 0.25%, kept by the pool. A private swap pays the same 0.25%
+          <strong>Fees.</strong> Direct deposits and private payments are free. A
+          cash out costs 0.5%, kept by the pool. A private swap pays the same 0.5%
           on the amount swapped, plus a price buffer (0.5% on Robinhood Chain,
-          0.1% on Tempo) whose unused part goes to the swap treasury.
+          0.1% on Tempo{swapV3Live(8453) || swapV3Live(1) ? ", and on Base and Ethereum 0.1% between two dollar stablecoins and 0.5% otherwise" : ""})
+          whose unused part goes to the swap treasury. Money{" "}
+          <Link href="/docs/bridge#costs">bridged in from another chain</Link> pays
+          the bridge&apos;s fees.
         </li>
       </ul>
 
@@ -313,7 +369,7 @@ export default function DocsNetworksPage() {
           <strong>Proving keys</strong>, the final keys from the 13-contributor
           trusted setup (drand round 6561386, release{" "}
           <a
-            href="https://github.com/cryptoduke01/gloam/releases/tag/ceremony-final"
+            href="https://github.com/gloamtrade/gloam/releases/tag/ceremony-final"
             target="_blank"
             rel="noreferrer"
           >
@@ -335,7 +391,7 @@ export default function DocsNetworksPage() {
         </li>
         <li>
           <strong>Treasury</strong>, <code>{GLOAM_TREASURY}</code>. Cash-out
-          fees go here since 24 October. Both swap routers also send what a swap
+          fees go here since 24 October. The swap routers also send what a swap
           does not use here; that address is fixed in each router and cannot
           change. The routers have no upgrade. Tempo&apos;s has no owner;
           Robinhood Chain&apos;s owner can add a pool with 3 days of public
@@ -373,7 +429,7 @@ export default function DocsNetworksPage() {
         </li>
         <li>
           <strong>Mainnet assets</strong>, USDG, $GLOAM, PONS and CASHCAT to add
-          privately, with beta limits of 390,000 PONS per deposit and 9,800,000 in
+          privately, with deposit limits of 390,000 PONS per deposit and 9,800,000 in
           total, and 960,000 CASHCAT per deposit and 24,000,000 in total, the limits
           live now. Stock tokens, WETH and the other swap tokens come in through a
           private swap.
@@ -517,12 +573,12 @@ export default function DocsNetworksPage() {
       <p>
         Base is an Ethereum L2 (OP Stack) where a lot of USDC already moves.
         Gloam on Base is the same vault as on the other mainnets:{" "}
-        <code>ShieldPoolPayments</code>, the ceremony&apos;s final keys, beta
-        deposit limits and the 0.25% cash-out fee. Base Sepolia, the testnet,
+        <code>ShieldPoolPayments</code>, the ceremony&apos;s final keys,
+        deposit limits and the 0.5% cash-out fee. Base Sepolia, the testnet,
         went live on 24 October 2026 and Base mainnet on 26 October 2026, on
         the same code.{" "}
         {BASE_MAINNET_LIVE
-          ? "Both are live: Base mainnet is beta software, Base Sepolia is its testnet."
+          ? "Both are live: Base mainnet, and Base Sepolia as its testnet."
           : BASE_SEPOLIA_LIVE
             ? "Base Sepolia is live as a testnet. Base mainnet is not deployed yet, so the app does not offer it."
             : "Neither is deployed yet, so the app does not offer Base. This section is what to expect."}
@@ -577,11 +633,11 @@ export default function DocsNetworksPage() {
           not on Robinhood Chain mainnet)
         </li>
         <li>
-          <strong>Beta limits on Base mainnet</strong>, each stablecoin 50,000
+          <strong>Deposit limits on Base mainnet</strong>, each stablecoin 50,000
           per deposit and 2,500,000 in total; ETH 20 per deposit and 1,000 in total
         </li>
         <li>
-          <strong>Beta limits on Base Sepolia</strong>, each stablecoin 500 per
+          <strong>Deposit limits on Base Sepolia</strong>, each stablecoin 500 per
           deposit and 25,000 in total; ETH 0.2 per deposit and 10 in total
         </li>
         <li>
@@ -615,11 +671,10 @@ export default function DocsNetworksPage() {
           would be frozen in the vault; other assets keep working.
         </li>
         <li>
-          <strong>Not on Base yet.</strong>{" "}
-          Private swaps (next, through a router
-          on Uniswap v4) and bringing money over from another chain (the Relay
-          bridge). Payments, payroll, payment requests, claim links and proofs
-          work as on the other chains.{" "}
+          <strong>{swapV3Live(8453) ? "As on the other chains." : "Not on Base yet."}</strong>{" "}
+          {swapV3Live(8453) ? "" : "Private swaps, next, through a router on Uniswap v4. "}Bringing money
+          over from another chain (the Relay bridge), payments, payroll, payment
+          requests, claim links and proofs work as on the other chains.{" "}
           {BASE_MAINNET_MEMO
             ? "Base and Base Sepolia each have a payment-message board, so a payment can be found by scanning with your Gloam address."
             : "Base Sepolia has its payment-message board, so a payment can be found by scanning with your Gloam address; Base mainnet gets its own when it is deployed."}
@@ -629,11 +684,11 @@ export default function DocsNetworksPage() {
       <h2 id="ethereum">Ethereum</h2>
       <p>
         Gloam on Ethereum mainnet is the same vault as on the other mainnets:{" "}
-        <code>ShieldPoolPayments</code>, the ceremony&apos;s final keys, beta
-        deposit limits and the 0.25% cash-out fee. Its testnet is
+        <code>ShieldPoolPayments</code>, the ceremony&apos;s final keys,
+        deposit limits and the 0.5% cash-out fee. Its testnet is
         Ethereum Sepolia, below, on the same contract and keys.{" "}
         {ETHEREUM_LIVE
-          ? "Ethereum mainnet is live as beta software."
+          ? "Ethereum mainnet is live."
           : "It is not deployed yet, so the app does not offer it. This section is what to expect."}
       </p>
       <ul>
@@ -656,7 +711,7 @@ export default function DocsNetworksPage() {
           Tether&apos;s, USDG and PYUSD are issued by Paxos.
         </li>
         <li>
-          <strong>Beta limits</strong>, each stablecoin 50,000 per deposit and
+          <strong>Deposit limits</strong>, each stablecoin 50,000 per deposit and
           2,500,000 in total; ETH 20 per deposit and 1,000 in total
         </li>
         <li>
@@ -698,10 +753,12 @@ export default function DocsNetworksPage() {
           asset would be frozen in the vault; other assets keep working.
         </li>
         <li>
-          <strong>Not on Ethereum yet.</strong>{" "}
-          {ETHEREUM_MAINNET_MEMO
-            ? "Private swaps, and bringing money over into Ethereum (Ethereum stays a chain you can bring money over from)."
-            : "Private swaps, bringing money over into Ethereum (Ethereum stays a chain you can bring money over from), and the payment-message board: until it is deployed, a payment there goes by claim link or sealed code."}
+          <strong>{swapV3Live(1) && ETHEREUM_MAINNET_MEMO ? "As on the other chains." : "Not on Ethereum yet."}</strong>{" "}
+          {[
+            ...(swapV3Live(1) ? [] : ["Private swaps."]),
+            ...(ETHEREUM_MAINNET_MEMO ? [] : ["The payment-message board: until it is deployed, a payment there goes by claim link or sealed code."]),
+          ].join(" ")}{" "}
+          Bringing money over into Ethereum works, and Ethereum stays a chain you can bring money over from.
         </li>
       </ul>
 
@@ -709,7 +766,7 @@ export default function DocsNetworksPage() {
       <p>
         Ethereum Sepolia is Ethereum&apos;s testnet. Gloam runs it like Base
         Sepolia: the mainnet vault (<code>ShieldPoolPayments</code>, the
-        ceremony&apos;s final keys, beta deposit limits and the 0.25% cash-out
+        ceremony&apos;s final keys, deposit limits and the 0.25% cash-out
         fee), deployed from the same address and nonce as the other chains,
         so the vault sits at the same address.{" "}
         {ETHEREUM_SEPOLIA
@@ -747,7 +804,7 @@ export default function DocsNetworksPage() {
           Faucets are in the <Link href="/docs/testnet#ethereum">testnet guide</Link>.
         </li>
         <li>
-          <strong>Beta limits</strong>, each stablecoin 500 per deposit and
+          <strong>Deposit limits</strong>, each stablecoin 500 per deposit and
           25,000 in total; ETH 0.2 per deposit and 10 in total
         </li>
       </ul>
@@ -779,6 +836,100 @@ export default function DocsNetworksPage() {
         </li>
       </ul>
 
+      {ELYSIUM_FLAG && (
+        <>
+          <h2 id="elysium">Elysium</h2>
+          {ELYSIUM ? (
+            <>
+              <p>
+                Elysium is Kinetiq&apos;s Hyperliquid L2, an Arbitrum Orbit chain
+                that settles to HyperEVM, with HYPE as its gas coin. Gloam on
+                Elysium mainnet is the same vault as on the other mainnets:{" "}
+                <code>ShieldPoolPayments</code>, the ceremony&apos;s final keys,
+                deposit limits and the 0.5% cash-out fee. One thing is new: its
+                owner is a <code>VaultOwnerGuard</code> from the deploy itself, so
+                its proof checkers can never be replaced and its ownership can
+                never move.{ELYSIUM_TESTNET ? " Its testnet is below." : " There is no Gloam testnet on Elysium yet."}
+              </p>
+              <ul>
+                <li>
+                  <strong>Chain ID</strong>, {ELYSIUM.chainId}
+                </li>
+                <li>
+                  <strong>RPC</strong>, <code>{ELYSIUM_RPC_DISPLAY}</code>
+                </li>
+                <li>
+                  <strong>Explorer</strong>, <code>{ELYSIUM.explorerUrl}</code>
+                </li>
+                <li>
+                  <strong>Pool</strong>, <code>{ELYSIUM.pool}</code>, from block{" "}
+                  <code>{ELYSIUM.deployBlock.toString()}</code>
+                </li>
+                <li>
+                  <strong>Payment-message board</strong>,{" "}
+                  {ELYSIUM.payMemo ? <code>{ELYSIUM.payMemo.address}</code> : <>Not deployed yet</>}
+                </li>
+                <li>
+                  <strong>Assets</strong>, USDC ({ELYSIUM.usdcDecimals} decimals). HYPE, the gas
+                  coin, is not listed.
+                </li>
+                <li>
+                  <strong>Deposit limits</strong>, 500 USDC per deposit and 25,000 in total at
+                  launch, raised only through the vault&apos;s 3-day timelock
+                </li>
+                <li>
+                  <strong>Not on Elysium yet.</strong> Private swaps, and bringing money over
+                  into Elysium.
+                </li>
+              </ul>
+            </>
+          ) : (
+            <p>
+              Coming. Elysium is Kinetiq&apos;s Hyperliquid L2, with HYPE as its gas
+              coin. Gloam plans to support Elysium mainnet from the day it
+              launches, on the same vault and keys as the other mainnets, with
+              USDC first. It is not live yet, so the app does not offer it. Its
+              chain ID, RPC, pool and assets go here once the vault is deployed.
+            </p>
+          )}
+        </>
+      )}
+
+      {ELYSIUM_TESTNET_FLAG && (
+        <>
+          <h2 id="elysium-testnet">Elysium testnet</h2>
+          <p>
+            {ELYSIUM_TESTNET
+              ? "Elysium's testnet runs like Base Sepolia: the mainnet vault, owned by a VaultOwnerGuard from its deploy, on the ceremony's final keys, with test USDC only and gas in test HYPE."
+              : "Coming: Elysium's testnet, run like Base Sepolia on the mainnet vault and keys, with test USDC. Its pool goes here once it is deployed."}
+          </p>
+          <ul>
+            <li>
+              <strong>Chain ID</strong>, 99801
+            </li>
+            <li>
+              <strong>RPC</strong>, <code>{ELYSIUM_TESTNET?.rpcUrl ?? "https://testnet-rpc.elysium.kinetiq.xyz"}</code>
+            </li>
+            <li>
+              <strong>Explorer</strong>, <code>https://elysium.kinetiq.xyz/testnet-explorer</code>
+            </li>
+            <li>
+              <strong>Test USDC</strong>, <code>0x7D29d8047B905000459c0E80c34a26CeedcB47b2</code> (6 decimals)
+            </li>
+            {ELYSIUM_TESTNET && (
+              <li>
+                <strong>Pool</strong>, <code>{ELYSIUM_TESTNET.pool}</code>, from block{" "}
+                <code>{ELYSIUM_TESTNET.deployBlock.toString()}</code>
+              </li>
+            )}
+            <li>
+              <strong>Blocks</strong>, about every 100 ms. The public RPCs cap a log read at 10,000 logs, not at a
+              block range.
+            </li>
+          </ul>
+        </>
+      )}
+
       <h2>Switching networks in the app</h2>
       <p>
         The network selector in the app header lists every Gloam network and
@@ -791,9 +942,9 @@ export default function DocsNetworksPage() {
 
       <h2>Honest status</h2>
       <p>
-        Mainnet on all four chains is beta software. It uses
+        Mainnet is live on all {liveMainnetCountWords().split(" ")[0]} chains. It uses
         the final keys from the multi-party ceremony that closed on 17 October
-        with 13 contributors, and beta deposit limits cap what the pools take.
+        with 13 contributors, and deposit limits cap what the pools take.
         The code was reviewed internally before launch; that review finished on
         20 October with no Critical or High findings open. Kann Audits then
         reviewed the vault contracts (<Link href="/security">report, 1 November 2026</Link>) and found no Critical, High

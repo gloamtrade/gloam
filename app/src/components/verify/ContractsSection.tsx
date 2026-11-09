@@ -28,7 +28,7 @@ import { CheckMark, CopyButton, ExplorerLink } from "./VerifyBits";
  * pool is filled in; until then it shows as next.
  */
 
-const GITHUB = "https://github.com/cryptoduke01/gloam";
+const GITHUB = "https://github.com/gloamtrade/gloam";
 const ENTRIES = contractDirectory();
 const READ_TIMEOUT_MS = 20_000;
 
@@ -37,6 +37,8 @@ const LOGOS: Record<ChainFamily, string> = {
   tempo: "/brand/logos/tempo.svg",
   base: "/brand/chains/8453.png",
   ethereum: "/brand/chains/1.png",
+  // Elysium's mark, its official avatar circle-cropped
+  elysium: "/brand/chains/elysium.png",
 };
 
 type Side = "mainnet" | "testnet";

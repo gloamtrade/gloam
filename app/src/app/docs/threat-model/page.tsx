@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
-import { VAULT_SWAP_V2_ROUTER } from "@/lib/vaultSwap";
+import { VAULT_SWAP_V2_ROUTER, swapV3Live } from "@/lib/vaultSwap";
 
 /** Private swaps v2 on Robinhood Chain (lib/vaultSwap VAULT_SWAP_V2_ROUTER): the page follows the switch. */
 const V2 = Boolean(VAULT_SWAP_V2_ROUTER[4663]);
+/** Private swaps v3 (lib/vaultSwap VAULT_SWAP_V3_LIVE): the page follows each chain's switch. */
+const V3_NEW_CHAINS = [...(swapV3Live(8453) ? ["Base"] : []), ...(swapV3Live(1) ? ["Ethereum"] : [])];
+const V3 = swapV3Live(4663) || swapV3Live(4217) || V3_NEW_CHAINS.length > 0;
 
 export const metadata: Metadata = {
   title: "Threat model",
@@ -88,7 +91,7 @@ export default function DocsThreatModelPage() {
       title="Threat model"
       lede="Who we defend against, what each of them can and cannot do, what we assume, and the gaps we know about. Written for security researchers. If you just want to know what an explorer shows, start with What stays private."
       glance={[
-        { label: "Network", value: "Mainnet, in beta" },
+        { label: "Network", value: "Live on mainnet" },
         { label: "Bounty", value: "None yet, credit by name" },
         { label: "Report to", value: "hello@gloam.trade" },
         { label: "Fork tests", value: "Welcome" },
@@ -170,11 +173,11 @@ export default function DocsThreatModelPage() {
       {V2 ? (
         <p>
           <strong>What a router trusts.</strong>{" "}
-          No router can be upgraded, and none has a function that moves money. On Robinhood Chain the router trades only
+          No router can be upgraded, and no owner function moves money. On {["Robinhood Chain", ...V3_NEW_CHAINS].join(" and ")} the router trades only
           on Uniswap v4 pools on its allowlist. Its owner can add one only by queueing it, usable 3 days later and public on
           chain from the start, and can take one off at once; the owner can do nothing else. A swap names its route in its
-          escrow address, so no pool added later can enter it. ETH sits in the vault as WETH, and the router unwraps or
-          wraps exactly what a pool holding ETH trades. On Tempo it trades only on Tempo&apos;s stablecoin exchange. These
+          escrow address, so no pool added later can enter it. {swapV3Live(4663) ? "A note can be ETH or WETH, and the router converts at a route's ends exactly what a pool holding the other form trades." : "ETH sits in the vault as WETH, and the router unwraps or wraps exactly what a pool holding ETH trades."}{" "}
+          On Tempo it trades only on Tempo&apos;s stablecoin exchange. These
           venues, and a pool&apos;s hook, are outside code. The router checks that it received the full output and paid no
           more than arrived from the vault, so the worst a venue or hook can do is make a swap fail or keep its buffer,
           the part that would go to the treasury.
@@ -192,18 +195,35 @@ export default function DocsThreatModelPage() {
       )}
       <p>
         <strong>Price moves.</strong> The swap asks a little below the quote (0.5% on
-        Robinhood Chain, 0.1% on Tempo). The app prices the swap again just before it goes
+        Robinhood Chain, 0.1% on Tempo{V3_NEW_CHAINS.length > 0 ? `, and on ${V3_NEW_CHAINS.join(" and ")} 0.1% between two dollar stablecoins and 0.5% otherwise` : ""}). The app prices the swap again just before it goes
         and binds the new note to an exact amount: the better of that price and the quote
         the person saw. The router delivers exactly that amount or nothing. A trader who
         moves the price before the swap lands can take up to the buffer, which would
         otherwise go to the treasury. Past the buffer, the swap reverts and nothing moves.
       </p>
+      {V3_NEW_CHAINS.length > 0 && (
+        <p>
+          <strong>Thin pools and stablecoin pegs.</strong> A pool that runs out of liquidity near the market price keeps
+          filling further and further from it. On {V3_NEW_CHAINS.join(" and ")} the app refuses a quote that moves its pool by
+          more than 2%, or that gives under 98 cents on the dollar between two dollar stablecoins, and it warns before that.
+          These checks are in the app, not the router: the router only holds a swap to the amount the person agreed to.
+        </p>
+      )}
+      {swapV3Live(1) && (
+        <p>
+          <strong>Ethereum before a swap lands.</strong> A swap can be seen before it lands, by searchers at the least,
+          so a trader can take its buffer, and anyone can send its first step on its own for a few cents. Neither can change
+          what lands. That first step forces a refund, so a refund through these routers costs only the vault&apos;s fee and
+          0.1%. The relay pays the gas, so it weighs a swap&apos;s vault fee against the swap&apos;s gas first, and what
+          reverts is capped by the hour.
+        </p>
+      )}
       <p>
         <strong>A swap made to fail.</strong>{" "}
         Once a swap is broadcast, its unshield proof is public. Anyone can send that step alone. The money then waits at the
         swap&apos;s escrow, which only the router can open, and only into the refund note
         the owner made with the swap. That refund holds 99% of the note: the vault keeps
-        its 0.25% cash-out fee and the rest of the 1% goes to the treasury. The
+        its 0.5% cash-out fee and the rest of the 1% goes to the treasury. The
         owner&apos;s app finishes the refund through the relay on its next sync. The
         attacker pays gas and gains nothing.
       </p>
@@ -220,14 +240,27 @@ export default function DocsThreatModelPage() {
         the same way once an hour has passed with nothing landed. If that swap lands
         first, the move fails and the swap stands; if the move lands first, the swap
         reverts.
+        {V3 && " A swap through the newest routers also carries a deadline in its escrow address, 30 minutes after it is made (10 on Base and Ethereum), and can't land after it. A refund and an exit have no deadline."}
       </p>
       <p>
         <strong>Limits and blocks.</strong> The new note and the refund note are deposits,
-        so the beta deposit limits apply. If the vault is full for that token, a refund
+        so the deposit limits apply. If the vault is full for that token, a refund
         waits at the escrow until there is room. The app shows it as held, outside the
         balance, and keeps trying on each sync. If a token issuer blocks the treasury,
         what it cannot take stays in the router; it never stops a swap or a refund.
       </p>
+      {V3 && (
+        <p>
+          <strong>The exit.</strong> A swap through the newest routers names a one-time exit
+          key in its escrow address, made from the refund note&apos;s secret. Its holder can
+          sign the money waiting at the escrow out to a wallet, and a copy of that signature
+          can only pay that wallet. Nothing in the swap&apos;s proofs or calldata can sign for
+          it, and the escrow opens once, so a refund and an exit can never both happen. An
+          exit is public: it pays a wallet in the clear, next to the swap, so a full limit
+          leaves the owner a choice between waiting, which keeps that note private, and
+          leaving, which doesn&apos;t. A swap through an earlier router has no exit.
+        </p>
+      )}
 
       <h3>Owner powers</h3>
       <p>
@@ -306,8 +339,8 @@ export default function DocsThreatModelPage() {
       <h2 id="gaps">Known gaps</h2>
       <ul>
         <li>
-          <strong>Beta software.</strong> Mainnet is new. Beta deposit
-          limits cap what each pool can take while it is young.
+          <strong>Deposit limits.</strong> Mainnet is new. Deposit limits
+          cap what each pool can take while it is young.
         </li>
         <li>
           <strong>External review covers the vault only.</strong> Kann Audits reviewed the vault

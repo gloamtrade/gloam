@@ -57,7 +57,7 @@ first and MEV Blocker after it.
 
 ## Assets and limits
 
-Checked on chain on 25 October 2026 (`symbol()`, `name()`, `decimals()`). Beta limits
+Checked on chain on 25 October 2026 (`symbol()`, `name()`, `decimals()`). Deposit limits
 match the other chains: 500 per deposit and 25,000 in total for each stablecoin; ETH 0.2
 per deposit and 10 in total (about $471 and $23,550 at Chainlink's ETH/USD that day,
 $2,354.93).

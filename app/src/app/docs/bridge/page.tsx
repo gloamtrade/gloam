@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ELYSIUM_ENABLED } from "@/lib/elysium";
 import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
@@ -7,7 +8,7 @@ import { BRIDGE_MAX_USD, BRIDGE_MIN_USD, EXPENSIVE_ROUTE_MIN_USD, EXPENSIVE_ROUT
 export const metadata: Metadata = {
   title: "Deposit from another chain",
   description:
-    "Pay into Gloam from Bitcoin, Solana, Tron or 22 EVM chains through Relay. From a Solana or EVM wallet it lands straight in your private balance; from Bitcoin or an exchange it lands in your wallet first.",
+    "Pay into Gloam from Bitcoin, Solana, Tron or 22 EVM chains through Relay. From a Solana or EVM wallet it lands straight in your private balance; from Bitcoin or an exchange it lands in your wallet first. Cash outs can land on another chain too.",
 };
 
 const usd = (n: number) => `$${n.toLocaleString("en-US")}`;
@@ -16,7 +17,7 @@ export default function DocsBridgePage() {
   return (
     <DocsLayout
       title="Deposit from another chain"
-      lede="Pay in from the chain your money is already on. Gloam's bridge runs on Relay and lands your money as the vault's stablecoin: USDG on Robinhood Chain, USDC on Tempo."
+      lede={`Pay in from the chain your money is already on. Gloam's bridge runs on Relay and lands your money as the vault's stablecoin: USDG on Robinhood Chain, USDC on Tempo, Base and Ethereum.${ELYSIUM_ENABLED ? " It does not bring money into Elysium yet." : ""}`}
       glance={[
         { label: "From", value: "Bitcoin, Solana, Tron, 22 EVM" },
         { label: "Lands as", value: "USDG or USDC" },
@@ -38,8 +39,8 @@ export default function DocsBridgePage() {
       <p>
         A deposit address can&apos;t make the private deposit itself, so these
         take two steps. You get a one-time address, send to it from any wallet
-        or exchange, and the money arrives in your wallet on Robinhood Chain or
-        Tempo. Bitcoin waits for its own confirmations first, usually 10 to 30
+        or exchange, and the money arrives in your wallet on Robinhood Chain,
+        Tempo, Base or Ethereum. Bitcoin waits for its own confirmations first, usually 10 to 30
         minutes. Then you add it privately with one more tap.
       </p>
       <p>
@@ -49,6 +50,12 @@ export default function DocsBridgePage() {
       </p>
 
       <h2 id="costs">What it costs</h2>
+      <p>
+        A deposit made directly from a wallet on the vault&apos;s own chain is
+        free. Bringing money over from another chain isn&apos;t: Relay charges
+        for the route, and Gloam can add a fee of its own, up to 1%, which shows
+        on its own line when it does.
+      </p>
       <p>
         Gloam doesn&apos;t route anything itself. Relay&apos;s solvers compete
         for each order, and before you send anything you see what you pay, what
@@ -70,6 +77,28 @@ export default function DocsBridgePage() {
         wallet and the amount, and the vault shows the deposit. What you do with
         the money after it lands stays private. See{" "}
         <Link href="/docs/privacy-model">what stays private</Link>.
+      </p>
+
+      <h2 id="cash-out">Cash out to another chain</h2>
+      <p>
+        It works the other way too. On Robinhood Chain, Base or Ethereum, a
+        cash out can land as USDC on Base, Ethereum, Arbitrum or Solana in one
+        step. Under <strong>Lands on</strong>, pick the chain, then the address
+        there. The vault pays a one-time Relay address for exactly the amount
+        after the 0.5% cash-out fee, and Relay sends the USDC on.
+      </p>
+      <p>
+        Before you confirm you see what arrives, the least that will arrive,
+        Relay&apos;s fee and roughly how long it takes. Right before your proof
+        is made, the app asks Relay once more and stops if the price got worse.
+        If Relay can&apos;t deliver it, it sends the money back to your wallet
+        on the chain you cashed out from. That refund is public.
+      </p>
+      <p>
+        A cash out to another chain goes now and all at once. Cashing out later
+        or in pieces stays on the same chain, and Tempo isn&apos;t a starting
+        point yet. Like any cash out, the amount and where it goes are public,
+        on both chains.
       </p>
 
       <h2 id="try">Try it</h2>

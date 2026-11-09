@@ -7,16 +7,36 @@
 
 type ErrorLike = { name?: string; code?: number; message?: string; shortMessage?: string; cause?: unknown };
 
+/**
+ * The error and its causes, outermost first. It stops at a Gloam wallet's maybe-sent
+ * error (lib/embeddedErrors): that is the verdict, and nothing it wraps (a 5xx whose
+ * text happens to say "request rejected", say) may turn it into "declined" or "never
+ * sent".
+ */
 function chain(e: unknown): ErrorLike[] {
   const out: ErrorLike[] = [];
   let x = e as ErrorLike | undefined;
-  for (let i = 0; x && typeof x === "object" && i < 8; i++, x = x.cause as ErrorLike | undefined) out.push(x);
+  for (let i = 0; x && typeof x === "object" && i < 8; i++, x = x.cause as ErrorLike | undefined) {
+    out.push(x);
+    if (x.name === "EmbeddedMaybeSentError") break;
+  }
   return out;
+}
+
+/**
+ * A Gloam wallet's maybe-sent verdict is in the chain: Turnkey took the send, or may
+ * have, so it was neither declined nor stopped before it went out. Its message (and a
+ * wrapper's) can carry the text of the error under it, so no text test may override it.
+ */
+function maybeSent(links: ErrorLike[]): boolean {
+  return links.some((x) => x.name === "EmbeddedMaybeSentError");
 }
 
 /** The person turned the wallet prompt down. */
 export function walletDeclined(e: unknown): boolean {
-  return chain(e).some(
+  const links = chain(e);
+  if (maybeSent(links)) return false;
+  return links.some(
     (x) =>
       x.name === "UserRejectedRequestError" ||
       x.code === 4001 ||
@@ -33,10 +53,14 @@ const BEFORE_SEND = new Set([
   "ContractFunctionRevertedError",
   "EstimateGasExecutionError",
   "InsufficientFundsError",
+  // a Gloam wallet with no way to pay the fee, or a sponsored send Turnkey refused before any
+  // work (lib/embeddedErrors). EmbeddedMaybeSentError is left out on purpose: it may have gone out.
+  "EmbeddedNotSentError",
 ]);
 
 export function failedBeforeSend(e: unknown): boolean {
   const links = chain(e);
+  if (maybeSent(links)) return false;
   // viem names any -32603 internal error from the wallet a ContractFunctionRevertedError,
   // and a wallet can answer that after it already sent the transaction: not sure then
   const internal = links.some((x) => x.code === -32603 || x.name === "InternalRpcError");
@@ -69,7 +93,23 @@ export function solanaSurelyNotSent(message: string): boolean {
 
 /** The short, human part of a wallet or viem error (viem's long message lists the chain and call). */
 export function walletErrorText(e: unknown): string {
-  const first = chain(e)[0];
+  const links = chain(e);
+  // A Gloam wallet's own words say what to do: they win over whatever wrapped them.
+  const first = links.find((x) => x.name === "EmbeddedNotSentError" || x.name === "EmbeddedMaybeSentError") ?? links[0];
   const text = first?.shortMessage || first?.message || "";
   return text.split("\n")[0] ?? "";
+}
+
+/**
+ * What a person reads when a wallet send fails: a decline in plain words, else the
+ * short first line of the error. Never viem's long message, which lists the account,
+ * the contract and the calldata.
+ */
+export const WALLET_DECLINED_TEXT = "You declined it in your wallet, so it wasn't sent.";
+
+export function walletErrorForPeople(e: unknown, fallback = "It didn't go through. Try again."): string {
+  if (walletDeclined(e)) return WALLET_DECLINED_TEXT;
+  const text = walletErrorText(e).trim();
+  if (!text) return fallback;
+  return text.length > 280 ? `${text.slice(0, 277).trimEnd()}…` : text;
 }

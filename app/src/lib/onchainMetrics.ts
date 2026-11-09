@@ -41,9 +41,10 @@ import { serverTransport } from "@/lib/serverRpc";
 import { readCreatorFees, type CreatorFees } from "./creatorFees";
 import { MAINNET_LAUNCH_MS } from "./mainnet";
 import { errText, getLogsSafe } from "./logRange";
-import { VAULT_SWAP_ROUTERS } from "./vaultSwap";
+import { EVERY_SWAP_ROUTER } from "./vaultSwap";
 import { addChainPeople } from "./peopleStore";
 import { hasUiMultiplier, holdableTokens, SWAP_LANDABLE, swapTokenPrice } from "./vaultAssets";
+import { dailyMeans, priceAt, usdSeries } from "./priceHistory";
 
 // Moved to lib/vaultAssets so the browser's read on /transparency uses them too.
 export { holdableTokens, swapTokenPrice };
@@ -87,7 +88,11 @@ export type RecentRow = {
   detail: string;
 };
 
-/** Dollar figures over rolling windows (the last 24 hours, 7 days, 30 days, all time), at today's prices. */
+/**
+ * Dollar figures over rolling windows (the last 24 hours, 7 days, 30 days, all
+ * time). On a mainnet each deposit, cash-out and fee is priced at the time it
+ * happened (lib/priceHistory); on a testnet at today's prices.
+ */
 export type Windowed = { d1: number; d7: number; d30: number; all: number };
 
 export type FeeRow = {
@@ -95,6 +100,7 @@ export type FeeRow = {
   symbol: string;
   /** Kept by cash-outs since the vault went live (WithdrawFee logs). */
   earned: string;
+  /** Each fee priced when it was kept (a testnet: today's price); null for an asset with no dollar price. */
   earnedUsd: number | null;
   count: number;
   /** Still in the vault waiting for collectFees(); null when it could not be read. */
@@ -104,7 +110,7 @@ export type FeeRow = {
   collected: string;
 };
 
-/** One UTC day of money moving through a vault, priced now. */
+/** One UTC day of money moving through a vault, priced as Windowed says. */
 export type RevenueDay = {
   day: string;
   feesUsd: number;
@@ -135,6 +141,12 @@ export type NetworkRevenue = {
    * Absent on snapshots cached before it was added.
    */
   unpriced?: string[];
+  /**
+   * Mainnet assets priced at today's price because no price for the time of
+   * the flow could be read yet (CoinGecko down, or a token it has no history
+   * for). Named next to the figures; empty once every flow has its price.
+   */
+  atToday?: string[];
 };
 
 export type NetworkMetrics = {
@@ -217,7 +229,12 @@ export type OnchainMetrics = {
   /** Where this snapshot came from: read just now, or a cached one. */
   source: "fresh" | "memory" | "redis";
   ageSec: number;
-  prices: { ethUsd: number | null; stocks: "live" | "unpriced" };
+  /**
+   * Today's prices, used for what is held now and fees waiting to collect.
+   * `flowsAtTime`: mainnet deposits, cash-outs and fees are priced at the time
+   * of each one (absent on snapshots from before, which priced them today).
+   */
+  prices: { ethUsd: number | null; stocks: "live" | "unpriced"; flowsAtTime?: true };
   networks: NetworkMetrics[];
   /** Every network together, testnets included. */
   combined: CombinedMetrics;
@@ -282,7 +299,7 @@ const ZERO = "0x0000000000000000000000000000000000000000";
 /* ------------------------------------------------------------------ state */
 
 /** Compact pool event as kept between reads. */
-type ChainEvent = {
+export type ChainEvent = {
   k: ActivityKind;
   b: number;
   i: number;
@@ -296,6 +313,16 @@ type ChainEvent = {
   v?: string;
   /** Cash-out fee kept by the vault, raw, in the same asset. */
   f?: string;
+  /**
+   * A private swap's leg: the note a swap spends goes out to its escrow, and the
+   * router puts the new note in, in one transaction. Inside the vault, so not a
+   * deposit or a cash-out (`counted` turns the pair into one trade).
+   */
+  r?: 1;
+  /** USD per whole token at the time of the flow (mainnet, not a dollar stablecoin; lib/priceHistory). */
+  p?: number;
+  /** `p` is provisional: the flow is too new for the hour to be settled; priced again on a later read. */
+  pq?: 1;
 };
 
 export type ScanState = {
@@ -311,9 +338,21 @@ export type ScanState = {
   fee?: 1;
   /** Fees sent to the recipient per asset, raw (FeesCollected). */
   collected?: Record<string, string>;
+  /** Set once the scan marks private swap legs (`r`); a mainnet state without it is read again from the start. */
+  sw?: 1;
 };
 
 const states = new Map<NetworkKey, ScanState>();
+/**
+ * Block times from a state that is read again from the start (a mainnet state
+ * from before `sw`), so the new read does not have to fetch them again.
+ */
+const carriedTs = new Map<NetworkKey, Map<number, number>>();
+
+/** A state this version can build on: a mainnet one must have every cash-out fee and swap leg marked. */
+function usable(n: GloamNetwork, s: ScanState): boolean {
+  return n.testnet || Boolean(s.fee && s.sw);
+}
 
 function stateKey(n: GloamNetwork) {
   return `${STATE_PREFIX}:${n.key}:${(n.pool ?? "").toLowerCase()}`;
@@ -322,13 +361,16 @@ function stateKey(n: GloamNetwork) {
 async function loadState(n: GloamNetwork): Promise<ScanState | null> {
   const pool = (n.pool ?? "").toLowerCase();
   const m = states.get(n.key);
-  if (m && m.pool === pool && (m.fee || n.testnet)) return m;
+  if (m && m.pool === pool && usable(n, m)) return m;
   const r = await cacheGetJson<ScanState>(stateKey(n));
   // Testnet states keep their history (their fees are not revenue); a mainnet one is
-  // read again so every cash-out fee is counted.
-  if (r && r.v === 1 && r.pool === pool && Array.isArray(r.events) && (r.fee || n.testnet)) {
-    states.set(n.key, r);
-    return r;
+  // read again so every cash-out fee and private swap is counted right.
+  if (r && r.v === 1 && r.pool === pool && Array.isArray(r.events)) {
+    if (usable(n, r)) {
+      states.set(n.key, r);
+      return r;
+    }
+    carriedTs.set(n.key, new Map(r.events.filter((e) => e.ts).map((e) => [e.b, e.ts])));
   }
   return null;
 }
@@ -347,6 +389,7 @@ function clientFor(n: GloamNetwork): PublicClient {
   if (hit) return hit;
   const c = createPublicClient({
     chain: n.chain,
+    ccipRead: false,
     // viem retries 429s, 5xx and timeouts with backoff (0.5s, 1s, 2s, 4s).
     transport: serverTransport(n, { timeout: 20_000, retryCount: 4, retryDelay: 500 }),
   });
@@ -385,14 +428,11 @@ async function gated<T>(chainId: number, call: () => Promise<T>): Promise<T> {
  * privateBridgeable), so its address is not a person's wallet: such a deposit
  * counts as money in, but not as a wallet or a depositor. The same goes for a
  * private swap (lib/vaultSwap): its router puts the new note in, and the note
- * it spends goes out to a one-time escrow in the same transaction.
+ * it spends goes out to a one-time escrow in the same transaction. Every router
+ * counts, not only the one in use: its past deposits are still a router's.
  */
 const RELAY_ROUTER = "0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f";
-const SWAP_ROUTERS = new Set(
-  Object.values(VAULT_SWAP_ROUTERS)
-    .filter((a): a is Address => Boolean(a))
-    .map((a) => a.toLowerCase())
-);
+const SWAP_ROUTERS = new Set(EVERY_SWAP_ROUTER.map((a) => a.toLowerCase()));
 function depositor(from: string | undefined): string | undefined {
   const w = from?.toLowerCase();
   return w === RELAY_ROUTER || (w && SWAP_ROUTERS.has(w)) ? undefined : w;
@@ -752,18 +792,29 @@ async function scan(
     };
     const asset = assetKey;
     switch (log.eventName) {
-      case "Shielded":
-        fresh.push({ ...base, k: "deposit", w: depositor(log.args.from), a: asset(log.args.asset), v: String(log.args.amount ?? 0n) });
+      case "Shielded": {
+        const swapIn = SWAP_ROUTERS.has(String(log.args.from).toLowerCase());
+        fresh.push({
+          ...base,
+          k: "deposit",
+          w: depositor(log.args.from),
+          a: asset(log.args.asset),
+          v: String(log.args.amount ?? 0n),
+          ...(swapIn ? { r: 1 as const } : {}),
+        });
         break;
+      }
       case "Unshielded": {
         const fee = feeOf.get(`${log.transactionHash}:${log.args.nullifier}`);
+        const swapOut = swapTxs.has(log.transactionHash);
         fresh.push({
           ...base,
           k: "cashout",
-          w: swapTxs.has(log.transactionHash) ? undefined : log.args.to?.toLowerCase(),
+          w: swapOut ? undefined : log.args.to?.toLowerCase(),
           a: asset(log.args.asset),
           v: String(log.args.amount ?? 0n),
           ...(fee ? { f: String(fee) } : {}),
+          ...(swapOut ? { r: 1 as const } : {}),
         });
         break;
       }
@@ -778,6 +829,12 @@ async function scan(
   const memos = memoLogs.filter((l) => l.topics[0] && MEMO_TOPICS.has(l.topics[0])).length;
 
   const events = [...(prev?.events ?? []), ...fresh].sort((x, y) => x.b - y.b || x.i - y.i);
+  // Read again from the start: the old state's block times still hold.
+  const carry = prev ? undefined : carriedTs.get(n.key);
+  if (carry) {
+    for (const e of events) if (!e.ts) e.ts = carry.get(e.b) ?? 0;
+    carriedTs.delete(n.key);
+  }
 
   // Robinhood leaves blockTimestamp at 0 on logs; read those blocks (newest first, capped per pass).
   const missing = [...new Set(events.filter((e) => !e.ts).map((e) => e.b))].sort((x, y) => y - x).slice(0, MAX_BLOCK_FETCH);
@@ -804,6 +861,7 @@ async function scan(
       events,
       fee: 1,
       collected,
+      sw: 1,
     },
     blocksRead: poolTo >= from ? poolTo - from + 1n : 0n,
     latest,
@@ -858,7 +916,12 @@ function recentRows(n: GloamNetwork, events: ChainEvent[]): RecentRow[] {
     });
 }
 
-/** Cash-out fees, volume and transactions for one vault, priced now. */
+/**
+ * Cash-out fees, volume and transactions for one vault. On a mainnet each flow
+ * is priced at the time it happened (`p`, lib/priceHistory); one with no such
+ * price yet falls back to today's and is named in `atToday`. A testnet prices
+ * at today's prices. Dollar stablecoins are $1 either way.
+ */
 function revenueOf(n: GloamNetwork, s: ScanState, prices: Prices, settings: FeeSettings | null, days: string[]): NetworkRevenue {
   const now = Math.floor(Date.now() / 1000);
   const cut = { d1: now - 86_400, d7: now - 7 * 86_400, d30: now - 30 * 86_400 };
@@ -876,13 +939,20 @@ function revenueOf(n: GloamNetwork, s: ScanState, prices: Prices, settings: FeeS
     return unit.get(a)!;
   };
   const unpriced = new Set<string>();
-  const usd = (a: string, raw: bigint) => {
-    const p = unitUsd(a);
+  const atToday = new Set<string>();
+  /** Dollars of `raw` of the event's asset: at the time when known, else today. Null with no price at all. */
+  const usdAt = (e: ChainEvent, raw: bigint): number | null => {
+    const info = assetInfo(n, e.a!);
+    const units = Number(formatUnits(raw, info.decimals));
+    if (info.stable) return units;
+    if (e.p != null) return units * e.p;
+    const p = unitUsd(e.a!);
     if (p == null) {
-      if (raw > 0n) unpriced.add(assetInfo(n, a).symbol);
-      return 0;
+      if (raw > 0n) unpriced.add(info.symbol);
+      return null;
     }
-    return Number(formatUnits(raw, assetInfo(n, a).decimals)) * p;
+    if (!n.testnet && raw > 0n) atToday.add(info.symbol);
+    return units * p;
   };
 
   const fees = zero();
@@ -892,7 +962,7 @@ function revenueOf(n: GloamNetwork, s: ScanState, prices: Prices, settings: FeeS
   const byDay = new Map(
     days.map((d) => [d, { day: d, feesUsd: 0, depositUsd: 0, cashoutUsd: 0, txs: 0, wallets: new Set<string>() }])
   );
-  const feeRaw = new Map<string, { raw: bigint; count: number }>();
+  const feeRaw = new Map<string, { raw: bigint; count: number; usd: number | null }>();
   for (const e of s.events) {
     add(txs, e.ts, 1);
     const day = e.ts ? byDay.get(utcDay(e.ts * 1000)) : undefined;
@@ -902,22 +972,24 @@ function revenueOf(n: GloamNetwork, s: ScanState, prices: Prices, settings: FeeS
     }
     if (!e.a) continue;
     if (e.k === "deposit") {
-      const u = usd(e.a, BigInt(e.v ?? "0"));
+      const u = usdAt(e, BigInt(e.v ?? "0")) ?? 0;
       add(deposits, e.ts, u);
       if (day) day.depositUsd += u;
     } else if (e.k === "cashout") {
-      const u = usd(e.a, BigInt(e.v ?? "0"));
+      const u = usdAt(e, BigInt(e.v ?? "0")) ?? 0;
       add(cashouts, e.ts, u);
       if (day) day.cashoutUsd += u;
-      if (e.f) {
-        const fu = usd(e.a, BigInt(e.f));
-        add(fees, e.ts, fu);
-        if (day) day.feesUsd += fu;
-        const r = feeRaw.get(e.a) ?? { raw: 0n, count: 0 };
-        r.raw += BigInt(e.f);
-        r.count++;
-        feeRaw.set(e.a, r);
-      }
+    }
+    // A cash-out keeps its fee, and so does a private swap's leg out (`counted` makes it a trade).
+    if (e.f && (e.k === "cashout" || e.k === "trade")) {
+      const fu = usdAt(e, BigInt(e.f));
+      add(fees, e.ts, fu ?? 0);
+      if (day) day.feesUsd += fu ?? 0;
+      const r = feeRaw.get(e.a) ?? { raw: 0n, count: 0, usd: 0 };
+      r.raw += BigInt(e.f);
+      r.count++;
+      r.usd = r.usd == null || fu == null ? null : r.usd + fu;
+      feeRaw.set(e.a, r);
     }
   }
 
@@ -942,7 +1014,7 @@ function revenueOf(n: GloamNetwork, s: ScanState, prices: Prices, settings: FeeS
       asset: a,
       symbol: info.symbol,
       earned: fine(r?.raw ?? 0n, info),
-      earnedUsd: p == null ? null : usd(a, r?.raw ?? 0n),
+      earnedUsd: r ? r.usd : p == null ? null : 0,
       count: r?.count ?? 0,
       owed: owed == null ? null : fine(owed, info),
       owedUsd: owedValue,
@@ -964,6 +1036,7 @@ function revenueOf(n: GloamNetwork, s: ScanState, prices: Prices, settings: FeeS
       return { ...rest, wallets: wallets.size };
     }),
     unpriced: [...unpriced],
+    atToday: [...atToday],
   };
 }
 
@@ -1088,7 +1161,27 @@ export function figures(
 }
 
 function emptyState(n: GloamNetwork): ScanState {
-  return { v: 1, pool: (n.pool ?? "").toLowerCase(), scannedTo: Number(n.deployBlock ?? 0n), memoScannedTo: 0, memos: 0, startTs: 0, events: [], fee: 1 };
+  return { v: 1, pool: (n.pool ?? "").toLowerCase(), scannedTo: Number(n.deployBlock ?? 0n), memoScannedTo: 0, memos: 0, startTs: 0, events: [], fee: 1, sw: 1 };
+}
+
+/**
+ * A private swap is one trade, not a deposit plus a cash-out: its note goes out
+ * to a one-time escrow and the router puts the new note back in, in one
+ * transaction, so no money enters or leaves Gloam. The leg out becomes the
+ * trade (it keeps its asset, amount and the fee the vault kept on it); the leg
+ * in is dropped. A router deposit with no leg out in its transaction is a trade
+ * of its own.
+ */
+export function swapsAsTrades(events: ChainEvent[]): ChainEvent[] {
+  if (!events.some((e) => e.r)) return events;
+  const outTx = new Set(events.filter((e) => e.r && e.k === "cashout").map((e) => e.tx));
+  const out: ChainEvent[] = [];
+  for (const e of events) {
+    if (!e.r) out.push(e);
+    else if (e.k === "cashout") out.push({ ...e, k: "trade", w: undefined });
+    else if (e.k === "deposit" && !outTx.has(e.tx)) out.push({ ...e, k: "trade", w: undefined });
+  }
+  return out;
 }
 
 /** Scans one network and reads its holdings. On failure keeps the last state read, with the error. */
@@ -1098,7 +1191,7 @@ function emptyState(n: GloamNetwork): ScanState {
  * before the doors opened stay out. Balances held are read live either way.
  */
 export function counted(n: Pick<GloamNetwork, "testnet">, s: ScanState): ScanState {
-  if (n.testnet) return s;
+  if (n.testnet) return { ...s, events: swapsAsTrades(s.events) };
   const from = Math.floor(MAINNET_LAUNCH_MS / 1000);
   // An event not dated yet (Robinhood's logs carry no time; a pass dates the
   // newest 250) counts only once it is surely after launch: at or after a block
@@ -1106,7 +1199,50 @@ export function counted(n: Pick<GloamNetwork, "testnet">, s: ScanState): ScanSta
   // the team's checks from before launch.
   let firstAfter = Infinity;
   for (const e of s.events) if (e.ts >= from && e.b < firstAfter) firstAfter = e.b;
-  return { ...s, events: s.events.filter((e) => (e.ts ? e.ts >= from : e.b >= firstAfter)) };
+  return { ...s, events: swapsAsTrades(s.events.filter((e) => (e.ts ? e.ts >= from : e.b >= firstAfter))) };
+}
+
+/** The CoinGecko id that prices `asset` in the past; null for a dollar stablecoin, a euro coin, or a token with none. */
+function geckoId(n: GloamNetwork, asset: string): string | null {
+  if (asset === NATIVE) return n.primaryAsset.symbol === "ETH" ? "ethereum" : null;
+  const t = holdableTokens(n.chainId).find((x) => x.address.toLowerCase() === asset);
+  if (!t || t.kind === "stablecoin") return null;
+  return t.coingecko ?? null;
+}
+
+/**
+ * Gives each mainnet deposit and cash-out of a token that is not a dollar
+ * stablecoin its USD price at the time (`p`), from CoinGecko's past prices
+ * (lib/priceHistory), in place. Only flows with no settled price are looked up,
+ * one series per token; one CoinGecko cannot answer for waits for the next read.
+ */
+export async function priceFlows(n: GloamNetwork, events: ChainEvent[], series = usdSeries): Promise<void> {
+  if (n.testnet) return;
+  const launch = Math.floor(MAINNET_LAUNCH_MS / 1000);
+  const want = new Map<string, ChainEvent[]>();
+  for (const e of events) {
+    if ((e.k !== "deposit" && e.k !== "cashout") || !e.a || !e.ts || e.ts < launch) continue;
+    if (e.p != null && !e.pq) continue;
+    const id = geckoId(n, e.a);
+    if (!id) continue;
+    const list = want.get(id) ?? [];
+    list.push(e);
+    want.set(id, list);
+  }
+  await Promise.all(
+    [...want].map(async ([id, list]) => {
+      const from = Math.min(...list.map((e) => e.ts)) - 3 * 3_600;
+      const points = await series(id, from).catch(() => null);
+      if (!points) return;
+      for (const e of list) {
+        const q = priceAt(points, e.ts);
+        if (!q) continue;
+        e.p = q.usd;
+        if (q.settled) delete e.pq;
+        else e.pq = 1;
+      }
+    })
+  );
 }
 
 async function readNetwork(n: GloamNetwork, days: string[], revenueDays: string[]) {
@@ -1118,6 +1254,8 @@ async function readNetwork(n: GloamNetwork, days: string[], revenueDays: string[
       readHoldings(n, n.pool as Address),
       readFeeSettings(n, n.pool as Address),
     ]);
+    // Mainnet flows priced at their time; what is not priced yet is tried on the next read.
+    await withTimeout(priceFlows(n, state.events), 12_000, undefined);
     await saveState(n, state);
     const readMs = Date.now() - started;
     const extra = { blocksRead, latest, readMs, error: null };
@@ -1160,6 +1298,7 @@ function combineRevenue(revs: NetworkRevenue[], allEvents: ChainEvent[][], days:
   return {
     fees: sumW((r) => r.fees),
     unpriced: [...new Set(revs.flatMap((r) => r.unpriced ?? []))],
+    atToday: [...new Set(revs.flatMap((r) => r.atToday ?? []))],
     owedUsd: revs.reduce((a, r) => a + r.owedUsd, 0),
     depositVolume: sumW((r) => r.depositVolume),
     cashoutVolume: sumW((r) => r.cashoutVolume),
@@ -1220,7 +1359,15 @@ async function readAll(): Promise<OnchainMetrics> {
   const pricing = loadPrices();
   // $GLOAM creator fees live on Robinhood Chain mainnet; read beside the vaults once it is live.
   const creatorRead = nets.some((n) => n.key === "robinhood-mainnet")
-    ? readCreatorFees(revenueDays, () => pricing.then((p) => p.ethUsd)).catch((e: unknown) => {
+    ? readCreatorFees(
+        revenueDays,
+        () => pricing.then((p) => p.ethUsd),
+        // each day's creator fees at that day's ETH price, not today's
+        async () => {
+          const pts = await usdSeries("ethereum", Math.floor(Date.parse(`${revenueDays[0]}T00:00:00Z`) / 1000));
+          return pts ? dailyMeans(pts) : null;
+        }
+      ).catch((e: unknown) => {
         console.warn("gloam_creator_fees", errText(e).split("\n")[0].slice(0, 160));
         return { error: "Could not read creator fees. The details are in the server logs." };
       })
@@ -1260,7 +1407,7 @@ async function readAll(): Promise<OnchainMetrics> {
     asOf: new Date().toISOString(),
     source: "fresh",
     ageSec: 0,
-    prices: { ethUsd: prices.ethUsd, stocks: prices.stocks },
+    prices: { ethUsd: prices.ethUsd, stocks: prices.stocks, flowsAtTime: true },
     networks,
     combined: all,
     mainnet: {

@@ -22,7 +22,11 @@ type Env = Record<string, string | undefined>;
 
 const TEMPO = GLOAM_NETWORKS.tempo;
 const RH = GLOAM_NETWORKS.robinhood;
-const NOW = Date.parse("2026-10-03T12:00:00Z");
+/**
+ * Noon (UTC) of the day the test runs. The spending log drops entries over 30 days old
+ * by the real clock when it writes, so a fixed date here stops working a month later.
+ */
+const NOW = Math.floor(Date.now() / 86_400_000) * 86_400_000 + 43_200_000;
 const PAYEE = "gloamr1.payee-tag-for-tests";
 const OTHER = "gloamr1.someone-else";
 
@@ -52,7 +56,7 @@ function setup(agentConfig: unknown, agent = "bot"): Env {
 const BASIC = {
   recipients: [PAYEE, "0xAbCdEf0000000000000000000000000000000001"],
   tools: ["pay", "send"],
-  expiresAt: "2026-12-31",
+  expiresAt: "2099-12-31",
   assets: { PathUSD: { maxPerPayment: "5", maxPerDay: "12" } },
 };
 
@@ -175,8 +179,8 @@ if (process.argv.includes("--reserve-once")) {
     assert.equal(code({ ...pay("1"), tool: "shield", recipient: null }), "tool_not_allowed");
     assert.equal(code(pay("0")), "bad_amount");
     // Expiry: a date means through the end of that day (UTC).
-    assert.equal(code(pay("1"), Date.parse("2026-12-31T23:00:00Z")), "ok");
-    assert.equal(code(pay("1"), Date.parse("2027-01-01T00:00:01Z")), "expired");
+    assert.equal(code(pay("1"), Date.parse("2099-12-31T23:00:00Z")), "ok");
+    assert.equal(code(pay("1"), Date.parse("2100-01-01T00:00:01Z")), "expired");
     assert.equal(parseExpiry("2026-02-30"), null);
   });
 
@@ -202,7 +206,7 @@ if (process.argv.includes("--reserve-once")) {
     if (!c.ok) {
       assert.equal(c.refusal.code, "over_daily");
       assert.match(c.refusal.message, /2 PathUSD is left/);
-      assert.match(c.refusal.message, /2026-10-04T12:00:00\.000Z/);
+      assert.ok(c.refusal.message.includes(new Date(NOW + 86_400_000).toISOString()), c.refusal.message);
     }
     // A plan preview reserves nothing.
     assert.equal(previewSpend(pay("2"), env, NOW + 3_000).allowed, true);

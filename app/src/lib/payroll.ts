@@ -31,7 +31,7 @@
  */
 import type { Address, Hex, PublicClient } from "viem";
 import { claimLinkFor } from "./claimLink";
-import { fieldToHex, hexToField, noteCommitmentPoseidon, noteNullifierPoseidon, randomSecretField } from "@gloamtrade/sdk";
+import { fieldToHex, hexToField, noteCommitmentPoseidon, noteNullifierPoseidon, randomNoteSeed, randomSecretField } from "@gloamtrade/sdk";
 import { buildTransferWitness, type TransferWitness } from "@/lib/proverTransfer";
 import { fieldToBytes32, proveTransferInBrowser } from "@/lib/proveClient";
 import { syncShieldTree, type SyncedTree } from "@/lib/treeSync";
@@ -39,6 +39,7 @@ import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
 import { buildNotePackage, decodeNotePackage, encodeNotePackage } from "@/lib/notePackage";
 import type { PayrollNote } from "@/lib/proofs";
 import { readAmountText } from "@/lib/amountText";
+import { walletErrorForPeople } from "@/lib/walletErrors";
 import { encryptTicketForTag, isReceiveTag, isValidReceiveTag } from "@/lib/receiveTag";
 import { ticketToMemoBytes } from "@/lib/payMemo";
 import { cleanPaymentNote } from "@/lib/paymentNote";
@@ -250,7 +251,11 @@ export function parsePayrollCsv(text: string, asset: Address): { rows: DraftRow[
   // shifted, so the row is refused rather than read.
   const width = looksLikeHeader ? first.length : first.length === 2 ? 2 : Math.min(Math.max(first.length, 3), 4);
 
-  const body = lines.slice(start);
+  // A spreadsheet's empty rows come out as ",,," (or tabs): nothing to pay, so not an error row either.
+  const body = lines.slice(start).filter(({ l }) => {
+    const cells = splitCsvLine(l, delimiter);
+    return !cells || cells.some((c) => c.trim().length > 0);
+  });
   if (body.length > PAYROLL_MAX_ROWS) {
     return { rows: [], error: `Up to ${PAYROLL_MAX_ROWS} people per run. Split the list into smaller batches.` };
   }
@@ -753,12 +758,19 @@ async function holdUnconfirmed(row: PayrollRow, why: string, emit: () => Promise
 
 /** The wallet prompt was turned down, so this send never went out. */
 function isDeclined(e: unknown): boolean {
-  let x = e as { name?: string; code?: number; message?: string; cause?: unknown } | undefined;
-  for (let i = 0; x && i < 6; i++, x = x.cause as typeof x) {
-    if (x.name === "UserRejectedRequestError" || x.code === 4001) return true;
-    if (typeof x.message === "string" && /user (rejected|denied)/i.test(x.message)) return true;
-  }
-  return false;
+  type Link = { name?: string; code?: number; message?: string; cause?: unknown };
+  const links: Link[] = [];
+  let x = e as Link | undefined;
+  for (let i = 0; x && i < 6; i++, x = x.cause as Link | undefined) links.push(x);
+  // A Gloam wallet's maybe-sent verdict (lib/embeddedErrors): taken, or may have been, never
+  // declined, whatever the text around it says (a wrapper's message carries its causes').
+  if (links.some((l) => l.name === "EmbeddedMaybeSentError")) return false;
+  return links.some(
+    (l) =>
+      l.name === "UserRejectedRequestError" ||
+      l.code === 4001 ||
+      (typeof l.message === "string" && /user (rejected|denied)/i.test(l.message))
+  );
 }
 
 /** Only for a payment the chain shows can never land (or that was never handed out). */
@@ -915,12 +927,14 @@ async function payRow(
       if (note) {
         const path = (await tree!.pathForLeaf(note.leafIndex!)) as PoseidonMerklePath | null;
         if (!path) throw new Error("Could not read the vault. Try again.");
+        // A seed for the payee's secret, so a link row's claim link is short (lib/claimLink).
         w = await buildTransferWitness({
           secretHex: note.secret,
           amountIn: BigInt(note.amountWei),
           amountPay: amount,
           asset: batch.asset,
           path,
+          paySeed: randomNoteSeed().seed,
         });
         if (w.blocker) throw new Error(w.blocker);
       } else {
@@ -937,6 +951,7 @@ async function payRow(
           commitment: w.paymentNote.commitment,
           note: row.note,
           chainId: batch.chainId,
+          seed: w.paymentNote.seed,
         });
         const plain = encodeNotePackage(pack);
         const ticket = row.kind === "gloam" ? await encryptTicketForTag(plain, row.recipient) : plain;
@@ -1015,7 +1030,8 @@ async function payRow(
       return;
     } catch (e) {
       if (e instanceof PayrollStop) throw e;
-      const msg = e instanceof Error ? e.message : "Payment failed";
+      // a wallet's or viem's long text (account, contract, calldata) is cut to plain words
+      const msg = walletErrorForPeople(e, "Payment failed");
       if (row.spendNullifier && declined && !row.sentAt) {
         // Turned down before this payment ever went out: nothing can land.
         discardPending(row);

@@ -1,5 +1,5 @@
 /**
- * Live beta deposit limits self-test.
+ * Live deposit limits self-test.
  *
  * The vault's limits change through its timelock, so the SDK reads them from
  * the vault: depositLimitsOn(), depositLimit(asset) and deposited(asset). A
@@ -12,6 +12,9 @@
  */
 import {
   readDepositLimit,
+  readCashOutFeeBps,
+  cashOutFee,
+  CASH_OUT_FEE_BPS,
   depositLimitProblem,
   assertDepositWithinLiveLimit,
   buildShieldBoundIntent,
@@ -185,6 +188,21 @@ const raised = { on: true, limits: { [usdg]: [50_000n * SIX, 2_500_000n * SIX] }
   const j = await buildShieldBoundIntent({ chainId: RH, asset: RH_MAINNET_USDG, amountWei: 5_000n * SIX, prover });
   assert(j.exec.args[1] === 5_000n * SIX, "no client: the launch value no longer refuses");
   assert(depositLimitProblem({ on: true, perDeposit: 5n, total: 10n, deposited: 0n, room: 10n }, 5n, "X", "T", 0) === null, "exactly the limit is fine");
+}
+
+// ── the cash-out fee, read live ──────────────────────────────────────────────
+{
+  const feeVault = (bps) => ({
+    readContract: async ({ address, functionName }) => {
+      assert(address === POOL && functionName === "withdrawFeeBps", "reads the vault's own fee");
+      if (bps === null) throw new Error("execution reverted");
+      return bps;
+    },
+  });
+  assert((await readCashOutFeeBps(feeVault(CASH_OUT_FEE_BPS), POOL)) === 50, "a mainnet vault at 0.5%");
+  const old = await readCashOutFeeBps(feeVault(25), POOL);
+  assert(old === 25 && cashOutFee(100n * SIX, old) === 250_000n, "a vault still at 0.25% is priced at 0.25%, not the constant");
+  await rejects(() => readCashOutFeeBps(feeVault(null), POOL), /reverted/, "a pool with no fee to read throws, so nobody prices it at the constant");
 }
 
 console.log(`limits.selftest: ok (${checks} assertions)`);

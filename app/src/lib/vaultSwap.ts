@@ -17,6 +17,12 @@
  * which one new swaps use; the relay keeps both, so a refund of a swap made
  * through either still finishes.
  *
+ * v3 (GloamVaultSwapV4c, and GloamVaultSwapTempo2 on Tempo) adds native ETH notes,
+ * Base and Ethereum, and an exit for money a refund can't bring back. It is off
+ * until a router address is filled into VAULT_SWAP_V3_LIVE, chain by chain
+ * (DEPLOY-ROUTER.md). Its escrow key has two more fields, so a swap is built for the
+ * router it goes through.
+ *
  * Shared by the app and the relay server: no browser-only imports here.
  */
 import {
@@ -24,10 +30,14 @@ import {
   encodeAbiParameters,
   getContractAddress,
   keccak256,
+  pad,
+  toEventSelector,
+  toHex,
   type Address,
   type Hex,
   type PublicClient,
 } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -49,10 +59,64 @@ export const VAULT_SWAP_V2_ROUTER: Record<number, Address | null> = {
   4663: "0xfCa1887e77f738ef9C5751974b3f3873d029F2DC",
 };
 
+/**
+ * Where v3 lands on each chain, known before it deploys: the CREATE2 factory's
+ * address for the repo's compile (contracts/test/fixtures/router-next.json pins these,
+ * and contracts/launch/router-fixture.mjs writes it). Any edit to the contracts moves them.
+ */
+export const VAULT_SWAP_V3_ADDRESS: Record<number, Address> = {
+  4663: "0x9CdA89fA6E6f796a1623C2086b2C710DCa64486d",
+  8453: "0x3A99f461bdbfc86fbd4e84ee80Bfb2fd73f3576a",
+  1: "0x2E0c06Ac42Cc6f0ecC3eDc86bC0d67F3c2DC7E6A",
+  4217: "0x991efFC6cA44BD578000d32C1351d78298BdBC0a",
+};
+
+/**
+ * The switch for v3, chain by chain: null until the router is deployed and its read-backs
+ * passed (DEPLOY-ROUTER.md), then its address. Nothing is deployed yet, so merging this
+ * turns nothing on. An address that isn't the one pinned in VAULT_SWAP_V3_ADDRESS counts
+ * as off. New swaps on a chain go through v3 from then on, and earlier routers stay known
+ * for their refunds. It only goes one way: back to null, the relay no longer knows v3
+ * there, so a refund or an exit of a swap made through it is refused. To stop swaps on a
+ * chain, take its pools off instead.
+ */
+export const VAULT_SWAP_V3_LIVE: Record<number, Address | null> = { 4663: null, 8453: null, 1: null, 4217: null };
+
+function v3On(chainId: number): boolean {
+  const at = VAULT_SWAP_V3_LIVE[chainId];
+  return Boolean(at) && same(at!, VAULT_SWAP_V3_ADDRESS[chainId] ?? "");
+}
+
+/**
+ * Every router Gloam has on a chain or will have, whatever the switches say: a router
+ * stays Gloam's after the next one replaces it, so its past deposits never read as a
+ * person's. New swaps use only VAULT_SWAP_ROUTERS.
+ */
+export const EVERY_SWAP_ROUTER: readonly Address[] = [
+  RH_ROUTER_V1,
+  TEMPO_ROUTER, // also GloamVaultSwapV4b on Robinhood Chain
+  ...Object.values(VAULT_SWAP_V3_ADDRESS),
+];
+
+/** Whether v3 is what new swaps use on a chain. Docs and Glim follow this, so they stay true either side of a switch. */
+export const swapV3Live = v3On;
+
+/** The mainnets with private swaps now, for the sentences that name them: "Robinhood Chain and Tempo". */
+export function swapMainnets(): string {
+  const names = ["Robinhood Chain", "Tempo", ...(v3On(8453) ? ["Base"] : []), ...(v3On(1) ? ["Ethereum"] : [])];
+  return names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+const v3Address = (chainId: number): Address | null => (v3On(chainId) ? VAULT_SWAP_V3_ADDRESS[chainId]! : null);
+
 /** The router new swaps go through, per chain. null: swaps are off there. */
 export const VAULT_SWAP_ROUTERS: Record<number, Address | null> = {
-  4663: VAULT_SWAP_V2_ROUTER[4663] ?? RH_ROUTER_V1,
-  4217: TEMPO_ROUTER,
+  4663: v3Address(4663) ?? VAULT_SWAP_V2_ROUTER[4663] ?? RH_ROUTER_V1,
+  4217: v3Address(4217) ?? TEMPO_ROUTER,
+  8453: v3Address(8453),
+  1: v3Address(1),
+  // Elysium: not yet. No router is deployed there, so swaps are off on Elysium
+  // (its id is not listed, which reads as null) and the copy says "not on Elysium yet".
 };
 
 /**
@@ -75,6 +139,9 @@ export function vaultSwapRouter(chainId: number): Address | null {
 
 export const RH_POOL_MANAGER: Address = "0x8366a39cc670b4001a1121b8f6a443a643e40951";
 export const RH_V4_QUOTER: Address = "0x8dc178efb8111bb0973dd9d722ebeff267c98f94";
+/** Uniswap's V4Quoter on Base and Ethereum: its poolManager() names the PoolManager v3 is fixed to (checked 2026-10-31). */
+const BASE_V4_QUOTER: Address = "0x0d5e0f971ed27fbff6c2837bf31316121532048d";
+const ETHEREUM_V4_QUOTER: Address = "0x52f0e24d1c21c8a0cb1e5a5dd6198556bd9e1203";
 
 export const RH_MULTICALL3: Address = "0xcA11bde05977b3631167028862bE2a173976CA11";
 
@@ -281,6 +348,65 @@ export const RH_SWAP_ASSETS_V2: readonly Address[] = [
  */
 export const RH_SWAP_ASSETS_V2_QUEUED: readonly Address[] = [RH_AI, RH_ORBIO];
 
+// ---------------------------------------------------------------- Base and Ethereum (Uniswap v4, v3 only)
+
+const BASE_USDC: Address = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const BASE_USDT: Address = "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2";
+const BASE_EURC: Address = "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42";
+const BASE_WETH: Address = "0x4200000000000000000000000000000000000006";
+const ETH_USDC: Address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+const ETH_USDT: Address = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
+const ETH_USDG: Address = "0xe343167631d89B6Ffc58B88d6b7fB0228795491D";
+const ETH_EURC: Address = "0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c";
+const ETH_WETH: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+
+const hookless = (currency0: Address, currency1: Address, fee: number, tickSpacing: number): PoolKey => ({
+  currency0,
+  currency1,
+  fee,
+  tickSpacing,
+  hooks: NATIVE,
+});
+
+/**
+ * The pools v3 allows at deploy on Base, in DeployVaultSwapV4c.s.sol's order
+ * (contracts/test/fixtures/router-next.json pins both). Hookless only, picked from
+ * live state on 2026-10-31 by quoting $100, $500 and $5,000 both ways against Uniswap v3.
+ */
+export const BASE_SWAP_POOLS: readonly PoolKey[] = [
+  hookless(NATIVE, BASE_USDC, 500, 10),
+  hookless(NATIVE, BASE_USDC, 3000, 60),
+  hookless(BASE_USDC, BASE_USDT, 7, 1),
+  hookless(BASE_USDC, BASE_USDT, 6, 1),
+  hookless(BASE_USDC, BASE_USDT, 4, 1),
+  hookless(BASE_USDC, BASE_USDT, 100, 1),
+  hookless(BASE_EURC, BASE_USDC, 500, 10),
+];
+
+/**
+ * v3's pools on Ethereum, the same way. Left out, checked on chain on 2026-11-01:
+ * PYUSD ($100 into its USDC pool returns about $6) and BDX (v4 pools on both chains,
+ * about $1,100 at most, nearly all at LP fees of 9% to 98%, and selling $100 returns under $10).
+ */
+export const ETHEREUM_SWAP_POOLS: readonly PoolKey[] = [
+  hookless(NATIVE, ETH_USDC, 500, 10),
+  hookless(NATIVE, ETH_USDC, 100, 1),
+  hookless(NATIVE, ETH_USDT, 500, 10),
+  hookless(NATIVE, ETH_USDT, 100, 1),
+  hookless(ETH_USDC, ETH_USDT, 7, 1),
+  hookless(ETH_USDC, ETH_USDT, 8, 1),
+  hookless(ETH_USDC, ETH_USDT, 10, 1),
+  hookless(ETH_USDC, ETH_USDT, 100, 1),
+  hookless(ETH_USDC, ETH_USDG, 65, 1),
+  hookless(ETH_USDC, ETH_USDG, 100, 1),
+  hookless(ETH_USDT, ETH_USDG, 100, 1),
+  hookless(ETH_EURC, ETH_USDC, 250, 3),
+  hookless(ETH_EURC, ETH_USDC, 300, 6),
+];
+
+/** The dollar stablecoins, whose pairs barely move, so a swap between two asks a thinner buffer. 6 decimals each. */
+export const DOLLARS: readonly Address[] = [RH_USDG, BASE_USDC, BASE_USDT, ETH_USDC, ETH_USDT, ETH_USDG];
+
 // ---------------------------------------------------------------- Tempo (Stablecoin DEX)
 
 export const TEMPO_STABLE_DEX: Address = "0xdec0000000000000000000000000000000000000";
@@ -292,11 +418,18 @@ const TEMPO_SWAP_ASSETS: readonly Address[] = [
   "0x20c0000000000000000000006a37da5c996874be", // OUSD
 ];
 
+/** What v3 swaps between, per chain, in the order the picker lists them. Native ETH is address(0). */
+const RH_SWAP_ASSETS_V3: readonly Address[] = [RH_USDG, NATIVE, ...RH_SWAP_ASSETS_V2.slice(1), ...RH_SWAP_ASSETS_V2_QUEUED];
+const BASE_SWAP_ASSETS: readonly Address[] = [BASE_USDC, BASE_USDT, BASE_EURC, NATIVE];
+const ETHEREUM_SWAP_ASSETS: readonly Address[] = [ETH_USDC, ETH_USDT, ETH_USDG, ETH_EURC, NATIVE];
+
 /** The assets a new swap can go between, per chain (the current router's list). */
 export const VAULT_SWAP_ASSETS: Record<number, readonly Address[]> = {
-  4663: VAULT_SWAP_V2_ROUTER[4663] ? [...RH_SWAP_ASSETS_V2, ...RH_SWAP_ASSETS_V2_QUEUED] : RH_SWAP_ASSETS_V1,
+  4663: v3On(4663) ? RH_SWAP_ASSETS_V3 : VAULT_SWAP_V2_ROUTER[4663] ? [...RH_SWAP_ASSETS_V2, ...RH_SWAP_ASSETS_V2_QUEUED] : RH_SWAP_ASSETS_V1,
   4217: TEMPO_SWAP_ASSETS,
 };
+if (v3On(8453)) VAULT_SWAP_ASSETS[8453] = BASE_SWAP_ASSETS;
+if (v3On(1)) VAULT_SWAP_ASSETS[1] = ETHEREUM_SWAP_ASSETS;
 
 // ---------------------------------------------------------------- routers
 
@@ -304,26 +437,56 @@ export type SwapRouter = {
   address: Address;
   /** "v4": Uniswap v4 routes (GloamVaultSwapV4, V4b). "tempo": the Stablecoin DEX, no route. */
   venue: "v4" | "tempo";
-  /** 1: GloamVaultSwapV4 or GloamVaultSwapTempo. 2: GloamVaultSwapV4b. */
-  version: 1 | 2;
-  /** The pools a route may use (on chain, v2's allowlist has the last word). */
+  /** 1: GloamVaultSwapV4 or GloamVaultSwapTempo. 2: GloamVaultSwapV4b. 3: GloamVaultSwapV4c or GloamVaultSwapTempo2. */
+  version: 1 | 2 | 3;
+  /** The pools a route may use (on chain, an allowlist has the last word from v2 on). */
   pools: readonly PoolKey[];
   maxHops: number;
-  /** v2: the WETH the vault holds for ETH, unwrapped or wrapped at a route's ends. */
+  /** From v2 on: the chain's WETH, converted to or from ETH at a route's ends. */
   weth: Address | null;
   /** What a swap through it can go between. */
   assets: readonly Address[];
+  /** Where its quotes come from. null: no v4 route (Tempo's DEX). */
+  quoter?: Address | null;
+  /** Assets offered only once they open on chain (offeredSwapAssets). */
+  gated?: readonly Address[];
 };
+
+/** v3 on a chain, deployed or not: the switches decide when anything uses it. */
+function routerV3(chainId: number): SwapRouter | null {
+  const address = VAULT_SWAP_V3_ADDRESS[chainId];
+  if (!address) return null;
+  if (chainId === 4217) return { address, venue: "tempo", version: 3, pools: [], maxHops: 0, weth: null, assets: TEMPO_SWAP_ASSETS, quoter: null };
+  if (chainId === 8453) return { address, venue: "v4", version: 3, pools: BASE_SWAP_POOLS, maxHops: 3, weth: BASE_WETH, assets: BASE_SWAP_ASSETS, quoter: BASE_V4_QUOTER };
+  if (chainId === 1) return { address, venue: "v4", version: 3, pools: ETHEREUM_SWAP_POOLS, maxHops: 3, weth: ETH_WETH, assets: ETHEREUM_SWAP_ASSETS, quoter: ETHEREUM_V4_QUOTER };
+  return {
+    address,
+    venue: "v4",
+    version: 3,
+    pools: [...RH_SWAP_POOLS_V2, ...RH_SWAP_POOLS_V2_QUEUED],
+    maxHops: 3,
+    weth: RH_WETH,
+    assets: RH_SWAP_ASSETS_V3,
+    quoter: RH_V4_QUOTER,
+    // the vault's native ETH limit lands through its timelock, like AI's and ORBIO's
+    gated: [NATIVE, ...RH_SWAP_ASSETS_V2_QUEUED],
+  };
+}
 
 /** Every router on a chain, the newest first. */
 function routerList(chainId: number): SwapRouter[] {
+  const v3 = v3On(chainId) ? [routerV3(chainId)!] : [];
+  return [...v3, ...olderRouters(chainId)];
+}
+
+function olderRouters(chainId: number): SwapRouter[] {
   if (chainId === 4663) {
     const v1: SwapRouter = {
       address: RH_ROUTER_V1, venue: "v4", version: 1, pools: RH_SWAP_POOLS, maxHops: 2, weth: null, assets: RH_SWAP_ASSETS_V1,
     };
     const v2 = VAULT_SWAP_V2_ROUTER[4663];
     return v2
-      ? [{ address: v2, venue: "v4", version: 2, pools: [...RH_SWAP_POOLS_V2, ...RH_SWAP_POOLS_V2_QUEUED], maxHops: 3, weth: RH_WETH, assets: [...RH_SWAP_ASSETS_V2, ...RH_SWAP_ASSETS_V2_QUEUED] }, v1]
+      ? [{ address: v2, venue: "v4", version: 2, pools: [...RH_SWAP_POOLS_V2, ...RH_SWAP_POOLS_V2_QUEUED], maxHops: 3, weth: RH_WETH, assets: [...RH_SWAP_ASSETS_V2, ...RH_SWAP_ASSETS_V2_QUEUED], gated: RH_SWAP_ASSETS_V2_QUEUED }, v1]
       : [v1];
   }
   if (chainId === 4217) {
@@ -367,9 +530,11 @@ export function isSwapAsset(chainId: number, asset: string, router?: string | nu
  * How far below the quote the swap asks, in basis points. The trade must
  * cost no more than what arrives, or it reverts whole and nothing moves; the
  * part it does not use goes to the treasury. GLOAM moves, stablecoins barely.
+ * Off Robinhood Chain, a swap between two dollars asks the thinner buffer too.
  */
-export function swapBufferBps(chainId: number): number {
-  return chainId === 4217 ? 10 : 50;
+export function swapBufferBps(chainId: number, assetIn?: Address, assetOut?: Address): number {
+  if (chainId === 4217) return 10;
+  return chainId !== 4663 && isDollar(assetIn) && isDollar(assetOut) ? 10 : 50;
 }
 
 // ---------------------------------------------------------------- contract
@@ -391,6 +556,30 @@ const ESCROW_KEY_COMPONENTS = [
   { name: "routeHash", type: "bytes32" },
 ] as const;
 
+/** GloamVaultSwap2.EscrowKey: the same, then the swap's exit key and deadline. */
+const ESCROW_KEY_V3_COMPONENTS = [
+  ...ESCROW_KEY_COMPONENTS,
+  { name: "exitKey", type: "address" },
+  { name: "deadline", type: "uint256" },
+] as const;
+
+/** How long a v3 swap has to land, from the chain's own clock when it is made. */
+export const SWAP_DEADLINE_SECONDS = 30 * 60;
+/**
+ * On Base and Ethereum, 10 minutes: until a swap lands or its note moves, anyone can land it
+ * at the rate agreed, and a stablecoin that loses its peg in that time is what a deadline is for.
+ */
+export function swapDeadlineSeconds(chainId: number): number {
+  return swapChecked(chainId) ? 10 * 60 : SWAP_DEADLINE_SECONDS;
+}
+/** The relay sends a swap only with at least this long left: closer than that it could pass the dry run and land late. */
+export const SWAP_SEND_MARGIN_SECONDS = 60;
+
+/** Whether a swap can no longer land at `now`, in seconds: it lands up to and including its deadline. */
+export function swapExpired(deadline: bigint, now: bigint): boolean {
+  return now > deadline;
+}
+
 export type EscrowKey = {
   nullifier: Hex;
   amountIn: bigint;
@@ -400,6 +589,10 @@ export type EscrowKey = {
   refundCommitment: Hex;
   refundAmount: bigint;
   routeHash: Hex;
+  /** v3: the swap's one-time exit key. Without it, the key of the routers before v3. */
+  exitKey?: Address;
+  /** v3: the last time the swap can land, in seconds. It comes with the exit key. */
+  deadline?: bigint;
 };
 
 /**
@@ -413,13 +606,49 @@ export const SWAP_ESCROW_INIT_CODE: Hex =
   "0x608060405234801561000f575f80fd5b5060405161023438038061023483398101604081905261002e916101a4565b6040516370a0823160e01b81523060048201525f906001600160a01b038316906370a0823190602401602060405180830381865afa158015610072573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061009691906101d1565b905080156101a25760408051336024820152604480820184905282518083039091018152606490910182526020810180516001600160e01b031663a9059cbb60e01b17905290515f9182916001600160a01b038616916100f5916101e8565b5f604051808303815f865af19150503d805f811461012e576040519150601f19603f3d011682016040523d82523d5f602084013e610133565b606091505b509150915081801561015d57508051158061015d57508080602001905181019061015d9190610214565b61019f5760405162461bcd60e51b815260206004820152600f60248201526e32b9b1b937bb903a3930b739b332b960891b604482015260640160405180910390fd5b50505b005b5f602082840312156101b4575f80fd5b81516001600160a01b03811681146101ca575f80fd5b9392505050565b5f602082840312156101e1575f80fd5b5051919050565b5f82515f5b8181101561020757602081860181015185830152016101ed565b505f920191825250919050565b5f60208284031215610224575f80fd5b815180151581146101ca575f80fdfe";
 export const SWAP_ESCROW_CODE_HASH: Hex = "0x192133b7cb5a5193a55ec981c9f7272702248f684d2b85aa1dd843dde9b85bd4";
 
+/**
+ * SwapEscrow2's creation code (contracts/src/SwapEscrow2.sol), pinned the same way:
+ * keccak256 is SWAP_ESCROW2_CODE_HASH, the value in contracts/test/fixtures/router-next.json.
+ */
+export const SWAP_ESCROW2_INIT_CODE: Hex =
+  "0x608060405234801561000f575f80fd5b5060405161035338038061035383398101604081905261002e916102c3565b5f336001600160a01b0316632b4611906040518163ffffffff1660e01b8152600401602060405180830381865afa15801561006b573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061008f91906102c3565b90506001600160a01b0382166101445747801561013e575f826001600160a01b0316826040515f6040518083038185875af1925050503d805f81146100ef576040519150601f19603f3d011682016040523d82523d5f602084013e6100f4565b606091505b505090508061013c5760405162461bcd60e51b815260206004820152600f60248201526e32b9b1b937bb903a3930b739b332b960891b60448201526064015b60405180910390fd5b505b506102ba565b6040516370a0823160e01b81523060048201525f906001600160a01b038416906370a0823190602401602060405180830381865afa158015610188573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906101ac91906102f0565b905080156102b857604080516001600160a01b038481166024830152604480830185905283518084039091018152606490920183526020820180516001600160e01b031663a9059cbb60e01b17905291515f9283929087169161020f9190610307565b5f604051808303815f865af19150503d805f8114610248576040519150601f19603f3d011682016040523d82523d5f602084013e61024d565b606091505b50915091508180156102775750805115806102775750808060200190518101906102779190610333565b6102b55760405162461bcd60e51b815260206004820152600f60248201526e32b9b1b937bb903a3930b739b332b960891b6044820152606401610133565b50505b505b60fe5f5360015ff35b5f602082840312156102d3575f80fd5b81516001600160a01b03811681146102e9575f80fd5b9392505050565b5f60208284031215610300575f80fd5b5051919050565b5f82515f5b81811015610326576020818601810151858301520161030c565b505f920191825250919050565b5f60208284031215610343575f80fd5b815180151581146102e9575f80fdfe";
+export const SWAP_ESCROW2_CODE_HASH: Hex = "0x929521c51ece2df1d9b72eb6ff3b7e94b036bfe9d7c70d18cea088fcb6a079c6";
+
 /** A swap's escrow, worked out here: CREATE2 from the router, salt keccak256(abi.encode(key)). */
 export function escrowAddress(router: Address, assetIn: Address, key: EscrowKey): Address {
-  const salt = keccak256(encodeAbiParameters(ESCROW_KEY_COMPONENTS, [
-    key.nullifier, key.amountIn, key.outCommitment, key.assetOut, key.amountOut, key.refundCommitment, key.refundAmount, key.routeHash,
-  ]));
-  const bytecode = concatHex([SWAP_ESCROW_INIT_CODE, encodeAbiParameters([{ type: "address" }], [assetIn])]);
+  const fields = [key.nullifier, key.amountIn, key.outCommitment, key.assetOut, key.amountOut, key.refundCommitment, key.refundAmount, key.routeHash] as const;
+  if (key.exitKey && key.deadline === undefined) throw new Error("A v3 swap needs a deadline.");
+  const salt = keccak256(
+    key.exitKey
+      ? encodeAbiParameters(ESCROW_KEY_V3_COMPONENTS, [...fields, key.exitKey, key.deadline!])
+      : encodeAbiParameters(ESCROW_KEY_COMPONENTS, fields)
+  );
+  const init = key.exitKey ? SWAP_ESCROW2_INIT_CODE : SWAP_ESCROW_INIT_CODE;
+  const bytecode = concatHex([init, encodeAbiParameters([{ type: "address" }], [assetIn])]);
   return getContractAddress({ opcode: "CREATE2", from: router, salt, bytecode });
+}
+
+/** Keeps an exit signature from meaning anything else (GloamVaultSwap2.EXIT_DOMAIN). */
+const EXIT_DOMAIN = keccak256(toHex("gloam.vault-swap.exit.v1"));
+
+/** What a swap's exit key signs to send its escrow to `to`: GloamVaultSwap2.exitDigest, worked out here. */
+export function exitDigest(chainId: number, router: Address, escrow: Address, to: Address): Hex {
+  return keccak256(
+    encodeAbiParameters(
+      [{ type: "bytes32" }, { type: "uint256" }, { type: "address" }, { type: "address" }, { type: "address" }],
+      [EXIT_DOMAIN, BigInt(chainId), router, escrow, to]
+    )
+  );
+}
+
+/**
+ * A swap's one-time exit key, from its refund note's secret. Whoever can spend the
+ * refund note can exit, a backup restores it with the note, and the secret itself
+ * never leaves this browser. Each swap's is its own. A secret can't be a key as it
+ * stands: hashing it also keeps a signature from saying anything about the note.
+ */
+export function exitAccount(refundSecret: Hex) {
+  return privateKeyToAccount(keccak256(concatHex([toHex("gloam.vault-swap.exit-key.v1"), refundSecret])));
 }
 
 /**
@@ -433,9 +662,25 @@ export type VaultSwapRefundInfo = {
   amountIn: string;
   out: { commitment: Hex; asset: Address; amount: string };
   route: PoolKey[];
+  /** v3: the swap's exit key, the public half (exitAccount has the rest). */
+  exitKey?: Address;
+  /** v3: the swap's deadline, in seconds, as a decimal string. */
+  deadline?: string;
+  /** The transaction that paid the escrow, once found (lib/vaultSwapRun): what a refund or an exit shows the relay. */
+  unshieldTx?: Hex;
   /** The relay's send of this swap, once it answered: a sync reads how it ended if this tab never heard. */
   sent?: { hash: Hex; at: number };
 };
+
+/** Whether a refund the vault won't take can leave by its swap's exit: a v3 swap, with its money waiting. */
+export function canExitVaultSwap(note: {
+  vaultSwap?: { exitKey?: Address };
+  sweptFrom?: unknown;
+  sweepPending?: boolean;
+  refundHeld?: "returning" | "blocked";
+}): boolean {
+  return Boolean(note.vaultSwap?.exitKey && note.sweptFrom && note.sweepPending && note.refundHeld === "blocked");
+}
 
 /** The escrow key for a refund note, from what it keeps. */
 export function refundEscrowKey(info: VaultSwapRefundInfo, nullifier: Hex, refundCommitment: Hex, refundAmount: bigint): EscrowKey {
@@ -448,6 +693,7 @@ export function refundEscrowKey(info: VaultSwapRefundInfo, nullifier: Hex, refun
     refundCommitment,
     refundAmount,
     routeHash: keccak256(encodeRoute(info.route)),
+    ...(info.exitKey ? { exitKey: info.exitKey, deadline: BigInt(info.deadline ?? "0") } : {}),
   };
 }
 
@@ -455,9 +701,45 @@ const balanceOfAbi = [
   { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
 ] as const;
 
+/** The vault's event for a note leaving it. The amount is the note's, before the vault's fee. */
+export const UNSHIELDED_EVENT = {
+  type: "event",
+  name: "Unshielded",
+  inputs: [
+    { name: "nullifier", type: "bytes32", indexed: true },
+    { name: "asset", type: "address", indexed: true },
+    { name: "to", type: "address", indexed: true },
+    { name: "amount", type: "uint256", indexed: false },
+  ],
+} as const;
+
+const UNSHIELDED_TOPIC = toEventSelector(UNSHIELDED_EVENT);
+
+/** Whether a receipt's logs show `vault` paying this note out to `escrow`, for this amount. */
+export function receiptPaysEscrow(
+  logs: readonly { address: string; topics: readonly string[]; data: string }[],
+  vault: string,
+  paid: { nullifier: Hex; asset: Address; escrow: Address; amount: bigint }
+): boolean {
+  const word = (a: string) => pad(a.toLowerCase() as Hex, { size: 32 });
+  return logs.some(
+    (l) =>
+      same(l.address, vault) &&
+      l.topics[0] === UNSHIELDED_TOPIC &&
+      same(l.topics[1] ?? "", paid.nullifier) &&
+      same(l.topics[2] ?? "", word(paid.asset)) &&
+      same(l.topics[3] ?? "", word(paid.escrow)) &&
+      BigInt(l.data || "0x0") === paid.amount
+  );
+}
+
 /**
- * Whether a swap's money waits at its escrow (someone sent the note's unshield
- * on its own, and no refund has finished yet): its balance covers the refund note.
+ * Whether a swap's money waits at its escrow (someone sent the note's unshield on its
+ * own, and no refund has finished yet): true when it covers the refund note; "short"
+ * when the note's money is there but the vault's fee rose past what the refund note
+ * allowed for, so that note can't land and the exit is the way back; false otherwise.
+ * "short" asks for at least what the vault's highest fee leaves, so a stray transfer
+ * to an escrow is never read as a swap's money.
  */
 export async function escrowHolds(
   client: PublicClient,
@@ -466,16 +748,14 @@ export async function escrowHolds(
   refundCommitment: Hex,
   refundAmount: bigint,
   blockNumber?: bigint
-): Promise<boolean> {
+): Promise<boolean | "short"> {
   const escrow = escrowAddress(info.router, info.assetIn, refundEscrowKey(info, nullifier, refundCommitment, refundAmount));
-  const held = await client.readContract({
-    address: info.assetIn,
-    abi: balanceOfAbi,
-    functionName: "balanceOf",
-    args: [escrow],
-    ...(blockNumber !== undefined ? { blockNumber } : {}),
-  });
-  return held >= refundAmount;
+  const at = blockNumber !== undefined ? { blockNumber } : {};
+  const held = same(info.assetIn, NATIVE)
+    ? await client.getBalance({ address: escrow, ...at })
+    : await client.readContract({ address: info.assetIn, abi: balanceOfAbi, functionName: "balanceOf", args: [escrow], ...at });
+  if (held >= refundAmount) return true;
+  return held > 0n && held >= refundAmountFor(BigInt(info.amountIn)) ? "short" : false;
 }
 
 const DEPOSIT_COMPONENTS = [
@@ -538,6 +818,76 @@ export const vaultSwapAbi = [
   ...SWAP_ERRORS,
 ] as const;
 
+const SPEND_COMPONENTS = [
+  { name: "proof", type: "bytes" },
+  { name: "root", type: "bytes32" },
+  { name: "nullifier", type: "bytes32" },
+  { name: "asset", type: "address" },
+  { name: "amount", type: "uint256" },
+] as const;
+
+/** v3's own calls: swap() names the exit key, escrowFor() takes the longer key, and exit() is new. */
+export const vaultSwapV3Abi = [
+  {
+    type: "function",
+    name: "swap",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "s", type: "tuple", components: SPEND_COMPONENTS },
+      { name: "d", type: "tuple", components: DEPOSIT_COMPONENTS },
+      { name: "r", type: "tuple", components: DEPOSIT_COMPONENTS },
+      { name: "route", type: "bytes" },
+      { name: "exitKey", type: "address" },
+      { name: "deadline", type: "uint256" },
+    ],
+    outputs: [{ name: "amountIn", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "escrowFor",
+    stateMutability: "view",
+    inputs: [
+      { name: "assetIn", type: "address" },
+      { name: "k", type: "tuple", components: ESCROW_KEY_V3_COMPONENTS },
+    ],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    type: "function",
+    name: "exit",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "assetIn", type: "address" },
+      { name: "k", type: "tuple", components: ESCROW_KEY_V3_COMPONENTS },
+      { name: "to", type: "address" },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [{ name: "amount", type: "uint256" }],
+  },
+  {
+    type: "error",
+    name: "OverInput",
+    inputs: [
+      { name: "needed", type: "uint256" },
+      { name: "available", type: "uint256" },
+    ],
+  },
+  {
+    type: "error",
+    name: "ShortOutput",
+    inputs: [
+      { name: "got", type: "uint256" },
+      { name: "wanted", type: "uint256" },
+    ],
+  },
+  { type: "error", name: "PoolNotAllowed", inputs: [{ name: "poolId", type: "bytes32" }] },
+  { type: "error", name: "BadExit", inputs: [] },
+  { type: "error", name: "SwapExpired", inputs: [] },
+  { type: "error", name: "EscrowFailed", inputs: [] },
+  { type: "error", name: "ReceiveBlocked", inputs: [] },
+  ...SWAP_ERRORS,
+] as const;
+
 const POOL_KEY_COMPONENTS = [
   { name: "currency0", type: "address" },
   { name: "currency1", type: "address" },
@@ -565,11 +915,12 @@ const holds = (k: PoolKey, c: string) => same(k.currency0, c) || same(k.currency
 
 /**
  * The currencies a route passes through, as the PoolManager sees them, worked
- * out exactly as the router does it (GloamVaultSwapV4b._walk), or null when the
- * router would refuse the route. A WETH note pays in ETH when its first pool
- * holds ETH and not WETH; a WETH note can be bought with a route that ends at
- * ETH. Each currency once, and WETH nowhere inside a route that unwraps or
- * wraps it. Every pool must be one of the router's (and pass `allowed`).
+ * out exactly as the router does it (GloamVaultSwapV4b and V4c _walk), or null when
+ * the router would refuse the route. A note in one form of ETH pays in the other
+ * when its first pool holds only that one, and a route can end in the other form
+ * from the new note. Each currency once, and an end that is converted nowhere
+ * inside the route in the form the note holds. v3 alone takes native ETH notes.
+ * Every pool must be one of the router's (and pass `allowed`).
  */
 export function routeCurrencies(
   r: SwapRouter,
@@ -580,10 +931,12 @@ export function routeCurrencies(
 ): Address[] | null {
   const n = route.length;
   if (r.venue !== "v4" || n === 0 || n > r.maxHops) return null;
-  if (same(assetIn, assetOut) || same(assetIn, NATIVE) || same(assetOut, NATIVE)) return null;
-  const weth = r.weth;
+  if (same(assetIn, assetOut)) return null;
+  if (r.version < 3 && (same(assetIn, NATIVE) || same(assetOut, NATIVE))) return null;
+  const twin = (a: Address) => ethTwin(r, a);
   let cur: Address = assetIn;
-  if (weth && same(assetIn, weth) && !holds(route[0]!, weth) && holds(route[0]!, NATIVE)) cur = NATIVE;
+  const inTwin = twin(assetIn);
+  if (inTwin !== null && !holds(route[0]!, assetIn) && holds(route[0]!, inTwin)) cur = inTwin;
   const path: Address[] = [cur];
   for (const k of route) {
     if (!r.pools.some((p) => sameKey(p, k)) || (allowed && !allowed(k))) return null;
@@ -592,13 +945,21 @@ export function routeCurrencies(
     else return null;
     path.push(cur);
   }
-  if (!same(cur, assetOut) && !(weth && same(assetOut, weth) && same(cur, NATIVE))) return null;
-  const wraps = same(path[0]!, NATIVE) || same(path[n]!, NATIVE);
+  const outTwin = twin(assetOut);
+  if (!same(cur, assetOut) && !(outTwin !== null && same(cur, outTwin))) return null;
   for (let i = 0; i <= n; i++) {
-    if (wraps && weth && same(path[i]!, weth)) return null;
+    if (!same(path[0]!, assetIn) && same(path[i]!, assetIn)) return null;
+    if (!same(path[n]!, assetOut) && same(path[i]!, assetOut)) return null;
     for (let j = i + 1; j <= n; j++) if (same(path[i]!, path[j]!)) return null;
   }
   return path;
+}
+
+/** The other form of ETH for `a`, or null when `a` is no ETH this router converts. */
+function ethTwin(r: SwapRouter, a: Address): Address | null {
+  if (!r.weth) return null;
+  if (same(a, r.weth)) return NATIVE;
+  return same(a, NATIVE) ? r.weth : null;
 }
 
 /**
@@ -614,13 +975,13 @@ export function routesBetween(
 ): PoolKey[][] {
   if (!r || r.venue !== "v4") return [];
   const pools = allowed ? r.pools.filter(allowed) : r.pools;
-  const weth = r.weth;
+  const inTwin = ethTwin(r, assetIn);
   const out: PoolKey[][] = [];
   const extend = (route: PoolKey[], cur: Address) => {
     for (const k of pools) {
       if (route.includes(k)) continue;
-      // a WETH note pays its first pool in ETH when that pool holds ETH and not WETH
-      const from = !route.length && weth && same(assetIn, weth) && !holds(k, weth) && holds(k, NATIVE) ? NATIVE : cur;
+      // a note pays its first pool in the other form of ETH when that pool holds only that one
+      const from = !route.length && inTwin !== null && !holds(k, assetIn) && holds(k, inTwin) ? inTwin : cur;
       if (!holds(k, from)) continue;
       const next = same(k.currency0, from) ? k.currency1 : k.currency0;
       const at = [...route, k];
@@ -663,7 +1024,7 @@ const LIVE_TTL_MS = 60_000;
  * one it doesn't allow, and a queued one shows only on the router's own word.
  */
 export async function livePools(client: PublicClient, r: SwapRouter): Promise<(k: PoolKey) => boolean> {
-  if (r.version !== 2) return () => true;
+  if (r.version === 1 || r.venue !== "v4") return () => true;
   const key = r.address.toLowerCase();
   const hit = liveCache.get(key);
   const ids = r.pools.map(poolId);
@@ -697,8 +1058,9 @@ export function offeredSwapAssets(
   openGated: ReadonlySet<string>,
   live: ((k: PoolKey) => boolean) | null
 ): Address[] {
+  const gated = r?.gated ?? RH_SWAP_ASSETS_V2_QUEUED;
   return assets.filter((a) => {
-    if (!RH_SWAP_ASSETS_V2_QUEUED.some((q) => same(q, a))) return true;
+    if (!gated.some((q) => same(q, a))) return true;
     if (!r || !live || !openGated.has(a.toLowerCase())) return false;
     return r.pools.some((k) => holds(k, a) && live(k));
   });
@@ -810,7 +1172,7 @@ async function v4ExactInAll(
     contracts: routes.map(
       (route, i) =>
         ({
-          address: RH_V4_QUOTER,
+          address: r.quoter ?? RH_V4_QUOTER,
           abi: quoterAbi,
           functionName: "quoteExactInput",
           args: [quoteParams(route, routeCurrencies(r, assetIn, assetOut, route)!, true, amountIn[i]!)],
@@ -830,7 +1192,7 @@ async function v4ExactOut(
   amountOut: bigint
 ): Promise<bigint> {
   const { result } = await client.simulateContract({
-    address: RH_V4_QUOTER,
+    address: r.quoter ?? RH_V4_QUOTER,
     abi: quoterAbi,
     functionName: "quoteExactOutput",
     args: [quoteParams(route, routeCurrencies(r, assetIn, assetOut, route)!, false, amountOut)],
@@ -842,12 +1204,18 @@ async function v4ExactOut(
  * The refund note a swap makes in advance, used only if someone sends the
  * note's unshield on its own (GloamVaultSwap): the amount less the vault's
  * highest possible cash-out fee (1%), so it is never more than arrives.
+ *
+ * With `feeBps`, for a router with an exit: the amount less the vault's fee now and
+ * 0.1%, so a refund costs about what the swap would have. A raise of the fee waits out
+ * a 3-day timelock; should a proof outlive that, the refund won't land and the app
+ * offers the exit (escrowHolds).
  */
-export function refundAmountFor(amount: bigint): bigint {
-  return amount - amount / 100n;
+export function refundAmountFor(amount: bigint, feeBps?: number): bigint {
+  if (feeBps === undefined) return amount - amount / 100n;
+  return amount - vaultFeeOf(amount, feeBps) - amount / 1_000n;
 }
 
-/** One asset's beta deposit limits in the vault, and what it holds of it now. */
+/** One asset's deposit limits in the vault, and what it holds of it now. */
 export type VaultRoom = { perDeposit: bigint; total: bigint; deposited: bigint };
 
 /** The most one deposit of the asset can bring in right now: 0 when the vault doesn't take it or is full. */
@@ -863,15 +1231,17 @@ export function depositRoom(v: VaultRoom): bigint {
  * doesn't fit waits at the escrow until the limit is raised, so the app never
  * makes one: a larger note is split first.
  */
-export function refundFits(v: VaultRoom, amount: bigint): boolean {
-  const back = refundAmountFor(amount);
+export function refundFits(v: VaultRoom, amount: bigint, feeBps?: number): boolean {
+  const back = refundAmountFor(amount, feeBps);
   return back <= v.perDeposit && v.deposited - amount + back <= v.total;
 }
 
 /** The most of one note a single swap may spend so its refund note fits (refundFits). */
-export function maxSwapInForRefund(v: VaultRoom): bigint {
-  let a = (v.perDeposit * 100n) / 99n + 1n;
-  while (a > 0n && refundAmountFor(a) > v.perDeposit) a--;
+export function maxSwapInForRefund(v: VaultRoom, feeBps?: number): bigint {
+  // what the refund keeps, in basis points, at its smallest: rounding lands within a few units of this
+  const keeps = feeBps === undefined ? 9_900n : 9_990n - BigInt(feeBps);
+  let a = (v.perDeposit * 10_000n) / keeps + 3n;
+  while (a > 0n && refundAmountFor(a, feeBps) > v.perDeposit) a--;
   return a;
 }
 
@@ -898,10 +1268,67 @@ export type SwapPlan = {
    * in basis points (pool fees cancel out): the price impact. null when unknown.
    */
   impactBps?: number | null;
+  /** Between two dollar stablecoins: how far the route's rate falls below a dollar for a dollar. */
+  pegBps?: number | null;
 };
 
 /** Above this price impact the swap tab warns that a smaller amount gets a better rate. */
 export const IMPACT_WARN_BPS = 100;
+/**
+ * On Base and Ethereum a quote past this impact is refused. Their stablecoin pools hold a
+ * few hundred dollars at the market price and far more at any price: Base's EURC / USDC
+ * pool fills $10,000 at 13 cents on the dollar, without reverting, so a warning is not enough.
+ */
+export const IMPACT_STOP_BPS = 200;
+/** How far below a dollar for a dollar two dollar stablecoins may trade, in basis points, before the swap tab says so. */
+export const PEG_WARN_BPS = 50;
+/** And before the quote is refused: a pool this far off is drained or stale, or one of the two has lost its peg. */
+export const PEG_STOP_BPS = 200;
+
+/**
+ * A swap against market prices, on the same chains. A euro pair has no peg to hold it
+ * to, so the app weighs what goes in and what comes out at the marks it shows, fees
+ * included. It warns, and past the stop it won't send: marks are off-chain, so this
+ * lives in the swap tab alone, and no mark means no check.
+ */
+export const VALUE_WARN_BPS = 200;
+export const VALUE_STOP_BPS = 400;
+
+/** How much less `getUsd` is than `payUsd`, in basis points, never below 0. */
+export function valueGapBps(payUsd: number, getUsd: number): number | null {
+  if (!(payUsd > 0) || !(getUsd > 0)) return null;
+  return Math.max(0, Math.round((1 - getUsd / payUsd) * 10_000));
+}
+
+const CHECKED_CHAINS: readonly number[] = [8453, 1];
+
+/** Whether quotes on a chain are held to IMPACT_STOP_BPS and PEG_STOP_BPS. */
+export function swapChecked(chainId: number): boolean {
+  return CHECKED_CHAINS.includes(chainId);
+}
+
+const isDollar = (a?: Address) => Boolean(a) && DOLLARS.some((d) => same(d, a!));
+
+/** How far `out` falls below a dollar for a dollar of `amountIn`, in basis points, never below 0. */
+export function pegGapBps(amountIn: bigint, out: bigint): number {
+  if (amountIn <= 0n) return 0;
+  const bps = 10_000n - (out * 10_000n) / amountIn;
+  return bps > 0n ? Number(bps) : 0;
+}
+
+/** Why a quote was refused, and about the most of the note that would pass. null: no size would. */
+export class SwapQuoteRefused extends Error {
+  constructor(
+    message: string,
+    readonly fitsIn: bigint | null = null
+  ) {
+    super(message);
+    this.name = "SwapQuoteRefused";
+  }
+}
+
+export const SWAP_TOO_THIN = "This pool is too thin for that amount.";
+export const SWAP_OFF_PEG = "These two are too far apart right now. Nothing was swapped.";
 
 /**
  * The best swap of a note worth `amountIn` of `assetIn` into `assetOut`: the
@@ -925,7 +1352,7 @@ export async function planVaultSwap(client: PublicClient, chainId: number, p: Sw
   }
   const available = p.amountIn - vaultFeeOf(p.amountIn, p.feeBps);
   if (available <= 0n) throw new Error("That amount is too small to swap.");
-  const buffer = BigInt(swapBufferBps(chainId));
+  const buffer = BigInt(swapBufferBps(chainId, p.assetIn, p.assetOut));
 
   if (chainId === 4217) {
     const expected = await client.readContract({
@@ -962,9 +1389,41 @@ export async function planVaultSwap(client: PublicClient, chainId: number, p: Sw
   if (amountOut <= 0n) throw new Error("That amount is too small to swap.");
   const small = probe > 0n ? outs[routes.length + best]! : 0n;
   const impactBps = small > 0n ? priceImpactBps(available, outs[best]!, probe, small) : null;
-  const cost = await v4ExactOut(client, r, route, p.assetIn, p.assetOut, amountOut);
+  const pegBps = isDollar(p.assetIn) && isDollar(p.assetOut) ? pegGapBps(available, outs[best]!) : null;
+  if (swapChecked(chainId)) {
+    // thin first: a pool that ran out reads as off its peg too, and only this says what size fits
+    if (impactBps !== null && impactBps > IMPACT_STOP_BPS) {
+      const fits = await largestFair(client, r, route, p, available, probe, small);
+      throw new SwapQuoteRefused(SWAP_TOO_THIN, fits > 0n ? noteFor(fits, p.feeBps) : null);
+    }
+    if (pegBps !== null && pegBps > PEG_STOP_BPS) throw new SwapQuoteRefused(SWAP_OFF_PEG);
+  }
+  // the buffer asks for less than the pool quoted, so one that can't fill even that moved since
+  const cost = await v4ExactOut(client, r, route, p.assetIn, p.assetOut, amountOut).catch(() => available + 1n);
   if (cost > available) throw new Error("The price is moving too fast. Try again in a moment.");
-  return { router: r.address, available, amountOut, cost, leftover: available - cost, route, impactBps };
+  return { router: r.address, available, amountOut, cost, leftover: available - cost, route, impactBps, pegBps };
+}
+
+/** The note that brings in about `arrives` after the vault's fee. */
+function noteFor(arrives: bigint, feeBps: number): bigint {
+  return (arrives * 10_000n) / (10_000n - BigInt(feeBps));
+}
+
+/** The largest of a few halvings of `available` that `route` fills within IMPACT_WARN_BPS. 0 when none does. */
+async function largestFair(
+  client: PublicClient,
+  r: SwapRouter,
+  route: PoolKey[],
+  p: SwapAsk,
+  available: bigint,
+  probe: bigint,
+  small: bigint
+): Promise<bigint> {
+  const sizes = [2n, 4n, 8n, 16n, 32n, 64n].map((d) => available / d).filter((a) => a > probe);
+  if (!sizes.length) return 0n;
+  const outs = await v4ExactInAll(client, r, sizes.map(() => route), p.assetIn, p.assetOut, sizes);
+  const i = sizes.findIndex((a, j) => outs[j]! > 0n && priceImpactBps(a, outs[j]!, probe, small) <= IMPACT_WARN_BPS);
+  return i < 0 ? 0n : sizes[i]!;
 }
 
 /** 1 - (out / in) / (smallOut / smallIn), in basis points, never below 0. */

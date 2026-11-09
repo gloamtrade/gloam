@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
+import { swapMainnets } from "@/lib/vaultSwap";
+import { ELYSIUM, ELYSIUM_TESTNET } from "@/lib/elysium";
 
 const MAINNETS = liveMainnetNames();
 
@@ -11,8 +13,10 @@ const MAINNET_IDS = [
   "Tempo 4217",
   ...(mainnetPool(8453) ? ["Base 8453"] : []),
   ...(mainnetPool(1) ? ["Ethereum 1"] : []),
+  // Elysium, only while it is on (lib/elysium.ts)
+  ...(ELYSIUM ? [`Elysium ${ELYSIUM.chainId}`] : []),
 ].join(", ");
-const MAINNET_CHAIN_IDS = [4663, 4217, ...(mainnetPool(8453) ? [8453] : []), ...(mainnetPool(1) ? [1] : [])].join(" · ");
+const MAINNET_CHAIN_IDS = [4663, 4217, ...(mainnetPool(8453) ? [8453] : []), ...(mainnetPool(1) ? [1] : []), ...(ELYSIUM ? [ELYSIUM.chainId] : [])].join(" · ");
 
 export const metadata: Metadata = {
   title: "SDK",
@@ -28,7 +32,7 @@ export default function DocsSdkPage() {
       glance={[
         { label: "Package", value: "@gloamtrade/sdk" },
         { label: "Runtime", value: "browser + node" },
-        { label: "Chains", value: `Mainnet ${MAINNET_CHAIN_IDS}, testnet 46630 · 42431 · 84532 · 11155111` },
+        { label: "Chains", value: `Mainnet ${MAINNET_CHAIN_IDS}, testnet 46630 · 42431 · 84532 · 11155111${ELYSIUM_TESTNET ? " · 99801" : ""}` },
         { label: "Proofs", value: "Groth16 + Poseidon" },
       ]}
       quickLinks={[
@@ -117,23 +121,24 @@ npm install snarkjs   # optional peer, for proving`}</code>
           On Robinhood Chain mainnet the pool takes USDG (
           <code>RH_MAINNET_USDG</code>), $GLOAM (<code>GLOAM_TOKEN</code>), PONS (
           <code>RH_MAINNET_PONS</code>) and CASHCAT (
-          <code>RH_MAINNET_CASHCAT</code>), then native ETH (
+          <code>RH_MAINNET_CASHCAT</code>), native ETH (
           <code>NATIVE_ASSET</code>), AI (<code>RH_MAINNET_AI</code>) and ORBIO (
-          <code>RH_MAINNET_ORBIO</code>) once each limit lands through the
-          timelock. On Tempo mainnet it takes <code>TEMPO_USDCE</code>,{" "}
+          <code>RH_MAINNET_ORBIO</code>). On Tempo mainnet it takes <code>TEMPO_USDCE</code>,{" "}
           <code>TEMPO_PATHUSD</code>, <code>TEMPO_USDT0</code> and{" "}
           <code>TEMPO_OUSD</code>.
         </li>
         <li>
-          Beta deposit limits: 50,000 per deposit and 2,500,000 in total for
+          Deposit limits: 50,000 per deposit and 2,500,000 in total for
           each stablecoin; $GLOAM 2,500,000 per deposit and 25,000,000 in total.
-          Each network&apos;s <code>assets</code> carry the launch value in{" "}
+          Each network&apos;s <code>assets</code> carry a snapshot in{" "}
           <code>depositLimit</code>; <code>readDepositLimit</code> reads the
           live limit from the vault.
         </li>
         <li>
-          A mainnet cash out costs 0.25% (<code>CASH_OUT_FEE_BPS = 25</code>);{" "}
-          <code>cashOutFee(amount)</code> is what the pool keeps. Deposits and
+          A mainnet cash out costs 0.5% (<code>CASH_OUT_FEE_BPS = 50</code>);{" "}
+          <code>cashOutFee(amount)</code> is what the pool keeps. The pool takes
+          it when the cash out lands, so for a rate that matters read{" "}
+          <code>readCashOutFeeBps(client, pool)</code>. Direct deposits and
           private payments are free.
         </li>
       </ul>
@@ -177,7 +182,7 @@ const intent = await buildShieldBoundIntent({
   chainId: net.chainId,
   poolAddress: net.pool,
   asset: TEMPO_USDCE,
-  amountWei: 25_000_000n,                    // 25 USDC.e (6 decimals); beta cap is 50,000 per deposit
+  amountWei: 25_000_000n,                    // 25 USDC.e (6 decimals); the limit is 50,000 per deposit
   prover: artifactProver(circuitArtifactUrls("shield", net.chainId)),
 });
 
@@ -433,8 +438,8 @@ for (const p of payments) {
 
       <h2>Guardrails</h2>
       <p>
-        Mainnet ({MAINNET_IDS}) is beta software: final ceremony keys, beta
-        deposit limits, a 0.25% cash-out fee. It was reviewed internally before
+        Mainnet ({MAINNET_IDS}) runs on the final ceremony keys, with
+        deposit limits, a 0.5% cash-out fee. It was reviewed internally before
         launch, and Kann Audits has since reviewed the vault contracts (
         <Link href="/security">report, 1 November 2026</Link>) and found no Critical, High or Medium issues. The SDK was
         not part of that review. The Robinhood Chain and Tempo
@@ -443,8 +448,10 @@ for (const p of payments) {
         Sepolia (<code>11155111</code>) run the final keys with test funds. Real
         privacy only, never a mock success. Note secrets are the sole spend
         authority: persist and protect them. The old sealed trade is retired.{" "}
-        <Link href="/docs/private-swaps">Private swaps</Link> run in the app on
-        Robinhood Chain and Tempo mainnet; the SDK does not build them yet. See{" "}
+        <Link href="/docs/private-swaps">Private swaps</Link> run on {swapMainnets()} mainnet,
+        and from 0.5.0 the SDK builds them too (<code>quoteSwap</code>, <code>buildSwapIntent</code>,
+        and <code>buildSwapRefund</code> / <code>buildSwapExit</code> to get the money back): a swap
+        hides who swapped, not the tokens or the amounts. See{" "}
         <Link href="/docs/production">the production gate</Link>.
       </p>
     </DocsLayout>

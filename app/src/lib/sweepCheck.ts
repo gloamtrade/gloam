@@ -21,6 +21,7 @@
  */
 import { parseAbiItem, type Address, type Hex } from "viem";
 import { getLogsSafe } from "./logRange";
+import { ELYSIUM_LOG_RANGE, isElysiumFamilyChainId } from "./elysium";
 
 const TRANSFER = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
 
@@ -34,6 +35,10 @@ const KNOWN_DELEGATES = new Set([
   "0x5a7fc11397e9a8ad41bf10bf13f22b0a63f96f6d", // Ambire AmbireAccount7702
   "0x000000009b1d0af20d8c6d0a44e162d11f9b8f00", // Uniswap Wallet CaliburEntry
   "0x4cd241e8d1510e30b2076397afc7508ae59c66c9", // eth-infinitism Simple7702Account
+  // Turnkey TKGasDelegate v1.1 (github.com/tkhq/gas-station): a Gloam wallet whose
+  // fee Turnkey sponsored delegates to it (lib/embeddedGas). Robinhood Chain and Base
+  // differ from Ethereum only in two EIP-712 immutables (checked 2 Nov 2026).
+  "0x955d84139e7621bc571b117d8eb5d28a4a222c6f",
 ]);
 
 /** Left within this many blocks of arriving: about 2 seconds on Robinhood Chain, 11 on Tempo. */
@@ -52,6 +57,9 @@ function lookback(chainId: number): { chunk: bigint; chunks: number } {
   if (chainId === 4217 || chainId === 42431) return { chunk: BigInt(100_000), chunks: 4 };
   if (chainId === 8453 || chainId === 84532) return { chunk: BigInt(50_000), chunks: 4 };
   if (chainId === 1) return { chunk: BigInt(10_000), chunks: 4 };
+  // Elysium, mainnet and testnet: its RPC's range (lib/elysium, 1,000,000 blocks by
+  // default, about 28 hours at 100 ms), four reads: about 4.6 days, like the others.
+  if (isElysiumFamilyChainId(chainId)) return { chunk: ELYSIUM_LOG_RANGE, chunks: 4 };
   // Ethereum Sepolia: 12-second blocks, so one 50,000-block read covers about a week.
   if (chainId === 11155111) return { chunk: BigInt(50_000), chunks: 1 };
   return { chunk: BigInt(5_000_000), chunks: 1 };
@@ -76,8 +84,8 @@ export type SweepReader = {
     args: { from?: Address; to?: Address };
     fromBlock: bigint;
     toBlock: bigint;
-  }): Promise<{ blockNumber: bigint | null; transactionHash: Hex | null; args?: { value?: bigint } }[]>;
-  getTransaction(args: { hash: Hex }): Promise<{ from: Address }>;
+  }): Promise<{ blockNumber: bigint | null; transactionHash: Hex | null; args?: { value?: bigint; to?: Address } }[]>;
+  getTransaction(args: { hash: Hex }): Promise<{ from: Address; to?: Address | null }>;
 };
 
 /** A Transfer log that moved money (zero-value ones are free for anyone to emit). */
@@ -91,14 +99,18 @@ export function delegateOf(code: Hex | undefined): Address | null {
   return `0x${code.slice(8)}` as Address;
 }
 
-async function delegatedCheck(client: SweepReader, address: Address): Promise<SweepCheck["delegated"]> {
+/** The address's EIP-7702 delegate, or null (none, or the read failed). */
+async function readDelegate(client: SweepReader, address: Address): Promise<Address | null> {
   try {
-    const delegate = delegateOf(await client.getCode({ address }));
-    if (!delegate || KNOWN_DELEGATES.has(delegate.toLowerCase())) return null;
-    return { delegate };
+    return delegateOf(await client.getCode({ address }));
   } catch {
     return null;
   }
+}
+
+function delegatedCheck(delegate: Address | null): SweepCheck["delegated"] {
+  if (!delegate || KNOWN_DELEGATES.has(delegate.toLowerCase())) return null;
+  return { delegate };
 }
 
 async function sweptCheck(
@@ -161,9 +173,31 @@ export async function checkSweep(
   token: Address | null,
   opts: { head?: bigint } = {}
 ): Promise<SweepCheck> {
-  const [delegated, swept] = await Promise.all([
-    delegatedCheck(client, address),
-    token ? sweptCheck(client, chainId, address, token, opts.head) : Promise.resolve(null),
-  ]);
-  return { delegated, swept };
+  const delegate = await readDelegate(client, address);
+  const swept = token ? await sweptCheck(client, chainId, address, token, opts.head) : null;
+  return { delegated: delegatedCheck(delegate), swept };
+}
+
+/**
+ * What a cash out does with a sweep check's answer:
+ *  - "clean": nothing to say
+ *  - "swept": the warning, and the cash out waits until the person chooses
+ *    (or, for a split piece, is refused)
+ *  - "own-wallet": a quieter note, and nothing held. Only for the person's own
+ *    Gloam wallet, the one connected right now.
+ *
+ * Why the own Gloam wallet, and not "a deposit Turnkey relayed": a Gloam wallet
+ * that adds money privately with its fee covered sends that deposit from Turnkey's
+ * paymaster, so to this check it looks exactly like a sweep. The paymaster can't be
+ * told apart from a thief's relayer: Turnkey publishes no relayer addresses, its gas
+ * station takes any caller (50 recent calls on Ethereum came from 22 senders), and
+ * its paymaster relays for every Turnkey organization, a thief's included. What does
+ * set the person's own wallet apart is that they are signed in to it now: its key
+ * only signs for their session, so a cash out to it lands where they are.
+ */
+export type SweepVerdict = "clean" | "swept" | "own-wallet";
+
+export function sweepVerdict(check: SweepCheck | null, opts: { ownGloamWallet: boolean }): SweepVerdict {
+  if (!check?.swept) return "clean";
+  return opts.ownGloamWallet ? "own-wallet" : "swept";
 }

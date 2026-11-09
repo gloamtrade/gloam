@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { isAddress } from "viem";
 import { isAdminAuthenticated } from "@/lib/adminAuth";
+import { bridgeFeeSetting } from "@/lib/bridge";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
 import { fetchRelayVolume } from "@/lib/relayVolume";
 import { readTractionSummary } from "@/lib/tractionStore";
@@ -17,9 +17,7 @@ export const maxDuration = 60;
 
 /** The bridge's own cut, as api/bridge/quote reads it: on only with a valid rate and recipient. */
 function bridgeFeeBps(): number | null {
-  const bps = Number(process.env.BRIDGE_FEE_BPS ?? "");
-  const recipient = process.env.BRIDGE_FEE_RECIPIENT ?? "";
-  return Number.isInteger(bps) && bps > 0 && bps <= 100 && isAddress(recipient) ? bps : null;
+  return bridgeFeeSetting(process.env)?.bps ?? null;
 }
 
 /**

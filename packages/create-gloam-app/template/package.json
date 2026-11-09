@@ -12,7 +12,7 @@
     "start": "next start"
   },
   "dependencies": {
-    "@gloamtrade/sdk": "^0.4.6",
+    "@gloamtrade/sdk": "^0.5.0",
     "next": "16.4.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",

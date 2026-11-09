@@ -2,6 +2,7 @@ import { NextResponse, after } from "next/server";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { recordTractionEvent } from "@/lib/tractionStore";
 import { cleanPath, cleanRef } from "@/lib/analyticsClean";
+import { isTrackEvent } from "@/lib/trackEvents";
 
 /** Events per IP per minute. A busy session sends a handful; the rest is noise. */
 const PER_IP_PER_MIN = 60;
@@ -17,8 +18,6 @@ type Body = {
   ts?: unknown;
 };
 
-/** snake_case event names only, so junk never lands in the counters. "total" is the store's own counter. */
-const EVENT_NAME = /^(?!total$)[a-z][a-z0-9_]{0,47}$/;
 
 /** Keys whose text or number values could carry what someone paid, who, or a secret. */
 const SENSITIVE_KEY =
@@ -77,7 +76,8 @@ export async function POST(req: Request) {
     } catch {
       data = null;
     }
-    if (!data || typeof data !== "object" || typeof data.t !== "string" || !EVENT_NAME.test(data.t)) {
+    // only the events the app sends (lib/trackEvents), so the counters hold nothing else
+    if (!data || typeof data !== "object" || !isTrackEvent(data.t)) {
       return NextResponse.json({ ok: false }, { status: 400 });
     }
 

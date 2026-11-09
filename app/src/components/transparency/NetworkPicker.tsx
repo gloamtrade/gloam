@@ -17,6 +17,8 @@ const LOGOS: Record<ChainFamily, string> = {
   tempo: "/brand/logos/tempo.svg",
   base: "/brand/chains/8453.png",
   ethereum: "/brand/chains/1.png",
+  // Elysium's mark, its official avatar circle-cropped
+  elysium: "/brand/chains/elysium.png",
 };
 
 const sideOf = (k: NetworkKey): Side => (getNetwork(k).testnet ? "testnet" : "mainnet");

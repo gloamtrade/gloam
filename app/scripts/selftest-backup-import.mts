@@ -69,6 +69,8 @@ const notSpent = async () => false;
 const seenAll = async () => true;
 const balance = () => shield.sumByAsset(shield.activeSpendableNotes(shield.loadLocalNotes(ME))).get(ASSET.toLowerCase()) ?? 0n;
 const stored = (id: string) => shield.loadLocalNotes(ME).find((x) => x.id === id);
+/** A restored note: under a new id of its own, found by its commitment. */
+const restored = (n: LocalNote) => shield.loadLocalNotes(ME).find((x) => x.commitment.toLowerCase() === n.commitment.toLowerCase());
 
 await test("a real note the vault holds is restored and counted", async () => {
   const before = balance();
@@ -112,7 +114,7 @@ await test("a real note the vault has not seen goes in out of the balance, and c
   if (!res.ok) return;
   assert.equal(res.count, 0);
   assert.equal(res.unseen, 1);
-  assert.equal(stored(waiting.id)?.unfunded, true);
+  assert.equal(restored(waiting)?.unfunded, true);
   assert.equal(balance(), before, "not money until it lands");
   // the sync asks again: still not there, then there
   const env = (seen: boolean) =>
@@ -120,7 +122,7 @@ await test("a real note the vault has not seen goes in out of the balance, and c
   assert.equal(await reconcileUnfunded(env(false)), false);
   assert.equal(balance(), before);
   assert.equal(await reconcileUnfunded(env(true)), true);
-  assert.equal(stored(waiting.id)?.unfunded, false);
+  assert.equal(restored(waiting)?.unfunded, false);
   assert.equal(balance() - before, 7_000_000n);
 });
 
@@ -132,6 +134,89 @@ await test("a restore that can't ask the vault still adds a real note, as before
   });
   assert.ok(res.ok && res.count === 1 && res.unseen === 0, JSON.stringify(res));
   assert.equal(balance() - before, 3_000_000n);
+});
+
+// ---------------------------------------------------------------- what a restore takes from a file
+
+const { getAllNotes, setAllNotes } = await import("../src/lib/noteVault");
+const { reconcileClaims } = await import("../src/lib/claimSweep");
+const { noteNullifierPoseidon } = await import("@gloamtrade/sdk");
+const nullifierOf = async (x: LocalNote) => fieldToHex(await noteNullifierPoseidon(BigInt(x.secret), BigInt(x.commitment))) as Hex;
+
+await test("a restored note is rebuilt from its money fields under a new id; what the file says about state is not taken", async () => {
+  const mine = await realNote(4_000_000n);
+  await shield.saveLocalNote(mine);
+  const theirs = await realNote(1_000_000n, {
+    id: mine.id, // the id of a note already here
+    status: "open",
+    secured: true,
+    nullifier: `0x${"77".repeat(32)}` as Hex,
+    unfunded: false,
+    leafIndex: 3,
+    txHash: `0x${"88".repeat(32)}` as Hex,
+    cashOut: { job: "job-1", at: Date.now(), to: ME, state: "scheduled" },
+    refundHeld: "blocked",
+    restoredSpent: true,
+    source: "chain",
+    note: "Invoice 042",
+  });
+  const asked: (Hex | undefined)[] = [];
+  const res = await shield.importNotesBackup(backupOf([theirs]), ME, async (x) => (asked.push(x.nullifier), false), seenAll);
+  assert.ok(res.ok && res.count === 1, JSON.stringify(res));
+  const back = restored(theirs)!;
+  assert.notEqual(back.id, mine.id, "a new id, never one already here");
+  assert.deepEqual(stored(mine.id), mine, "the note already here is exactly as it was");
+  assert.equal(back.nullifier, await nullifierOf(theirs), "the spend marker comes from the secret");
+  assert.deepEqual(asked, [undefined], "and the vault is asked by it, not by the file's");
+  for (const k of ["secured", "leafIndex", "txHash", "cashOut", "refundHeld", "restoredSpent", "unfunded", "sweptFrom", "sweepPending"] as const) {
+    assert.equal(back[k], undefined, `${k} is not taken from the file`);
+  }
+  assert.equal(back.source, "local");
+  assert.equal(back.status, "open");
+  assert.equal(back.note, "Invoice 042", "the memo comes along");
+});
+
+await test("a move in a file can name a note of the same file, never one already here", async () => {
+  const mine = await realNote(6_000_000n);
+  await shield.saveLocalNote(mine);
+  const src = await realNote(2_000_000n);
+  const viaMine = await realNote(2_000_000n, { sweepPending: true, sweptFrom: { id: mine.id, nullifier: await nullifierOf(mine) } });
+  const viaSrc = await realNote(2_000_000n, { sweepPending: true, sweptFrom: { id: src.id, nullifier: await nullifierOf(src) } });
+  const viaNone = await realNote(2_000_000n, { sweepPending: true, sweptFrom: { id: "imp-1", nullifier: `0x${"12".repeat(32)}` as Hex } });
+  const res = await shield.importNotesBackup(backupOf([viaMine, src, viaSrc, viaNone]), ME, notSpent, seenAll);
+  assert.ok(res.ok && res.skipped === 0, JSON.stringify(res));
+  assert.equal(restored(viaMine)!.sweptFrom, undefined, "naming a note already here: dropped");
+  assert.equal(restored(viaMine)!.sweepPending, undefined);
+  assert.equal(restored(viaSrc)!.sweptFrom?.id, restored(src)!.id, "naming a note of this file: its new id");
+  assert.equal(restored(viaSrc)!.sweepPending, true);
+  const none = restored(viaNone)!.sweptFrom!;
+  assert.ok(none.id !== "imp-1" && none.id.startsWith("imp-") && !getAllNotes().some((m) => m.id === none.id), "naming neither: an id no note has");
+  // the sync settles every pending move; the note already here is never touched
+  const env = {
+    chainId: net.chainId,
+    pool: net.pool,
+    chain: { isSpent: async () => true, isCommitmentSeen: async () => true, pathForCommitment: async () => null, waitForReceipt: async () => ({ status: "success" }) },
+    leafIndexOf: async () => 1,
+  } as unknown as Parameters<typeof reconcileClaims>[0];
+  await reconcileClaims(env);
+  assert.deepEqual(stored(mine.id), mine, "a note already here keeps its state");
+  assert.equal(restored(src)!.status, "recovered", "the source in the same file is the one settled");
+});
+
+await test("history a restore brings in is never trimmed, and never pushes other history out", async () => {
+  const keep = await realNote(1_000_000n, { status: "recovered", createdAt: 1 });
+  const open = await realNote(9_000_000n, { createdAt: 2 });
+  await setAllNotes([keep, open, ...getAllNotes()]);
+  const spentOnes: LocalNote[] = [];
+  for (let i = 0; i < 230; i++) spentOnes.push(await realNote(BigInt(1_000 + i)));
+  const res = await shield.importNotesBackup(backupOf(spentOnes), ME, async () => true, seenAll);
+  assert.ok(res.ok && res.moved === 230, JSON.stringify(res));
+  for (const x of spentOnes) assert.equal(restored(x)?.restoredSpent, true);
+  // more history saved later trims only the app's own history, past the cap
+  for (let i = 0; i < 205; i++) await shield.saveLocalNote({ ...(await realNote(BigInt(2_000 + i))), status: "recovered" });
+  assert.ok(spentOnes.every((x) => restored(x)), "every spent note a restore brought in is still here");
+  assert.ok(stored(open.id), "a spendable note is never trimmed");
+  assert.equal(stored(open.id)?.status, "open");
 });
 
 // ---------------------------------------------------------------- locked backups

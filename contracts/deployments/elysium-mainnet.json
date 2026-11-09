@@ -1,0 +1,43 @@
+{
+  "deployedAt": "2026-11-09",
+  "network": "Elysium",
+  "chainId": 99901,
+  "testnet": false,
+  "note": "Elysium mainnet: ShieldPoolPayments on the ceremony's final keys, with the launch deposit limits and the 0.5% cash-out fee, owned from its deploy by a VaultOwnerGuard (no proof checker can be replaced, ownership cannot move). Deployed with script/DeployElysiumMainnet.s.sol (DEPLOY-ELYSIUM.md) and read back by elysium-mainnet-after-deploy.sh. Gas is paid in HYPE.",
+  "ceremony": "final (13 contributors, drand 6561386, release ceremony-final)",
+  "deployer": "0xec9993765e249e8e9DC677B7BCB61F78b31c6b60",
+  "owner": "0x268D7CAd645282D1e77461b5B2dd997bd54eFAf5",
+  "guard": {
+    "address": "0x268D7CAd645282D1e77461b5B2dd997bd54eFAf5",
+    "controller": "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8",
+    "pendingController": null,
+    "acceptControllerTx": "0x73431d697bd8c0813293d9adffe318aff2a49dda2c01cad04687d9dbdee17a48"
+  },
+  "feeRecipient": "0xB3900ac9350903218e4c7597bAb0f008F01B30B8",
+  "withdrawFeeBps": 50,
+  "relayer": "0xb1E994586E62994648a0b866BF33F2EDd942512e",
+  "rpc": "https://rpc.elysium.kinetiq.xyz",
+  "contracts": {
+    "ShieldPoolPayments": "0x89d3042390204f57b8b4F8949D3c2203E4002164",
+    "deployBlock": 3248495,
+    "deployTx": "0xc8fc0d7e11f42cf255066ff8b4f0b84dc40403c6bd59f3bf761f4b857dd6bfc2",
+    "PoseidonT3": "0x62c435CE6886fa91e3b0e91500c6dC9219723457",
+    "PoseidonT3CodeHash": "0x354b26999e434f8256d168395315e1f51fc15bf49bf2e6bb58fc549bd597e7da",
+    "DualProofVerifier": "0x29053A713E3a7D37053374446869a6f55858FcEf",
+    "ShieldIVerifier": "0xAEB8cb99B3BB43eB230F9fEB7293fB5E39080016",
+    "VaultOwnerGuard": "0x268D7CAd645282D1e77461b5B2dd997bd54eFAf5",
+    "ShieldVerifierFinal": "0x2B28b693EA3A880085fe582E55B7f0EEC86d3EDB",
+    "UnshieldVerifierFinal": "0xD9f1c6e9fe4ffb1d4000f0eA921eE65F10bC725a",
+    "UnshieldIVerifierFinal": "0x13b1A2C8b822e1Bd031D53A03E106B3632d3E91C",
+    "TransferVerifierFinal": "0xA0c65bcb9417e07DCd1b1F97F0761B73A73823f6",
+    "TransferIVerifierFinal": "0x0c350Dd2D7988E3c837431954Ea8994C3C877e07"
+  },
+  "assets": {
+    "USDC": {
+      "address": "0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65",
+      "decimals": 6,
+      "perDeposit": "500000000",
+      "total": "25000000000"
+    }
+  }
+}

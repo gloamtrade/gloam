@@ -5,11 +5,12 @@
  * with the key are attributed to the partner, who sets their own fee and sees
  * volume and commissions in the portal. Partner fees are not collected yet, on
  * mainnet or testnet: the portal shows the fees your setting would apply, and
- * responses say charged: false. On mainnet the pool itself keeps Gloam's 0.25%
+ * responses say charged: false. On mainnet the pool itself keeps Gloam's 0.5%
  * cash-out fee (see cashOutFee).
  *
  *   const gloam = new GloamApiClient({ apiKey: process.env.GLOAM_API_KEY! });
  *   const { hash } = await gloam.relay(sendIntent);          // private payment
+ *   await gloam.relaySwap(swapIntent.relay);                  // private swap (store swapIntent.recovery first)
  *   await gloam.attributeDeposit({ chainId, txHash });        // a deposit your app made
  *   const report = await gloam.verifyProof("gloamfunds1:...");
  *
@@ -24,6 +25,7 @@ import type { GloamNetworkKey } from "./constants.js";
 import type { GloamIntent } from "./intents.js";
 import { RELAY_MAYBE_SENT } from "./relay.js";
 import type { SweepSubmitter } from "./sweep.js";
+import { assertSwapSendable, type SwapRelayCall } from "./swapIntent.js";
 
 export const GLOAM_API_URL = "https://gloam.trade";
 
@@ -48,7 +50,7 @@ export class GloamApiError extends Error {
   }
 }
 
-export type PartnerActivityKind = "private_payment" | "cash_out" | "deposit";
+export type PartnerActivityKind = "private_payment" | "cash_out" | "deposit" | "private_swap";
 
 export interface PartnerActivity {
   id: string;
@@ -76,7 +78,7 @@ export interface ApiRelayResult {
   hash: Hex;
   chainId: number;
   network: string;
-  action: "transfer" | "unshield" | "memo";
+  action: "transfer" | "unshield" | "memo" | "swap" | "swapExit";
   attribution: RelayAttribution;
   /** False today on every network: partner fees are shown, not yet taken. */
   charged: boolean;
@@ -109,6 +111,54 @@ export interface ApiPaymentRequest {
   amount: string | null;
   note: string | null;
   name: string | null;
+}
+
+/** A swap quote from the partner API (POST /api/v1/swaps/quote). Amounts are decimal strings of base units. */
+export interface ApiSwapQuote {
+  network: string;
+  chainId: number;
+  router: Address;
+  routerVersion: 1 | 2 | 3;
+  venue: "v4" | "tempo";
+  assetIn: Address;
+  assetOut: Address;
+  amountIn: string;
+  feeBps: number;
+  available: string | null;
+  amountOut: string | null;
+  cost: string | null;
+  leftover: string | null;
+  route: { currency0: Address; currency1: Address; fee: number; tickSpacing: number; hooks: Address }[];
+  hops: number;
+  impactBps: number | null;
+  pegBps: number | null;
+  warnings: string[];
+  /** The first thing that keeps this swap from going, or null. */
+  stop: { code: string; message: string; fitsIn?: string; maxIn?: string; floorUsd?: number } | null;
+  limits: { maxIn: string | null; outRoom: string | null };
+  relay: { enabled: boolean; gasHigh: boolean } | null;
+  floorUsd: number | null;
+  valueChecked: false;
+  deadlineSeconds: number;
+  quotedAt: number;
+  ttlMs: number;
+  public: string;
+}
+
+/** One network's private swaps (GET /api/v1/swaps). */
+export interface ApiSwapNetwork {
+  network: string;
+  chainId: number;
+  label: string;
+  testnet: boolean;
+  live: boolean;
+  router: Address | null;
+  version: 1 | 2 | 3 | null;
+  venue: "v4" | "tempo" | null;
+  maxHops: number | null;
+  deadlineSeconds: number | null;
+  assets: { address: Address; symbol: string | null; decimals: number | null; native: boolean; opensLater: boolean }[];
+  earlierRouters: { address: Address; version: 1 | 2 | 3 }[];
 }
 
 const KEY_RE = /^gloam_(test|live)_[A-Za-z0-9_-]{43}$/;
@@ -198,6 +248,47 @@ export class GloamApiClient {
   /** Submit a built private_send or unshield intent through the relay, attributed to you. */
   relay(intent: GloamIntent): Promise<ApiRelayResult> {
     return this.request<ApiRelayResult>("POST", "/relay", relayBodyFor(intent));
+  }
+
+  /**
+   * Send a private swap, its refund or its exit (buildSwapIntent's `relay`,
+   * buildSwapRefund's or buildSwapExit's) through the relay with this key. A swap
+   * is counted to you like a payment, never charged. Store the swap's recovery
+   * record before calling this (sendSwap with swapSubmitter() does it for you).
+   */
+  relaySwap(call: SwapRelayCall): Promise<ApiRelayResult> {
+    if (call.action !== "swap" && call.action !== "swapExit") {
+      return Promise.reject(new GloamApiError("Only a swap or a swap exit goes through relaySwap.", "unsupported", 0, null));
+    }
+    assertSwapSendable(call);
+    return this.request<ApiRelayResult>("POST", "/relay", { ...call.body, action: call.action });
+  }
+
+  /** A submitter for sendSwap that relays with this key. An unclear answer is marked maybeSent: the swap may still land. */
+  swapSubmitter(): (call: SwapRelayCall) => Promise<Hex> {
+    return async (call) => {
+      try {
+        return (await this.relaySwap(call)).hash;
+      } catch (e) {
+        // only a clear refusal says nothing went out; a swap refused before sending (SwapRefusedError) never reached the relay
+        if (!(e instanceof GloamApiError) || !RELAY_MAYBE_SENT.has(e.code)) throw e;
+        throw Object.assign(e, { maybeSent: true });
+      }
+    };
+  }
+
+  /** Private swaps on every network: live or not, the router, what it swaps between. */
+  swapNetworks() {
+    return this.request<{ networks: ApiSwapNetwork[]; public: string }>("GET", "/swaps");
+  }
+
+  /**
+   * Quote a private swap on the server, with the stops the Gloam app applies. Read only.
+   * `amountIn` is the whole note's value in base units. quoteSwap in this SDK gives the
+   * same price from your own RPC.
+   */
+  swapQuote(args: { chainId?: number; network?: GloamNetworkKey; assetIn: Address; assetOut: Address; amountIn: bigint | string; via?: "relay" | "wallet" }) {
+    return this.request<ApiSwapQuote>("POST", "/swaps/quote", { ...args, amountIn: args.amountIn.toString() });
   }
 
   /** Post an encrypted payment message for a payment that already landed. */

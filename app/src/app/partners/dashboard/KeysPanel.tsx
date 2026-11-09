@@ -233,8 +233,8 @@ export function KeysPanel({
         </form>
         <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
           {liveKeys
-            ? "Live keys (gloam_live_) work on mainnet. Test keys (gloam_test_) work on Robinhood Chain testnet and Tempo testnet."
-            : "Test keys (gloam_test_) work on Robinhood Chain testnet and Tempo testnet. Live keys (gloam_live_) open when Gloam launches on mainnet."}{" "}
+            ? "Live keys (gloam_live_) work on mainnet. Test keys (gloam_test_) work on the testnets."
+            : "Test keys (gloam_test_) work on the testnets. Live keys (gloam_live_) open when Gloam launches on mainnet."}{" "}
           Keep keys on your server; the API does not answer browsers on other sites.
         </p>
         {err && (

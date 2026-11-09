@@ -304,7 +304,7 @@ await test("a job sealed with a key the relay lacks is not gone: it stays, and n
     const plain = job({ sendAfter: T0 + 1 });
     await store.create(plain);
     await assert.rejects(store.get(sealedJobs[0]!.id), JobSealError);
-    await assert.rejects(cancelJob(store, sealedJobs[0]!.id, T0), JobSealError);
+    await assert.rejects(cancelJob(store, sealedJobs[0]!.id, T0, sealedJobs[0]!.nullifier), JobSealError);
     const deps = { now: () => T0 + 10, readChain: async () => ({ spent: false, knownRoot: true }), send: async () => hex32(1) };
     const first = await runDueJobs(store, deps);
     assert.equal(first.length, 20);
@@ -470,7 +470,7 @@ await test("an unreadable job answers as a relay that can't say, never as unknow
     setKeys();
     const read = await route.GET(call("GET", sealed.id));
     assert.deepEqual([read.status, ((await read.json()) as { code: string }).code], [503, "later_off"]);
-    const del = await route.DELETE(call("DELETE", sealed.id));
+    const del = await route.DELETE(call("DELETE", sealed.id, { nullifier: sealed.nullifier }));
     assert.deepEqual([del.status, ((await del.json()) as { code: string }).code], [503, "later_off"]);
     assert.ok(r.kv.has(rec(sealed)), "nothing changed");
   });

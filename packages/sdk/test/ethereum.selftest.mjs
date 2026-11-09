@@ -5,7 +5,7 @@
  * MAINNET_POOLS[1]. This file checks that state, then runs itself again in a
  * child process with a placeholder pool put in before the SDK loads, so the
  * rest of the SDK can be checked against it: the final keys, payments only, the
- * five listed stablecoins and ETH with their beta limits, no testnet, and no
+ * five listed stablecoins and ETH with their deposit limits, no testnet, and no
  * memo board until the real deploy fills one in next to the vault. USDT's
  * approve rule is checked in both.
  *
@@ -134,11 +134,11 @@ if (FILLED) {
   assert(ETHEREUM_BDX === BDX, "ETHEREUM_BDX");
   for (const a of ETHEREUM_MAINNET_ASSETS) {
     if (a.symbol === "BDX") {
-      assert(a.decimals === 9 && a.depositLimit.perDeposit === 100_000n * 10n ** 9n && a.depositLimit.total === 2_000_000n * 10n ** 9n, "BDX: 100,000 per deposit, 2,000,000 in total");
+      assert(a.decimals === 9 && a.depositLimit.perDeposit === (1n << 128n) - 1n && a.depositLimit.total === (1n << 128n) - 1n, "BDX: no limit once its timelocked change lands");
     } else if (a.symbol === "ETH") {
-      assert(a.decimals === 18 && a.depositLimit.perDeposit === 2n * 10n ** 17n && a.depositLimit.total === 10n * 10n ** 18n, "ETH: 0.2 per deposit, 10 in total");
+      assert(a.decimals === 18 && a.depositLimit.perDeposit === 20n * 10n ** 18n && a.depositLimit.total === 1_000n * 10n ** 18n, "ETH: 20 per deposit, 1,000 in total, as read on chain");
     } else {
-      assert(a.decimals === 6 && a.depositLimit.perDeposit === 500_000_000n && a.depositLimit.total === 25_000_000_000n, `${a.symbol}: 500 per deposit, 25,000 in total`);
+      assert(a.decimals === 6 && a.depositLimit.perDeposit === 50_000_000_000n && a.depositLimit.total === 2_500_000_000_000n, `${a.symbol}: 50,000 per deposit, 2,500,000 in total, as read on chain`);
     }
   }
   const keys = gloamNetworks().map((n) => n.key);

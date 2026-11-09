@@ -6,6 +6,7 @@ import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { FAUCET_BLURB, FAUCET_URL } from "@/lib/faucet";
 import { baseSepoliaPool, ethereumSepoliaPool } from "@/lib/mainnet";
 import { CIRCLE_FAUCET_URL, PAXOS_FAUCET_URL } from "@/lib/tokens";
+import { swapMainnets } from "@/lib/vaultSwap";
 
 /** Base Sepolia shows in the app once its pool is filled in (lib/mainnet.ts). */
 const BASE_SEPOLIA_LIVE = baseSepoliaPool() !== null;
@@ -213,9 +214,9 @@ export default function DocsTestnetPage() {
           ? "Gloam also runs on Base Sepolia (chain ID 84532)."
           : "Base Sepolia (chain ID 84532) is next. It is not in the app yet; this is how it will work."}{" "}
         It is the testnet for Base, and it runs the mainnet vault: the
-        final keys, its own beta deposit limits (500 USDC or EURC
+        final keys, its own deposit limits (500 USDC or EURC
         per deposit and 25,000 in total, 0.2 ETH per deposit and 10 in total)
-        and the 0.25% cash-out fee, all on test funds. It takes test USDC, EURC
+        and a 0.25% cash-out fee (Base mainnet&apos;s is 0.5%), all on test funds. It takes test USDC, EURC
         and ETH; there is no USDT on Base Sepolia.
       </p>
       <ul>
@@ -250,9 +251,9 @@ export default function DocsTestnetPage() {
           ? "Gloam also runs on Ethereum Sepolia (chain ID 11155111), Ethereum's testnet."
           : "Ethereum Sepolia (chain ID 11155111), Ethereum's testnet, is next. It is not in the app yet; this is how it will work."}{" "}
         Like Base Sepolia it runs the mainnet vault: the final keys, its
-        own beta deposit limits (500 of each stablecoin per deposit and 25,000
-        in total, 0.2 ETH per deposit and 10 in total) and the 0.25% cash-out
-        fee. It takes test USDC, USDG, PYUSD, EURC and ETH; Tether issues no
+        own deposit limits (500 of each stablecoin per deposit and 25,000
+        in total, 0.2 ETH per deposit and 10 in total) and a 0.25% cash-out
+        fee (mainnet&apos;s is 0.5%). It takes test USDC, USDG, PYUSD, EURC and ETH; Tether issues no
         USDT on Sepolia.
       </p>
       <ul>
@@ -429,7 +430,7 @@ export default function DocsTestnetPage() {
 
       <h2 id="private-swaps">7b. Private swaps (mainnet)</h2>
       <p>
-        Swapping from a private balance runs on Robinhood Chain and Tempo
+        Swapping from a private balance runs on {swapMainnets()}{" "}
         mainnet, under Vault &gt; Swap. Who swapped stays
         private; the tokens and amounts are public. How it works, what it costs
         and what shows: <Link href="/docs/private-swaps">private swaps</Link>.
@@ -462,7 +463,7 @@ export default function DocsTestnetPage() {
         <li>Export note backup (Settings)</li>
         <li>
           Ready for mainnet? Pick one in the network selector and start
-          small. Beta limits cap each deposit (see{" "}
+          small. Deposit limits cap each deposit (see{" "}
           <Link href="/docs/chain#mainnet">Networks</Link>).
         </li>
         <li>

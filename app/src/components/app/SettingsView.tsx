@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useDisconnect } from "wagmi";
 import { walletParamsForChain } from "@/lib/chain";
 import { exitDemo, useAppAccount } from "@/lib/demo";
@@ -42,6 +42,9 @@ import { StatusPill } from "./StatusPill";
 import { VaultHealth } from "./VaultHealth";
 import { RecoverySettingsCard } from "./RecoveryPanel";
 import { restoreMessage } from "@/lib/restoreMessage";
+import { embeddedSignInEmail, onEmbeddedSignInEmail } from "@/lib/turnkeyBridge";
+import { subscribeToUpdates, unsubscribeFromUpdates } from "@/lib/updatesClient";
+import { BusyLabel } from "@/components/ui/Spinner";
 
 /* ------------------------------------------------------------ primitives */
 
@@ -182,6 +185,81 @@ function Status({ children }: { children: ReactNode }) {
     <p className="mt-3 rounded-[12px] bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-soft" role="status">
       {children}
     </p>
+  );
+}
+
+/* ------------------------------------------------------------ updates */
+
+/**
+ * Email updates: subscribe or unsubscribe with an email. Filled in only with the
+ * email a Gloam wallet signed in with, when this page already has it in memory.
+ * Only the email is sent (lib/updatesClient); the wallet never goes with it.
+ */
+function UpdatesCard() {
+  const signInEmail = useSyncExternalStore(onEmbeddedSignInEmail, embeddedSignInEmail, () => null);
+  const [typed, setTyped] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"in" | "out" | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const email = typed ?? signInEmail ?? "";
+
+  async function run(kind: "in" | "out") {
+    if (busy) return;
+    setBusy(kind);
+    setMsg(null);
+    const res = kind === "in" ? await subscribeToUpdates(email, "settings") : await unsubscribeFromUpdates(email);
+    setBusy(null);
+    setMsg(
+      res.ok
+        ? kind === "in"
+          ? "You're on the list. Every update has an unsubscribe link."
+          : "That email is off the list."
+        : res.message,
+    );
+  }
+
+  return (
+    <Card
+      title="Email updates"
+      description="News about Gloam now and then. We keep only the email, apart from your wallet."
+    >
+      <form
+        className="flex flex-wrap items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void run("in");
+        }}
+      >
+        <label htmlFor="updates-email" className="sr-only">
+          Email
+        </label>
+        <input
+          id="updates-email"
+          type="email"
+          inputMode="email"
+          autoComplete="email"
+          autoCapitalize="none"
+          spellCheck={false}
+          maxLength={254}
+          placeholder="you@example.com"
+          className="gl-input h-10 min-w-0 flex-1 basis-[220px] text-[14px]"
+          value={email}
+          onChange={(e) => setTyped(e.target.value)}
+        />
+        <button type="submit" disabled={busy !== null || !email.trim()} aria-busy={busy === "in"} className="btn btn-ink btn-sm h-10">
+          <BusyLabel busy={busy === "in"}>Subscribe</BusyLabel>
+        </button>
+        <button
+          type="button"
+          disabled={busy !== null || !email.trim()}
+          onClick={() => void run("out")}
+          aria-busy={busy === "out"}
+          className="btn btn-quiet btn-sm h-10 text-mute"
+        >
+          <BusyLabel busy={busy === "out"}>Unsubscribe</BusyLabel>
+        </button>
+      </form>
+      {msg && <Status>{msg}</Status>}
+    </Card>
   );
 }
 
@@ -840,6 +918,8 @@ export function SettingsView() {
         </div>
         {integrityMsg && <Status>{integrityMsg}</Status>}
       </Card>
+
+      <UpdatesCard />
 
       <Card id="help" title="Help" flush>
         <Row label="Telegram" hint="Ask the team and other testers.">

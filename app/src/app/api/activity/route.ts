@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAddress } from "viem";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { NETWORK_KEYS } from "@/lib/networks";
+import { ELYSIUM } from "@/lib/elysium";
 
 const EXPLORER_API = "https://explorer.testnet.chain.robinhood.com/api";
 /** Robinhood Chain mainnet's explorer answers the same account API (checked 2026-10-20). */
@@ -25,6 +26,10 @@ function explorerFor(chainId: string | null): string | null | "bad" {
   if (chainId === "1" && NETWORK_KEYS.includes("ethereum-mainnet")) return null;
   // Ethereum Sepolia too; Etherscan's API needs a key.
   if (chainId === "11155111" && NETWORK_KEYS.includes("ethereum")) return null;
+  // Elysium, once on (lib/elysium): read from the chain; its explorer's API is not known yet.
+  if (ELYSIUM && chainId === String(ELYSIUM.chainId) && NETWORK_KEYS.includes("elysium-mainnet")) return null;
+  // Elysium testnet too, once on.
+  if (chainId === "99801" && NETWORK_KEYS.includes("elysium")) return null;
   return "bad";
 }
 

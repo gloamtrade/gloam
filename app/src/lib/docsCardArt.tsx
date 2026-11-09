@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { C } from "./docsCard";
-import { MAINNET_CHAINS, mainnetPool } from "./mainnet";
+import { MAINNET_CHAINS, mainnetChainPool } from "./mainnet";
 
 /**
  * The small drawings on the docs link cards, one per page, each built from a
@@ -143,11 +143,12 @@ const CHAIN_PILLS: Record<string, [label: string, mono: string]> = {
   Tempo: ["Tempo", "T"],
   Base: ["Base", "B"],
   Ethereum: ["Ethereum", "E"],
+  Elysium: ["Elysium", "EL"],
 };
 
 /** The mainnets with a pool in, as card pills (lib/mainnet.ts). */
 function liveChainPills(): [string, string][] {
-  return MAINNET_CHAINS.filter((c) => mainnetPool(c.chainId)).map((c) => CHAIN_PILLS[c.name] ?? [c.name, c.name.slice(0, 1)]);
+  return MAINNET_CHAINS.filter((c) => mainnetChainPool(c.chainId)).map((c) => CHAIN_PILLS[c.name] ?? [c.name, c.name.slice(0, 1)]);
 }
 
 /**
@@ -530,7 +531,7 @@ export function TimelineArt() {
 export function ChecklistArt() {
   const items: [string, boolean][] = [
     ["Final keys", true],
-    ["Beta limits", true],
+    ["Deposit limits", true],
     ["Internal review", true],
     ["Multisig owner", false],
   ];
@@ -899,6 +900,45 @@ export function JobArt() {
       {line("Fee", <Text size={21}>0.05 USDC</Text>)}
       {line("Payout", <Hidden n={4} d={8} gap={6} />, true)}
       {line("Payout", <Hidden n={4} d={8} gap={6} />, true)}
+    </div>
+  );
+}
+
+/** Video contest: a video frame with a play mark, and a progress line under it. */
+export function PlayArt() {
+  return (
+    <div style={{ ...col, alignItems: "center" }}>
+      <div
+        style={{
+          ...row,
+          justifyContent: "center",
+          width: 300,
+          height: 172,
+          borderRadius: 22,
+          border: `1.5px solid ${C.line}`,
+          background: C.surface,
+        }}
+      >
+        <div
+          style={{
+            ...row,
+            justifyContent: "center",
+            width: 72,
+            height: 72,
+            borderRadius: 36,
+            background: C.tintSoft,
+            border: `1.5px solid ${C.tintLine}`,
+          }}
+        >
+          <svg width={28} height={28} viewBox="0 0 24 24" style={{ marginLeft: 4 }}>
+            <path d="M7 4.5v15l12-7.5z" fill={C.tint} />
+          </svg>
+        </div>
+      </div>
+      <div style={{ ...row, gap: 10, marginTop: 22 }}>
+        <Bar w={120} h={8} color={C.paper} />
+        <Bar w={168} h={8} />
+      </div>
     </div>
   );
 }

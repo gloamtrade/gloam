@@ -39,6 +39,7 @@ import { SuccessModal } from "./SuccessModal";
 import { VaultTradePanel } from "./VaultTradePanel";
 import { SealedTradePanel } from "./SealedTradePanel";
 import { TokenLogo } from "./TokenLogo";
+import { walletErrorForPeople } from "@/lib/walletErrors";
 
 type Side = "buy" | "sell";
 type InputMode = "token" | "usd";
@@ -326,6 +327,11 @@ export function TradeView() {
   const autoSellAfterApprove = useRef(false);
   useEffect(() => {
     if (!autoSellAfterApprove.current) return;
+    // a declined approval, or a switch to Buy, ends it: never send a sell nobody clicked
+    if (writeError || side !== "sell") {
+      autoSellAfterApprove.current = false;
+      return;
+    }
     if (!token || !address || !sellAmountIn) return;
     if (allowance === undefined || allowance < sellAmountIn) return;
     autoSellAfterApprove.current = false;
@@ -349,13 +355,14 @@ export function TradeView() {
       ],
       chainId: network.chainId,
     });
-  }, [allowance, sellAmountIn, quoteOut, token, address, writeContract, network.chainId]);
+  }, [allowance, sellAmountIn, quoteOut, token, address, writeContract, network.chainId, writeError, side]);
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     resetWrite();
     handledHash.current = null;
+    autoSellAfterApprove.current = false;
 
     if (!isConnected || !onProduct || !address) {
       setError(`Connect on ${network.label}.`);
@@ -1067,7 +1074,7 @@ export function TradeView() {
                     role="alert"
                     className="rounded-[14px] bg-danger-soft px-4 py-3 text-[13px] leading-relaxed text-danger"
                   >
-                    {error || writeError?.message.slice(0, 160)}
+                    {error || walletErrorForPeople(writeError)}
                   </p>
                 )}
               </form>

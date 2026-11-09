@@ -1,18 +1,20 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
+import { swapMainnets } from "@/lib/vaultSwap";
+import { liveMainnetNames } from "@/lib/mainnet";
 
 export const metadata: Metadata = {
   title: "Agents",
   description:
-    "Give an AI agent private payments on Robinhood Chain, Tempo, Base and Ethereum: shield, pay, and disclose end to end via @gloamtrade/sdk and the @gloamtrade/mcp server, under policy.",
+    `Give an AI agent private payments on ${liveMainnetNames()}: shield, pay, and disclose end to end via @gloamtrade/sdk and the @gloamtrade/mcp server, under policy.`,
 };
 
 export default function DocsAgentsPage() {
   return (
     <DocsLayout
       title="Build a private agent"
-      lede="Give an AI agent a private execution surface on Robinhood Chain, Tempo, Base and Ethereum. It shields, pays, and proves holdings end to end, with size and strategy hidden and signing under policy."
+      lede={`Give an AI agent private payments on ${liveMainnetNames()}. It holds, pays and gets paid with amounts and payees hidden, proves what it holds when asked, and signs under policy.`}
       glance={[
         { label: "SDK", value: "@gloamtrade/sdk" },
         { label: "Server", value: "@gloamtrade/mcp (MCP)" },
@@ -23,16 +25,18 @@ export default function DocsAgentsPage() {
         { href: "/docs/sdk", label: "SDK" },
         { href: "/docs/sdk/disclosure", label: "Selective disclosure" },
         { href: "/docs/virtuals", label: "Virtuals agents" },
-        { href: "/docs/privacy-model", label: "Privacy model" },
+        { href: "/docs/integrate", label: "Agent kits and marketplaces" },
       ]}
     >
       <h2>Why agents need this most</h2>
       <p>
-        An agent trading a public chain leaks its whole strategy: every position,
-        size, and time is on the graph for anyone to copy or front-run. Agents run
-        predictable, high-frequency strategies, so they are the easiest to
-        reverse-engineer. Gloam gives an agent a private execution surface: hold,
-        move, and prove value with size hidden, so its edge stays its own.
+        An agent paying on a public chain shows every payment: who it paid, how
+        much and when, for anyone to read or copy. Agents pay often and in
+        patterns, so they are easy to follow. With Gloam an agent holds, pays and
+        gets paid with the amounts and payees hidden. Money going in and out of
+        the vault stays public. Private swaps in the Gloam app hide who swapped,
+        not the tokens or the amounts, and agents can&apos;t swap through the SDK
+        or the MCP server yet.
       </p>
 
       <h2>Two ways in</h2>
@@ -68,6 +72,15 @@ export default function DocsAgentsPage() {
         <Link href="/docs/virtuals">Gloam for Virtuals agents</Link> covers
         setup, every function, the limits, exactly what stays public, and the
         networks.
+      </p>
+
+      <h2 id="kits">For agent kits and marketplaces</h2>
+      <p>
+        Building a kit other people&apos;s agents run on, or an x402 marketplace?{" "}
+        <Link href="/docs/integrate">Add Gloam to your agent kit or marketplace</Link>{" "}
+        covers a drop-in tool pack that previews every payment before your
+        wallet signs it, bundling this MCP server next to yours, and taking
+        private x402 payments next to standard ones.
       </p>
 
       <h2 id="connect-by-url">Connect by URL</h2>
@@ -213,7 +226,7 @@ export default function DocsAgentsPage() {
         to a server. A Gloam address opens Pay and makes a private payment,
         free, with the amount hidden. A 0x address or an ENS name opens Cash out
         to that wallet: the relay sends it from the user&apos;s private balance
-        for 0.25%, so their wallet does not show, while the receiving wallet,
+        for 0.5%, so their wallet does not show, while the receiving wallet,
         the token and the amount are public. An ENS name is looked up on
         Ethereum mainnet and paid on the network the link names. A field that
         does not check out is left blank, with the reason shown to the user.
@@ -264,8 +277,12 @@ export default function DocsAgentsPage() {
           from the same screen.
         </li>
         <li>
-          <strong>Each top-up pays the usual 0.25% cash-out fee,</strong> taken
-          from that top-up when it goes out.
+          <strong>Each top-up pays the usual 0.5% cash-out fee,</strong> taken
+          from that top-up when it goes out, at the vault&apos;s rate that day.
+          A proof fixes the amount and the agent&apos;s wallet, not the fee, so if
+          the fee goes up, the top-ups still ahead pay the agent less. The screen
+          shows what each one will pay, and you can cancel any that hasn&apos;t
+          gone.
         </li>
         <li>
           <strong>An alert if one fails, if you want one.</strong> Give an https
@@ -363,13 +380,19 @@ const hash = await wallet.writeContract({
             </tr>
             <tr>
               <td>
-                <code>gloam_list_markets</code> / <code>gloam_quote</code>
+                <code>gloam_swap_quote</code>
               </td>
-              <td>Markets and indicative quotes, with what stays private (read)</td>
+              <td>The price of a private swap, and anything that would stop it (read)</td>
             </tr>
             <tr>
               <td>
-                <code>gloam_plan_shield</code> / <code>gloam_plan_private_trade</code>
+                <code>gloam_execute_private_swap</code> / <code>gloam_finish_swap</code>
+              </td>
+              <td>A private swap proved locally and sent through the Gloam relay, under the spending limits (&quot;swap&quot; must be listed); bring back a swap whose money waits at its escrow</td>
+            </tr>
+            <tr>
+              <td>
+                <code>gloam_plan_shield</code>
               </td>
               <td>Build an unsigned intent an agent can reason over (plan)</td>
             </tr>
@@ -502,6 +525,104 @@ const hash = await wallet.writeContract({
         a balance, the wallet or a key.
       </p>
 
+      <h2 id="check-budget-before-paying">Check the budget before paying (VEYA)</h2>
+      <p>
+        A Gloam note is spent with a proof, so wallet rules can&apos;t stop a
+        payment. A budget only holds before the payment, on the server that
+        keeps the notes. The MCP server can ask{" "}
+        <a href="https://veyanet.tech" target="_blank" rel="noreferrer">
+          VEYA
+        </a>{" "}
+        whether the agent&apos;s budget covers each payment, and only an allow
+        pays. A refusal, any other answer, an error, a bad setting or no answer
+        within five seconds all mean the agent does not pay, and nothing is
+        spent. With Agent Wormhole on too, it goes first, and both must allow.
+      </p>
+      <p>
+        It is off until you turn it on. Put these in the server&apos;s settings
+        (<code>~/.gloam/agent.env</code>) or its environment. The agent id is
+        one you choose, and a wallet address is refused:
+      </p>
+      <pre>
+        <code>{`GLOAM_VEYA_KEY=your-veya-key
+GLOAM_VEYA_URL=https://api.veyanet.tech/guard/v1/check
+GLOAM_VEYA_AGENT_ID=an-id-you-choose`}</code>
+      </pre>
+      <p>
+        VEYA covers USDG on Robinhood Chain. A payment on another chain or in
+        another asset is refused, so with the check on, the server pays only in
+        USDG on Robinhood Chain.
+      </p>
+      <p>
+        With this on, VEYA sees the agent id, the chain, the asset, the amount
+        and the payee during the check, and nothing else. It gets no resource
+        host and no payment request text, so it learns nothing about what was
+        bought. It never sees a note, a secret, a balance, a wallet or a key.
+        What VEYA keeps after the check is VEYA&apos;s to say. If VEYA ever
+        needs more than this to answer, the payment is refused and nothing is
+        spent.
+      </p>
+      <p>
+        This server enforces the check, off-chain. The vault does not know about
+        it, so it binds the agent only while the notes and the key are held by
+        this server and nowhere else. If a payment fails after an allow,
+        VEYA&apos;s running budget may sit ahead of what was really paid.
+      </p>
+      <p>
+        VEYA checks payments: <code>gloam_execute_private_pay</code> and{" "}
+        <code>gloam_fetch_paid</code>. These go through the spending limits but
+        not through VEYA: <code>gloam_execute_transfer</code>, a public send of
+        test ETH on Robinhood Chain testnet, and a private swap or a
+        swap&apos;s exit to an address, which only run when the owner lists{" "}
+        <code>swap</code> in the limits. Leave <code>swap</code> out if every
+        private spend must pass VEYA. A price of zero or less is refused before
+        any check, with the limits on or off.
+      </p>
+      <h3>The receipt after a payment</h3>
+      <p>
+        VEYA&apos;s allow carries a check id. Set{" "}
+        <code>GLOAM_VEYA_ANCHOR_URL</code> to{" "}
+        <code>https://api.veyanet.tech/guard/v1/anchor</code> as well, on the
+        same origin as the check URL since the key goes to both, and the
+        server proves each payment once it lands, with that id as the
+        receipt&apos;s verifier, and
+        hashes the proof into one <code>bytes32</code> leaf. VEYA gets that leaf
+        and the agent id, nothing else: never the record, the proof, the amount,
+        the payee, a note or the transaction hash. VEYA writes the leaf to{" "}
+        <code>storeCommitment</code>, so you need no anchoring wallet.
+      </p>
+      <p>
+        With receipts on, an allow without a usable check id does not pay,
+        because a payment can&apos;t be undone and it could never get its
+        receipt. The payment&apos;s answer, with its credential, never waits on
+        the receipt: it comes back as soon as the payment lands, with the
+        receipt <code>pending</code>, and the receipt is built after it, so a
+        challenge can&apos;t expire meanwhile and push the agent to pay twice.
+        Keep the server running until the receipt is done.{" "}
+        <code>gloam_retry_veya_receipts</code> shows where it stands and tries
+        again without paying anything, after <code>anchor_failed</code> or{" "}
+        <code>receipt_failed</code>. A leaf goes to VEYA only once its record is
+        saved, so one payment never gets two leaves.{" "}
+        <code>anchored</code> means VEYA named the leaf and the
+        transaction that wrote it, given as <code>anchorTx</code>; the server
+        does not read the chain to confirm the write. VEYA writes a leaf once,
+        so sending the same one again is safe, and it answers with the first
+        transaction.
+      </p>
+      <p>
+        The server keeps the full record in its encrypted note store. It shows
+        the asset, the minimum amount and the transaction hash, so no tool hands
+        it to the agent. See <code>examples/veya-receipt</code>.
+      </p>
+      <p>
+        What a receipt proves: a payment of at least the stated amount, in that
+        asset, made by that transaction into the vault, tied to VEYA&apos;s
+        check id. It does not prove who received it, since the payee stays
+        private, or that anything was delivered for it. The leaf on chain
+        proves only that VEYA wrote that leaf; whoever holds the record checks
+        the rest with <code>checkPaymentReceipt</code>.
+      </p>
+
       <h2>Spending limits</h2>
       <p>
         An agent that can sign can spend, so the owner sets its limits and every
@@ -551,7 +672,7 @@ const hash = await wallet.writeContract({
         every spend until you set them (or turn them off on purpose). Every
         spend is logged before it is signed, under a lock, so two calls at once
         cannot both squeeze under the daily cap. Configuration lives in the{" "}
-        <a href="https://github.com/cryptoduke01/gloam/tree/main/mcp#spending-limits">
+        <a href="https://github.com/gloamtrade/gloam/tree/main/mcp#spending-limits">
           MCP README
         </a>
         .
@@ -585,16 +706,16 @@ const hash = await wallet.writeContract({
       <p>
         No fabricated fills, ever. If a private path is not live, the tool says so
         and returns a plan rather than a fake success.{" "}
-        <Link href="/docs/private-swaps">Private swaps</Link> are live in the
-        Gloam app on the Robinhood Chain and Tempo mainnets, but the SDK and the MCP server do not swap
-        yet: the market and trade tools only plan, and the old sealed trade they
-        describe is retired. Shield, private send, cash out, and disclosure are
-        live and proof-gated. Mainnet uses the final keys from the 13-contributor
+        <Link href="/docs/private-swaps">Private swaps</Link> are live on the{" "}
+        {swapMainnets()} mainnets, in the Gloam app, the SDK (<code>buildSwapIntent</code>) and the
+        MCP server (<code>gloam_execute_private_swap</code>): a swap hides who swapped, not the
+        tokens or the amounts. The old sealed trade is retired. Shield, private send, cash out,
+        swaps and disclosure are proof-gated. Mainnet uses the final keys from the 13-contributor
         ceremony; testnet runs on dev-ceremony keys. The code was reviewed
         internally before launch, and Kann Audits reviewed the vault contracts
         (<Link href="/security">report, 1 November 2026</Link>) and found no Critical, High or Medium issues. The SDK
-        and the MCP server were not part of that review. Mainnet is
-        beta software, so start an agent on small limits.
+        and the MCP server were not part of that review. Start an agent on
+        small limits and raise them as you go.
       </p>
     </DocsLayout>
   );

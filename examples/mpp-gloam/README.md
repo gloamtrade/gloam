@@ -45,7 +45,7 @@ The chain id, pool and stablecoin come from the SDK's network list (`getGloamNet
 
 ## Going live on mainnet
 
-On mainnet, Gloam is beta software: deposits are capped (50,000 per deposit and 2,500,000 in total for each stablecoin), private payments and cash outs are not. MPP payments are private sends, so Gloam takes no fee on them; a cash out costs 0.25% (`cashOutFee(amount)`). The mainnet pools take payments only, with no private trading.
+On mainnet, deposits are capped (50,000 per deposit and 2,500,000 in total for each stablecoin), private payments and cash outs are not. MPP payments are private sends, so Gloam takes no fee on them; a cash out costs 0.5% (`cashOutFee(amount)`). The mainnet pools take payments only, with no private trading.
 
 Swap the mock for the chain, using the network object for every value:
 

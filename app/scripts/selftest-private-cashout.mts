@@ -185,17 +185,18 @@ await test("odd cents that match money in are flagged, so rounding can leave the
   assert.equal(planPieces({ amount: 10_123_456n, decimals: 6, avoid: [7n * U], random: seededRandom(1) })!.tailMatch, false);
 });
 
-await test("every piece pays the pool's fee on its own amount: the same 0.25% in total, never more", () => {
+await test("every piece pays the pool's fee on its own amount: the same 0.5% in total, never more", () => {
   const pieces = [20n * U, 25n * U, 7_500_000n];
-  assert.equal(piecesFee(pieces, 25), 50_000n + 62_500n + 18_750n);
-  assert.equal(piecesFee(pieces, 25), withdrawFeeOf(52_500_000n, 25));
+  assert.equal(piecesFee(pieces, 50), 100_000n + 125_000n + 37_500n);
+  assert.equal(piecesFee(pieces, 50), withdrawFeeOf(52_500_000n, 50));
+  assert.equal(piecesFee(pieces, 25), 50_000n + 62_500n + 18_750n, "a pool still at 0.25%");
   assert.equal(piecesFee(pieces, 0), 0n);
   const rand = seededRandom(9);
   for (let i = 0; i < 2000; i++) {
     const amount = 6n * U + BigInt(Math.floor(rand() * 10_000 * 1_000_000));
     const r = planPieces({ amount, decimals: 6, random: seededRandom(i) })!;
-    const whole = withdrawFeeOf(amount, 25);
-    const parts = piecesFee(r.pieces, 25);
+    const whole = withdrawFeeOf(amount, 50);
+    const parts = piecesFee(r.pieces, 50);
     assert.ok(parts <= whole && whole - parts < BigInt(r.pieces.length), `fee ${parts} vs ${whole}`);
   }
 });

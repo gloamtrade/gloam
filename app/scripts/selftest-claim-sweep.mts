@@ -157,6 +157,15 @@ function freshOf(claim: LocalNote) {
   return getAllNotes().filter((n) => n.sweptFrom?.id === claim.id);
 }
 const total = (ns: LocalNote[]) => ns.reduce((s, n) => s + BigInt(n.amountWei), 0n);
+/** A note as a restore wrote it: under a new id of its own, found by its commitment. */
+function restored(n: LocalNote): LocalNote {
+  return getAllNotes().find((m) => m.commitment.toLowerCase() === n.commitment.toLowerCase() && m.secret !== "0x")!;
+}
+/** What the balance counts of these notes, found by commitment. */
+function countedOf(...ns: LocalNote[]): LocalNote[] {
+  const cs = new Set(ns.map((n) => n.commitment.toLowerCase()));
+  return activeSpendableNotes(getAllNotes()).filter((m) => cs.has(m.commitment.toLowerCase()));
+}
 
 const noWallet = async (): Promise<Hex> => {
   throw new Error("wallet should not be used");
@@ -487,10 +496,11 @@ await test("the same backup where those notes aren't: the spent claim never coun
   if (!res.ok) return;
   assert.equal(res.moved, 1, "the claim is reported as spent since the backup");
   assert.equal(res.movedClaims, 1);
-  assert.equal(byId(claim.id).status, "recovered", "kept as history: the payment can still be proved");
-  assert.equal(total(counted(claim)), 0n, "never shown as money");
+  assert.equal(restored(claim).status, "recovered", "kept as history: the payment can still be proved");
+  assert.ok(restored(claim).id !== claim.id && restored(claim).id.startsWith("imp-"), "under a new id, still a claim");
+  assert.equal(total(countedOf(claim)), 0n, "never shown as money");
   await syncAsTheAppDoes(pool, env);
-  assert.equal(total(counted(claim)), 0n);
+  assert.equal(total(countedOf(claim)), 0n);
 });
 
 await test("a backup holding the swept note restores it, counted straight away and after the sync", async () => {
@@ -505,10 +515,11 @@ await test("a backup holding the swept note restores it, counted straight away a
 
   const res = await importNotesBackup(backup, ME, backupSpentCheck(env));
   assert.ok(res.ok && res.count >= 1 && res.moved === 0);
-  assert.deepEqual(counted(claim).map((n) => n.id), [fresh!.id]);
+  assert.deepEqual(countedOf(claim, fresh!).map((n) => n.commitment), [fresh!.commitment]);
+  assert.notEqual(restored(fresh!).sweptFrom?.id, claim.id, "the move it came by names no note here");
   await syncAsTheAppDoes(pool, env);
-  assert.deepEqual(counted(claim).map((n) => n.id), [fresh!.id]);
-  assert.equal(total(counted(claim)), 10_000_000n);
+  assert.deepEqual(countedOf(claim, fresh!).map((n) => n.commitment), [fresh!.commitment]);
+  assert.equal(total(countedOf(claim, fresh!)), 10_000_000n);
 });
 
 await test("a restore that can't read the vault still adds the note, for the sync to settle", async () => {
@@ -521,9 +532,9 @@ await test("a restore that can't read the vault still adds the note, for the syn
   const down = pool.env({ chain: { ...env.chain, isSpent: async () => { throw new Error("rpc down"); } } });
   const res = await importNotesBackup(backup, ME, backupSpentCheck(down));
   assert.ok(res.ok && res.moved === 0);
-  assert.equal(byId(claim.id).status, "open", "never dropped: a secret is only ever added");
+  assert.equal(restored(claim).status, "open", "never dropped: a secret is only ever added");
   await syncAsTheAppDoes(pool, env);
-  assert.equal(byId(claim.id).status, "recovered", "the sync retires it once the vault answers");
+  assert.equal(restored(claim).status, "recovered", "the sync retires it once the vault answers");
 });
 
 await test("a claim on another network is refused before anything runs", async () => {
@@ -606,6 +617,19 @@ await test("swap: an unshield sent alone keeps the refund note pending and finis
   await reconcileClaims(env);
   assert.equal(byId(refund.id).sweepPending, false);
   assert.equal(byId(refund.id).status, "open");
+});
+
+await test("swap: a refund note the vault's fee outgrew is held for the exit, not given up", async () => {
+  const pool = mockPool();
+  const { spentNote, refund } = await swapNotes(pool, 10_000_000n);
+  pool.spent.add(lc(spentNote.nullifier!));
+  let tried = 0;
+  await reconcileClaims(pool.env({ escrowWaiting: async () => "short", finishRefund: async () => void tried++ }));
+  assert.equal(byId(refund.id).status, "open", "the money is still there");
+  assert.equal(byId(refund.id).sweepPending, true, "and out of the balance");
+  assert.equal(byId(refund.id).refundHeld, "blocked", "which is what shows the exit");
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(tried, 0, "this refund note can't land, so no proof is spent on it");
 });
 
 await test("swap: an unreadable escrow keeps the refund note pending, and nothing is finished blind", async () => {

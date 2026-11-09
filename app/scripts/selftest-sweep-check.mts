@@ -10,12 +10,15 @@
  *  - known smart-wallet delegates are not flagged
  *  - zero-value transfers (free for anyone) can't fake a sweep or hide a real one
  *  - a node that fails every read: clean, never a blocked cash out
+ *  - a relayed transfer out of a delegated wallet is a sweep wherever it went,
+ *    the vault included (a thief relaying deposits into a note they hold); the
+ *    person's own connected Gloam wallet gets a quieter note and no hold
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-sweep-check.mts
  */
 import assert from "node:assert/strict";
 import { createPublicClient, http, type Address, type Hex } from "viem";
-import { SWEEP_CLEAN, checkSweep, delegateOf, type SweepReader } from "../src/lib/sweepCheck";
+import { SWEEP_CLEAN, checkSweep, delegateOf, sweepVerdict, type SweepReader } from "../src/lib/sweepCheck";
 
 const RH = 4663;
 const USDG = "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168";
@@ -109,5 +112,61 @@ const down: SweepReader = {
 };
 assert.deepEqual(await checkSweep(down, RH, "0x058dC9a70EE9fB5678eD500F7FE69AF974C884b6", USDG), SWEEP_CLEAN, "fails open");
 n += 1;
+
+// Money that left a delegated wallet in a transaction another account sent is a sweep,
+// whoever relayed it and wherever it went, the chain's Gloam vault included: Turnkey's
+// paymaster relays for every Turnkey organization and its gas station takes any caller,
+// so a relayed deposit proves nothing about who asked for it. A thief holding the key
+// who relays each arrival into the vault (a note the thief holds) is flagged.
+// The person's own connected Gloam wallet, whose sponsored deposits look the same, gets
+// a quieter note and no hold (sweepVerdict), and only that wallet.
+{
+  const WALLET = "0x00000000000000000000000000000000000000a1" as Address;
+  const TURNKEY_PAYMASTER = "0xdC77bc261D3E890FaA53c8910cD85173d9fb926d" as Address; // one of many senders seen calling the gas station
+  const THIEF_BOT = "0x000000000000000000000000000000000000bad1" as Address;
+  const THIEF = "0x000000000000000000000000000000000000beef" as Address;
+  const STATION = "0x5aF5194B4b0909eB978e3Cf1e25333852277f07D" as Address;
+  const VAULT = "0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194" as Address;
+  const ARRIVAL = `0x${"aa".repeat(32)}` as Hex;
+  const OUT = `0x${"dd".repeat(32)}` as Hex;
+  const reader = (code: Hex, out: { recipient: Address; from: Address; to: Address } | null): SweepReader => ({
+    getCode: async () => code,
+    getBlockNumber: async () => BigInt(1_000),
+    getLogs: async ({ args }) =>
+      args.to
+        ? [{ blockNumber: BigInt(900), transactionHash: ARRIVAL, args: { value: BigInt(50_000_000), to: WALLET } }]
+        : out
+          ? [{ blockNumber: BigInt(907), transactionHash: OUT, args: { value: BigInt(50_000_000), to: out.recipient } }]
+          : [],
+    getTransaction: async ({ hash }) => (hash === OUT ? { from: out!.from, to: out!.to } : { from: "0x00000000000000000000000000000000000000c3" as Address, to: USDG as Address }),
+  });
+  const turnkeyDelegate = "0xef0100955d84139e7621bc571b117d8eb5d28a4a222c6f" as Hex;
+  const check = (out: { recipient: Address; from: Address; to: Address } | null) => checkSweep(reader(turnkeyDelegate, out), RH, WALLET, USDG);
+
+  // the honest sponsored deposit: Turnkey's paymaster relays it into the vault through the gas station
+  const honest = await check({ recipient: VAULT, from: TURNKEY_PAYMASTER, to: STATION });
+  assert.equal(honest.swept?.evidenceTx, OUT, "on the chain alone it reads as a sweep");
+  assert.equal(honest.delegated, null, "Turnkey's delegate is known");
+  assert.equal(sweepVerdict(honest, { ownGloamWallet: true }), "own-wallet", "cashing out to one's own connected Gloam wallet: a note, no hold");
+  assert.equal(sweepVerdict(honest, { ownGloamWallet: false }), "swept", "to anyone else's address it stays a warning");
+
+  // a thief with the key relaying each arrival into the vault (a note the thief holds): flagged
+  for (const via of [WALLET, STATION]) {
+    const thief = await check({ recipient: VAULT, from: THIEF_BOT, to: via });
+    assert.equal(thief.swept?.evidenceTx, OUT, `thief-relayed vault deposit via ${via === STATION ? "the gas station" : "the wallet"}: a sweep`);
+    assert.equal(sweepVerdict(thief, { ownGloamWallet: false }), "swept");
+  }
+  // even relayed by the same paymaster Turnkey uses for everyone: flagged
+  assert.equal((await check({ recipient: VAULT, from: TURNKEY_PAYMASTER, to: WALLET })).swept?.evidenceTx, OUT, "a paymaster-relayed deposit proves nothing on its own");
+  // a relayed sweep to an outside address: flagged
+  assert.equal((await check({ recipient: THIEF, from: THIEF_BOT, to: WALLET })).swept?.evidenceTx, OUT);
+  // nothing left: clean, own wallet or not
+  const quiet = await check(null);
+  assert.deepEqual(quiet, SWEEP_CLEAN);
+  assert.equal(sweepVerdict(quiet, { ownGloamWallet: false }), "clean");
+  assert.equal(sweepVerdict(quiet, { ownGloamWallet: true }), "clean");
+  assert.equal(sweepVerdict(null, { ownGloamWallet: false }), "clean", "a check that didn't answer is no warning");
+  n += 13;
+}
 
 console.log(`sweep check: ${n} passed`);

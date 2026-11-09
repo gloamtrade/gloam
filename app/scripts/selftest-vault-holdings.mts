@@ -44,7 +44,8 @@ check("Robinhood mainnet: the listed tokens first, then every swap-landable one,
 check("every address a swap can land in is read, on every chain", () => {
   for (const [chain, assets] of Object.entries(VAULT_SWAP_ASSETS)) {
     const h = new Set(holdableTokens(Number(chain)).map((t) => lc(t.address)));
-    for (const a of assets) assert.ok(h.has(lc(a)), `${chain} ${a}`);
+    // a native ETH note is read as the chain's own coin (onchainMetrics), never as a token
+    for (const a of assets) assert.ok(BigInt(a) === 0n || h.has(lc(a)), `${chain} ${a}`);
   }
   const h = new Set(holdableTokens(4663).map((t) => lc(t.address)));
   for (const a of RH_SWAP_ASSETS_V2) assert.ok(h.has(lc(a)), `v2 ${a}`);

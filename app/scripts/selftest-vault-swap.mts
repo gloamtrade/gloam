@@ -53,7 +53,24 @@ import {
   vaultSwapRouter,
 } from "../src/lib/vaultSwap";
 import { getNetwork } from "../src/lib/networks";
-import { RelayError, relayVaultSwap } from "../src/lib/relay/server";
+import { RelayError, relayVaultSwap, relayVaultSwapExit } from "../src/lib/relay/server";
+import { cashOutTargetProblem as appCashOutTargetProblem } from "../src/lib/cashOutTarget";
+import {
+  BASE_SWAP_POOLS,
+  ETHEREUM_SWAP_POOLS,
+  SWAP_DEADLINE_SECONDS,
+  SWAP_ESCROW2_CODE_HASH,
+  SWAP_ESCROW2_INIT_CODE,
+  VAULT_SWAP_V3_ADDRESS,
+  VAULT_SWAP_V3_LIVE,
+  swapV3Live,
+  canExitVaultSwap,
+  exitAccount,
+  exitDigest,
+  swapBufferBps,
+  swapExpired,
+  swapRoutersOn,
+} from "../src/lib/vaultSwap";
 import { knownTokens } from "../src/lib/tokens";
 
 let n = 0;
@@ -416,6 +433,180 @@ n += 4;
 
   VAULT_SWAP_V2_ROUTER[4663] = null;
   VAULT_SWAP_ROUTERS[4663] = V1;
+}
+
+// v3 (GloamVaultSwapV4c, GloamVaultSwapTempo2): off everywhere, and pinned to what the contracts say.
+{
+  const pinned = JSON.parse(readFileSync(new URL("../../contracts/test/fixtures/router-next.json", import.meta.url), "utf8")) as {
+    escrowCodeHash: string;
+    chains: Record<string, { address: Address; poolIds?: string[] }>;
+  };
+  // nothing is deployed: every switch off, and Ethereum has a switch of its own
+  assert.deepEqual({ ...VAULT_SWAP_V3_LIVE }, { 4663: null, 8453: null, 1: null, 4217: null }, "no router address is filled in, so no chain is on");
+  assert.equal(vaultSwapRouter(8453), null, "no swaps on Base yet");
+  assert.equal(vaultSwapRouter(1), null, "no swaps on Ethereum yet");
+  assert.deepEqual(swapRoutersOn(8453), [], "nothing on /verify that isn't deployed");
+  n += 4;
+
+  for (const [id, c] of Object.entries(pinned.chains)) {
+    assert.equal(VAULT_SWAP_V3_ADDRESS[Number(id)]!.toLowerCase(), c.address.toLowerCase(), `v3's address on ${id}`);
+    const net = getNetwork(({ 4663: "robinhood-mainnet", 8453: "base-mainnet", 1: "ethereum-mainnet", 4217: "tempo-mainnet" } as const)[Number(id) as 4663]);
+    assert.ok(appCashOutTargetProblem(c.address, net)?.includes("swap router"), `a cash out to v3 is refused on ${id}, before it deploys`);
+    n += 2;
+  }
+  assert.equal(keccak256(SWAP_ESCROW2_INIT_CODE), SWAP_ESCROW2_CODE_HASH, "the pinned escrow code hashes to its pin");
+  assert.equal(SWAP_ESCROW2_CODE_HASH, pinned.escrowCodeHash, "the contracts' escrow");
+  assert.deepEqual(BASE_SWAP_POOLS.map(poolId), pinned.chains["8453"]!.poolIds, "Base: the deploy script's list");
+  assert.deepEqual(ETHEREUM_SWAP_POOLS.map(poolId), pinned.chains["1"]!.poolIds, "Ethereum: the deploy script's list");
+  assert.deepEqual([...RH_SWAP_POOLS_V2, ...RH_SWAP_POOLS_V2_QUEUED].map(poolId), pinned.chains["4663"]!.poolIds, "Robinhood Chain: v2's and the queued");
+  for (const k of [...BASE_SWAP_POOLS, ...ETHEREUM_SWAP_POOLS]) assert.equal(BigInt(k.hooks), 0n, "hookless only on Base and Ethereum");
+  n += 5;
+
+  // the switch: a router address filled in, v3 is what new swaps use; a wrong address is still off
+  const ETH: Address = "0x0000000000000000000000000000000000000000";
+  const [BU, BT, BE] = ["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42"] as Address[];
+  VAULT_SWAP_V3_LIVE[1] = "0x000000000000000000000000000000000000dEaD";
+  assert.equal(swapV3Live(1), false, "an address that isn't the pinned one is off");
+  VAULT_SWAP_V3_LIVE[1] = VAULT_SWAP_V3_ADDRESS[1]!;
+  assert.equal(swapV3Live(1), true, "the pinned address is on");
+  VAULT_SWAP_V3_LIVE[1] = null;
+  VAULT_SWAP_V3_LIVE[8453] = VAULT_SWAP_V3_ADDRESS[8453]!;
+  VAULT_SWAP_ROUTERS[8453] = VAULT_SWAP_V3_ADDRESS[8453]!;
+  const base = swapRouterFor(8453)!;
+  assert.equal(base.version, 3);
+  assert.equal(base.quoter?.toLowerCase(), "0x0d5e0f971ed27fbff6c2837bf31316121532048d");
+  // native notes, on routes the router takes; WETH is no vault asset here, but ETH is
+  assert.ok(isSwapAsset(8453, ETH), "an ETH note swaps on Base");
+  assert.deepEqual(routesBetween(ETH, BU, base).map((r) => r.length), [1, 1], "both ETH / USDC pools");
+  assert.ok(routesBetween(ETH, BT, base).length > 0 && routesBetween(ETH, BT, base).every((r) => r.length === 2), "ETH to USDT goes through USDC");
+  assert.ok(routesBetween(BE, ETH, base).every((r) => r.length === 2));
+  assert.equal(swapBufferBps(8453, BU, BT), 10, "two dollars: the thin buffer");
+  assert.equal(swapBufferBps(8453, ETH, BU), 50, "ETH moves");
+  assert.equal(swapBufferBps(8453, BU, BE), 50, "a euro isn't a dollar");
+  assert.equal(swapBufferBps(4663, USDG, GLOAM), 50);
+  assert.equal(swapBufferBps(4217), 10);
+  n += 12;
+  VAULT_SWAP_V3_LIVE[8453] = null;
+  VAULT_SWAP_ROUTERS[8453] = null;
+
+  // Robinhood Chain: the same rules as GloamVaultSwapV4c._walk, ETH and WETH both
+  VAULT_SWAP_V2_ROUTER[4663] = RH_V2;
+  VAULT_SWAP_V3_LIVE[4663] = VAULT_SWAP_V3_ADDRESS[4663]!;
+  VAULT_SWAP_ROUTERS[4663] = VAULT_SWAP_V3_ADDRESS[4663]!;
+  const v3 = swapRouterFor(4663)!;
+  assert.equal(v3.version, 3);
+  assert.equal(swapRouterFor(4663, RH_V2)!.version, 2, "v2 stays for its refunds");
+  assert.equal(swapRouterFor(4663, RH_V1)!.version, 1, "and v1");
+  const byHead = (h: string) => RH_SWAP_POOLS_V2.find((k) => poolId(k).startsWith(h))!;
+  const ethUsdg = byHead("0x387bf619");
+  const wethUsdg = byHead("0x84bd4e2d");
+  const ethGloamV3 = byHead("0xc5f37371");
+  // an ETH note on an ETH pool pays ETH; on a WETH pool the router wraps it
+  assert.deepEqual(routeCurrencies(v3, ETH, USDG, [ethUsdg]), [ETH, USDG]);
+  assert.deepEqual(routeCurrencies(v3, ETH, USDG, [wethUsdg]), [RH_WETH, USDG]);
+  // into an ETH note, by either kind of pool; a WETH note the same way
+  assert.deepEqual(routeCurrencies(v3, USDG, ETH, [ethUsdg]), [USDG, ETH]);
+  assert.deepEqual(routeCurrencies(v3, USDG, ETH, [wethUsdg]), [USDG, RH_WETH]);
+  assert.deepEqual(routeCurrencies(v3, RH_WETH, USDG, [wethUsdg]), [RH_WETH, USDG]);
+  assert.deepEqual(routeCurrencies(v3, RH_WETH, USDG, [ethUsdg]), [ETH, USDG]);
+  assert.deepEqual(routeCurrencies(v3, ETH, RH_WETH, [ethUsdg, wethUsdg]), [ETH, USDG, RH_WETH], "both forms, one at each end, no conversion");
+  // refused as the router refuses them
+  assert.equal(routeCurrencies(v3, ETH, RH_WETH, [wethUsdg, ethUsdg]), null, "converted at both ends");
+  assert.equal(routeCurrencies(v3, ETH, GLOAM, [wethUsdg, ethUsdg, ethGloamV3]), null, "ETH inside a route that converted it");
+  assert.equal(routeCurrencies(v3, USDG, GLOAM, [ethGloamV3]), null, "a USDG note never pays in ETH");
+  assert.equal(routeCurrencies(v3, ETH, ETH, [ethUsdg]), null, "the same asset");
+  // v2 still refuses a native note, so a route can't be built for a router that would revert
+  const v2only = swapRouterFor(4663, RH_V2)!;
+  assert.equal(routeCurrencies(v2only, ETH, USDG, [ethUsdg]), null, "v2 takes no native note");
+  assert.equal(routeCurrencies(v2only, USDG, ETH, [ethUsdg]), null);
+  assert.deepEqual(routeCurrencies(v2only, RH_WETH, USDG, [ethUsdg]), [ETH, USDG], "v2's WETH routes stand");
+  const ethRoutes = routesBetween(ETH, USDG, v3);
+  assert.ok(ethRoutes.some((r) => r.length === 1 && poolId(r[0]!) === poolId(wethUsdg)), "the walk finds a WETH pool for an ETH note");
+  assert.ok(ethRoutes.every((r) => routeCurrencies(v3, ETH, USDG, r)), "every route it finds, the router takes");
+  n += 17;
+
+  // ETH is offered on Robinhood Chain only once the vault's limit lands
+  const ethOpen = new Set([ETH.toLowerCase()]);
+  assert.ok(!offeredSwapAssets(v3.assets, v3, new Set(), () => true).includes(ETH), "the vault doesn't take ETH yet");
+  assert.ok(offeredSwapAssets(v3.assets, v3, ethOpen, () => true).includes(ETH), "and then it does");
+  n += 2;
+
+  // the relay: v3 needs its exit key, and an exit is checked like a cash out, before any read
+  const net3 = getNetwork("robinhood-mainnet");
+  const body = {
+    router: VAULT_SWAP_V3_ADDRESS[4663],
+    spend: { proof: `0x${"11".repeat(256)}`, root: `0x${"22".repeat(32)}`, nullifier: `0x${"33".repeat(32)}`, asset: ETH, amount: "50000000000000000" },
+    deposit: { proof: `0x${"44".repeat(256)}`, commitment: `0x${"55".repeat(32)}`, asset: USDG, amount: "100000000" },
+    refund: { proof: `0x${"66".repeat(256)}`, commitment: `0x${"77".repeat(32)}`, asset: ETH, amount: "49500000000000000" },
+    route: [ethUsdg],
+  };
+  await assert.rejects(relayVaultSwap(net3, body), (e: unknown) => e instanceof RelayError && e.code === "bad_request", "no exit key");
+  await assert.rejects(
+    relayVaultSwap(net3, { ...body, exitKey: "0x00000000000000000000000000000000000e0817" }),
+    (e: unknown) => e instanceof RelayError && e.code === "bad_request",
+    "no deadline"
+  );
+  n += 2;
+  const exitBody = {
+    router: VAULT_SWAP_V3_ADDRESS[4663],
+    asset: USDG,
+    to: "0x00000000000000000000000000000000000c0de1",
+    signature: `0x${"ab".repeat(65)}`,
+    key: {
+      nullifier: `0x${"33".repeat(32)}`, amountIn: "100", outCommitment: `0x${"55".repeat(32)}`, assetOut: GLOAM, amountOut: "100",
+      refundCommitment: `0x${"77".repeat(32)}`, refundAmount: "99", routeHash: `0x${"88".repeat(32)}`, exitKey: "0x00000000000000000000000000000000000e0817",
+      deadline: "1800",
+    },
+  };
+  const noExit = async (b: Record<string, unknown>, code: string) => {
+    await assert.rejects(relayVaultSwapExit(net3, b), (e: unknown) => e instanceof RelayError && e.code === code, code);
+    n++;
+  };
+  await noExit({ ...exitBody, router: RH_V2 }, "no_exit");
+  await noExit({ ...exitBody, router: "0x000000000000000000000000000000000000c0de" }, "swap_router");
+  await noExit({ ...exitBody, to: net3.pool! }, "vault_recipient");
+  await noExit({ ...exitBody, to: VAULT_SWAP_V3_ADDRESS[4663] }, "vault_recipient");
+  await noExit({ ...exitBody, to: USDG }, "vault_recipient");
+  await noExit({ ...exitBody, signature: "0x1234" }, "bad_request");
+  await noExit({ ...exitBody, key: { ...exitBody.key, deadline: undefined } }, "bad_request");
+  VAULT_SWAP_V3_LIVE[4663] = null;
+  VAULT_SWAP_ROUTERS[4663] = RH_V1;
+  VAULT_SWAP_V2_ROUTER[4663] = null;
+  n += 1;
+
+  // the deadline: 30 minutes by default, in the key, and a swap lands up to and including it
+  assert.equal(SWAP_DEADLINE_SECONDS, 1800);
+  assert.equal(swapExpired(1000n, 999n), false);
+  assert.equal(swapExpired(1000n, 1000n), false, "the deadline itself still lands, as on chain");
+  assert.equal(swapExpired(1000n, 1001n), true);
+  const keyOf = (deadline?: bigint) => ({
+    nullifier: `0x${"33".repeat(32)}` as const, amountIn: 100n, outCommitment: `0x${"55".repeat(32)}` as const, assetOut: GLOAM, amountOut: 100n,
+    refundCommitment: `0x${"77".repeat(32)}` as const, refundAmount: 99n, routeHash: `0x${"88".repeat(32)}` as const,
+    exitKey: "0x00000000000000000000000000000000000e0817" as Address, deadline,
+  });
+  assert.notEqual(escrowAddress(VAULT_SWAP_V3_ADDRESS[8453]!, USDG, keyOf(1800n)), escrowAddress(VAULT_SWAP_V3_ADDRESS[8453]!, USDG, keyOf(1801n)), "the key fixes it");
+  assert.throws(() => escrowAddress(VAULT_SWAP_V3_ADDRESS[8453]!, USDG, keyOf(undefined)), /deadline/, "a v3 key can't go without one");
+  n += 6;
+
+  // the exit key: from the refund note's secret, its own for each swap, and the digest fixes every part
+  const secret = `0x${"12".repeat(32)}` as const;
+  const a = exitAccount(secret);
+  assert.equal(a.address, exitAccount(secret).address, "the same note, the same key: a backup restores it");
+  assert.notEqual(a.address, exitAccount(`0x${"13".repeat(32)}`).address, "each swap's is its own");
+  const R = VAULT_SWAP_V3_ADDRESS[8453]!;
+  const E = "0x00000000000000000000000000000000000e5c20" as Address;
+  const T = "0x00000000000000000000000000000000000c0de1" as Address;
+  const d = exitDigest(8453, R, E, T);
+  assert.notEqual(d, exitDigest(1, R, E, T), "another chain");
+  assert.notEqual(d, exitDigest(8453, VAULT_SWAP_V3_ADDRESS[1]!, E, T), "another router");
+  assert.notEqual(d, exitDigest(8453, R, T, E), "another escrow or address");
+  // a refund shows the way out only when the vault refuses it, and only on a swap with an exit key
+  const held = { vaultSwap: { exitKey: T }, sweptFrom: {}, sweepPending: true, refundHeld: "blocked" as const };
+  assert.ok(canExitVaultSwap(held));
+  assert.ok(!canExitVaultSwap({ ...held, refundHeld: "returning" }), "on its way back");
+  assert.ok(!canExitVaultSwap({ ...held, vaultSwap: {} }), "an older router has no exit");
+  assert.ok(!canExitVaultSwap({ ...held, sweepPending: false }), "already settled");
+  n += 9;
 }
 
 // The relay: refused while off, then refused on bad input before it reads anything.

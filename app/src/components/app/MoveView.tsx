@@ -37,7 +37,7 @@ import { IssuerPolicyRow } from "./IssuerPolicyRow";
 import { noteCommitmentPoseidon, noteNullifierPoseidon } from "@/lib/notePoseidon";
 import { fieldToHex, hexToField } from "@/lib/poseidon";
 import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
-import type { SweepResult } from "@gloamtrade/sdk";
+import { randomNoteSeed, type SweepResult } from "@gloamtrade/sdk";
 
 import {
   buildNotePackage,
@@ -85,6 +85,7 @@ import { gasHighMessage } from "@/lib/relay/gasCeiling";
 import { RelayToggle } from "./RelayToggle";
 import { RelayGasNotice } from "./RelayGasNotice";
 import { PaymentRequestBanner, RequestPaymentCard } from "./PaymentRequest";
+import { queuePartnerJobs, registerLinkSpend, settlePartnerTx, usePartnerName } from "@/lib/partnerLinkClient";
 import {
   claimNetworkProblem,
   isWalletRequest,
@@ -106,10 +107,11 @@ import { PaymentTicketShare } from "./PaymentTicketShare";
 import { SentLinks } from "./SentLinks";
 import { makeSentLink, paymentNullifier, type SentLink } from "@/lib/sentLinks";
 import { removeSentLink, saveSentLink } from "@/lib/sentLinksStore";
-import { surelyNotSent } from "@/lib/walletErrors";
+import { surelyNotSent, walletErrorForPeople } from "@/lib/walletErrors";
 import {
   cancelCashOut,
   dismissReturnedCashOut,
+  feeMoved,
   reconcileCashOuts,
   releaseGoneCashOut,
   returnedCashOutNotes,
@@ -142,9 +144,9 @@ import {
   HowChoice,
   PieceLeftover,
   PiecesCard,
+  ScheduledCashOuts,
   SpreadOver,
   aboutTime,
-  scheduledLine,
 } from "./PrivateCashOut";
 import { cashOutPrivacyWarnings, cashOutSender, depositWallets, presetAmounts } from "@/lib/cashOutPrivacy";
 import { CashOutAmountChips, CashOutPrivacyLine, CashOutWarnings } from "./CashOutPrivacy";
@@ -157,7 +159,19 @@ import { ClaimSafetyLine } from "./ClaimSafetyLine";
 import { canSwapAfterClaim, takeFirstClaim } from "@/lib/afterClaim";
 import { TokenLogo } from "./TokenLogo";
 import { AddTokenToWallet } from "./AddTokenToWallet";
-import { checkSweep, type SweepCheck, type SweepReader } from "@/lib/sweepCheck";
+import { CrossChainCashOutStatus, CrossChainPicker, CrossChainQuoteCard } from "./CrossChainCashOut";
+import {
+  cashOutNet,
+  crossChainDestination,
+  crossChainDestinations,
+  crossChainProblem,
+  relayOrderUrl,
+  requestCrossChainQuote,
+  requoteStillFine,
+  type CrossChainQuote,
+} from "@/lib/cashOutCrossChain";
+import { checkSweep, sweepVerdict, type SweepCheck, type SweepReader } from "@/lib/sweepCheck";
+import { EMBEDDED_CONNECTOR_ID } from "@/lib/embeddedWallet";
 import { moveModeFromParam, searchWithMoveMode } from "@/lib/vaultNav";
 import { cashOutHandoff, classifyPayRecipient, isWalletRecipient } from "@/lib/payRecipient";
 import { useEnsAddress } from "@/hooks/useEnsAddress";
@@ -182,7 +196,16 @@ const RELAY_MAYBE_SENT = new Set(["maybe_sent", "rpc", "network", "error", "inte
 export function MoveView() {
   const shieldLive = isShieldDeployed();
   const poseidonMode = HASH_SCHEME === "poseidon";
-  const { address, isConnected, chainId } = useAppAccount();
+  const { address, isConnected, chainId, connector } = useAppAccount();
+  /** `to` is the Gloam wallet connected now (lib/sweepCheck sweepVerdict: its own sponsored deposits look like a sweep). */
+  const ownGloamWallet = (to: string | null | undefined) =>
+    Boolean(
+      to &&
+        address &&
+        connector?.id === EMBEDDED_CONNECTOR_ID &&
+        connector.type === "turnkey" &&
+        to.toLowerCase() === address.toLowerCase()
+    );
   const { network } = useNetwork();
   const onProduct = chainId === network.chainId;
   const { open, local: allLocal, refresh: refreshNotes } = useLocalShieldNotes(address);
@@ -209,6 +232,8 @@ export function MoveView() {
           network.key
         )
   );
+  // A partner's link code (p=): their name from their Gloam account, once the server says the code is live.
+  const partnerName = usePartnerName(request?.partnerCode ?? null);
   // The first-payment nudge (FirstPaymentCard) opens Send with a small amount
   // in one stablecoin (?suggest=5&suggestAsset=0x…). A request link wins over
   // it. Read once; the URL is cleaned up below so a refresh starts blank.
@@ -227,6 +252,11 @@ export function MoveView() {
   const sweepRuns = useRef(new Map<string, Promise<SweepCheck>>());
   /** Where the last cash out went, for the "see it in your wallet" step after it lands. */
   const [cashedOut, setCashedOut] = useState<{ to: Address; asset: Address } | null>(null);
+  // Cash out to another chain (lib/cashOutCrossChain): where it lands (null: this chain, as
+  // always), the live price for it, and the order just sent, for its status.
+  const [xDestId, setXDestId] = useState<string | null>(null);
+  const [xQuote, setXQuote] = useState<CrossChainQuote | null>(null);
+  const [xSent, setXSent] = useState<CrossChainQuote | null>(null);
   /** What was just scheduled: one cash out, or a private cash out's pieces (count, from `at` to `until`). */
   const [scheduledNotice, setScheduledNotice] = useState<{ at: number; label: string; count?: number; until?: number } | null>(null);
   // Cash out privately (lib/cashOutPrivately): a few pieces over time, the
@@ -274,6 +304,15 @@ export function MoveView() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [successTitle, setSuccessTitle] = useState("Done");
   const [busy, setBusy] = useState(false);
+  /** A cash out's checks (screening, the live fee) run before busy is set: one click at a time. */
+  const cashOutGate = useRef(false);
+  const [cashOutChecking, setCashOutChecking] = useState(false);
+  /** Opening a claim code (PBKDF2, spent check, tree sync) before it is saved: one at a time. */
+  const claimGate = useRef(false);
+  const [claimOpening, setClaimOpening] = useState(false);
+  /** The newest inbox scan: Check now waits for it, and an older one never ends its spinner. */
+  const scanRun = useRef(0);
+  const [scanning, setScanning] = useState(false);
   const [claimPreview, setClaimPreview] = useState<{ text: string; note?: string } | null>(null);
   const [payStyle, setPayStyle] = useState<PayStyle>("direct");
   const [recipientTag, setRecipientTag] = useState(() => request?.to ?? "");
@@ -411,6 +450,11 @@ export function MoveView() {
       setMode("send");
       setSelectedId(null);
       setRecipientTag(r.to ?? "");
+      // a request names who to pay: never turn it into a claim link the tab had chosen before
+      if (r.to) {
+        setPayStyle("direct");
+        setSendPassphrase("");
+      }
       setSendAmount(r.amount ?? "");
       setPayNote(r.note ?? "");
       setNoteOpen(Boolean(r.note));
@@ -482,6 +526,13 @@ export function MoveView() {
   const pendingShare = useRef<{ blob: string; amountLabel: string } | null>(
     null
   );
+  /**
+   * The payment or cash out in flight came from a partner's link: its spend was
+   * registered under the link's code before it was sent (by the app, or by the
+   * relay with the code it was handed), and it is asked to be counted once it
+   * lands (lib/partnerLinkClient). Never waited on.
+   */
+  const partnerSend = useRef<{ chainId: number } | null>(null);
   /** Analytics for the payment in flight: sent on a request, carrying a note. */
   const payTrack = useRef<{ chainId: number; request: boolean; note: boolean } | null>(null);
   /** The payment's code for Sent links, saved once the payment lands. */
@@ -564,6 +615,13 @@ export function MoveView() {
       }
 
       if (pendingAction.current === "cashout") countPerson("cashout", address, network.testnet);
+
+      // From a partner's link: the server checks this transaction on chain and counts it to the link it was registered under.
+      if ((pendingAction.current === "send" || pendingAction.current === "cashout") && partnerSend.current) {
+        const ps = partnerSend.current;
+        partnerSend.current = null;
+        settlePartnerTx({ chainId: ps.chainId, txHash });
+      }
 
       if (pendingAction.current === "send" && payTrack.current) {
         const t = payTrack.current;
@@ -703,6 +761,8 @@ export function MoveView() {
     pendingClaimLink.current = false;
     spentNoteId.current = null;
     payTrack.current = null;
+    // the wallet refused or the write failed: a memo's failure comes after the payment was reported
+    partnerSend.current = null;
     setShareBlob(landed?.blob ?? null);
     if (landed) {
       setShareAmountLabel(landed.amountLabel);
@@ -718,6 +778,10 @@ export function MoveView() {
     if (!receiptLost || !txHash || !busy) return;
     const action = pendingAction.current;
     keptBeforeSend.current = null;
+    // it may still land: the report waits for the chain, and counts nothing if it never does
+    const ps = partnerSend.current;
+    partnerSend.current = null;
+    if (ps && (action === "send" || action === "cashout")) settlePartnerTx({ chainId: ps.chainId, txHash });
     pendingChange.current = null;
     pendingShare.current = null;
     pendingMemo.current = null;
@@ -840,14 +904,15 @@ export function MoveView() {
   // Cash-out fee (mainnet pools). The proof still spends the whole note; the
   // pool keeps the fee and pays the rest. Older pools fail this read: no fee.
   const demoMode = useDemo();
-  const { data: feeBpsRead } = useReadContract({
+  const { data: feeBpsRead, refetch: refetchFee } = useReadContract({
     address: network.pool ?? undefined,
     abi: shieldPoolAbi,
     functionName: "withdrawFeeBps",
     chainId: network.chainId,
     query: { enabled: Boolean(network.pool) && mode === "cashout" && !demoMode, refetchInterval: 60_000 },
   });
-  const cashOutFeeBps = typeof feeBpsRead === "number" ? feeBpsRead : 0;
+  const liveFeeBps = typeof feeBpsRead === "number" ? feeBpsRead : null;
+  const cashOutFeeBps = liveFeeBps ?? 0;
   // On mainnet the fee must be known before anyone confirms: a failed read must
   // not show the full amount when the pool will keep a fee. Testnet pools have no fee.
   const cashOutFeeUnknown =
@@ -858,6 +923,27 @@ export function MoveView() {
     selected != null &&
     poolForCashOut != null &&
     poolForCashOut < cashOutAmount;
+
+  // Cash out to another chain (lib/cashOutCrossChain): offered for the stablecoins Relay
+  // takes from this chain. Now and all at once only; picking it turns off later and pieces.
+  const xDestinations = mode === "cashout" && selected && !demoMode ? crossChainDestinations(network.chainId, selected.asset) : [];
+  const xDestination = xDestinations.find((d) => d.id === xDestId) ?? null;
+  const xActive = xDestination != null;
+  /** What reaches Relay's deposit address: the cash out less the vault's fee. */
+  const xNet = cashOutNet(cashOutAmount, cashOutFeeBps);
+  /** The price, only while it still fits what is on screen: the amount after the fee, the chain, the wallets. */
+  const xPrice =
+    xQuote &&
+    xDestination &&
+    xQuote.destination.id === xDestination.id &&
+    xQuote.amountIn === xNet.toString() &&
+    address != null &&
+    xQuote.refundTo.toLowerCase() === address.toLowerCase() &&
+    (xDestination.kind === "svm" || (cashOutTo != null && xQuote.recipient.toLowerCase() === cashOutTo.toLowerCase()))
+      ? xQuote
+      : null;
+  /** The person's address on the other chain: the To address for an EVM chain, typed in for Solana (in the quote). */
+  const xRecipient = xDestination?.kind === "svm" ? (xPrice?.recipient ?? null) : cashOutTo;
 
   // Cash out privately (lib/cashOutPrivately): 2 to 4 round pieces, none
   // matching money that came in, each through cash out later. Offered for a
@@ -879,7 +965,7 @@ export function MoveView() {
           random: seededRandom(planSeed),
         })
       : null;
-  const planOffered = plan != null && relayAvailable && poseidonMode;
+  const planOffered = plan != null && relayAvailable && poseidonMode && !xActive;
   const planActive = planOffered && privatePref;
   // While a run is setting pieces up, the card shows that run (the note it
   // started from is spent part way, so the selection moves on underneath).
@@ -905,7 +991,7 @@ export function MoveView() {
     : [];
   const privacyWarnings = selected
     ? cashOutPrivacyWarnings({
-        to: cashOutTo,
+        to: xActive ? xRecipient : cashOutTo,
         connected: address,
         amountWei: planActive || cashOutAmountInvalid ? null : cashOutAmount,
         asset: selected.asset,
@@ -946,7 +1032,7 @@ export function MoveView() {
   // Does money sent to this address get swept out? Read in the background; a
   // failed read is no warning, never a blocked cash out.
   const sweepKey =
-    mode === "cashout" && cashOutTo && selected && !demoMode
+    mode === "cashout" && cashOutTo && selected && !demoMode && !xActive
       ? `${network.chainId}:${cashOutTo.toLowerCase()}:${selected.asset.toLowerCase()}`
       : null;
   function runSweepCheck(key: string, to: Address, asset: Address, chainId: number): Promise<SweepCheck> {
@@ -968,7 +1054,8 @@ export function MoveView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sweepKey]);
   const sweepNow = sweepKey ? (sweepResults[sweepKey] ?? null) : null;
-  const sweepHold = Boolean(sweepNow?.swept) && sweepOkFor !== sweepKey;
+  const sweepSays = sweepVerdict(sweepNow, { ownGloamWallet: ownGloamWallet(cashOutTo) });
+  const sweepHold = sweepSays === "swept" && sweepOkFor !== sweepKey;
 
   /** What Round it starts from and gives: the amount (or the whole balance) down to whole units. */
   const roundFrom = cashOutAmountInvalid ? noteWei : cashOutAmount;
@@ -988,6 +1075,19 @@ export function MoveView() {
     savePrivatePref({ on });
   }
 
+  /** The cash out button: its checks run before busy is set, so a second click waits for the first. */
+  async function startCashOut() {
+    if (cashOutGate.current) return;
+    cashOutGate.current = true;
+    setCashOutChecking(true);
+    try {
+      await (planActive ? onPrivateCashOut() : onCashOut());
+    } finally {
+      cashOutGate.current = false;
+      setCashOutChecking(false);
+    }
+  }
+
   async function onCashOut() {
     if (!selected || !address || !network.pool || !poseidonMode) return;
     // never prove or send a balance of another chain (several vaults share one address)
@@ -998,12 +1098,19 @@ export function MoveView() {
     }
     setError(null);
     setScheduledNotice(null);
-    const later = cashOutWhen !== "now";
+    // To another chain: always now, and the vault pays Relay's one-time address from the price shown.
+    const xShown = xActive ? xPrice : null;
+    const xDest = xActive ? xDestination : null;
+    const later = cashOutWhen !== "now" && !xDest;
     const amount = cashOutAmount;
-    const to = cashOutTo;
+    let to: Address | null = xShown ? (xShown.depositAddress as Address) : cashOutTo;
 
     if (cashOutAmountInvalid || amount <= 0n || amount > noteWei) {
       setError("Enter an amount up to this balance.");
+      return;
+    }
+    if (xDest && (!xShown || !address)) {
+      setError("Wait for the price from Relay, then try again.");
       return;
     }
     if (!to) {
@@ -1030,16 +1137,27 @@ export function MoveView() {
       );
       return;
     }
-    if (!(await checkCashOutTargets([to], selected.asset, to))) return;
+    // Relay's address passes the same checks, but not the sweep check: it is swept on purpose.
+    if (!(await checkCashOutTargets([to], selected.asset, to, { sweep: !xDest }))) return;
+    const feeNote = await feeMoved(network, liveFeeBps);
+    if (feeNote) {
+      setError(feeNote);
+      void refetchFee();
+      return;
+    }
 
     setBusy(true);
     setPaidPrivately(false);
+    // the last payment's claim code (kept under Sent links) is not this cash out's success
+    setShareBlob(null);
+    setMemoPosted(false);
     reset();
     setRelayHash(undefined);
     handledHash.current = null;
     pendingAction.current = "cashout";
     pendingChange.current = null;
     setCashedOut(null);
+    setXSent(null);
 
     let splitDone = false;
     try {
@@ -1077,17 +1195,63 @@ export function MoveView() {
         path = (await pathForLeaf(selected.leafIndex!)) as PoseidonMerklePath | null;
       }
       if (!path) throw new Error("Could not read your private balance. Refresh and try again.");
+      // To another chain: a fresh price for exactly what the vault will pay, right before the
+      // proof fixes the address and the amount. A worse price stops here and is shown instead.
+      let xOrder: CrossChainQuote | null = null;
+      if (xDest && xShown && address) {
+        setStatus("Getting a fresh price from Relay…");
+        const gross = BigInt(target.amountWei);
+        const fresh = await requestCrossChainQuote({
+          network: network.key,
+          asset: target.asset,
+          amount: cashOutNet(gross, cashOutFeeBps),
+          destination: xDest.id,
+          recipient: xShown.recipient,
+          refundTo: address,
+        });
+        if (!requoteStillFine(xShown, fresh)) {
+          setXQuote(fresh);
+          throw new Error("The price moved. Check the new amount, then cash out again.");
+        }
+        const binding = { chainId: network.chainId, asset: target.asset, gross, feeBps: cashOutFeeBps, destinationId: xDest.id, recipient: xShown.recipient, refundTo: address };
+        const problem = crossChainProblem(fresh, { ...binding, to: fresh.depositAddress });
+        if (problem) throw new Error(problem);
+        if (!(await checkCashOutTargets([fresh.depositAddress as Address], target.asset as Address, null, { sweep: false }))) {
+          throw new Error("Relay's address didn't pass the checks. Nothing was sent.");
+        }
+        xOrder = fresh;
+        to = fresh.depositAddress as Address;
+        setXQuote(fresh);
+      }
       spentNoteId.current = target.id;
       setStatus("Proving privately, this takes 10 to 30 seconds…");
       const call = await proveCashOut(target, to, path, network.chainId);
+      // the proof binds where the money goes and how much: it must be exactly Relay's order
+      if (xOrder && address) {
+        const problem = crossChainProblem(xOrder, {
+          chainId: call.chainId,
+          asset: call.asset,
+          gross: call.amount,
+          feeBps: cashOutFeeBps,
+          to: call.to,
+          destinationId: xOrder.destination.id,
+          recipient: xOrder.recipient,
+          refundTo: address,
+        });
+        if (problem) throw new Error(problem);
+      }
+      // From a partner's link to the request's own wallet: bound to the link's code before anything is sent.
+      const fromLink = requestPartner(to);
       if (later) {
         setStatus("Scheduling with the Gloam relay…");
         // Out of the balance while it waits; the chain settles it once it goes out. The
         // address shown is the one the relay holds, not the one asked for (and when this
         // money already has a cash out waiting, the note shows that one).
-        const job = await scheduleNoteCashOut(target, call, cashOutWhen as CashOutWindow);
+        // the relay registers it under the code as it schedules it, and counts it as it sends it
+        const job = await scheduleNoteCashOut(target, call, cashOutWhen as CashOutWindow, cashOutFeeBps, fromLink ? { partnerCode: fromLink.code } : {});
         spentNoteId.current = null;
         countPerson("cashout", address, network.testnet);
+        if (fromLink) queuePartnerJobs(network.chainId, [job.id]);
         setScheduledNotice({ at: job.sendAfter, label: formatAssetLabel(target.amountWei, target.asset) });
         setCashOutInput("");
         refreshNotes();
@@ -1098,15 +1262,20 @@ export function MoveView() {
         });
         return;
       }
+      partnerSend.current = fromLink ? { chainId: network.chainId } : null;
       if (relayOn) {
         setStatus("Sending through the Gloam relay…");
-        const h = await relayUnshield(call);
-        setCashedOut({ to, asset: target.asset as Address });
+        // the relay registers it under the code as it sends it
+        const h = await relayUnshield({ ...call, ...(fromLink ? { partnerCode: fromLink.code } : {}) });
+        if (xOrder) setXSent(xOrder);
+        else setCashedOut({ to, asset: target.asset as Address });
         setRelayHash(h);
         setSuccessTitle("Cashed out");
         setCashOutInput("");
         return;
       }
+      // from the wallet: registered under the code now, before the wallet is asked, bound to this cash out's proof
+      if (fromLink) registerLinkSpend({ code: fromLink.code, chainId: network.chainId, nullifier: call.nullifier, proof: call.proof });
       setStatus("Confirm the cash out in your wallet…");
       writeContract({
         address: network.pool,
@@ -1116,15 +1285,16 @@ export function MoveView() {
         gas: gasFor(network.chainId, SHIELD_GAS_LIMIT),
         chainId: network.chainId,
       });
-      setCashedOut({ to, asset: target.asset as Address });
+      if (xOrder) setXSent(xOrder);
+      else setCashedOut({ to, asset: target.asset as Address });
       setSuccessTitle("Cashed out");
       setCashOutInput("");
       void import("@/lib/track").then(({ track }) => {
-        track("unshield_success");
+        track(xOrder ? "unshield_xchain" : "unshield_success");
       });
       // cash out is intentional exit, no onboarding mark
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Cash out failed";
+      const msg = walletErrorForPeople(e, "The cash out didn't go through. Try again.");
       // The first step landed: the amount is its own note in the balance now.
       setError(splitDone ? `${msg} The amount is set aside in your private balance, so you can cash it out from there.` : msg);
       setBusy(false);
@@ -1134,13 +1304,28 @@ export function MoveView() {
   }
 
   /**
+   * The partner a cash out counts to: one from a partner's request link (p=) to a
+   * wallet, paying the very wallet the link asked for. null otherwise.
+   */
+  function requestPartner(to: Address | null | undefined): { code: string; chainId: number } | null {
+    const code = request?.partnerCode;
+    if (!code || !isWalletRequest(request) || handedOffRequest.current !== request || !handedOffTo.current || !to) return null;
+    return to.toLowerCase() === handedOffTo.current.toLowerCase() ? { code, chainId: network.chainId } : null;
+  }
+
+  /**
    * The checks every cash out passes before anything is proven, for each
    * address it pays: never the vault, the memo board, a token contract, a swap
    * router or the zero address, the sweep check, and screening. A swept
    * `quiet` address (the one under To) stops without a message, since its
    * warning says why and how to go ahead; any other swept address is refused.
    */
-  async function checkCashOutTargets(targets: Address[], asset: Address, quiet: Address | null): Promise<boolean> {
+  async function checkCashOutTargets(
+    targets: Address[],
+    asset: Address,
+    quiet: Address | null,
+    opts: { sweep?: boolean } = {}
+  ): Promise<boolean> {
     const unique = targets.filter((t, i) => targets.findIndex((x) => x.toLowerCase() === t.toLowerCase()) === i);
     // Never to the vault, the memo board, a token or a swap router: the money would be stuck there.
     for (const t of unique) {
@@ -1152,7 +1337,7 @@ export function MoveView() {
     }
     // Money sent here has been swept out within seconds before: only on purpose.
     // A check still running gets a few seconds; one that fails is no warning.
-    if (!demoMode) {
+    if (!demoMode && opts.sweep !== false) {
       for (const t of unique) {
         const key = `${network.chainId}:${t.toLowerCase()}:${asset.toLowerCase()}`;
         if (sweepOkFor === key) continue;
@@ -1160,7 +1345,8 @@ export function MoveView() {
           runSweepCheck(key, t, asset, network.chainId),
           new Promise<null>((r) => window.setTimeout(() => r(null), 4_000)),
         ]);
-        if (!result?.swept) continue;
+        // the person's own connected Gloam wallet gets a note under To, not a hold
+        if (sweepVerdict(result, { ownGloamWallet: ownGloamWallet(t) }) !== "swept") continue;
         if (quiet && t.toLowerCase() === quiet.toLowerCase()) return false;
         setError(
           `Money sent to ${shortAddress(t, 4)} has been moved out automatically within seconds before, by another account. Use another address for that piece.`
@@ -1219,10 +1405,18 @@ export function MoveView() {
     }
     const targets = pieceTargets as Address[];
     if (!(await checkCashOutTargets(targets, selected.asset, cashOutTo))) return;
+    const feeNote = await feeMoved(network, liveFeeBps);
+    if (feeNote) {
+      setError(feeNote);
+      void refetchFee();
+      return;
+    }
 
     const note = selected;
     setBusy(true);
     setPaidPrivately(false);
+    setShareBlob(null);
+    setMemoPosted(false);
     reset();
     setRelayHash(undefined);
     handledHash.current = null;
@@ -1231,6 +1425,9 @@ export function MoveView() {
     setCashedOut(null);
     setPlanRun(pieces.map((p, i) => ({ amount: p, to: targets[i]!, state: "waiting" })));
     setRunNote(note);
+    // From a partner's link: the pieces that pay the request's own wallet carry its code to the relay as they are scheduled.
+    const fromLink = requestPartner(cashOutTo);
+    const toRequest = (a: Address) => Boolean(fromLink && cashOutTo && a.toLowerCase() === cashOutTo.toLowerCase());
     try {
       const r = await runPrivateCashOut({
         note,
@@ -1238,9 +1435,14 @@ export function MoveView() {
         to: targets,
         window: planWindow,
         owner: address as Address,
+        feeBps: cashOutFeeBps,
         onStatus: setStatus,
         onPiece: (i, patch) => setPlanRun((rows) => rows && rows.map((row, j) => (j === i ? { ...row, ...patch } : row))),
+        ...(fromLink
+          ? { deps: { schedule: (n, c, when, feeBps) => scheduleNoteCashOut(n, c, when, feeBps, toRequest(c.to) ? { partnerCode: fromLink.code } : {}) } }
+          : {}),
       });
+      if (fromLink) queuePartnerJobs(network.chainId, r.jobs.filter((j) => toRequest(j.to)).map((j) => j.id));
       if (r.jobs.length) {
         // Jobs come back in piece order: the first ones are what was scheduled.
         const times = r.jobs.map((j) => j.sendAfter);
@@ -1280,7 +1482,7 @@ export function MoveView() {
       });
     } catch (e) {
       // Refused before anything moved.
-      setError(e instanceof Error ? e.message : "Cash out failed");
+      setError(walletErrorForPeople(e, "The cash out didn't go through. Try again."));
     } finally {
       setPlanRun(null);
       setRunNote(null);
@@ -1310,7 +1512,7 @@ export function MoveView() {
     setBusy(true);
     setStatus("Proving privately, this takes 10 to 30 seconds…");
     try {
-      const job = await schedulePiece(n);
+      const job = await schedulePiece(n, {}, liveFeeBps ?? undefined);
       setScheduledNotice({ at: job.sendAfter, label: formatAssetLabel(n.amountWei, n.asset) });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not schedule this piece.");
@@ -1326,7 +1528,7 @@ export function MoveView() {
     if (!note.cashOut) return;
     setError(null);
     setScheduledNotice(null);
-    const result = await cancelCashOut(note.cashOut.job);
+    const result = await cancelCashOut(note.cashOut.job, note);
     if (result === "cancelled") {
       // Back in the balance as plain money: a cancelled piece is not one still to schedule.
       await cancelledPiece(note.id);
@@ -1396,14 +1598,32 @@ export function MoveView() {
       if (!path) throw new Error("Could not read your private balance. Refresh and try again.");
 
       setStatus("Proving your payment privately…");
+      // The payee's secret is made from a 16-byte seed, so the claim link can be short (lib/claimLink).
       const w = await buildTransferWitness({
         secretHex: selected.secret,
         amountIn: BigInt(selected.amountWei),
         amountPay,
         asset: selected.asset,
         path: path as PoseidonMerklePath,
+        paySeed: randomNoteSeed().seed,
       });
       if (w.blocker) throw new Error(w.blocker);
+
+      // From a partner's link, to the request's own Gloam address: bound to the link's code before
+      // anything is sent. Through the relay, the code goes with the send. From the wallet, it is
+      // registered now, before proving, bound to this payment's new note commitment, which only
+      // this send has.
+      const linkCode =
+        request?.partnerCode && request.toKind === "gloam" && payStyle === "direct" && recipientTag.trim() === request.to ? request.partnerCode : null;
+      partnerSend.current = linkCode ? { chainId: network.chainId } : null;
+      if (linkCode && !relayOn) {
+        registerLinkSpend({
+          code: linkCode,
+          chainId: network.chainId,
+          nullifier: fieldToBytes32(w.publicInputs.nullifier),
+          bind: fieldToBytes32(w.publicInputs.newCommitment0),
+        });
+      }
 
       const { proofBytes } = await proveTransferInBrowser(w.circomInput);
 
@@ -1439,6 +1659,7 @@ export function MoveView() {
         commitment: w.paymentNote.commitment,
         note: payNote,
         chainId: network.chainId,
+        seed: w.paymentNote.seed,
       });
       setSentNote(pack.note ?? null);
       payTrack.current = { chainId: network.chainId, request: Boolean(request), note: Boolean(pack.note) };
@@ -1522,6 +1743,7 @@ export function MoveView() {
             fieldToBytes32(w.publicInputs.newCommitment0),
             fieldToBytes32(w.publicInputs.newCommitment1),
           ],
+          ...(linkCode ? { partnerCode: linkCode } : {}),
         });
         setRelayHash(h);
         setSuccessTitle("Sent privately");
@@ -1565,7 +1787,7 @@ export function MoveView() {
         );
       } else {
         forgetUnsent();
-        setError(e instanceof Error ? e.message : "Private send failed");
+        setError(walletErrorForPeople(e, "The payment didn't go through. Try again."));
       }
       keptBeforeSend.current = null;
       setBusy(false);
@@ -1589,6 +1811,8 @@ export function MoveView() {
     // the board, the vault reads and the list below are all of the network shown
     const scanKey = networkKey;
     if (noteNetworkProblem({ chainId: network.chainId, pool: network.pool }, network)) return;
+    const run = ++scanRun.current;
+    setScanning(true);
     setInboxStatus("Checking for payments to your Gloam address…");
     setInbox([]);
     try {
@@ -1638,8 +1862,13 @@ export function MoveView() {
           ? `Found ${hits.length} ${hits.length === 1 ? "payment" : "payments"} for you.`
           : "No new payments yet."
       );
-    } catch (e) {
-      setInboxStatus(e instanceof Error ? e.message : "Could not check for payments.");
+    } catch {
+      // an RPC error's text names the endpoint and the request: no use to read
+      if (shownNetworkKey.current === scanKey) {
+        setInboxStatus("Couldn't check for payments right now. Try again in a moment.");
+      }
+    } finally {
+      if (run === scanRun.current) setScanning(false);
     }
   }
 
@@ -1736,7 +1965,17 @@ export function MoveView() {
         });
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message.replace(/\.$/, "") : "something went wrong";
+      // viem's message carries the whole RPC request (URL, body, call args): show its first line only,
+      // and say plainly when the network itself could not be reached.
+      const short =
+        (e as { shortMessage?: string } | null)?.shortMessage ??
+        (e instanceof Error ? e.message.split("\n")[0] : "something went wrong");
+      const offline =
+        (e as { name?: string } | null)?.name === "HttpRequestError" ||
+        /HTTP request failed|Failed to fetch|fetch failed|timed? ?out|network/i.test(short);
+      const msg = offline
+        ? `${network.label} could not be reached just now. Tap Secure it now to try again`
+        : short.replace(/\.$/, "");
       if (report) setImportOk({
         text: `${did}, but it is not secured yet: ${msg}. ${stillOpen}`,
         note: claim?.note,
@@ -1875,6 +2114,9 @@ export function MoveView() {
   }
 
   async function onImportNote() {
+    if (claimGate.current) return;
+    claimGate.current = true;
+    setClaimOpening(true);
     setError(null);
     setImportOk(null);
     try {
@@ -1896,7 +2138,10 @@ export function MoveView() {
       }
       await secureNote(r.local, { claimed: true, note: r.note });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Import failed");
+      setError(walletErrorForPeople(e, "Couldn't open this payment. Check the code and try again."));
+    } finally {
+      claimGate.current = false;
+      setClaimOpening(false);
     }
   }
 
@@ -2071,6 +2316,8 @@ export function MoveView() {
    * mode reaches the URL after the first render has synced it.
    */
   const handedOffRequest = useRef<PaymentRequest | null>(null);
+  /** The wallet a request was handed off to Cash out with: a cash out from a partner's link counts only when it pays this one. */
+  const handedOffTo = useRef<Address | null>(null);
   useEffect(() => {
     if (!request || !isWalletRequest(request) || handedOffRequest.current === request) return;
     if (mode !== "send" || !payWalletTo || recipientTag !== request.to) return;
@@ -2078,6 +2325,7 @@ export function MoveView() {
     const amount = request.amount ?? "";
     const t = window.setTimeout(() => {
       handedOffRequest.current = request;
+      handedOffTo.current = to;
       const h = cashOutHandoff(to, amount);
       setCashOutDest(h.dest);
       setOtherTo(h.to);
@@ -2213,6 +2461,7 @@ export function MoveView() {
               onSwitchNetwork={setNetworkKey}
               onDismiss={() => setRequest(null)}
               balanceHint={requestHint}
+              partnerName={partnerName}
             />
           )}
 
@@ -2515,7 +2764,7 @@ export function MoveView() {
                               <>
                                 <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
                                   Gloam pays it from your private balance. It arrives in their wallet like a normal
-                                  transfer, and nobody can see who sent it. The amount is public.
+                                  transfer, and it doesn&apos;t show which Gloam balance paid it. The amount and their address are public.
                                 </p>
                                 <button
                                   type="button"
@@ -2705,7 +2954,7 @@ export function MoveView() {
                 <div className="mt-6 space-y-4">
                   <div className="rounded-[16px] bg-warn-soft px-4 py-3.5 text-[13px] leading-relaxed">
                     <p className="font-medium text-warn">
-                      Cashing out makes this amount public
+                      Cashing out makes the amount and where it goes public
                     </p>
                     <p className="mt-1 text-soft">
                       A round amount, a later time or a fresh wallet makes it
@@ -2825,6 +3074,15 @@ export function MoveView() {
                           }
                         />
                       )}
+                      {xActive && xDestination ? (
+                        <div className="mt-4 border-t border-line pt-3">
+                          <p className="tnum text-[12.5px] leading-relaxed text-mute">
+                            {cashOutFeeBps > 0
+                              ? `${formatFeePercent(cashOutFeeBps)} fee: ${formatAssetLabel(cashOutFee, selected.asset)}. Relay gets ${formatAssetLabel(xNet, selected.asset)} and sends ${xDestination.token.symbol} on ${xDestination.chain}.`
+                              : `Relay gets ${formatAssetLabel(xNet, selected.asset)} and sends ${xDestination.token.symbol} on ${xDestination.chain}.`}
+                          </p>
+                        </div>
+                      ) : (
                       <div className="mt-4 border-t border-line pt-3">
                         <p className="text-[13px] text-mute">You get</p>
                         <p className="tnum mt-1.5 truncate text-[22px] font-light leading-tight text-foreground">
@@ -2837,6 +3095,7 @@ export function MoveView() {
                           </p>
                         )}
                       </div>
+                      )}
                       <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-3 text-[13px]">
                         <span className="text-mute">
                           In the vault ({assetLabel(selected.asset)})
@@ -2866,8 +3125,24 @@ export function MoveView() {
                     </div>
                   )}
 
+                  {selected && xDestinations.length > 0 && (
+                    <CrossChainPicker
+                      chainId={network.chainId}
+                      chainLabel={network.label}
+                      symbol={assetLabel(selected.asset)}
+                      destinations={xDestinations}
+                      value={xDestination ? xDestination.id : null}
+                      onChange={(id) => {
+                        setXDestId(id);
+                        setXQuote(null);
+                      }}
+                      disabled={working}
+                    />
+                  )}
+
+                  {xDestination?.kind !== "svm" && (
                   <div>
-                    <p id="cashout-to" className="text-[13px] text-mute">To</p>
+                    <p id="cashout-to" className="text-[13px] text-mute">{xDestination ? `To, on ${xDestination.chain}` : "To"}</p>
                     <div role="radiogroup" aria-labelledby="cashout-to" className="mt-2 grid grid-cols-2 gap-2">
                       {(
                         [
@@ -2930,7 +3205,22 @@ export function MoveView() {
                         For privacy, a fresh wallet that never added money to Gloam is best.
                       </p>
                     ) : null}
-                    {sweepNow?.swept && cashOutTo ? (
+                    {sweepNow?.swept && cashOutTo && sweepSays === "own-wallet" ? (
+                      <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
+                        Money that reached this Gloam wallet left again soon after, in a transaction another account sent.
+                        Adding money privately with the network fee covered looks like that. If you didn&apos;t add
+                        money privately, someone else may be moving money out of this wallet: don&apos;t cash out
+                        here, and sign out.{" "}
+                        <a
+                          href={network.explorerTx(sweepNow.swept.evidenceTx)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-foreground underline underline-offset-2"
+                        >
+                          See it on the explorer
+                        </a>
+                      </p>
+                    ) : sweepNow?.swept && cashOutTo ? (
                       <SweptWarning
                         address={cashOutTo}
                         evidenceHref={network.explorerTx(sweepNow.swept.evidenceTx)}
@@ -2948,6 +3238,23 @@ export function MoveView() {
                       </p>
                     ) : null}
                   </div>
+                  )}
+
+                  {xDestination && selected && (
+                    <CrossChainQuoteCard
+                      networkKey={network.key}
+                      chainId={network.chainId}
+                      asset={selected.asset}
+                      destination={xDestination}
+                      netAmount={xNet}
+                      evmRecipient={xDestination.kind === "evm" ? cashOutTo : null}
+                      refundTo={(address as Address | undefined) ?? null}
+                      ready={!cashOutAmountInvalid && !cashOutFeeUnknown && xNet > 0n}
+                      quote={xPrice}
+                      onQuote={setXQuote}
+                      disabled={working}
+                    />
+                  )}
 
                   {planOffered && plan && (
                     <HowChoice
@@ -3030,7 +3337,7 @@ export function MoveView() {
                     </>
                   )}
 
-                  {!planActive && (
+                  {!planActive && !xActive && (
                   <div>
                     <p id="cashout-when" className="text-[13px] text-mute">When</p>
                     <div role="radiogroup" aria-labelledby="cashout-when" className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -3066,7 +3373,7 @@ export function MoveView() {
                         ? relayAvailable
                           ? "Later sends it at a random time in that window, so it doesn't go out right after a payment."
                           : "Cashing out later needs the Gloam relay, which is off right now."
-                        : "Your proof is made now and the Gloam relay sends it at a random time in that window. It can't change the amount or where it goes. If it can't go out, nothing moves and it comes back to your private balance."}
+                        : "Your proof is made now and the Gloam relay sends it at a random time in that window. It can't change the amount or where it goes. The vault takes its fee when it goes out, at the rate then. If it can't go out, nothing moves and it comes back to your private balance."}
                     </p>
                     {cashOutWhen !== "now" && (
                       <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
@@ -3098,15 +3405,16 @@ export function MoveView() {
                         treeLoading ||
                         !relayChecked ||
                         working ||
+                        cashOutChecking ||
                         selected?.leafIndex == null ||
                         cashOutInventoryShort ||
                         cashOutFeeUnknown ||
                         cashOutAmountInvalid ||
-                        !cashOutTo ||
+                        (xActive ? !xPrice : !cashOutTo) ||
                         sweepHold ||
                         (planActive ? !piecesReady : cashOutWhen !== "now" && !relayAvailable)
                       }
-                      onClick={() => void (planActive ? onPrivateCashOut() : onCashOut())}
+                      onClick={() => void startCashOut()}
                       className="btn btn-ink btn-lg btn-block"
                     >
                       {working && busyAction === "cashout" ? (
@@ -3114,12 +3422,19 @@ export function MoveView() {
                           <Spinner />
                           <span className="truncate">{status || "Working…"}</span>
                         </>
+                      ) : cashOutChecking ? (
+                        <>
+                          <Spinner />
+                          <span className="truncate">Checking…</span>
+                        </>
                       ) : cashOutInventoryShort ? (
                         "Not enough in the vault yet"
                       ) : cashOutFeeUnknown ? (
                         "Loading the cash-out fee…"
                       ) : sweepHold ? (
                         "Check the address first"
+                      ) : xActive && xDestination ? (
+                        xPrice ? `Cash out to ${xDestination.chain}` : "Waiting for the price"
                       ) : planActive ? (
                         piecesReady || !perPiece ? "Cash out privately" : "Add an address for each piece"
                       ) : cashOutWhen !== "now" ? (
@@ -3173,30 +3488,18 @@ export function MoveView() {
                     </div>
                   )}
 
-                  {scheduledRows.length > 0 && (
-                    <div className="rounded-[16px] bg-surface px-4 py-3">
-                      <p className="text-[13px] text-mute">Scheduled cash outs</p>
-                      <ul className="mt-1 divide-y divide-line">
-                        {scheduledRows.map((n) => (
-                          <li key={n.id} className="flex items-center justify-between gap-3 py-2.5 text-[13.5px]">
-                            <span className="min-w-0">
-                              <span className="tnum block text-foreground">{formatAssetLabel(n.amountWei, n.asset)}</span>
-                              <span className="block truncate text-[12px] text-mute">{scheduledLine(n, undefined, gasHigh)}</span>
-                            </span>
-                            {n.cashOut?.state === "scheduled" && (
-                              <button type="button" className="btn btn-ghost btn-sm shrink-0" onClick={() => void cancelScheduled(n)}>
-                                Cancel
-                              </button>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
+                  <ScheduledCashOuts rows={scheduledRows} liveFeeBps={liveFeeBps} gasHigh={gasHigh} onCancel={cancelScheduled} />
                 </div>
               )}
             </>
           ) : mode !== "receive" ? (
+            <>
+            {/* The whole balance can be waiting to go out: its rows, and Cancel, still show. */}
+            {mode === "cashout" && scheduledRows.length > 0 && (
+              <div className="mt-6">
+                <ScheduledCashOuts rows={scheduledRows} liveFeeBps={liveFeeBps} gasHigh={gasHigh} onCancel={cancelScheduled} />
+              </div>
+            )}
             <div className="mt-6 rounded-[16px] bg-surface px-5 py-9 text-center">
               <span className="mx-auto grid h-11 w-11 place-items-center rounded-full bg-panel text-mute shadow-card">
                 <LockIcon />
@@ -3221,6 +3524,7 @@ export function MoveView() {
                 </button>
               </div>
             </div>
+            </>
           ) : null}
 
           {mode === "send" && shieldLive && <SentLinks onTakeBack={takeBackLink} />}
@@ -3324,9 +3628,17 @@ export function MoveView() {
                   <button
                     type="button"
                     onClick={() => void scanInbox()}
+                    disabled={scanning}
                     className="btn btn-ghost btn-sm"
                   >
-                    Check now
+                    {scanning ? (
+                      <>
+                        <Spinner />
+                        Checking…
+                      </>
+                    ) : (
+                      "Check now"
+                    )}
                   </button>
                 </div>
                 <p className="mt-1 text-[13px] leading-relaxed text-mute">
@@ -3393,7 +3705,7 @@ export function MoveView() {
                 </h3>
                 <p className="mt-1 text-[13px] leading-relaxed text-mute">
                   Paste the claim link or payment code you were sent. Codes start
-                  with gloam2t, gloam1 or gloam1e. Claiming also secures it: the
+                  with gloam3, gloam1, gloam1e or gloam2t. Claiming also secures it: the
                   payment moves into a balance only you hold, so the person who
                   sent it can no longer take it back.
                 </p>
@@ -3407,7 +3719,7 @@ export function MoveView() {
                   rows={4}
                   spellCheck={false}
                   className="gl-input tnum mt-3 h-auto min-h-[108px] resize-none py-3 text-[13px] leading-relaxed"
-                  placeholder="gloam2t… or gloam1…"
+                  placeholder="gloam.trade/c#…, gloam3… or gloam1…"
                 />
                 {claimPreview && (
                   <div className="mt-2 rounded-xl bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-soft" aria-live="polite">
@@ -3450,13 +3762,18 @@ export function MoveView() {
                     <button
                       type="button"
                       onClick={() => void onImportNote()}
-                      disabled={!importText.trim() || !isConnected || working}
+                      disabled={!importText.trim() || !isConnected || working || claimOpening}
                       className="btn btn-ink btn-lg btn-block"
                     >
                       {securingId ? (
                         <>
                           <Spinner />
                           <span className="truncate">{status || "Securing…"}</span>
+                        </>
+                      ) : claimOpening ? (
+                        <>
+                          <Spinner />
+                          <span className="truncate">Opening the payment…</span>
                         </>
                       ) : (
                         "Claim and secure"
@@ -3474,7 +3791,7 @@ export function MoveView() {
               role="alert"
               className="mt-5 break-words rounded-xl bg-danger-soft px-4 py-3 text-[13.5px] leading-relaxed text-danger"
             >
-              {error || writeError?.message.slice(0, 200)}
+              {error || walletErrorForPeople(writeError)}
             </p>
           )}
           {txHash && !isSuccess && (
@@ -3640,10 +3957,12 @@ export function MoveView() {
             </>
           ) : (
             <p>
-              {cashOutDest === "other"
-                ? "The money is on its way to that address."
-                : "The money is back in your wallet."}{" "}
-              That amount is public on the explorer, so only cash out when you
+              {xSent
+                ? `The vault paid Relay, and Relay sends ${xSent.destination.symbol} on ${xSent.destination.chain}.`
+                : cashOutDest === "other"
+                  ? "The money is on its way to that address."
+                  : "The money is back in your wallet."}{" "}
+              The amount and the address it went to are public on the explorer, so only cash out when you
               need it in the open.
             </p>
           )
@@ -3654,6 +3973,11 @@ export function MoveView() {
         footer={
           paidPrivately ? (
             <PrivatePayShare chainId={network.chainId} networkLabel={network.label} testnet={network.testnet} />
+          ) : successTitle === "Cashed out" && xSent ? (
+            <CrossChainCashOutStatus
+              quote={xSent}
+              explorerTx={crossChainDestination(xSent.destination.id)?.explorerTx ?? relayOrderUrl}
+            />
           ) : successTitle === "Cashed out" && cashedOut ? (
             <AddTokenToWallet chainId={network.chainId} asset={cashedOut.asset} to={cashedOut.to} />
           ) : undefined

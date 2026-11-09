@@ -21,9 +21,14 @@ import {
   BRIDGE_DESTINATIONS,
   BRIDGE_MIN_USD,
   RELAY_REFERRER,
+  SWAP_SLIPPAGE_BPS,
   bridgeChain,
+  bridgeFeeSetting,
   bridgeToken,
   privateBridgeable,
+  quotedAppFee,
+  relayAppFees,
+  swapLeftover,
   swapSource,
   validRefundAddress,
   type PrivateBridgeQuote,
@@ -64,14 +69,6 @@ function fail(status: number, message: string) {
   return NextResponse.json({ ok: false, error: { message } }, { status, headers: { "Cache-Control": "no-store" } });
 }
 
-/** Gloam's optional cut of a bridge, set in env. Off unless both values are valid. */
-function appFees(): { recipient: string; fee: string }[] | undefined {
-  const bps = Number(process.env.BRIDGE_FEE_BPS ?? "");
-  const recipient = process.env.BRIDGE_FEE_RECIPIENT ?? "";
-  if (!Number.isInteger(bps) || bps <= 0 || bps > 100 || !isAddress(recipient)) return undefined;
-  return [{ recipient, fee: String(bps) }];
-}
-
 const units = (v: bigint, decimals: number) =>
   Number(formatUnits(v, decimals)).toLocaleString("en-US", { maximumFractionDigits: 2 });
 
@@ -101,7 +98,8 @@ function evmSteps(steps: any[], chainId: number, sender: string): PrivateBridgeT
  *   - an EVM wallet on another chain: an approve (for a token) and a deposit,
  *     which the wallet signs on that chain;
  *   - this chain's own coin (ETH on Robinhood Chain): one swap that also makes
- *     the deposit, simulated here; the price buffer comes back to the wallet.
+ *     the deposit, simulated here; what's left of the swap comes back to the
+ *     wallet as the stablecoin.
  * If the call can't run, Relay sends the stablecoin to `recipient` instead.
  * Nothing here holds money or a secret: the commitment and proof are public.
  */
@@ -156,9 +154,9 @@ export async function POST(req: Request) {
   const screen = await screenAddresses([recipient], { chainId: network.chainId, asset, flow: "deposit" });
   if (!screen.allowed) return fail(403, screen.message ?? SCREEN_BLOCKED_MESSAGE);
 
-  // The vault's own checks, read before anyone pays: room under the beta
+  // The vault's own checks, read before anyone pays: room under the deposit
   // limits, a commitment it hasn't seen, and a proof its verifier accepts.
-  const client = createPublicClient({ chain: network.chain, transport: serverTransport(network, { retryCount: 2 }) });
+  const client = createPublicClient({ chain: network.chain, ccipRead: false, transport: serverTransport(network, { retryCount: 2 }) });
   const pool = network.pool as Address;
   try {
     const [limitsOn, limit, deposited, seen, verifier] = await Promise.all([
@@ -172,13 +170,13 @@ export async function POST(req: Request) {
       // A side set to type(uint128).max is no limit (isNoLimit): never checked or shown.
       const [perDeposit, total] = limit;
       if (!isNoLimit(perDeposit) && amount > perDeposit) {
-        return fail(400, `During the beta, one private deposit can be up to ${units(perDeposit, dest.token.decimals)} ${dest.token.symbol}.`);
+        return fail(400, `One private deposit can be up to ${units(perDeposit, dest.token.decimals)} ${dest.token.symbol}.`);
       }
       if (!isNoLimit(total) && deposited + amount > total) {
         const room = total > deposited ? total - deposited : BigInt(0);
         return fail(400, room > BigInt(0)
-          ? `The vault has room for ${units(room, dest.token.decimals)} ${dest.token.symbol} more during the beta.`
-          : `The vault is at its beta limit for ${dest.token.symbol}. Try again later.`);
+          ? `The vault has room for ${units(room, dest.token.decimals)} ${dest.token.symbol} more right now.`
+          : `The vault is at its deposit limit for ${dest.token.symbol}. Try again later.`);
       }
     }
     if (seen) return fail(400, "That private deposit was already used. Start over.");
@@ -217,11 +215,12 @@ export async function POST(req: Request) {
         amount: amount.toString(),
         tradeType: "EXACT_OUTPUT",
         useDepositAddress: false,
+        ...(sameChain ? { slippageTolerance: SWAP_SLIPPAGE_BPS } : {}),
         txs: [
           { to: asset, value: "0", data: approveData },
           { to: pool, value: "0", data: shieldData },
         ],
-        appFees: appFees(),
+        appFees: relayAppFees(bridgeFeeSetting(process.env)),
         ...(apiKey ? { referrer: RELAY_REFERRER } : {}),
       }),
       signal: AbortSignal.timeout(20_000),
@@ -335,7 +334,7 @@ export async function POST(req: Request) {
     // The wallet must hold enough on that chain. The same-chain swap is
     // simulated whole (swap, approve and deposit); a cross-chain payment is
     // checked by balance, since its deposit needs the approve to land first.
-    const origin = createPublicClient({ chain: evmChain!, transport: http(evmChain!.rpcUrls.default.http[0], { timeout: 10_000 }) });
+    const origin = createPublicClient({ chain: evmChain!, ccipRead: false, transport: http(evmChain!.rpcUrls.default.http[0], { timeout: 10_000 }) });
     if (sameChain) {
       try {
         await origin.call({ account: sender as Address, to: deposit.to as Address, data: deposit.data as Hex, value: BigInt(deposit.value) });
@@ -355,6 +354,7 @@ export async function POST(req: Request) {
 
   const feeUsd = ["relayer", "app"].reduce((sum, k) => sum + Number(data?.fees?.[k]?.amountUsd ?? 0), 0);
   const gasUsd = Number(data?.fees?.gas?.amountUsd ?? NaN);
+  const paidUsd = Number.isFinite(usdIn) ? Math.round(usdIn * 100) / 100 : null;
   const quote: PrivateBridgeQuote = {
     requestId,
     solanaTx,
@@ -366,11 +366,12 @@ export async function POST(req: Request) {
       chain: chain.name,
       chainId: chain.id,
       logo: token.logo,
-      usd: Number.isFinite(usdIn) ? Math.round(usdIn * 100) / 100 : null,
+      usd: paidUsd,
     },
     receive: { amount: amountText, symbol: dest.token.symbol, chain: dest.chain, logo: dest.token.logo },
-    extra: sameChain && outAmount > amount ? formatUnits(outAmount - amount, dest.token.decimals) : null,
+    extra: sameChain ? swapLeftover({ out: outAmount, amount, decimals: dest.token.decimals, paidUsd, feeUsd }) : null,
     feeUsd: Math.round(feeUsd * 100) / 100,
+    appFee: quotedAppFee(bridgeFeeSetting(process.env), data?.fees?.app?.amountUsd, usdIn),
     gasUsd: Number.isFinite(gasUsd) ? Math.round(gasUsd * 100) / 100 : null,
     timeSec: Number(data?.details?.timeEstimate ?? 0),
   };

@@ -79,7 +79,13 @@ export type Gate =
  * Check a spend and, when it is allowed, reserve it in the log as pending.
  * Call right before signing; settle the result with settleSpend.
  */
-export function authorizeSpend(spend: Spend & { pool?: Address }, env: Env = process.env, now: number = Date.now()): Gate {
+export function authorizeSpend(
+  spend: Spend & { pool?: Address },
+  env: Env = process.env,
+  now: number = Date.now(),
+  /** counts: false checks everything but the caps and never counts against them (a swap's exit). */
+  opts: { counts?: boolean } = {}
+): Gate {
   const loaded = currentPolicy(env);
   const agent = agentOf(loaded);
   const logPath = spendLogPath(agent, env);
@@ -96,6 +102,7 @@ export function authorizeSpend(spend: Spend & { pool?: Address }, env: Env = pro
     amountWei: spend.amountWei.toString(),
     amount: formatUnits(spend.amountWei, decimals),
     recipient: spend.recipient,
+    ...(opts.counts === false ? { counts: false } : {}),
     at: new Date(now).toISOString(),
   };
   const refuse = (r: Refusal): Gate => ({
@@ -112,7 +119,8 @@ export function authorizeSpend(spend: Spend & { pool?: Address }, env: Env = pro
     const res = log.reserve(
       entry,
       (c) => {
-        out.refusal = poolRefusal(spend) ?? (loaded.mode === "enforced" ? checkSpend(loaded.policy, spend, c, now) : null);
+        out.refusal =
+          poolRefusal(spend) ?? (loaded.mode === "enforced" ? checkSpend(loaded.policy, spend, c, now, { capped: opts.counts !== false }) : null);
         return out.refusal?.message ?? null;
       },
       now
@@ -175,6 +183,7 @@ export function limitsReport(env: Env = process.env, now: number = Date.now()) {
         expired: p.expiresAt ? now > p.expiresAt.getTime() : false,
         tools: p.tools,
         recipients: p.recipients,
+        swapTo: p.swapTo ? p.swapTo.map((a) => ({ symbol: a.symbol, network: networkName(a.chainId), address: a.address })) : "the assets below",
         assets: p.assets.map((a) => ({
           symbol: a.symbol,
           network: networkName(a.chainId),
@@ -226,7 +235,7 @@ export function spendingReport(recent = 10, env: Env = process.env, now: number 
       : // No limits to measure against: just what moved, per asset.
         Object.values(
           entries
-            .filter((e) => COUNTED_STATUSES.includes(e.status) && Date.parse(e.at) > dayAgo)
+            .filter((e) => e.counts !== false && COUNTED_STATUSES.includes(e.status) && Date.parse(e.at) > dayAgo)
             .reduce<Record<string, { symbol: string; network: string; raw: bigint; decimals: number; payments: number }>>(
               (m, e) => {
                 const k = `${e.chainId}:${e.asset.toLowerCase()}`;
@@ -249,6 +258,7 @@ export function spendingReport(recent = 10, env: Env = process.env, now: number 
     symbol: e.symbol,
     recipient: e.recipient,
     status: e.status,
+    ...(e.counts === false ? { countedAgainstLimits: false } : {}),
     ...(e.hash ? { hash: e.hash } : {}),
     ...(e.reason ? { reason: e.reason } : {}),
   });

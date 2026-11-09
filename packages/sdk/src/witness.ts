@@ -14,6 +14,7 @@ import type { PoseidonMerklePath } from "./merkle.js";
 import { fieldToHex, hexToField, toField } from "./poseidon.js";
 import { NATIVE_ASSET } from "./constants.js";
 import { exactSealedAmounts } from "./rates.js";
+import { seedToSecret } from "./shortLink.js";
 
 // ── unshield ────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,8 @@ export type NoteExport = {
   nullifier: Hex;
   amountWei: string;
   asset: Address;
+  /** The 16-byte seed the secret was made from, when it was (shortLink seedToSecret). */
+  seed?: Hex;
 };
 
 export type TransferWitness = {
@@ -98,12 +101,27 @@ export type TransferWitness = {
   blocker: string | null;
 };
 
+/** The secret a hex seed makes; refuses a seed that makes zero (the circuits reject a zero secret). */
+function seedFromHex(seed: Hex): bigint {
+  if (!/^0x[0-9a-fA-F]{32}$/.test(seed)) throw new Error("A note seed is 16 bytes of hex.");
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) bytes[i] = parseInt(seed.slice(2 + i * 2, 4 + i * 2), 16);
+  const s = seedToSecret(bytes);
+  if (s === 0n) throw new Error("That seed makes a zero secret. Draw another.");
+  return s;
+}
+
 export async function buildTransferWitness(args: {
   secretHex: Hex;
   amountIn: bigint;
   amountPay: bigint;
   asset?: Address;
   path: PoseidonMerklePath;
+  /**
+   * A 16-byte seed (hex) to make the payee's secret from (seedToSecret), so the
+   * payment fits a short claim link. Left out, the secret is drawn at random as before.
+   */
+  paySeed?: Hex;
 }): Promise<TransferWitness> {
   const asset = args.asset ?? NATIVE_ASSET;
   const amountChange = args.amountIn - args.amountPay;
@@ -117,7 +135,7 @@ export async function buildTransferWitness(args: {
   const nullifier = await noteNullifierPoseidon(secretIn, commitmentIn);
   const commitmentMatches = commitmentIn === args.path.leaf;
 
-  const secretPay = await randomSecretField();
+  const secretPay = args.paySeed ? seedFromHex(args.paySeed) : await randomSecretField();
   const secretChange = await randomSecretField();
   const newCommitment0 = await noteCommitmentPoseidon(secretPay, args.amountPay, asset);
   const newCommitment1 = await noteCommitmentPoseidon(secretChange, amountChange, asset);
@@ -153,6 +171,7 @@ export async function buildTransferWitness(args: {
       nullifier: fieldToHex(nullifierPay),
       amountWei: args.amountPay.toString(),
       asset,
+      ...(args.paySeed ? { seed: args.paySeed } : {}),
     },
     changeNote: {
       secret: fieldToHex(secretChange),

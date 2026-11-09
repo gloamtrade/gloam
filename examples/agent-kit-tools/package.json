@@ -1,0 +1,25 @@
+{
+  "name": "gloam-agent-kit-tools-example",
+  "private": true,
+  "type": "module",
+  "description": "Gloam for agent kits and x402 marketplaces: framework-agnostic tool definitions with preview-then-execute handlers, and a seller side for private x402.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "tsc --noEmit -p . && tsx --test test/*.test.mts",
+    "example": "tsx src/example.ts"
+  },
+  "dependencies": {
+    "@gloamtrade/game-plugin-gloam": "workspace:*",
+    "@gloamtrade/sdk": "workspace:*",
+    "circomlibjs": "0.1.7",
+    "snarkjs": "^0.7.5",
+    "viem": "2.55.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}

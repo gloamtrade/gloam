@@ -13,6 +13,7 @@ import { formatUnits } from "viem";
 import { formatEth } from "@/lib/chain";
 import { useAppAccount, useAppBalance, useAppTokenBalances } from "@/lib/demo";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
+import { useAutoRestoreStatus } from "@/hooks/useAutoRestoreStatus";
 import { assetLabel, formatAssetAmount, formatAssetLabel, isNativeAsset, isShieldDeployed } from "@/lib/shield";
 import { addableTokensFor, isDollarStable, isNativeAddable, knownTokens } from "@/lib/tokens";
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
@@ -121,8 +122,11 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
     () => [...topUpsSetAside(local)].map(([asset, wei]) => formatAssetLabel(wei, asset)).join(", "),
     [local]
   );
-  const privateLoading = balancesVisible && (!ready || (balanceSyncing && !hasPrivate));
-  const privateKnown = balancesVisible && ready && !balanceSyncing;
+  // A restore from the backup on its way (lib/autoRestore) can still bring the balance in.
+  const autoRestore = useAutoRestoreStatus(address);
+  const restoring = autoRestore.kind === "checking" || autoRestore.kind === "running";
+  const privateLoading = balancesVisible && (!ready || ((balanceSyncing || restoring) && !hasPrivate));
+  const privateKnown = balancesVisible && ready && !balanceSyncing && !restoring;
   const suggest = pickAddAsset(wallet);
   const core = actions.filter((a) => !a.extra);
   const extras = actions.filter((a) => a.extra);
@@ -233,12 +237,14 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
             empty={balancesVisible ? "0" : null}
             note={
               !balancesVisible
-                ? "Connect to see it. Only this browser can read it."
-                : setAside
-                  ? `${setAside} more is set aside for agent top-ups.`
-                  : hasPrivate
-                    ? "Only this browser can read it."
-                    : "Nothing here yet. Only you will see this number."
+                ? "Connect to see it. Only you can."
+                : restoring
+                  ? "Syncing your private balance…"
+                  : setAside
+                    ? `${setAside} more is set aside for agent top-ups.`
+                    : hasPrivate
+                      ? "Only you can see it."
+                      : "Nothing here yet. Only you will see this number."
             }
           />
           <BalancePane

@@ -68,6 +68,7 @@ async function defaultVerify(author: `0x${string}`, typed: ReturnType<typeof fee
   }
   rhClient ??= createPublicClient({
     chain: robinhood,
+    ccipRead: false,
     transport: serverTransport({ chainId: robinhood.id, chain: robinhood, historyRpc: null }, { timeout: 8_000, retryCount: 1 }),
   }) as PublicClient;
   try {

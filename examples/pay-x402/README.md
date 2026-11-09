@@ -15,6 +15,11 @@ settlement made private and self-custodial. It is **not** a Tempo Zone: no
 operator sees the payment; only the payer and the payee learn the amount, and
 compliance visibility is opt-in per payment through an issuer-scoped disclosure.
 
+Selling an API that already takes standard x402? The seller guide in
+[`examples/agent-kit-tools`](../agent-kit-tools/README.md#sell-with-private-x402)
+adds a Gloam price next to your `exact` one, with middleware that settles and
+sweeps before it serves, and says what standard clients can and cannot do.
+
 ## Run on mainnet
 
 ```bash
@@ -36,12 +41,12 @@ GLOAM_NETWORK=tempo-mainnet GLOAM_PAY_KEY=0x... npx tsx examples/pay-x402/pay-x4
 
 What to know before you use mainnet:
 
-- **Beta.** Gloam is beta software. Deposits are capped at 50,000 per deposit and
+- **Deposit limits.** Deposits are capped at 50,000 per deposit and
   2,500,000 in total for each stablecoin. Private payments and cash outs are never
   limited.
 - **Fees.** Gloam takes no fee on deposits or private payments (this x402
   payment and the seller's sweep included); you pay only network gas. Cashing
-  out costs 0.25% (`cashOutFee(amount)`).
+  out costs 0.5% (`cashOutFee(amount)`).
 - **Final keys.** Mainnet proofs use the final keys from the 13-contributor
   trusted setup (release `ceremony-final`), picked with `circuitArtifactFiles` /
   `circuitArtifactUrls`.

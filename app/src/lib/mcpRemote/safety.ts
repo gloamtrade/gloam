@@ -14,7 +14,8 @@
  *  - Gloam notes and tickets: gloam1. / gloam1e. (note package), gloam2t.
  *    (sealed payment ticket), gloambak1. (backup), gloamenc1: (encrypted note
  *    vault), gloamnote1: (x402 note), gloamx402pay1: (x402 payment payload)
- *  - a claim link (#claim=...)
+ *  - a claim link (#claim=..., or the short gloam.trade/c#...) and a short
+ *    payment code (gloam3.)
  *  - a JWK with its private part ("d")
  *
  * A receive tag (gloamr1.) is public and is not matched.
@@ -36,6 +37,8 @@ const PATTERNS: Pattern[] = [
   { what: "a Gloam note secret", re: /(?<![A-Za-z0-9])gloamnote1:\S{8,}/ },
   { what: "a Gloam x402 payment", re: /(?<![A-Za-z0-9])gloamx402pay1:\S{8,}/ },
   { what: "a Gloam claim link", re: /(?:#|%23)claim(?:=|%3D)\S{8,}/i },
+  { what: "a short Gloam payment code", re: /(?<![A-Za-z0-9])gloam3(?:[.=]|%2E)[0-9A-Za-z]{8,}/i },
+  { what: "a Gloam claim link", re: /gloam\.trade(?:\/|%2F)c\/?(?:#|%23)[0-9A-Za-z]{8,}/i },
   { what: "a private key (JWK)", re: /"d"\s*:\s*"[A-Za-z0-9_-]{20,}"/ },
 ];
 

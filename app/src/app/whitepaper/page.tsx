@@ -1,34 +1,45 @@
+import { swapMainnets, swapV3Live } from "@/lib/vaultSwap";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram, PoolPicture } from "@/components/docs/FlowDiagram";
-import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
+import { joinNames, liveMainnetNames, liveMainnetsSinceText, mainnetPool } from "@/lib/mainnet";
+import { ELYSIUM, ELYSIUM_TESTNET } from "@/lib/elysium";
 
 /** Base and Ethereum mainnet join the lists once their pools are in (lib/mainnet.ts). */
 const BASE_LIVE = mainnetPool(8453) !== null;
 const ETHEREUM_LIVE = mainnetPool(1) !== null;
-const MAINNET_IDS = ["RH 4663", "Tempo 4217", ...(BASE_LIVE ? ["Base 8453"] : []), ...(ETHEREUM_LIVE ? ["Ethereum 1"] : [])].join(" · ");
+const MAINNET_IDS = [
+  "RH 4663",
+  "Tempo 4217",
+  ...(BASE_LIVE ? ["Base 8453"] : []),
+  ...(ETHEREUM_LIVE ? ["Ethereum 1"] : []),
+  // Elysium mainnet, only while it is on (lib/elysium.ts)
+  ...(ELYSIUM ? [`Elysium ${ELYSIUM.chainId}`] : []),
+].join(" · ");
+/** The mainnets after Robinhood Chain and Tempo, as words: "Base and Ethereum", and Elysium while it is on. */
+const LATER_NAMES = joinNames([...(BASE_LIVE ? ["Base"] : []), ...(ETHEREUM_LIVE ? ["Ethereum"] : []), ...(ELYSIUM ? ["Elysium"] : [])]);
 
 export const metadata: Metadata = {
   title: "Whitepaper",
   alternates: { canonical: "/whitepaper" },
   description:
-    "Gloam whitepaper: private stablecoin payments on Robinhood Chain, Tempo, Base and Ethereum. Thesis, architecture, cryptography, what is new, how it compares, threat model and roadmap.",
+    `Gloam whitepaper: private stablecoin payments on ${liveMainnetNames()}. Thesis, architecture, cryptography, what is new, how it compares, threat model and roadmap.`,
 };
 
 export default function WhitepaperPage() {
   return (
     <DocsLayout
       title="Whitepaper"
-      lede="Private money on public chains. The technical and product thesis for Gloam: private stablecoin payments for people, teams and AI agents, private by default and provable on demand, on Robinhood Chain, Tempo, Base and Ethereum."
+      lede={`Private money on public chains. The technical and product thesis for Gloam: private stablecoin payments for people, teams and AI agents, private by default and provable on demand, on ${liveMainnetNames()}.`}
       glance={[
         { label: "Version", value: "0.5" },
         { label: "Status", value: "Public draft" },
-        { label: "Networks", value: `Mainnet ${MAINNET_IDS}; testnet 46630 · 42431 · 84532 · 11155111` },
+        { label: "Networks", value: `Mainnet ${MAINNET_IDS}; testnet 46630 · 42431 · 84532 · 11155111${ELYSIUM_TESTNET ? " · 99801" : ""}` },
         { label: "Live", value: "Shield · pay · payroll · proofs · swaps" },
         { label: "Private swaps", value: "Mainnet; amounts public" },
-        { label: "Mainnet", value: "Live since 21 Oct 2026, beta" },
+        { label: "Mainnet", value: "Live since 21 Oct 2026" },
       ]}
       quickLinks={[
         { href: "/docs", label: "Documentation" },
@@ -54,7 +65,7 @@ export default function WhitepaperPage() {
         Stablecoins are becoming how businesses and AI agents pay each other,
         and every one of those payments is public. Gloam makes them private,
         and lets the payer prove exactly what someone needs to see. It is a
-        self-custodial vault on Robinhood Chain, Tempo, Base and Ethereum in
+        self-custodial vault on {liveMainnetNames()} in
         which stablecoins, and on Robinhood Chain stock tokens, can be held,
         paid and proven with
         reduced public visibility. The thesis is one line:{" "}
@@ -150,7 +161,7 @@ export default function WhitepaperPage() {
           <strong>Mainnet only when ready.</strong> Production capital
           requires production ceremonies, reviews, and operational maturity.
           Mainnet opened on the final ceremony keys, after an internal review,
-          with beta deposit limits.
+          with deposit limits.
         </li>
       </ul>
 
@@ -190,7 +201,7 @@ export default function WhitepaperPage() {
       <p>
         Gloam is an application-layer privacy system on a transparent L2
         (Robinhood Chain), with the same contracts deployed on Tempo, a
-        payments-first L1, and on Base and Ethereum. Settlement finality remains with the chain. Privacy
+        payments-first L1, and on {LATER_NAMES}. Settlement finality remains with the chain. Privacy
         is constructed above it via a self-custodial shielded pool, a Merkle
         tree of note commitments, nullifiers to prevent double-spends, and
         on-chain verifiers for zero-knowledge proofs. The pool holds deposits,
@@ -337,12 +348,12 @@ export default function WhitepaperPage() {
           {
             n: "1",
             title: "Connect",
-            body: `Wallet on a mainnet (Robinhood Chain 4663, Tempo 4217${BASE_LIVE ? ", Base 8453" : ""}${ETHEREUM_LIVE ? ", Ethereum 1" : ""}), or on a testnet (46630, 42431, 84532, 11155111) to practice.`,
+            body: `Wallet on a mainnet (Robinhood Chain 4663, Tempo 4217${BASE_LIVE ? ", Base 8453" : ""}${ETHEREUM_LIVE ? ", Ethereum 1" : ""}${ELYSIUM ? `, Elysium ${ELYSIUM.chainId}` : ""}), or on a testnet (46630, 42431, 84532, 11155111${ELYSIUM_TESTNET ? ", 99801" : ""}) to practice.`,
           },
           {
             n: "2",
             title: "Shield",
-            body: "Deposit USDG or $GLOAM (Robinhood Chain); USDC.e, pathUSD, USDT0 or OUSD (Tempo); USDC, EURC, USDT or ETH (Base); or USDC, USDT, USDG, PYUSD, EURC or ETH (Ethereum), into the vault, under beta limits. The Robinhood Chain testnet also takes ETH and faucet stocks.",
+            body: "Deposit USDG or $GLOAM (Robinhood Chain); USDC.e, pathUSD, USDT0 or OUSD (Tempo); USDC, EURC, USDT or ETH (Base); or USDC, USDT, USDG, PYUSD, EURC or ETH (Ethereum), into the vault, under deposit limits. The Robinhood Chain testnet also takes ETH and faucet stocks.",
           },
           {
             n: "3",
@@ -494,7 +505,7 @@ export default function WhitepaperPage() {
                 <strong>Gloam</strong>
               </td>
               <td>Only the owner, and whoever they prove one fact to</td>
-              <td>Owner-only privacy, proofs for one reader, payroll and agent rails on Robinhood Chain, Tempo, Base and Ethereum</td>
+              <td>Owner-only privacy, proofs for one reader, payroll and agent rails on {liveMainnetNames()}</td>
             </tr>
             <tr>
               <td>Zama (FHE)</td>
@@ -598,9 +609,9 @@ export default function WhitepaperPage() {
         <li>Private payroll, scheduled payroll, and payment requests</li>
         <li>Proofs of funds, payment, and payroll totals, checked at /verify</li>
         <li>
-          Private swaps on Robinhood Chain and Tempo mainnet: USDG, $GLOAM,
+          Private swaps on {swapMainnets()} mainnet: USDG, $GLOAM,
           PONS, CASHCAT, WETH, stock tokens and more on Robinhood Chain, the four
-          vault stablecoins on Tempo, sent by the
+          vault stablecoins on Tempo{swapV3Live(8453) || swapV3Live(1) ? ", stablecoins and ETH on Uniswap v4 on the others" : ""}, sent by the
           Gloam relay, with who swapped kept private and the amounts public
         </li>
         <li>
@@ -621,14 +632,15 @@ export default function WhitepaperPage() {
       <h2 id="roadmap">11. Roadmap</h2>
       <ol>
         <li>
-          <strong>Live on mainnet (beta):</strong> Robinhood Chain and Tempo
-          since 21 October 2026, Base and Ethereum since 26 October 2026, all
+          <strong>Live on mainnet:</strong> {liveMainnetsSinceText()}, all
           on the same vault and the final ceremony keys: proof-bound
           shield, unshield, private send, the Gloam relay, payroll, proofs of
-          funds, payment, and payroll totals, private agent payments, beta
+          funds, payment, and payroll totals, private agent payments,
           deposit limits, and pools with no admin withdraw and timelocked rule
           changes. Private swaps from the private balance run on Robinhood
-          Chain and Tempo, through a router per chain. Encrypted payment memos run on every network, and
+          Chain and Tempo, through a router per chain, and on Robinhood Chain
+          they include stock tokens. A swap hides who swapped, not the tokens or
+          the amounts. Encrypted payment memos run on every network, and
           the Robinhood Chain testnet adds stock tokens held and sent
           privately, with test funds.
         </li>
@@ -643,7 +655,7 @@ export default function WhitepaperPage() {
         </li>
         <li>
           <strong>Mid term:</strong> issuer-scoped disclosure for regulated
-          stablecoins on Tempo; private trading of stock tokens.
+          stablecoins on Tempo.
         </li>
         <li>
           <strong>Production gate:</strong> done before mainnet, the multi-party
@@ -658,7 +670,7 @@ export default function WhitepaperPage() {
       <h2 id="risks">12. Risks and limitations</h2>
       <ul>
         <li>
-          Beta software on mainnet; beta deposit limits cap
+          On mainnet, deposit limits cap
           what the pools take
         </li>
         <li>
@@ -697,7 +709,7 @@ export default function WhitepaperPage() {
 
       <h2 id="non-claims">13. Explicit non-claims</h2>
       <p>
-        Gloam is live on mainnet as beta software. It does not claim a full
+        Gloam is live on mainnet. It does not claim a full
         external audit (the Kann Audits review covers the vault contracts only),
         insurance of funds, legal immunity, or invisibility
         from investigation. Nothing in
@@ -707,12 +719,12 @@ export default function WhitepaperPage() {
       <h2 id="closing">14. Closing</h2>
       <p>
         Settlement will remain public. Salaries, suppliers and strategies need
-        not. Gloam builds the sealed chamber beside the open book on Robinhood
-        Chain, Tempo, Base and Ethereum, so people, teams and agents can hold, pay and prove
+        not. Gloam builds the sealed chamber beside the open book on{" "}
+        {liveMainnetNames()}, so people, teams and agents can hold, pay and prove
         exactly what is needed, without printing every private calculation to
         the street.
       </p>
-      <div className="t-label pt-4">gloam.trade · mainnet beta · hello@gloam.trade · @gloamtrade</div>
+      <div className="t-label pt-4">gloam.trade · live on mainnet · hello@gloam.trade · @gloamtrade</div>
     </DocsLayout>
   );
 }

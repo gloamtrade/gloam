@@ -3,18 +3,19 @@ import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
+import { swapMainnets } from "@/lib/vaultSwap";
 
 export const metadata: Metadata = {
   title: "Sealed trade (retired)",
   description:
-    "Gloam's first private trade design, the sealed swap, is retired and stays off on every network. Private swaps replaced it on Robinhood Chain and Tempo mainnet.",
+    `Gloam's first private trade design, the sealed swap, is retired and stays off on every network. Private swaps replaced it on ${swapMainnets()} mainnet.`,
 };
 
 export default function DocsSealedTradePage() {
   return (
     <DocsLayout
       title="Sealed trade (retired)"
-      lede="The sealed swap was Gloam's first design for private trading. It is retired and stays off on every network. Private swaps replaced it: you swap straight from your private balance on Robinhood Chain and Tempo mainnet."
+      lede={`The sealed swap was Gloam's first design for private trading. It is retired and stays off on every network. Private swaps replaced it: you swap straight from your private balance on ${swapMainnets()} mainnet.`}
       glance={[
         { label: "Sealed trade", value: "Retired, stays off" },
         { label: "Replaced by", value: "Private swaps" },
@@ -25,8 +26,8 @@ export default function DocsSealedTradePage() {
       <h2 id="replaced">What replaced it</h2>
       <p>
         <Link href="/docs/private-swaps">Private swaps</Link>{" "}
-        are live on
-        Robinhood Chain and Tempo mainnet, under Vault &gt; Swap. One
+        are live on{" "}
+        {swapMainnets()} mainnet, under Vault &gt; Swap. One
         transaction takes a note out of the vault, swaps it on a public DEX
         for an exact amount, and puts the output back as a new private note.
       </p>

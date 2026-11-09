@@ -84,6 +84,7 @@ export async function readGloamNow(address: Address): Promise<bigint | null> {
   if (process.env.GLOAM_VOTE_NO_CHAIN === "1") return null;
   rhClient ??= createPublicClient({
     chain: robinhood,
+    ccipRead: false,
     transport: serverTransport({ chainId: robinhood.id, chain: robinhood, historyRpc: null }, { timeout: READ_TIMEOUT_MS, retryCount: 1 }),
   }) as PublicClient;
   try {
@@ -102,9 +103,21 @@ export async function getHolder(address: string): Promise<HolderRecord | null> {
 }
 
 /**
+ * Whether a wallet not noted before is worth a new record: it held $GLOAM at a
+ * snapshot, holds some now (read on the server), has signed a vote, or is a
+ * listed team or contract address. Anyone can post any address to the seen
+ * route, so a wallet with none of these is answered and not stored: made-up
+ * addresses can't use up HOLDERS_MAX or slow the admin list. Pure.
+ */
+export function worthRecording(facts: HolderFacts, current: bigint | null): boolean {
+  return BigInt(facts.snapshot) > 0n || (current !== null && current > 0n) || facts.signed.length > 0 || facts.excluded !== null;
+}
+
+/**
  * Notes a connected wallet: one record per wallet, its first-seen time kept,
  * everything else brought up to date. A failed balance read keeps the last
- * one. Returns the record, or null when the store is full and this wallet is new.
+ * one. Returns the record, or null when this wallet is new and either holds no
+ * $GLOAM (worthRecording) or the store is full.
  */
 export async function recordHolder(facts: HolderFacts, current: bigint | null, now: number = Date.now()): Promise<HolderRecord | null> {
   const address = getAddress(facts.address);
@@ -113,7 +126,7 @@ export async function recordHolder(facts: HolderFacts, current: bigint | null, n
     ["SCARD", HOLDERS_SET],
   ]);
   const prev = jsonOf<HolderRecord>(prevRaw);
-  if (!prev && Number(count ?? 0) >= HOLDERS_MAX) return null;
+  if (!prev && (!worthRecording(facts, current) || Number(count ?? 0) >= HOLDERS_MAX)) return null;
   const next: HolderRecord = {
     address,
     firstSeen: prev ? Math.min(prev.firstSeen, now) : now,

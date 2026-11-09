@@ -68,7 +68,8 @@ const shieldBoundAbi = [
 
 // ── network ──────────────────────────────────────────────────────────────────
 
-// Base ("base-mainnet", and "base" for Base Sepolia) and Ethereum ("ethereum-mainnet") work once the SDK has their pools.
+// Base ("base-mainnet", and "base" for Base Sepolia) and Ethereum ("ethereum-mainnet") work once the SDK has their pools;
+// Elysium ("elysium-mainnet", USDC, gas in HYPE) once it has Elysium's values (coming).
 const NETWORK_KEYS: GloamNetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "robinhood", "tempo", "base"];
 const isNative = (a: GloamAsset) => a.address.toLowerCase() === NATIVE_ASSET.toLowerCase();
 
@@ -86,7 +87,7 @@ function pickNetwork(fallback: GloamNetworkKey = "robinhood"): GloamNetwork {
   if (net.testnet) {
     console.log(`${networkName(net.chainId)}. Set GLOAM_NETWORK=${net.family}-mainnet to use mainnet.`);
   } else {
-    console.log(`${net.label} mainnet. Gloam is beta software: at most 50,000 per stablecoin deposit.`);
+    console.log(`${net.label} mainnet. Deposit limit: at most 50,000 per stablecoin deposit.`);
   }
   return net;
 }
@@ -171,7 +172,7 @@ async function main() {
 
   console.log(`Agent ${account.address} shielding ${show(amountWei)} into pool ${net.pool}`);
 
-  // 1) Build the shield intent. The SDK checks the asset and the beta limit,
+  // 1) Build the shield intent. The SDK checks the asset and the deposit limit,
   //    mints a Poseidon note, and proves it binds (amount, asset).
   const intent = await buildShieldBoundIntent({
     chainId: net.chainId,
@@ -222,7 +223,7 @@ async function main() {
   }
   console.log("Shielded privately. Who can spend this balance is now off the public feed.");
   if (!net.testnet) {
-    console.log("Deposits and private payments are free. Cashing out costs 0.25% (see cashOutFee in the SDK).");
+    console.log("Direct deposits and private payments are free. Cashing out costs 0.5% (see cashOutFee in the SDK).");
   }
 }
 

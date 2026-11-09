@@ -5,16 +5,17 @@
  *
  * shieldBound (live deposit), unshield (cash out), and private_send (in-vault
  * transfer) each build a witness, generate a Groth16 proof via the injected
- * prover, and resolve to a signed-ready call. private_trade (sealedSwap) builds
- * a valid intent too, but its on-chain path is disabled pending the H1 solvency
- * work — the builder is here so integrators can wire it ahead of that flip.
+ * prover, and resolve to a signed-ready call. private_trade (sealedSwap) is the
+ * old sealed trade, retired: its on-chain path reverts on every live pool. Private
+ * swaps are buildSwapIntent (swapIntent.ts).
  *
  * Network: every builder takes `chainId` (default Robinhood Chain testnet, as
  * in 0.0.x) and `poolAddress` (default: Gloam's pool on that chain). For
  * mainnet, pass the mainnet network's chainId (see mainnetNetwork()); a mainnet
  * (or Base Sepolia) whose pool is not in this SDK version is refused rather
- * than guessed, and so is a mainnet vault passed with no chainId. Prove
- * with the key set of the same chain: circuitArtifactUrls(circuit, chainId).
+ * than guessed, and so is a mainnet vault, or Ethereum Sepolia's, passed with
+ * no chainId. Prove with the key set of the same chain:
+ * circuitArtifactUrls(circuit, chainId).
  */
 
 import type { Address } from "viem";
@@ -27,12 +28,13 @@ import {
   networkName,
   poolForChainId,
 } from "./constants.js";
-import { MAINNET_POOLS } from "./mainnet.js";
+import { ETHEREUM_SEPOLIA_POOL, MAINNET_POOLS } from "./mainnet.js";
 import { makeBoundNotePoseidon, type BoundNote } from "./note.js";
 import type { GloamIntent, IntentExec, TradeSide } from "./intents.js";
 import type { PoseidonMerklePath } from "./merkle.js";
 import { fieldToBytes32 } from "./proof.js";
 import { assertDepositWithinLiveLimit, type DepositLimitReader } from "./limits.js";
+import { cashOutFeeLive, type FeeReader } from "./fee.js";
 import type { Prover } from "./prove.js";
 import { toField } from "./poseidon.js";
 import {
@@ -48,16 +50,26 @@ const isNativeAsset = (a: Address) =>
 const isMainnetVault = (pool: Address) =>
   Object.values(MAINNET_POOLS).some((m) => m.pool?.toLowerCase() === pool.toLowerCase());
 
+const isEthereumSepoliaVault = (pool: Address) =>
+  ETHEREUM_SEPOLIA_POOL.pool?.toLowerCase() === pool.toLowerCase();
+
 /**
  * The chain a builder runs on: `chainId`, or Robinhood Chain testnet when it is
- * left out. A mainnet vault has the same address on every mainnet, so it can't
- * name its chain, and the testnet default would be wrong for it: refused.
+ * left out. A mainnet vault has the same address on every mainnet (and Base
+ * Sepolia), so it can't name its chain, and the testnet default would be wrong
+ * for it: refused. Ethereum Sepolia's vault is refused the same way, since the
+ * default is a different chain, as a Base Sepolia pool is.
  */
 function resolveChainId(params: { chainId?: number; poolAddress?: Address }): number {
   if (params.chainId != null) return params.chainId;
   if (params.poolAddress && isMainnetVault(params.poolAddress)) {
     throw new Error(
       `${params.poolAddress} is Gloam's vault on every mainnet, so it doesn't say which chain this is for. Pass chainId too (see mainnetNetwork()).`
+    );
+  }
+  if (params.poolAddress && isEthereumSepoliaVault(params.poolAddress)) {
+    throw new Error(
+      `${params.poolAddress} is Gloam's vault on Ethereum Sepolia, not on the default chain. Pass chainId too (see testnetNetwork("ethereum")).`
     );
   }
   return RH_TESTNET_CHAIN_ID;
@@ -130,7 +142,7 @@ export interface ShieldBoundIntentParams extends ShieldIntentParams {
    */
   prover: Prover;
   /**
-   * Reads the vault's live beta limits (a viem PublicClient on this chain), so a
+   * Reads the vault's live deposit limits (a viem PublicClient on this chain), so a
    * deposit over them is refused before any proof is made. Left out, or when
    * the read fails, the amount is not checked here and the vault enforces it.
    */
@@ -143,7 +155,7 @@ export interface ShieldBoundIntentParams extends ShieldIntentParams {
  * (amount, asset), then resolves shieldBound(asset, amount, commitment, proof).
  * Use this on every live Gloam pool, mainnet and testnet: plain shield()
  * reverts there (ShieldProofRequired). On mainnet, the asset must be one the
- * pool lists and the amount within its beta limits; with a `client`, both are
+ * pool lists and the amount within its deposit limits; with a `client`, both are
  * read live from the vault before any proof is made.
  */
 export async function buildShieldBoundIntent(
@@ -202,6 +214,11 @@ export interface UnshieldIntentParams {
   poolAddress?: Address;
   chainId?: number;
   agentAddress?: Address | null;
+  /**
+   * Reads the vault's cash-out fee live (a viem PublicClient on this chain), so the
+   * plan says what the vault keeps and what `to` receives. Left out, the plan has no fee.
+   */
+  client?: FeeReader;
 }
 
 /** Build a signed-ready unshield intent. exec.args match unshield(proof, root, nullifier, asset, to, amount). */
@@ -222,18 +239,26 @@ export async function buildUnshieldIntent(
     path: params.path,
   });
   if (!w.readyToProve) throw new Error(w.blocker ?? "unshield witness not ready");
+  // the fee the vault charges now, when it can be read; the vault applies its own either way
+  const fee =
+    params.client && isPaymentsPoolChainId(chainId) ? await cashOutFeeLive(params.client, poolAddress, params.amountWei).catch(() => null) : null;
   const { proofBytes } = await params.prove(w.circomInput);
 
   return {
     intent: "unshield",
     chainId,
     agentAddress: params.agentAddress ?? null,
-    plan: { asset: isNativeAsset(asset) ? "ETH" : asset, amountWei: params.amountWei, to: params.to },
+    plan: {
+      asset: isNativeAsset(asset) ? "ETH" : asset,
+      amountWei: params.amountWei,
+      to: params.to,
+      ...(fee ? { feeBps: fee.feeBps, feeWei: fee.fee, receivesWei: fee.receives } : {}),
+    },
     privacy:
       "Unshield is the public exit: the amount, asset, and recipient become visible. The nullifier keeps the source note unlinkable to your other activity.",
     execution: `Unsigned. Sign and broadcast unshield(proof, root, nullifier, asset, to, amount) on ${networkName(chainId)}.${
       isPaymentsPoolChainId(chainId)
-        ? " The pool keeps its cash-out fee (0.25% at launch, see cashOutFee) and sends the rest to the recipient."
+        ? ` The pool keeps its cash-out fee (${fee ? `${fee.feeBps / 100}% now` : "readCashOutFeeBps reads it"}) at the rate when this lands, and sends the rest to the recipient.`
         : ""
     }`,
     exec: {

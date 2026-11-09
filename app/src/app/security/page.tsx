@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ELYSIUM_ENABLED } from "@/lib/elysium";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Footer } from "@/components/Footer";
@@ -20,7 +21,7 @@ const REPORT_PDF = "/audits/gloam-kann-security-review-2026-11-01.pdf";
 const REPORT_LIVE = true;
 
 const COMMIT = "aac9e185bbeaa6b74311236c1cc57077d928f407";
-const REPO = "https://github.com/cryptoduke01/gloam";
+const REPO = "https://github.com/gloamtrade/gloam";
 
 /**
  * The findings, as the report counts them. This is the only place the counts
@@ -45,7 +46,8 @@ const REVIEWED = [
 ];
 
 const NOT_REVIEWED = [
-  "Swap routers: GloamVaultSwap, V4, V4b, Tempo and SwapEscrow. These have only had internal review",
+  "Swap routers: GloamVaultSwap, GloamVaultSwap2, GloamVaultSwapV4, V4b and V4c, GloamVaultSwapTempo and GloamVaultSwapTempo2, with SwapEscrow and SwapEscrow2. These have had internal review only, most recently on 7 November 2026. An outside review of them is being sourced",
+  "VaultOwnerGuard",
   "GloamPayMemo",
   "Generated verifiers",
   "Circuits",
@@ -137,7 +139,7 @@ export default function SecurityPage() {
           <h1 className="t-display-xl">Security</h1>
           <p className="mt-6 max-w-[52ch] text-pretty text-[18px] leading-relaxed text-soft sm:text-[20px]">
             Kann Audits reviewed the vault contracts (report, 1 November 2026) and found no Critical, High or Medium
-            issues. The review covered the vault contracts only, and Gloam is still beta software.
+            issues. The review covered the vault contracts only.
           </p>
           <div className="mt-9 flex flex-wrap items-center gap-x-7 gap-y-4">
             {REPORT_LIVE ? (
@@ -187,6 +189,8 @@ export default function SecurityPage() {
           <p className="mt-10 max-w-[60ch] text-[15px] leading-relaxed text-mute">
             The 10 reviewed files have not changed on main since that commit. The deployed vault has identical bytecode
             on Robinhood Chain, Tempo, Base and Ethereum.
+            {ELYSIUM_ENABLED &&
+              " Elysium's vault went live after the review. It is built from the same reviewed files, and its owner is a VaultOwnerGuard from the deploy, which the review did not cover."}
           </p>
           <Link href="/verify#contracts" className="gl-arrowlink mt-5">
             Check the contracts <span aria-hidden>→</span>
@@ -196,9 +200,9 @@ export default function SecurityPage() {
         <Section id="limits" title="What it does not change">
           <div className="grid grid-cols-1 gap-10 sm:grid-cols-2">
             <div className="border-t border-foreground pt-5">
-              <p className="text-[18px] leading-snug tracking-[-0.01em]">Still beta</p>
+              <p className="text-[18px] leading-snug tracking-[-0.01em]">Deposit limits</p>
               <p className="mt-3 text-[14px] leading-relaxed text-mute">
-                Mainnet is beta software with deposit limits. A review lowers risk. It does not remove it.
+                Mainnet has deposit limits. A review lowers risk. It does not remove it.
               </p>
             </div>
             <div className="border-t border-foreground pt-5">

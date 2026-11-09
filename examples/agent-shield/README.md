@@ -30,10 +30,10 @@ GLOAM_NETWORK=robinhood-mainnet GLOAM_AGENT_PRIVATE_KEY=0x... npx tsx agent-shie
 
 What to know before you use mainnet:
 
-- **Beta.** Gloam is beta software. Deposits are capped at 50,000 per deposit and
+- **Deposit limits.** Deposits are capped at 50,000 per deposit and
   2,500,000 in total for each stablecoin ($GLOAM: 2,500,000 and 25,000,000). Cash outs and
   private payments are never limited.
-- **Fees.** Deposits and private payments are free. Cashing out costs 0.25%
+- **Fees.** Direct deposits and private payments are free. Cashing out costs 0.5%
   (`cashOutFee(amount)` in the SDK).
 - **Final keys.** Mainnet proofs use the final keys from the 13-contributor
   trusted setup (release `ceremony-final`). The script picks them with
@@ -89,7 +89,7 @@ against `CIRCUIT_SHA256` before it is used.
 - `getGloamNetwork(key)`: one object with the chain, RPC, pool, assets, limits
   and key set for a network. It is `null` for a mainnet whose pool is not in your
   SDK version.
-- `buildShieldBoundIntent(...)`: the SDK checks the asset and the beta limit,
+- `buildShieldBoundIntent(...)`: the SDK checks the asset and the deposit limit,
   mints the note, runs the shield prover, and returns a ready-to-sign
   `shieldBound(asset, amount, commitment, proof)` call. Plain `shield()` is off on
   every live pool, so the proof is required.

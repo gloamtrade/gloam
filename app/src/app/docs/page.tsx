@@ -4,6 +4,7 @@ import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram, PoolPicture } from "@/components/docs/FlowDiagram";
 import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
+import { ELYSIUM_ENABLED } from "@/lib/elysium";
 
 /** The mainnets with a pool in, as words: "Robinhood Chain and Tempo" until Base and Ethereum are in. */
 const MAINNETS = liveMainnetNames();
@@ -41,12 +42,12 @@ export default function DocsOverviewPage() {
         <Link href="/docs/compare">how Gloam compares</Link>.
       </p>
       <p>
-        Mainnet is <strong>beta software</strong>. It uses
-        the final keys from a 13-contributor trusted setup, and beta deposit
+        Mainnet is <strong>live</strong>. It uses
+        the final keys from a 13-contributor trusted setup, and deposit
         limits cap what goes in. The code was reviewed internally before
         launch, and Kann Audits has since reviewed the vault contracts (
         <Link href="/security">report, 1 November 2026</Link>) and found no Critical, High or Medium issues. Deposits and private payments are
-        free, and cashing out costs 0.25%. The Robinhood Chain and Tempo
+        free, and cashing out costs 0.5%. The Robinhood Chain and Tempo
         testnets keep <strong>development proving keys</strong>; Base Sepolia
         and Ethereum Sepolia run the final keys. Details: <Link href="/docs/chain">Networks</Link>.
       </p>
@@ -102,18 +103,19 @@ export default function DocsOverviewPage() {
       <ul>
         <li>Connect wallet, portfolio, markets</li>
         <li>
-          Mainnet on {MAINNETS}, with the final ceremony keys and beta deposit
+          Mainnet on {MAINNETS}, with the final ceremony keys and deposit
           limits
         </li>
         <li>
-          Send public balances: ETH and every token listed on the network
+          Send public balances: ETH{ELYSIUM_ENABLED ? " (HYPE on Elysium)" : ""} and every token listed on the network
         </li>
         <li>
-          Shield into the vault: USDG, $GLOAM, PONS and CASHCAT on Robinhood
-          Chain mainnet, with ETH, AI and ORBIO once their limits land;
+          Shield into the vault: USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO
+          on Robinhood Chain mainnet;
           USDC.e, pathUSD, USDT0 and OUSD on Tempo mainnet;
           {BASE_LIVE ? " USDC, EURC, USDT and ETH on Base mainnet;" : ""}
-          {ETHEREUM_LIVE ? " USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum mainnet;" : ""} test
+          {ETHEREUM_LIVE ? " USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum mainnet;" : ""}
+          {ELYSIUM_ENABLED ? " USDC on Elysium mainnet;" : ""} test
           ETH, stock tokens and stablecoins on the testnets
         </li>
         <li>

@@ -93,7 +93,7 @@ export const shieldPoolAbi = [
     inputs: [{ name: "asset", type: "address" }],
     outputs: [{ type: "uint256" }],
   },
-  // Beta deposit limits (ShieldPoolCore). Pools deployed before them lack these
+  // Deposit limits (ShieldPoolCore). Pools deployed before them lack these
   // reads, so a failed read means no limits.
   {
     type: "function",
@@ -483,7 +483,7 @@ export function withdrawFeeOf(amount: bigint, bps: number): bigint {
   return (amount * BigInt(bps)) / 10_000n;
 }
 
-/** "0.25%" for 25 bps, "1%" for 100. */
+/** "0.5%" for 50 bps, "0.25%" for 25, "1%" for 100. */
 export function formatFeePercent(bps: number): string {
   return `${(bps / 100).toFixed(2).replace(/\.?0+$/, "")}%`;
 }
@@ -622,6 +622,11 @@ export type LocalNote = {
    * note stays pending and every sync tries again (heldSwapRefunds lists it).
    */
   refundHeld?: "returning" | "blocked";
+  /**
+   * Went in as history because the vault showed it spent when a backup was
+   * restored here. Never trimmed, and never counted against the history cap.
+   */
+  restoredSpent?: boolean;
 };
 
 export type CashOutMark = {
@@ -639,6 +644,13 @@ export type CashOutMark = {
    */
   root?: Hex;
   provenAt?: number;
+  /**
+   * The cash-out fee the screen showed when this was set up, in basis points.
+   * The vault takes the fee when it goes out, at the rate that day, so the two
+   * can differ (lib/cashOutLater feeRise). Unset on one set up before the app
+   * kept it: those all showed 25.
+   */
+  feeBps?: number;
 };
 
 /** One piece of a private cash out ("cash out privately", lib/cashOutPrivately). */
@@ -865,6 +877,125 @@ async function backupNoteValid(n: LocalNote): Promise<boolean> {
   return BigInt(want) === BigInt(n.commitment);
 }
 
+const HEX_32 = /^0x[0-9a-fA-F]{64}$/;
+const DIGITS = /^\d{1,78}$/;
+
+/** A time (ms) a backup may carry, or undefined. */
+function timeOrNone(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : undefined;
+}
+
+/**
+ * A fresh id for a restored note, of the same kind as the backup's: a claim
+ * stays a claim (`imp-`, so it is still secured), a deposit a deposit. Never
+ * the backup's own id, so a restore can't land on a note already here.
+ */
+function restoredId(oldId: string, taken: Set<string>): string {
+  for (;;) {
+    const rand = Array.from(globalThis.crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("");
+    const kind = /^([a-z]{1,8})-/.exec(oldId)?.[1];
+    const id = /^\d{12,}-0x[0-9a-f]+$/i.test(oldId)
+      ? `${Date.now()}-0x${rand}`
+      : `${kind && kind !== "pay" && kind !== "chain" ? kind : "bk"}-${Date.now()}-${rand}`;
+    if (!taken.has(id)) {
+      taken.add(id);
+      return id;
+    }
+  }
+}
+
+/** A private swap's refund details as a backup holds them, checked field by field, or undefined. */
+function swapInfoOf(v: unknown): VaultSwapRefundInfo | undefined {
+  const o = v as Partial<VaultSwapRefundInfo> | null;
+  if (!o || typeof o !== "object") return undefined;
+  const addr = (a: unknown): a is Address => typeof a === "string" && HEX_ADDRESS.test(a);
+  const out = o.out;
+  if (!addr(o.router) || !addr(o.assetIn) || typeof o.amountIn !== "string" || !DIGITS.test(o.amountIn)) return undefined;
+  if (!out || typeof out.commitment !== "string" || !HEX_FIELD.test(out.commitment) || !addr(out.asset) || typeof out.amount !== "string" || !DIGITS.test(out.amount)) {
+    return undefined;
+  }
+  if (!Array.isArray(o.route) || o.route.length > 8) return undefined;
+  const route = o.route.map((k) =>
+    k && addr(k.currency0) && addr(k.currency1) && addr(k.hooks) && Number.isSafeInteger(k.fee) && Number.isSafeInteger(k.tickSpacing)
+      ? { currency0: k.currency0, currency1: k.currency1, fee: k.fee, tickSpacing: k.tickSpacing, hooks: k.hooks }
+      : null
+  );
+  if (route.some((k) => k === null)) return undefined;
+  const sent = o.sent && typeof o.sent.hash === "string" && HEX_32.test(o.sent.hash) && timeOrNone(o.sent.at) ? { hash: o.sent.hash, at: o.sent.at } : undefined;
+  return {
+    router: o.router,
+    assetIn: o.assetIn,
+    amountIn: o.amountIn,
+    out: { commitment: out.commitment, asset: out.asset, amount: out.amount },
+    route: route as VaultSwapRefundInfo["route"],
+    ...(sent ? { sent } : {}),
+  };
+}
+
+/**
+ * A restored note, rebuilt from what a backup proves (the money fields, checked
+ * by backupNoteValid) and nothing it merely says: the spend marker is worked
+ * out from the secret, the state comes from the vault (`gone`, `waiting`), and
+ * the id is new. What a backup may still carry, checked: the note's memo, its
+ * own privacy marks (a proof of it may be out, so it moves to a fresh note
+ * before it is spent), and a move between two notes of this same backup, by
+ * their new ids. Never anything that names a note already here (`taken` holds
+ * every id here, and every id this restore has given out).
+ */
+async function restoredNote(
+  n: LocalNote,
+  id: string,
+  ids: Map<string, string>,
+  state: { gone: boolean; waiting: boolean; owner?: Address; taken: Set<string> }
+): Promise<LocalNote> {
+  const poseidon = n.scheme !== "keccak";
+  let nullifier: Hex | undefined;
+  if (poseidon) {
+    const { fieldToHex, hexToField, noteNullifierPoseidon } = await import("@gloamtrade/sdk");
+    nullifier = fieldToHex(await noteNullifierPoseidon(hexToField(n.secret), hexToField(n.commitment))) as Hex;
+  } else if (typeof n.nullifier === "string" && HEX_FIELD.test(n.nullifier)) {
+    nullifier = n.nullifier;
+  }
+  // A move into this note keeps its spend marker, so a pending one still settles. It names the
+  // note it came from by that note's new id when this backup holds it too, by an id naming no
+  // note when it holds neither, and is dropped when it would name a note already here.
+  const from = n.sweptFrom;
+  let linked: LocalNote["sweptFrom"];
+  if (from && typeof from.id === "string" && typeof from.nullifier === "string" && HEX_FIELD.test(from.nullifier)) {
+    if (ids.has(from.id)) linked = { id: ids.get(from.id)!, nullifier: from.nullifier };
+    else if (!state.taken.has(from.id)) linked = { id: restoredId(from.id, state.taken), nullifier: from.nullifier };
+  }
+  const swap = linked ? swapInfoOf(n.vaultSwap) : undefined;
+  const memo = typeof n.note === "string" && n.note.trim() ? n.note.slice(0, 500) : undefined;
+  const marks = {
+    ...(timeOrNone(n.fundsProofAt) ? { fundsProofAt: n.fundsProofAt } : {}),
+    ...(timeOrNone(n.swapProofAt) ? { swapProofAt: n.swapProofAt } : {}),
+    ...(timeOrNone(n.proofOutAt) ? { proofOutAt: n.proofOutAt } : {}),
+  };
+  return {
+    id,
+    chainId: n.chainId,
+    pool: n.pool,
+    asset: n.asset,
+    amountWei: n.amountWei,
+    commitment: n.commitment,
+    secret: n.secret,
+    ...(nullifier ? { nullifier } : {}),
+    bound: true,
+    scheme: poseidon ? "poseidon" : "keccak",
+    createdAt: timeOrNone(n.createdAt) ?? Date.now(),
+    ...(state.owner ? { from: state.owner } : typeof n.from === "string" && HEX_ADDRESS.test(n.from) ? { from: n.from } : {}),
+    // spent since the backup: history (a received payment can still be proved), not balance
+    status: state.gone ? "recovered" : "open",
+    source: "local",
+    ...(state.gone ? { restoredSpent: true } : {}),
+    ...(state.waiting ? { unfunded: true } : {}),
+    ...(memo ? { note: memo } : {}),
+    ...marks,
+    ...(linked ? { sweptFrom: linked, ...(n.sweepPending === true ? { sweepPending: true } : {}), ...(swap ? { vaultSwap: swap } : {}) } : {}),
+  };
+}
+
 export type BackupImport =
   | {
       ok: true;
@@ -903,6 +1034,11 @@ export type BackupImport =
  * (`isSeen` false) goes in `unfunded`: out of the balance until the vault
  * shows it (lib/claimSweep reconcileUnfunded). A backup is a file anyone can
  * hand someone, so it never shows money the vault doesn't hold.
+ *
+ * A note new here is rebuilt (restoredNote) under a new id: what the file says
+ * about state is not taken, and nothing in it can name a note already here. A
+ * note already here is matched by its commitment, and is only shown under the
+ * restoring wallet when the file holds its secret too; its state never changes.
  */
 export async function importNotesBackup(
   raw: string,
@@ -933,51 +1069,61 @@ export async function importNotesBackup(
   const candidates: LocalNote[] = [];
   for (const n of data.notes) {
     if (!n?.secret || !n?.commitment || !n?.amountWei) continue;
+    if (typeof n.secret !== "string" || typeof n.commitment !== "string" || typeof n.id !== "string") continue;
     if (n.chainId !== scope.chainId) continue;
-    if (n.id?.startsWith("pay-") || n.status === "recovered") continue;
+    if (n.id.startsWith("pay-") || n.status === "recovered") continue;
+    const commitment = n.commitment.toLowerCase();
     const local = getAllNotes().find(
-      (m) =>
-        m.chainId === n.chainId &&
-        (m.id === n.id || m.commitment.toLowerCase() === n.commitment.toLowerCase()) &&
-        Boolean(m.secret) &&
-        m.secret !== "0x"
+      (m) => m.chainId === n.chainId && m.commitment.toLowerCase() === commitment && Boolean(m.secret) && m.secret !== "0x"
     );
-    if (local) here.add(local.id);
-    else if (!candidates.some((a) => a.id === n.id)) candidates.push(n);
+    if (local) {
+      // the file holds this note's secret too: the same note, shown under the wallet restoring it
+      if (local.secret.toLowerCase() === n.secret.toLowerCase()) here.add(local.id);
+    } else {
+      candidates.push(n);
+    }
   }
   const valid = await Promise.all(candidates.map((n) => backupNoteValid(n).catch(() => false)));
-  const added = candidates.filter((_, i) => valid[i]);
-  const skipped = candidates.length - added.length;
+  const skipped = valid.filter((v) => !v).length;
+  // one note per commitment
+  const added: LocalNote[] = [];
+  candidates.forEach((n, i) => {
+    if (!valid[i]) return;
+    const c = n.commitment.toLowerCase();
+    if (!added.some((a) => a.commitment.toLowerCase() === c)) added.push(n);
+  });
   const [spent, seen] = await Promise.all([
-    Promise.all(added.map((n) => (isSpent ? isSpent(n).catch(() => null) : null))),
+    // asked by the spend marker the secret gives (a legacy keccak note can only say its own)
+    Promise.all(added.map((n) => (isSpent ? isSpent({ ...n, nullifier: n.scheme === "keccak" ? n.nullifier : undefined }).catch(() => null) : null))),
     Promise.all(added.map((n) => (isSeen ? isSeen(n).catch(() => null) : null))),
   ]);
 
+  // every restored note gets a new id; a move between two notes of this backup keeps pointing at the right one
+  const taken = new Set(getAllNotes().map((m) => m.id));
+  const newIds = added.map((n) => restoredId(n.id, taken));
+  // what a move in this backup names, by the file's id: the first note with that id
+  const ids = new Map<string, string>();
+  added.forEach((n, i) => {
+    if (!ids.has(n.id)) ids.set(n.id, newIds[i]!);
+  });
   const writes: Promise<void>[] = [];
   let moved = 0;
   let movedClaims = 0;
   let unseen = 0;
-  added.forEach((n, i) => {
-    const gone = spent[i] === true;
-    // not in the vault (yet): kept, out of the balance until it is
-    const waiting = !gone && seen[i] === false;
-    if (gone) {
-      moved++;
-      if (n.id.startsWith("imp-")) movedClaims++;
-    }
-    if (waiting) unseen++;
-    writes.push(
-      saveLocalNote({
-        ...n,
-        from: owner ?? n.from,
-        // spent since the backup: history (a received payment can still be proved), not balance
-        status: gone ? "recovered" : "open",
-        source: "local",
-        bound: n.bound ?? true,
-        ...(waiting ? { unfunded: true } : {}),
-      })
-    );
-  });
+  const rebuilt = await Promise.all(
+    added.map((n, i) => {
+      const gone = spent[i] === true;
+      // not in the vault (yet): kept, out of the balance until it is
+      const waiting = !gone && seen[i] === false;
+      if (gone) {
+        moved++;
+        if (n.id.startsWith("imp-")) movedClaims++;
+      }
+      if (waiting) unseen++;
+      return restoredNote(n, newIds[i]!, ids, { gone, waiting, owner, taken });
+    })
+  );
+  for (const note of rebuilt) writes.push(saveLocalNote(note));
   // a restore adds what it holds to the wallet restoring it, notes already here too
   const lower = owner?.toLowerCase();
   if (lower && getAllNotes().some((m) => here.has(m.id) && m.from && m.from.toLowerCase() !== lower)) {
@@ -1060,6 +1206,8 @@ export function saveLocalNote(note: LocalNote): Promise<void> {
     const spendable =
       n.status !== "recovered" && Boolean(n.secret) && n.secret !== "0x";
     if (spendable) return true;
+    // history a restore brought in is kept, and never pushes other history out
+    if (n.restoredSpent) return true;
     history++;
     return history <= MAX_HISTORY_NOTES;
   });

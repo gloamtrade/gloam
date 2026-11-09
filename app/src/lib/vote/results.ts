@@ -59,6 +59,8 @@ export type VoteSummary = {
   snapshotReady: boolean;
   weighting: Weighting;
   basis: TallyBasis;
+  /** What the team is doing with the result, once the final count is in. */
+  outcome: string | null;
   /** The closing block, once the final count is in. */
   closeBlock: number | null;
   accepting: boolean;
@@ -168,6 +170,7 @@ export async function voteSummary(
     snapshotReady: ready,
     weighting,
     basis,
+    outcome: basis === "final" ? (v.outcome ?? null) : null,
     closeBlock,
     accepting: acceptingVotes(v, snapshot, now),
     eligible,

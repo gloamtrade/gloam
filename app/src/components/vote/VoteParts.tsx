@@ -22,6 +22,7 @@ import type { VoteSummary } from "@/lib/vote/results";
 import { TokenLogo } from "@/components/app/TokenLogo";
 import { useNow, useSeen, type Me, type Standing } from "./voteHooks";
 import { OptionArt } from "./OptionArt";
+import { Spinner } from "@/components/ui/Spinner";
 import m from "./vote.module.css";
 
 const AUTO_ADVANCE_MS = 1_900;
@@ -503,7 +504,8 @@ export function BallotCard({
         ) : !wallet.address ? (
           <div>
             {wallet.canConnect ? (
-              <button type="button" onClick={wallet.open} disabled={wallet.connecting} className="btn btn-ink btn-lg w-full sm:w-auto">
+              <button type="button" onClick={wallet.open} disabled={wallet.connecting} aria-busy={wallet.connecting} className="btn btn-ink btn-lg w-full sm:w-auto">
+                {wallet.connecting && <Spinner />}
                 {wallet.connecting ? "Check your wallet…" : "Connect wallet to vote"}
               </button>
             ) : (
@@ -565,8 +567,10 @@ export function BallotCard({
               type="button"
               onClick={sign}
               disabled={picked === null || busy || (mine?.option === picked && phase.k === "choose")}
+              aria-busy={busy}
               className="btn btn-ink btn-lg w-full sm:w-auto"
             >
+              {busy && <Spinner />}
               {phase.k === "signing"
                 ? "Sign in your wallet…"
                 : phase.k === "saving"
@@ -745,6 +749,8 @@ export function ResultsCard({ s, mine, link = true }: { s: VoteSummary; mine?: B
           );
         })}
       </ul>
+      {/* the hub leads with these; a vote's own page shows it here */}
+      {s.outcome && !link && <p className="mt-5 rounded-[12px] bg-surface px-4 py-3 text-[14.5px] leading-relaxed text-foreground">{s.outcome}</p>}
       <div className="mt-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line pt-4">
         <p className="tnum text-[13px] text-mute">
           {s.totals.wallets} {s.totals.wallets === 1 ? "wallet" : "wallets"} · {formatGloam(s.totals.weight)} GLOAM

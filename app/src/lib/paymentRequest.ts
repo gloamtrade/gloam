@@ -14,6 +14,11 @@
  *    payer's wallet does not show; the amount and the receiving wallet are
  *    public, like any transfer. The note is only shown to the payer.
  *
+ * `p` is a Gloam partner's link code (lib/partnerLinks), when a partner's app
+ * made the link: the payment is counted to that partner once it lands, and the
+ * partner's name shows from their Gloam account. A `name` alone counts for
+ * nothing and is only ever shown as what the link says.
+ *
  * `chain` is a network key (lib/networks): `robinhood-mainnet`,
  * `tempo-mainnet`, ... for mainnet; `robinhood`, `tempo`, `base`, `ethereum`
  * are the testnets. `asset` is the token's address or symbol on that network.
@@ -33,7 +38,9 @@ import { PAYMENT_NOTE_MAX, cleanText } from "./paymentNote";
 import { isValidReceiveTag } from "./receiveTag";
 import { readAmountText } from "./amountText";
 import { classifyPayRecipient } from "./payRecipient";
+import { isLinkCodeShape, readLinkCode } from "./partnerCode";
 import { isDollarStable, shieldTokensFor, supportsNativeShield, swapDisplayTokensFor } from "./tokens";
+import { decodeShortRequest, encodeShortRequest, shortRequestLink } from "@gloamtrade/sdk";
 
 /** Same cap as the private note the payment carries (lib/paymentNote). */
 export const REQUEST_NOTE_MAX = PAYMENT_NOTE_MAX;
@@ -187,6 +194,8 @@ export type PaymentRequestDraft = {
   amount: string;
   note?: string;
   name?: string;
+  /** A partner's link code (lib/partnerLinks), so the payment counts to that partner. */
+  partnerCode?: string;
 };
 
 /**
@@ -207,6 +216,60 @@ export function buildPaymentRequestLink(
   p.set("chain", draft.network);
   const name = cleanRequestText(draft.name, REQUEST_NAME_MAX);
   if (name) p.set("name", name);
+  if (isLinkCodeShape(draft.partnerCode)) p.set("p", draft.partnerCode);
+  return `${origin.replace(/\/+$/, "")}/app/vault?tab=move&mode=pay#${p.toString()}`;
+}
+
+/**
+ * The same request as a short link: gloam.trade/r#<letters and digits> (SDK
+ * shortLink). The /r page turns it back into the long link above, in the
+ * browser, so the request still never reaches a server. Falls back to the long
+ * link for a request the short form can't carry exactly.
+ */
+export function buildShortPaymentRequestLink(
+  draft: PaymentRequestDraft,
+  origin = "https://gloam.trade"
+): string {
+  const note = cleanRequestText(draft.note, REQUEST_NOTE_MAX);
+  const name = cleanRequestText(draft.name, REQUEST_NAME_MAX);
+  const body = encodeShortRequest({
+    to: draft.to.trim(),
+    chainId: getNetwork(draft.network).chainId,
+    asset: draft.asset.address,
+    decimals: draft.asset.decimals,
+    ...(draft.amount ? { amount: draft.amount } : {}),
+    ...(note ? { note } : {}),
+    ...(name ? { name } : {}),
+    ...(isLinkCodeShape(draft.partnerCode) ? { partnerCode: draft.partnerCode } : {}),
+  });
+  return body ? shortRequestLink(body, origin) : buildPaymentRequestLink(draft, origin);
+}
+
+/**
+ * The long request link a short one stands for (what the /r page opens), or
+ * null when the short link is cut off or damaged. A network Gloam doesn't run
+ * on is left out, so the payer's own network and its checks apply.
+ */
+export function requestLinkFromShort(body: string, origin: string): string | null {
+  const keyOf = (chainId: number) => NETWORK_KEYS.find((k) => getNetwork(k).chainId === chainId) ?? null;
+  let r: ReturnType<typeof decodeShortRequest>;
+  try {
+    r = decodeShortRequest(body, (chainId, asset) => {
+      const key = keyOf(chainId);
+      return key ? findRequestAsset(key, asset)?.decimals ?? null : null;
+    });
+  } catch {
+    return null;
+  }
+  const p = new URLSearchParams();
+  p.set("to", r.to);
+  if (r.amount) p.set("amount", r.amount);
+  p.set("asset", r.asset);
+  if (r.note) p.set("note", r.note);
+  const key = keyOf(r.chainId);
+  if (key) p.set("chain", key);
+  if (r.name) p.set("name", r.name);
+  if (r.partnerCode) p.set("p", r.partnerCode);
   return `${origin.replace(/\/+$/, "")}/app/vault?tab=move&mode=pay#${p.toString()}`;
 }
 
@@ -240,6 +303,8 @@ export type PaymentRequest = {
   amount: string | null;
   note: string | null;
   name: string | null;
+  /** A partner link code's shape from `p`, or null. Whether it is live is the server's to say. */
+  partnerCode: string | null;
   /** Plain-language reasons a field was left out. */
   problems: string[];
 };
@@ -324,6 +389,7 @@ export function readPaymentRequest(
     amount,
     note: cleanRequestText(params.get("note"), REQUEST_NOTE_MAX) || null,
     name: cleanRequestText(params.get("name"), REQUEST_NAME_MAX) || null,
+    partnerCode: readLinkCode(params),
     problems,
   };
 }

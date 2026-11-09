@@ -4,7 +4,7 @@
  *
  * Private payment tools for AI agents across Gloam's networks: private
  * stablecoin payments on Tempo, Robinhood Chain, Base and Ethereum, on
- * mainnet (beta) and testnet. The tools live in src/server.ts; this file
+ * mainnet and testnet. The tools live in src/server.ts; this file
  * loads settings and connects them to stdio.
  *
  * Money-moving tools pass the owner's spending limits first (src/policy.ts,

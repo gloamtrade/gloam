@@ -80,6 +80,7 @@ const node = {
   tip: 1_000_000n,
   balance: 10n ** 17n,
   failGasPrice: false,
+  dryRunGas: 500_000n,
 };
 const calls: string[] = [];
 const raws: Hex[] = [];
@@ -131,7 +132,7 @@ function answer(r: RpcReq): { result?: unknown; error?: { code: number; message:
     case "eth_maxPriorityFeePerGas":
       return { result: toHex(node.tip) };
     case "eth_estimateGas":
-      return { result: "0x1c9c38" };
+      return { result: toHex(node.dryRunGas) };
     case "eth_call": {
       const p = r.params?.[0] as { data?: string; input?: string };
       const sel = String(p?.data ?? p?.input).slice(0, 10);
@@ -160,7 +161,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 function setNode(state: Partial<typeof node>) {
-  Object.assign(node, { gasPrice: 30_000_000n, baseFee: 25_000_000n, tip: 1_000_000n, balance: 10n ** 17n, failGasPrice: false }, state);
+  Object.assign(node, { gasPrice: 30_000_000n, baseFee: 25_000_000n, tip: 1_000_000n, balance: 10n ** 17n, failGasPrice: false, dryRunGas: 500_000n }, state);
   calls.length = 0;
   raws.length = 0;
   gas.resetGasReads();
@@ -311,6 +312,32 @@ await test("a cash out for later still schedules while gas is high (it waits; th
   assert.equal(raws.length, 0);
 });
 
+await test("a cash out over its gas limit: refused after the dry run, nothing sent, now or for later", async () => {
+  setNode({ dryRunGas: 20_000_000n });
+  const isGasMost = (e: unknown) => {
+    assert.ok(e instanceof relay.RelayError, `expected a RelayError, got ${String(e)}`);
+    assert.equal(e.code, "gas_most");
+    assert.equal(e.status, 422);
+    assert.equal(e.message, relay.GAS_TOO_MUCH_MESSAGE);
+    return true;
+  };
+  await assert.rejects(relay.relayUnshield(eth, unshieldBody(nullifier())), isGasMost);
+  await assert.rejects(relay.checkUnshieldForLater(eth, unshieldBody(nullifier())), isGasMost);
+  assert.equal(raws.length, 0, "nothing went out");
+
+  setNode({ dryRunGas: relay.sendGasMost(1, "unshield")! });
+  await relay.relayUnshield(eth, unshieldBody(nullifier()));
+  assert.equal(raws.length, 1, "exactly at the limit still goes");
+});
+
+await test("the gas limit: a parent-chain cost gives Robinhood Chain more, Tempo and other sends have none", () => {
+  assert.equal(relay.sendGasMost(1, "unshield"), 1_200_000n);
+  assert.equal(relay.sendGasMost(8453, "unshield"), 1_200_000n);
+  assert.equal(relay.sendGasMost(4663, "unshield"), 4_800_000n);
+  assert.equal(relay.sendGasMost(4217, "unshield"), null);
+  assert.equal(relay.sendGasMost(1, "transfer"), null);
+});
+
 // ---------------------------------------------------------------- scheduled cash outs
 
 const HOUR = 3_600_000;
@@ -386,7 +413,7 @@ await test("a job waiting for gas can still be cancelled", async () => {
   await store.put(j);
   const state = { now: j.sendAfter + 1, high: true as boolean | "throw", sends: 0 };
   await sched.runDueJobs(store, deps(state));
-  assert.equal(await sched.cancelJob(store, j.id, state.now + 1), "cancelled");
+  assert.equal(await sched.cancelJob(store, j.id, state.now + 1, j.nullifier), "cancelled");
 });
 
 await test("waiting for gas never uses up the 2-hour give-up time", async () => {
@@ -454,7 +481,7 @@ await test("a relay that refuses over gas at the last moment: the job waits, the
   assert.equal(held.attempts, 0);
   assert.equal(held.maybeSent, undefined);
   assert.equal(held.reason, sched.GAS_WAIT_REASON);
-  assert.equal(await sched.cancelJob(store, j.id, state.now + 1), "cancelled", "still cancellable");
+  assert.equal(await sched.cancelJob(store, j.id, state.now + 1, j.nullifier), "cancelled", "still cancellable");
 });
 
 await test("a gas check that fails holds the job too", async () => {

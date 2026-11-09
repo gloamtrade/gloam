@@ -13,6 +13,7 @@ import { useNetwork } from "./NetworkProvider";
 import { faucetFor } from "@/lib/faucet";
 import { useLiveMarkets } from "@/hooks/useLiveMarkets";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
+import { useAutoRestoreStatus } from "@/hooks/useAutoRestoreStatus";
 import { useTradingSettings } from "@/hooks/useTradingSettings";
 import {
   formatTokenAmount,
@@ -48,6 +49,8 @@ import {
   isShieldDeployed,
 } from "@/lib/shield";
 import { isClaimedNote, isSecuredClaim, isUnsecuredClaim } from "@/lib/claimSweep";
+import { canExitVaultSwap } from "@/lib/vaultSwap";
+import { SwapExit } from "./SwapExit";
 import { SealedField } from "@/components/ui/SealedField";
 import { ActivityFeed } from "./ActivityFeed";
 import { AddressChip } from "./AddressChip";
@@ -287,6 +290,9 @@ export function PortfolioView() {
   // Claimed payments the vault hasn't shown yet are listed after the balance, never counted in it.
   // Swap refunds held outside the vault too, and those first, as only six rows show.
   const vaultRows = useMemo(() => [...heldRefunds, ...shieldNotes, ...waitingClaims], [heldRefunds, shieldNotes, waitingClaims]);
+  // A restore from the backup on its way (lib/autoRestore): the balance is not known yet, so never a 0.
+  const autoRestore = useAutoRestoreStatus(address);
+  const restoring = autoRestore.kind === "checking" || autoRestore.kind === "running";
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   // The wallet card's zero balances, folded under "Show N more" until asked for.
@@ -536,7 +542,11 @@ export function PortfolioView() {
     ? "Connect a wallet to see your private balance."
     : !onProduct
       ? `Switch your wallet to ${network.label} to see balances.`
-      : balanceSyncing
+      : restoring
+        ? autoRestore.kind === "running" && autoRestore.prompt
+          ? "Confirm in your wallet to bring your private balance to this device. It's free and sends nothing."
+          : "Syncing your private balance…"
+        : balanceSyncing
         ? "Syncing your vault…"
         : !hasShield
           ? shieldLive
@@ -546,7 +556,7 @@ export function PortfolioView() {
             : "The private vault is not live on this network yet."
           : settings.showUsd && sealedUsd > 0 && shieldUnpriced.length === 0
             ? `${vaultValue} in your vault. Nobody else can see it.`
-            : "Hidden from the public. Only this browser can read it.";
+            : "Hidden from the public. Only you can see it.";
 
 
   return (
@@ -602,7 +612,11 @@ export function PortfolioView() {
               balancesVisible && hasShield ? "text-foreground" : "text-foreground/85"
             }`}
           >
-            {privateDisplay}
+            {restoring && !hasShield ? (
+              <span className="gl-skeleton inline-block h-[0.85em] w-[min(14rem,60%)] align-baseline" aria-label="Loading your private balance" />
+            ) : (
+              privateDisplay
+            )}
           </p>
           <p className="mt-4 max-w-[64ch] text-[15px] leading-relaxed text-mute">{privateSub}</p>
 
@@ -684,7 +698,7 @@ export function PortfolioView() {
               <header className="flex items-center justify-between gap-3 max-sm:px-5 pb-3 pt-5 sm:px-6">
                 <div>
                   <h2 className="text-[17px] text-foreground">Private balance</h2>
-                  <p className="mt-0.5 text-[13px] text-mute">Only this browser can read these amounts</p>
+                  <p className="mt-0.5 text-[13px] text-mute">Only you can see these amounts</p>
                 </div>
               </header>
               <ul className="divide-y divide-line border-t border-line">
@@ -730,6 +744,7 @@ export function PortfolioView() {
                               : "A swap of this couldn't finish, so it's on its way back to your private balance."}
                           </p>
                         )}
+                        {canExitVaultSwap(n) && <SwapExit note={n} onDone={refreshVault} />}
                         {isUnsecuredClaim(n) && !n.unfunded && (
                           <p className="mt-0.5 text-[12.5px] text-warn">
                             Not secured yet, so the sender can still take it back.{" "}

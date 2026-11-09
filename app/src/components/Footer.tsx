@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { AppLink } from "./AppLink";
+import { FooterUpdates } from "./FooterUpdates";
 import { Mark } from "./Logo";
 import { MainnetCopy } from "./MainnetCountdown";
 import { ThemeSegmented } from "./ThemeToggle";
@@ -20,6 +21,7 @@ const groups: {
       { href: "/app/disclose", label: "Prove" },
       { href: "/docs/testnet", label: "Testnet guide" },
       { href: "/testers", label: "Become a tester" },
+      { href: "/contest", label: "Video contest" },
     ],
   },
   {
@@ -104,6 +106,7 @@ export function Footer() {
               >
                 hello@gloam.trade
               </a>
+              <FooterUpdates />
               <div className="-ml-3 mt-8 flex items-center gap-1">
                 <a
                   href="https://x.com/gloamtrade"
@@ -124,7 +127,7 @@ export function Footer() {
                   <TelegramIcon />
                 </a>
                 <a
-                  href="https://github.com/cryptoduke01/gloam"
+                  href="https://github.com/gloamtrade/gloam"
                   target="_blank"
                   rel="noreferrer"
                   aria-label="Gloam on GitHub"
@@ -191,7 +194,7 @@ export function Footer() {
             <p className="text-[12.5px] text-mute">
               © {year} Gloam.{" "}
               <MainnetCopy
-                live="Beta software."
+                live="Live on mainnet."
                 before="Testnet software."
               />{" "}
               Not investment, legal or tax advice.

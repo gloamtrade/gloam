@@ -1,14 +1,26 @@
 import type { Metadata } from "next";
+import { ELYSIUM_ENABLED } from "@/lib/elysium";
 import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
-import { VAULT_SWAP_ROUTERS, VAULT_SWAP_V2_ROUTER } from "@/lib/vaultSwap";
+import { VAULT_SWAP_ROUTERS, VAULT_SWAP_V2_ROUTER, VAULT_SWAP_V3_ADDRESS, swapV3Live } from "@/lib/vaultSwap";
+
+/** Private swaps v3 (lib/vaultSwap VAULT_SWAP_V3_LIVE), chain by chain: the page follows each switch. */
+const V3_RH = swapV3Live(4663);
+const V3_TEMPO = swapV3Live(4217);
+const V3_BASE = swapV3Live(8453);
+const V3_ETHEREUM = swapV3Live(1);
+const V3 = V3_RH || V3_TEMPO || V3_BASE || V3_ETHEREUM;
+/** The chains that joined with v3, and every chain with swaps, for the sentences that name them. */
+const NEW_CHAINS = [...(V3_BASE ? ["Base"] : []), ...(V3_ETHEREUM ? ["Ethereum"] : [])];
+const and = (names: string[]) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
+const WHERE = and(["Robinhood Chain", "Tempo", ...NEW_CHAINS]);
+const V4_WHERE = and(["Robinhood Chain", ...NEW_CHAINS]);
 
 export const metadata: Metadata = {
   title: "Private swaps",
-  description:
-    "Swap straight from your private balance on Robinhood Chain and Tempo mainnet. Who swapped stays private; the tokens and the amounts are public, like any DEX trade.",
+  description: `Swap straight from your private balance on ${WHERE} mainnet. Who swapped stays private; the tokens and the amounts are public, like any DEX trade.`,
 };
 
 const VAULT = "0x39e28cde55cab798874746ac52cb4b5cc99a0194";
@@ -21,9 +33,9 @@ export default function DocsPrivateSwapsPage() {
   return (
     <DocsLayout
       title="Private swaps"
-      lede="Swap one token for another straight from your private balance, on Robinhood Chain and Tempo mainnet. Who swapped stays private. The tokens and the amounts are public, like any trade on a DEX."
+      lede={`Swap one token for another straight from your private balance, on ${WHERE} mainnet. Who swapped stays private. The tokens and the amounts are public, like any trade on a DEX.`}
       glance={[
-        { label: "Where", value: "RH + Tempo mainnet" },
+        { label: "Where", value: NEW_CHAINS.length ? `${2 + NEW_CHAINS.length} mainnets` : "RH + Tempo mainnet" },
         { label: "Who swapped", value: "Private" },
         { label: "Amounts", value: "Public" },
         { label: "Sent by", value: "The Gloam relay" },
@@ -41,7 +53,7 @@ export default function DocsPrivateSwapsPage() {
           {
             n: "2",
             title: "Swap on a DEX",
-            body: "The swap router buys an exact amount of the other token on a public DEX: Uniswap v4 on Robinhood Chain, Tempo's stablecoin exchange on Tempo.",
+            body: `The swap router buys an exact amount of the other token on a public DEX: Uniswap v4 on ${V4_WHERE}, Tempo's stablecoin exchange on Tempo.`,
           },
           {
             n: "3",
@@ -60,6 +72,7 @@ export default function DocsPrivateSwapsPage() {
         the relay. Sending one from your own wallet would put your wallet right
         next to the swap, so the app does not offer it.
       </p>
+      {ELYSIUM_ENABLED && <p>Private swaps are not on Elysium yet: there is no swap router there.</p>}
 
       <h2 id="pairs">What you can swap</h2>
       <div className="overflow-x-auto">
@@ -77,10 +90,10 @@ export default function DocsPrivateSwapsPage() {
               {V2 ? (
                 <>
                   <td>
-                    USDG, $GLOAM, ETH (held as WETH), USDe, U, cbBTC, VIRTUAL,
-                    PONS, CASHCAT and 20 Robinhood stock tokens (SPY, NVDA, TSLA,
-                    AAPL and more), any one for another. AI and ORBIO join once
-                    their pools are live and the vault takes them.
+                    USDG, $GLOAM, {V3_RH ? "ETH, WETH" : "ETH (held as WETH)"}, USDe, U, cbBTC, VIRTUAL,
+                    PONS, CASHCAT, AI, ORBIO and 20 Robinhood stock tokens (SPY, NVDA,
+                    TSLA, AAPL and more), any one for another. AI and ORBIO swap
+                    through their USDG pools, live since 3 November 2026.
                   </td>
                   <td>
                     Uniswap v4, in up to three hops over the router&apos;s
@@ -102,11 +115,31 @@ export default function DocsPrivateSwapsPage() {
               <td>USDC.e, pathUSD, USDT0 and OUSD, any one for another</td>
               <td>Tempo&apos;s stablecoin exchange</td>
             </tr>
+            {V3_BASE && (
+              <tr>
+                <td>Base</td>
+                <td>USDC, USDT, EURC and ETH, any one for another</td>
+                <td>Uniswap v4, in up to three hops over hookless pools, whichever route pays the most</td>
+              </tr>
+            )}
+            {V3_ETHEREUM && (
+              <tr>
+                <td>Ethereum</td>
+                <td>USDC, USDT, USDG, EURC and ETH, any one for another</td>
+                <td>Uniswap v4, in up to three hops over hookless pools, whichever route pays the most</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
+      {V3_ETHEREUM && (
+        <p>
+          PYUSD can be held and sent on Ethereum, but not swapped: its plain
+          Uniswap v4 pools return about $10 for $100.
+        </p>
+      )}
       <p>
-        An example on Tempo: 1 pathUSD gets about 0.9964 USDC.e, after the
+        An example on Tempo: 1 pathUSD gets about 0.9937 USDC.e, after the
         vault fee and the price buffer below. Prices move, so the app always
         shows the live quote.
       </p>
@@ -182,21 +215,26 @@ export default function DocsPrivateSwapsPage() {
       <h2 id="costs">What it costs</h2>
       <ul>
         <li>
-          <strong>Vault fee, 0.25% of the amount you swap.</strong> A swap takes
+          <strong>Vault fee, 0.5% of the amount you swap.</strong> A swap takes
           the note out of the vault the same way a cash out does, so the vault
           keeps its usual cash-out fee.
         </li>
         <li>
           <strong>Price buffer, 0.5% on Robinhood Chain and 0.1% on Tempo.</strong>{" "}
           The swap asks for a little less than the quote, so a small price move
-          before it lands does not make it fail. Whatever the trade does not use
-          goes to the Gloam treasury.
+          before it lands does not make it fail. On Robinhood Chain that means
+          every swap is planned to leave about 0.5% of its input unspent.
+          Whatever the trade does not use is not returned to you: it goes to
+          the Gloam treasury.
+          {NEW_CHAINS.length > 0 && ` On ${and(NEW_CHAINS)} it is 0.1% between two dollar stablecoins and 0.5% otherwise.`}
         </li>
         <li>
           <strong>Pool fees</strong> are already in the quoted price.
         </li>
         <li>
           <strong>Network fee:</strong> the relay pays it.
+          {V3_ETHEREUM &&
+            " On Ethereum that sets a smallest swap: a swap's vault fee has to cover its gas, and the step that sets part of a note aside when there is one. The swap tab shows the smallest one right now, and it moves with gas."}
         </li>
       </ul>
       <p>
@@ -212,12 +250,42 @@ export default function DocsPrivateSwapsPage() {
         nothing moves.
       </p>
       <p>
-        Beta deposit limits apply to what lands, because the new note is a
+        Deposit limits apply to what lands, because the new note is a
         deposit. One swap brings in at most 50,000 of a stablecoin, or 2,500,000
         $GLOAM, and only while the vault has room under its total.
         {V2 &&
           " Every other token has its own limits, and a token the vault does not take yet can't be swapped into. A swap also spends no more than its refund could bring back in one deposit, so a larger part of your balance is split first."}
       </p>
+
+      {NEW_CHAINS.length > 0 && (
+        <>
+          <h2 id="stablecoins">Stablecoin pairs on {and(NEW_CHAINS)}</h2>
+          <p>
+            Two stablecoins can be far apart for a moment, and a pool can hold
+            far less than it looks like. A pool that runs out of liquidity at
+            the market price keeps filling at a worse one, so the app checks
+            each quote before it shows it.
+          </p>
+          <ul>
+            <li>
+              <strong>A thin pool is refused.</strong> A swap that would move
+              its pool by more than 2% doesn&apos;t go, and the app names a size
+              that would. From 1% it warns. EURC&apos;s pool on Base is thin, so
+              large EURC swaps there are refused.
+            </li>
+            <li>
+              <strong>Two dollars stay close to a dollar.</strong> Below 98 cents
+              on the dollar, before fees, the quote is refused. From 99.5 cents
+              the app says so.
+            </li>
+            <li>
+              <strong>The route is picked by what it pays.</strong> If the direct
+              pool is one-sided, the swap goes through another stablecoin. USDT to
+              USDG on Ethereum goes through USDC for this reason.
+            </li>
+          </ul>
+        </>
+      )}
 
       <h2 id="refund">If a swap can&apos;t finish</h2>
       <p>
@@ -234,9 +302,10 @@ export default function DocsPrivateSwapsPage() {
       <p>
         So the money comes back to your private balance as a refund note, made
         in advance with the swap. You get back 99% of the note. The other 1%
-        covers the vault&apos;s cash-out fee (0.25% today), and what is left of
+        covers the vault&apos;s cash-out fee (0.5% today), and what is left of
         it goes to the Gloam treasury. The app finishes the refund by itself,
         through the relay, the next time it syncs your balance.
+        {V3 && " Through the newest routers the refund is the note less the vault's fee and 0.1%."}
       </p>
       <p>
         If a swap simply doesn&apos;t go through, for example because the price
@@ -259,6 +328,39 @@ export default function DocsPrivateSwapsPage() {
         has landed by then, it makes the same move. Only one of the two can
         ever land, so your money is counted once either way.
       </p>
+      {V3 && (
+        <p>
+          A swap through the newest routers carries a deadline, 30 minutes after
+          it is made{NEW_CHAINS.length > 0 && `, or 10 on ${and(NEW_CHAINS)}`}. It can&apos;t land after that. A refund and an exit have no
+          deadline.
+        </p>
+      )}
+
+      {V3 && (
+        <>
+          <h3 id="exit">If the vault can&apos;t take the refund</h3>
+          <p>
+            A refund note is a deposit, so it needs room under the vault&apos;s
+            limit for that token. If there is none, the money waits at the
+            escrow. It stays yours, the app shows it as held, outside your
+            balance, and it comes back privately by itself once there is room.
+          </p>
+          <p>
+            You don&apos;t have to wait. Each swap names a one-time exit key, made
+            from your refund note&apos;s secret, so only you can use it. Sign for a
+            wallet and everything that arrived at the escrow goes there, and a
+            copy of your signature can only pay that wallet. The relay can send
+            it for you, so a new wallet needs no gas.
+          </p>
+          <p>
+            <strong>An exit is public.</strong> Anyone can see that wallet and the
+            amount next to the swap, so that money stops being private. A wallet
+            you have never used keeps the rest of your balance apart from it.
+            A swap made through an earlier router has no exit: its refund waits
+            for room.
+          </p>
+        </>
+      )}
 
       <h2 id="trust">What the router can and cannot do</h2>
       <ul>
@@ -268,24 +370,37 @@ export default function DocsPrivateSwapsPage() {
               <strong>No upgrade, and nobody moves money.</strong> No one can
               change the routers&apos; code, the vault, the treasury or the
               exchange they use, and no function sends what passes through them
-              anywhere but your new note and the treasury.
+              anywhere but your new note, your refund note and the treasury
+              {V3 ? ", or a wallet you signed for with the swap's exit key" : ""}.
             </li>
             <li>
               <strong>Allowed venues, changed in public.</strong>{" "}
-              On Robinhood Chain the router only uses Uniswap v4 pools on its
+              On {V4_WHERE} the router only uses Uniswap v4 pools on its
               allowlist. Its owner can add a pool only with 3 days of public
               notice on chain, and can take one off at once. A swap names its
               route in advance, so a pool added later can never be slipped into
               it. On Tempo the router only uses Tempo&apos;s stablecoin exchange.
             </li>
             <li>
-              <strong>ETH as WETH.</strong> The vault holds WETH. When a route
-              uses a pool that holds ETH, the router unwraps or wraps exactly
-              what that pool trades, inside the swap, and keeps none of it.
+              {V3_RH || NEW_CHAINS.length ? (
+                <>
+                  <strong>ETH and WETH.</strong> A note can be either one, and a
+                  pool can hold either one. When they differ, the router converts
+                  exactly what that pool trades, at the end of the route, inside
+                  the swap, and keeps none of it.
+                </>
+              ) : (
+                <>
+                  <strong>ETH as WETH.</strong> The vault holds WETH. When a route
+                  uses a pool that holds ETH, the router unwraps or wraps exactly
+                  what that pool trades, inside the swap, and keeps none of it.
+                </>
+              )}
             </li>
             <li>
               <strong>Issuers keep their powers.</strong> Robinhood can pause a
-              stock token or block an address, as Paxos can with USDG. A swap in
+              stock token or block an address, as Paxos can with USDG
+              {NEW_CHAINS.length ? ", and Circle and Tether with theirs" : ""}. A swap in
               or out of a paused token fails and nothing moves; a refund in one
               waits until it can land.
             </li>
@@ -318,7 +433,9 @@ export default function DocsPrivateSwapsPage() {
         <li>
           <strong>Not part of the external review.</strong>{" "}
           <Link href="/security">Kann Audits</Link> reviewed the vault contracts,
-          not the routers. The routers have only had internal review.
+          not the routers. The routers have had internal review only, most
+          recently on 7 November 2026. An outside review of them is being
+          sourced.
         </li>
       </ul>
       <p>
@@ -329,9 +446,16 @@ export default function DocsPrivateSwapsPage() {
       <h2 id="contracts">Contracts</h2>
       <ul>
         <li>
-          <strong>Robinhood Chain router</strong> ({V2 ? "GloamVaultSwapV4b" : "GloamVaultSwapV4"}),{" "}
+          <strong>Robinhood Chain router</strong> ({V3_RH ? "GloamVaultSwapV4c" : V2 ? "GloamVaultSwapV4b" : "GloamVaultSwapV4"}),{" "}
           <code>{VAULT_SWAP_ROUTERS[4663]}</code>
         </li>
+        {V3_RH && V2 && (
+          <li>
+            <strong>Earlier Robinhood Chain router</strong> (GloamVaultSwapV4b),
+            which still finishes the refunds of swaps made through it,{" "}
+            <code>{VAULT_SWAP_V2_ROUTER[4663]}</code>
+          </li>
+        )}
         {V2 && (
           <li>
             <strong>Earlier Robinhood Chain router</strong> (GloamVaultSwapV4),
@@ -340,16 +464,26 @@ export default function DocsPrivateSwapsPage() {
           </li>
         )}
         <li>
-          <strong>Tempo router</strong> (GloamVaultSwapTempo),{" "}
+          <strong>Tempo router</strong> ({V3_TEMPO ? "GloamVaultSwapTempo2" : "GloamVaultSwapTempo"}),{" "}
           <code>{VAULT_SWAP_ROUTERS[4217]}</code>
         </li>
+        {V3_BASE && (
+          <li>
+            <strong>Base router</strong> (GloamVaultSwapV4c), <code>{VAULT_SWAP_V3_ADDRESS[8453]}</code>
+          </li>
+        )}
+        {V3_ETHEREUM && (
+          <li>
+            <strong>Ethereum router</strong> (GloamVaultSwapV4c), <code>{VAULT_SWAP_V3_ADDRESS[1]}</code>
+          </li>
+        )}
         <li>
           <strong>Vault</strong>, the same address on every mainnet,{" "}
           <code>{VAULT}</code>
         </li>
         <li>
-          <strong>Treasury</strong>, where unused input goes, fixed in both
-          routers, <code>{TREASURY}</code>
+          <strong>Treasury</strong>, where unused input goes, fixed in each
+          router, <code>{TREASURY}</code>
         </li>
       </ul>
 
@@ -369,6 +503,40 @@ export default function DocsPrivateSwapsPage() {
         <Link href="/docs/privacy-model">what stays private</Link> and{" "}
         <Link href="/docs/chain#mainnet">networks</Link>.
       </p>
+
+      <h2 id="build">Swaps in your app or agent</h2>
+      <p>
+        The same swaps, priced by the same planner, are in the SDK and the MCP server. A swap hides
+        who swapped, not the tokens or the amounts. They check what the swap tab checks (the vault&apos;s
+        limits, the relay&apos;s state and floor), and they stop price impact over 2% and a dollar pair
+        more than 2% apart on every chain, where the swap tab only warns on Robinhood Chain and
+        Tempo. The swap tab also weighs a swap against market prices; the SDK does that only when
+        you pass prices, and the MCP server doesn&apos;t.
+      </p>
+      <ul>
+        <li>
+          SDK (<code>@gloamtrade/sdk</code> 0.5.0): <code>quoteSwap</code>, <code>buildSwapIntent</code>,{" "}
+          <code>sendSwap</code>, and <code>readSwapOutcome</code>, <code>buildSwapRefund</code> and{" "}
+          <code>buildSwapExit</code> to always get the money back. See the{" "}
+          <a href="https://github.com/gloamtrade/gloam/tree/main/packages/sdk#private-swaps">SDK README</a>.
+        </li>
+        <li>
+          Partner API: action <code>&quot;swap&quot;</code> on <code>POST /api/v1/relay</code>, and a read-only quote at{" "}
+          <code>POST /api/v1/swaps/quote</code>. See{" "}
+          <Link href="/docs/partners#swaps">the partner API</Link>.
+        </li>
+        <li>
+          MCP server (<code>@gloamtrade/mcp</code>): <code>gloam_swap_quote</code>,{" "}
+          <code>gloam_execute_private_swap</code> (proved on your machine, sent through the relay, under
+          the agent&apos;s spending limits) and <code>gloam_finish_swap</code>. The hosted server quotes only.
+        </li>
+        <li>
+          A link: a trading app can open the Swap tab with a swap filled in (
+          <code>?tab=swap#from=USDG&amp;to=TSLA&amp;amount=100</code>). The person checks the quote and
+          taps Swap privately. See{" "}
+          <Link href="/docs/partners#swap-link">trade privately with one link</Link>.
+        </li>
+      </ul>
     </DocsLayout>
   );
 }

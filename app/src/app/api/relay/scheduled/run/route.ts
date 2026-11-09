@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
+import { afterScheduledSend } from "@/lib/partnerAttribution";
 import { webhookSecretOk } from "@/lib/telegramBot/rules";
 import { runDueJobs, takeNotices } from "@/lib/relay/scheduled";
 import { deliverNotices } from "@/lib/relay/webhook";
@@ -26,6 +27,8 @@ export async function GET(req: Request) {
   // Without the shared store there is nothing to run: never treat that as "no jobs".
   if (!scheduledStoreReady()) return NextResponse.json({ ok: false, code: "later_off" }, { status: 503 });
   const store = scheduledStore();
+  // every receipt watch ends well inside the function's 60 s, whichever job it follows
+  const watchUntil = Date.now() + 50_000;
   const results = await runDueJobs(store, {
     now: () => Date.now(),
     readChain: (job) => readSpendState(networkForChain(job.chainId), job.root, job.nullifier),
@@ -38,8 +41,19 @@ export async function GET(req: Request) {
         asset: job.asset,
         to: job.to,
         amount: job.amount,
-      }),
+      }, { watchUntil }),
   });
+  // A cash out scheduled from a partner's link kept its code with the job: bind it to the
+  // transaction just sent, and count it (the run already watched each receipt). Never fails the run.
+  const sent = results.filter((r) => r.status === "sent").map((r) => r.id);
+  if (sent.length) {
+    after(async () => {
+      for (const id of sent) {
+        const job = await store.get(id).catch(() => null);
+        if (job?.hash) await afterScheduledSend({ net: networkForChain(job.chainId), jobId: id, hash: job.hash });
+      }
+    });
+  }
   // counts only: no ids, amounts or addresses in the logs
   const tally: Record<string, number> = {};
   for (const r of results) tally[r.status] = (tally[r.status] ?? 0) + 1;

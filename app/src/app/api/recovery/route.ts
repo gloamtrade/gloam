@@ -1,7 +1,19 @@
 import { NextResponse } from "next/server";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { KvUnavailableError } from "@/lib/partnersKv";
-import { BACKUP_GONE, RecoveryError, backupExists, backupInputProblem, deleteBackup, isHex64, readBackup, writeBackup } from "@/lib/recoveryStore";
+import { NEWER_KEY, VERSION1_SAVES_UNTIL } from "@/lib/recoveryEnd";
+import {
+  BACKUP_GONE,
+  RecoveryError,
+  VERSION1_ENDED,
+  backupExists,
+  backupInputProblem,
+  deleteBackup,
+  isHex64,
+  readBackup,
+  recoveryNow,
+  writeBackup,
+} from "@/lib/recoveryStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -90,20 +102,30 @@ export async function GET(req: Request) {
  * its connection and the day's budget, and only once it is a valid backup.
  * `mustExist` means this save must not make a new one: with nothing there it is
  * a 410, nothing is written, and neither count is touched.
+ *
+ * A save with no `v: 2` counts as version 1, or a tab on an earlier build. It is
+ * held to `mustExist` always, and from VERSION1_SAVES_UNTIL on the server's clock
+ * it is a 410 before the store is touched, so nothing is read, written or counted.
+ * This goes by the request and never the record: backups saved before the marker
+ * have none, and a save with `v: 2` works on them at any date. The marker is only
+ * what the browser says about its key.
  */
 export async function PUT(req: Request) {
   const body = await readBody(req);
   if (!body) return fail(400, "Bad request.");
-  const { id, write, c, n, mustExist } = body;
+  const { id, write, c, n, mustExist, v } = body;
   if (!isHex64(id) || !isHex64(write)) return fail(400, "Bad backup id.");
   const problem = backupInputProblem({ c, n });
   if (problem) return fail(400, problem);
+  const newerKey = v === NEWER_KEY;
+  const now = recoveryNow();
+  if (!newerKey && now >= VERSION1_SAVES_UNTIL) return fail(410, VERSION1_ENDED);
+  const existingOnly = mustExist === true || !newerKey;
   try {
-    const now = Date.now();
     if (await backupExists(id)) {
       const saves = await hitRateLimit(id, "recovery-save", SAVES_PER_BACKUP_PER_MIN, now);
       if (!saves.allowed) return fail(429, "Too many saves in a minute. Wait a moment.", { "Retry-After": String(saves.retryAfterSec) });
-    } else if (mustExist === true) {
+    } else if (existingOnly) {
       return (await limited(req)) ?? fail(410, BACKUP_GONE);
     } else {
       const mine = await hitRateLimit(clientIp(req), "recovery-new", NEW_BACKUPS_PER_DAY, now, 86_400, { v6Bits: NEW_BACKUPS_V6_BITS });
@@ -123,7 +145,7 @@ export async function PUT(req: Request) {
         return fail(429, BUDGET_FULL, { "Retry-After": String(all.retryAfterSec) });
       }
     }
-    return ok(await writeBackup({ id, write, c: c as string, n: Number(n), mustExist: mustExist === true }));
+    return ok(await writeBackup({ id, write, c: c as string, n: Number(n), mustExist: existingOnly, ...(newerKey ? { v: NEWER_KEY } : {}) }));
   } catch (e) {
     return handle(e);
   }

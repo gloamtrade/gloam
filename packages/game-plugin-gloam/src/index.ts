@@ -14,6 +14,7 @@ export {
   type SpendAction,
   type SpendPolicy,
 } from "./limits.js";
+export { fileNoteBackend, type NoteStoreBackend } from "./noteStore.js";
 export { claimLinkFor, readClaimLink, codeFromLinkText } from "./claimLinks.js";
 export { decodeProof, encodeProof, verifyHolderProof, type FundsProof, type PaymentProof, type ProofReport } from "./proofs.js";
 export { NETWORK_KEYS, resolveNetwork, type NetworkKey, type PluginNetwork } from "./networks.js";

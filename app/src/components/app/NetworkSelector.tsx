@@ -21,6 +21,8 @@ function assetLine(n: GloamNetwork): string {
   if (n.key === "tempo-mainnet") return "USDC.e, pathUSD, USDT0 and OUSD";
   if (n.key === "base-mainnet") return "USDC, EURC, USDT and ETH";
   if (n.key === "ethereum-mainnet") return "USDC, USDT, USDG, PYUSD, EURC and ETH";
+  if (n.key === "elysium-mainnet") return "USDC";
+  if (n.key === "elysium") return "Test USDC";
   if (n.key === "robinhood") return "Test ETH, stablecoins and stocks";
   if (n.key === "base") return "Test USDC, EURC and ETH";
   if (n.key === "ethereum") return "Test USDC, USDG, PYUSD, EURC and ETH";

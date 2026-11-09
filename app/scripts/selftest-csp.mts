@@ -10,7 +10,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { CSP_CONNECT_SOURCES, CSP_REPORT_ONLY } from "../csp.config.mjs";
+import { CSP_APP_ENFORCED, CSP_CONNECT_SOURCES, CSP_REPORT_ONLY, embeddedWalletsBuild } from "../csp.config.mjs";
 import { ORIGIN_CHAINS } from "../src/lib/originChains";
 import { getNetwork, type NetworkKey } from "../src/lib/networks";
 
@@ -79,5 +79,34 @@ assert.ok(config.includes('key: "Content-Security-Policy-Report-Only", value: CS
 assert.ok(/NODE_ENV === "production" \? \[\{ key: "Content-Security-Policy-Report-Only"/.test(config), "sent in production builds only");
 assert.ok(config.includes("frame-ancestors 'none'"));
 n += 3;
+
+// With Gloam wallets on, /app enforces scripts, frames, workers and connections. A Gloam
+// wallet signs with no prompt, so a page that loads code from anywhere could send from it.
+const directive = (name: string) => CSP_APP_ENFORCED.split("; ").find((d: string) => d.startsWith(`${name} `)) ?? "";
+assert.equal(directive("script-src"), "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://va.vercel-scripts.com", "scripts only from here");
+assert.ok(!CSP_APP_ENFORCED.includes("'unsafe-eval'"), "no eval");
+assert.equal(directive("connect-src"), `connect-src ${CSP_CONNECT_SOURCES.join(" ")}`, "the same tested connect list");
+for (const host of ["https://api.turnkey.com", "https://authproxy.turnkey.com", "https://lottie.host"]) assert.ok(allowed(host), host);
+assert.ok(/frame-src [^;]*https:\/\/\*\.turnkey\.com/.test(CSP_APP_ENFORCED), "Turnkey's export and import frames");
+assert.equal(directive("worker-src"), "worker-src 'self' blob:", "the prover's workers");
+for (const d of ["frame-ancestors 'none'", "base-uri 'self'", "object-src 'none'", "form-action 'self'"]) assert.ok(CSP_APP_ENFORCED.includes(d), d);
+n += 9;
+const ids = { NEXT_PUBLIC_TURNKEY_ORGANIZATION_ID: "org", NEXT_PUBLIC_TURNKEY_AUTH_PROXY_CONFIG_ID: "proxy" };
+const env = (e: Record<string, string>) => e as unknown as NodeJS.ProcessEnv;
+assert.equal(embeddedWalletsBuild(env({ NEXT_PUBLIC_TURNKEY_ENABLED: "true", ...ids })), true);
+assert.equal(embeddedWalletsBuild(env({ NEXT_PUBLIC_TURNKEY_ENABLED: "1", ...ids })), false);
+assert.equal(embeddedWalletsBuild(env({ NEXT_PUBLIC_TURNKEY_ENABLED: "true" })), false);
+assert.ok(
+  /process\.env\.NODE_ENV === "production" && embeddedWalletsBuild\(\)\s*\?\s*\[\s*\{ source: "\/app\/:path\*", headers: \[\{ key: "Content-Security-Policy", value: CSP_APP_ENFORCED \}\] \},\s*\{ source: "\/partners\/dashboard\/:path\*", headers: \[\{ key: "Content-Security-Policy", value: CSP_APP_ENFORCED \}\] \},\s*\]/.test(config),
+  "enforced on /app and the partner portal in production builds with Gloam wallets on, and nowhere else",
+);
+assert.ok(config.indexOf("CSP_APP_ENFORCED }") > config.indexOf("frame-ancestors 'none'; base-uri"), "after the framing policy, so it replaces it on /app");
+n += 5;
+
+// Continue with Google: the token goes to Turnkey's authproxy (allowed); Google itself is
+// only ever a popup window, so the enforced policy names no Google host.
+assert.ok(allowed("https://authproxy.turnkey.com/v1/oauth_login"), "Google's token reaches Turnkey");
+assert.ok(!/google/i.test(CSP_APP_ENFORCED), "no Google host to load scripts or frames from");
+n += 2;
 
 console.log(`csp: ${n} passed`);

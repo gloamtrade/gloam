@@ -604,6 +604,56 @@ if (process.argv.includes("--add-notes") || process.argv.includes("--reserve")) 
     assertNoSecrets(secretsOf([payerEnv, payeeEnv], paymentSecrets));
   });
 
+  test("a sealed ticket copied from the payment board is not an x402 payment", async () => {
+    const dir = tmp();
+    const chain = mockChain();
+    const payerEnv = partyEnv("payer", dir, PAYER_LIMITS);
+    const payeeEnv = partyEnv("payee", dir, { GLOAM_LIMITS: "off" });
+    const P = await connect(makeDeps(chain, payerEnv).deps);
+    const S = await connect(makeDeps(chain, payeeEnv).deps);
+    const priced = await S.call("gloam_payment_requirements", {
+      amount: 1, decimals: 6, assetSymbol: "PathUSD", asset: TEMPO_PATHUSD, resource: "answer", network: "tempo",
+    });
+    await P.call("gloam_execute_shield", { amount: 5, network: "tempo" });
+    const paid = await P.call("gloam_execute_private_pay", { requirements: priced.encoded });
+    assert.equal(paid.status, "paid", JSON.stringify(paid));
+    const payload = decodePaymentHeader(paid.paymentHeader);
+    assert.match(String(payload.payload.binding), /^[A-Za-z0-9_-]{43}$/, "a current payer binds its payment");
+
+    // What a stranger can build from the board: the same sealed ticket (a real, landed,
+    // unspent note for this payee), in an X-PAYMENT of their own, with no binding.
+    const lifted = { ...payload, payload: { paymentNote: payload.payload.paymentNote, txHash: null, exec: { fn: "transfer", poolAddress: payload.payload.exec.poolAddress } } };
+    const before = openNoteStore(payeeEnv).list().length;
+    const v = await S.call("gloam_verify_payment", { requirements: priced.encoded, payment: encodePaymentHeader(lifted as typeof payload) });
+    assert.equal(v.grantAccess, false, JSON.stringify(v));
+    assert.equal(v.status, "rejected", JSON.stringify(v));
+    assert.equal(v.problem, "unbound-payment");
+    assert.equal(openNoteStore(payeeEnv).list().length, before, "nothing is swept or stored for it");
+    // a made-up binding is refused the same way
+    const forged = { ...lifted, payload: { ...lifted.payload, binding: "C".repeat(43) } };
+    const f = await S.call("gloam_verify_payment", { requirements: priced.encoded, payment: encodePaymentHeader(forged as typeof payload) });
+    assert.equal(f.grantAccess, false, JSON.stringify(f));
+    assert.equal(f.problem, "unbound-payment");
+
+    // The payer's own header, with its binding, settles.
+    const ok = await S.call("gloam_verify_payment", { requirements: priced.encoded, payment: paid.paymentHeader });
+    assert.equal(ok.status, "settled", JSON.stringify(ok));
+    assert.equal(ok.grantAccess, true);
+
+    // A seller that still takes older payers can let unbound payments through, and only those.
+    const allowEnv = { ...payeeEnv, GLOAM_X402_ALLOW_UNBOUND: "1" };
+    const A = await connect(makeDeps(chain, allowEnv).deps);
+    const paid2 = await P.call("gloam_execute_private_pay", { requirements: priced.encoded });
+    assert.equal(paid2.status, "paid", JSON.stringify(paid2));
+    const p2 = decodePaymentHeader(paid2.paymentHeader);
+    const wrong = await A.call("gloam_verify_payment", { requirements: priced.encoded, payment: encodePaymentHeader({ ...p2, payload: { ...p2.payload, binding: "D".repeat(43) } }) });
+    assert.equal(wrong.grantAccess, false, "a wrong binding is refused even then");
+    const old = { ...p2, payload: { ...p2.payload } };
+    delete (old.payload as { binding?: string }).binding;
+    const legacy = await A.call("gloam_verify_payment", { requirements: priced.encoded, payment: encodePaymentHeader(old) });
+    assert.equal(legacy.status, "settled", JSON.stringify(legacy));
+  });
+
   test("a payment note claiming amount + p is refused, not settled", async () => {
     const dir = tmp();
     const chain = mockChain();
@@ -715,15 +765,17 @@ if (process.argv.includes("--add-notes") || process.argv.includes("--reserve")) 
     assert.equal(v.status, "settled", JSON.stringify(v));
   });
 
-  test("a relay refusal that proves nothing was sent frees the note and forgets the outputs", async () => {
+  test("a relay refusal frees the note and keeps the outputs dead, since the relay has seen the proof", async () => {
     const r = await relayPayment(() => async () => {
       throw new GloamRelayError("The payment did not pass the relay's check.", "check_failed");
     });
     assert.equal(r.paid.status, "error", JSON.stringify(r.paid));
     assert.equal(r.paid.paymentHeader, undefined);
-    assert.equal(openNoteStore(r.payerEnv).get(r.input)?.status, "unspent", "the note is spendable again");
-    assert.equal(r.byOrigin("change").length, 0);
-    assert.equal(r.byOrigin("payment").length, 0);
+    const input = openNoteStore(r.payerEnv).get(r.input);
+    assert.equal(input?.status, "unspent", "the note is spendable again");
+    assert.equal(input?.recheck, true, "and checked on every refresh, in case the refused proof lands after all");
+    assert.deepEqual(r.byOrigin("change").map((n) => n.status), ["dead"], "the change is kept, dead, secret and all");
+    assert.deepEqual(r.byOrigin("payment").map((n) => n.status), ["dead"], "the payment is kept, dead");
   });
 
   /**
@@ -790,7 +842,7 @@ if (process.argv.includes("--add-notes") || process.argv.includes("--reserve")) 
     assert.equal(v.status, "settled", JSON.stringify(v));
   });
 
-  test("a wallet send the node refused outright frees the note and forgets the outputs", async () => {
+  test("a wallet send the node refused outright frees the note and keeps the outputs dead", async () => {
     const dir = tmp();
     const chain = mockChain();
     const payerEnv = partyEnv("payer", dir, PAYER_LIMITS);
@@ -817,7 +869,9 @@ if (process.argv.includes("--add-notes") || process.argv.includes("--reserve")) 
     assert.equal(paid.paymentHeader, undefined);
     const notes = openNoteStore(payerEnv).list();
     assert.equal(notes.find((n) => n.handle === shield.note.handle)?.status, "unspent", "the note is spendable again");
-    assert.equal(notes.filter((n) => n.origin === "change" || n.origin === "payment").length, 0);
+    assert.equal(notes.find((n) => n.handle === shield.note.handle)?.recheck, true, "and checked on every refresh");
+    // the node had the signed transaction, proof and all: its outputs are kept, dead
+    assert.deepEqual(notes.filter((n) => n.origin === "change" || n.origin === "payment").map((n) => n.status), ["dead", "dead"]);
     const report = await P.call("gloam_get_spending_report", {});
     assert.equal(report.recentPayments.find((e: { tool: string }) => e.tool === "pay")?.status, "failed");
   });

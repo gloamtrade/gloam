@@ -21,6 +21,10 @@
  *
  * Besides notes it keeps the agent's receive key (the private half of its
  * Gloam address) and where the last scan for incoming payments stopped.
+ *
+ * Where the ciphertext lives is pluggable (NoteStoreBackend): a local file by
+ * default, or a kit's own secret storage. The backend only ever holds the
+ * encrypted store; encryption and the key stay here.
  */
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -74,6 +78,8 @@ export type StoredNote = {
   spendStarted?: string;
   /** A payment: the sealed payment message, until it is posted for the payee (sealed, so not a secret). */
   deliver?: string;
+  /** An x402 payment: the X-PAYMENT value it was made for (the note sealed to the payee, never in the clear). */
+  x402?: string;
   /**
    * A payment, claim link or cash out: what identifies it (payee or address,
    * asset, amount, note), so the same one is never sent twice while it may land.
@@ -95,6 +101,19 @@ export type StoredNote = {
    * longer counted as confirming or as a payment in flight.
    */
   stale?: boolean;
+  /**
+   * A payment, claim link or cash out (and a split made for one): the spending-log
+   * entry it was counted under, so a retry replaces that entry instead of counting
+   * the same money twice.
+   */
+  spendId?: string;
+  /**
+   * When this note was put behind a proof of funds. The proof carries the note's
+   * nullifier, which a cash out of the whole note would show next to where the
+   * money went and how much, so a cash out moves such a note to a fresh note
+   * first (GloamAgent.cashOut), as the app does.
+   */
+  fundsProofAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -151,18 +170,55 @@ export function noteStoreKey(env: Env = process.env): { key: Buffer; source: Key
   );
 }
 
+/**
+ * Where the encrypted store is kept. It only ever sees ciphertext. Every call is
+ * synchronous, so a backend is a file, an OS keychain or another local store,
+ * not a network round trip.
+ */
+export interface NoteStoreBackend {
+  /** Where the store lives, for messages. Never a secret. */
+  readonly where: string;
+  /** The encrypted store as last written, or null when nothing was written yet. */
+  read(): string | null;
+  /** Replace the store with `text`. Must be atomic: a half-written store loses money. */
+  write(text: string): void;
+  /** Run fn with no other writer in between (across processes too, when the store is shared). */
+  lock<T>(fn: () => T): T;
+}
+
+/** The default backend: one JSON file, written through a temporary file and a rename, under a lock file. */
+export function fileNoteBackend(path: string): NoteStoreBackend {
+  return {
+    where: path,
+    read: () => (existsSync(path) ? readFileSync(path, "utf8") : null),
+    write(text) {
+      const tmp = `${path}.${process.pid}.tmp`;
+      writeFileSync(tmp, text, { mode: 0o600 });
+      renameSync(tmp, path);
+    },
+    lock: (fn) => withFileLock(path, "note store", fn),
+  };
+}
+
 function newHandle(prefix = "n"): string {
   const bytes = randomBytes(10);
   return `${prefix}-` + Array.from(bytes, (b) => HANDLE_ALPHABET[b % HANDLE_ALPHABET.length]).join("");
 }
 
 export class NoteStore {
+  /** Where the store lives (the file path for the default backend). */
+  readonly path: string;
+  private readonly backend: NoteStoreBackend;
+
   constructor(
-    readonly path: string,
+    at: string | NoteStoreBackend,
     readonly agent: string,
     private readonly key: Buffer,
     readonly keySource: KeySource
-  ) {}
+  ) {
+    this.backend = typeof at === "string" ? fileNoteBackend(at) : at;
+    this.path = this.backend.where;
+  }
 
   private aad(): Buffer {
     return Buffer.from(`${INFO}:${this.agent}`);
@@ -170,14 +226,15 @@ export class NoteStore {
 
   /** Decrypt the store. Missing file: empty. Anything unreadable throws and nothing is written. */
   read(): StoreData {
-    if (!existsSync(this.path)) return { notes: [], receiveKey: null, scanFrom: {} };
+    const raw = this.backend.read();
+    if (raw === null) return { notes: [], receiveKey: null, scanFrom: {} };
     const unusable = (why: string) =>
       new Error(
         `The note store at ${this.path} cannot be opened: ${why}. It holds the only copy of this agent's private balance, so it is never overwritten. Restore the key it was written with, or move the file away to start a new store.`
       );
     let file: StoreFile;
     try {
-      file = JSON.parse(readFileSync(this.path, "utf8")) as StoreFile;
+      file = JSON.parse(raw) as StoreFile;
     } catch {
       throw unusable("it is not valid JSON");
     }
@@ -218,13 +275,11 @@ export class NoteStore {
       tag: cipher.getAuthTag().toString("base64"),
       data: enc.toString("base64"),
     };
-    const tmp = `${this.path}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(file, null, 2), { mode: 0o600 });
-    renameSync(tmp, this.path);
+    this.backend.write(JSON.stringify(file, null, 2));
   }
 
   private mutate<T>(fn: (data: StoreData) => T): T {
-    return withFileLock(this.path, "note store", () => {
+    return this.backend.lock(() => {
       const data = this.read();
       const out = fn(data);
       this.write(data);
@@ -284,6 +339,20 @@ export class NoteStore {
       const next: StoredNote = { ...note, status: "pending", pending: "spend", updatedAt: new Date().toISOString() };
       d.notes[i] = next;
       return next;
+    });
+  }
+
+  /**
+   * Mark notes as behind a proof of funds, before the proof is made. Under the lock each must still be
+   * unspent: a note a spend has already taken is never put in a proof, and one taken later sees the mark.
+   */
+  markFundsProof(handles: string[], at: string) {
+    this.mutate((d) => {
+      const picked = handles.map((h) => d.notes.findIndex((n) => n.handle === h));
+      if (picked.some((i) => i < 0 || d.notes[i]!.status !== "unspent")) {
+        throw new Error("A note picked for the proof was just taken by a payment or cash out. Try again.");
+      }
+      for (const i of picked) d.notes[i] = { ...d.notes[i]!, fundsProofAt: at, updatedAt: at };
     });
   }
 

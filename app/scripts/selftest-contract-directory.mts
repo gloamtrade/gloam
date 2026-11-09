@@ -42,7 +42,7 @@ if (CONFIGURED) {
 
 const nets = await import("../src/lib/networks");
 const dir = await import("../src/lib/contractDirectory");
-const { VAULT_SWAP_ROUTERS } = await import("../src/lib/vaultSwap");
+const { VAULT_SWAP_ROUTERS, swapV3Live } = await import("../src/lib/vaultSwap");
 
 let checks = 0;
 function check(name: string, fn: () => void) {
@@ -57,7 +57,7 @@ async function checkAsync(name: string, fn: () => Promise<void>) {
 }
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
-/** What Robinhood Chain mainnet's vault answered on 26 Oct 2026 (cast call, read only). */
+/** What Robinhood Chain mainnet's vault answers (cast call, read only), its fee as of 3 November 2026. */
 const RH_READ: import("../src/lib/contractDirectory").VaultRead = {
   owner: "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8",
   pendingOwner: "0x0000000000000000000000000000000000000000",
@@ -67,7 +67,7 @@ const RH_READ: import("../src/lib/contractDirectory").VaultRead = {
   shieldVerifier: "0x69Fa6d2De0A66dA718DF022cEe98485AfDb03465",
   poseidon: "0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4",
   feeRecipient: "0xB3900ac9350903218e4c7597bAb0f008F01B30B8",
-  withdrawFeeBps: 25,
+  withdrawFeeBps: 50,
   cashOutVerifier: "0x35de99bcD26B0F25E5a3a3b1e76FA5a708a01DF1",
   sendVerifier: "0x4dCac25a820D0C9Ede8f056378C08e31042AB7b1",
 };
@@ -150,8 +150,8 @@ check("swap routers only where swaps run, each from lib/vaultSwap", () => {
     if (current) assert.ok(same(routers[0]!.address, current), e.key);
     else assert.equal(routers.length, 0, e.key);
   }
-  assert.equal(byKey["robinhood-mainnet"]!.rows.find((r) => r.role === "swap_router")?.contract, "GloamVaultSwapV4b");
-  assert.equal(byKey["tempo-mainnet"]!.rows.find((r) => r.role === "swap_router")?.contract, "GloamVaultSwapTempo");
+  assert.equal(byKey["robinhood-mainnet"]!.rows.find((r) => r.role === "swap_router")?.contract, swapV3Live(4663) ? "GloamVaultSwapV4c" : "GloamVaultSwapV4b");
+  assert.equal(byKey["tempo-mainnet"]!.rows.find((r) => r.role === "swap_router")?.contract, swapV3Live(4217) ? "GloamVaultSwapTempo2" : "GloamVaultSwapTempo");
 });
 
 check("owner, treasury and deployer on the mainnet-pool vaults only; the relayer on every live network", () => {
@@ -220,7 +220,9 @@ check("the checks pass on the vault as it stands and name what differs", () => {
     ["Setup is over", "Rule changes wait 3 days", "Owner as listed", "No handover pending", "Fees go to the treasury", "Hash library as listed"]
   );
   assert.ok(ok.every((c) => c.ok), JSON.stringify(ok));
-  assert.equal(ok.find((c) => c.label === "Fees go to the treasury")!.detail, "Cash-out fee 0.25%.");
+  assert.equal(ok.find((c) => c.label === "Fees go to the treasury")!.detail, "Cash-out fee 0.5%.");
+  const stillOld = dir.vaultChecks(nets.getNetwork("base"), { ...RH_READ, withdrawFeeBps: 25 });
+  assert.equal(stillOld.find((c) => c.label === "Fees go to the treasury")!.detail, "Cash-out fee 0.25%.", "read from the vault, so a testnet at its own rate shows that rate");
   assert.equal(ok.find((c) => c.label === "Rule changes wait 3 days")!.detail, "The vault's delay is 3 days.");
 
   const off = dir.vaultChecks(n, {
@@ -323,7 +325,7 @@ if (!CONFIGURED) {
       assert.ok(same(vault.address, pool.pool));
       assert.equal(vault.deployBlock, pool.deployBlock);
       assert.deepEqual(
-        e.rows.filter((r) => r.role !== "payment_messages").map((r) => r.role),
+        e.rows.filter((r) => r.role !== "payment_messages" && r.role !== "swap_router").map((r) => r.role),
         ["vault", "owner", "fee_recipient", "relayer", "deployer"]
       );
       const csv = dir.directoryCsv(dir.contractDirectory());

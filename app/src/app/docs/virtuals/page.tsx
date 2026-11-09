@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/docs/virtuals" },
 };
 
-const REPO = "https://github.com/cryptoduke01/gloam/tree/main";
+const REPO = "https://github.com/gloamtrade/gloam/tree/main";
 const PLUGIN = `${REPO}/packages/game-plugin-gloam`;
 const PROVIDER = `${REPO}/examples/virtuals-acp-provider`;
 
@@ -47,7 +47,7 @@ const FUNCTIONS: { name: string; args: string; does: string; chain: string }[] =
   {
     name: "gloam_cash_out",
     args: "amount, to, asset?",
-    does: "From the private balance to a public 0x address. The pool keeps 0.25%.",
+    does: "From the private balance to a public 0x address. The pool keeps 0.5%.",
     chain: "The cash out: asset, amount and recipient",
   },
   {
@@ -223,7 +223,9 @@ GLOAM_LIMITS_FILE=./limits.json
         <code>payByClaimLink</code>, <code>requestPayment</code>,{" "}
         <code>checkIncoming</code>, <code>claim</code>, <code>cashOut</code>,{" "}
         <code>proveFunds</code>, <code>provePayment</code> and{" "}
-        <code>verifyProof</code>. The ACP provider below uses it directly.
+        <code>verifyProof</code>. The ACP provider below uses it directly, and
+        the <Link href="/docs/integrate">tool pack for agent kits</Link> is
+        built on it.
       </p>
 
       <h2 id="limits">Limits</h2>
@@ -495,15 +497,15 @@ GLOAM_LIMITS_FILE=./limits.json
                 <code>robinhood-mainnet</code>
               </td>
               <td>Robinhood Chain mainnet</td>
-              <td>Live, beta limits</td>
-              <td>USDG, GLOAM, PONS, CASHCAT; ETH, AI and ORBIO once their limits land</td>
+              <td>Live, deposit limits</td>
+              <td>USDG, GLOAM, PONS, CASHCAT, ETH, AI and ORBIO</td>
             </tr>
             <tr>
               <td>
                 <code>base-mainnet</code>
               </td>
               <td>Base mainnet</td>
-              <td>{BASE_MAINNET_LIVE ? "Live, beta limits" : "Next. Refused until its vault is live"}</td>
+              <td>{BASE_MAINNET_LIVE ? "Live, deposit limits" : "Next. Refused until its vault is live"}</td>
               <td>USDC, EURC, USDT, ETH</td>
             </tr>
             <tr>
@@ -519,7 +521,7 @@ GLOAM_LIMITS_FILE=./limits.json
                 <code>tempo-mainnet</code>
               </td>
               <td>Tempo mainnet</td>
-              <td>Live, beta limits</td>
+              <td>Live, deposit limits</td>
               <td>USDC.e, pathUSD, USDT0, OUSD</td>
             </tr>
           </tbody>
@@ -527,7 +529,7 @@ GLOAM_LIMITS_FILE=./limits.json
       </div>
       <ul>
         <li>
-          <strong>Beta limits on mainnet:</strong> 50,000 of a stablecoin per
+          <strong>Deposit limits on mainnet:</strong> 50,000 of a stablecoin per
           deposit and 2,500,000 in total per stablecoin.
         </li>
         <li>
@@ -578,7 +580,7 @@ GLOAM_LIMITS_FILE=./limits.json
       </p>
       <h3>What does it cost?</h3>
       <p>
-        Adding money and paying privately are free. A cash out costs 0.25%. The
+        Adding money directly and paying privately are free. A cash out costs 0.5%. The
         payout provider charges 0.5%, at least 0.05, and ACP takes its own fees
         on what is escrowed.
       </p>
@@ -590,7 +592,7 @@ GLOAM_LIMITS_FILE=./limits.json
       </p>
       <h3>Is mainnet ready for my agent?</h3>
       <p>
-        Mainnet is beta software with deposit limits. The code was reviewed
+        Mainnet is live with deposit limits. The code was reviewed
         internally before launch, and Kann Audits reviewed the vault contracts (<Link href="/security">report, 1 November 2026</Link>) and
         found no Critical, High or Medium issues. The plugin, SDK and relay were not part of that
         review. Start an agent on small limits and raise them

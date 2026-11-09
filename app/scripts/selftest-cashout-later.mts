@@ -57,6 +57,8 @@ const {
   REPROVE_MIN_LEAD_MS,
   cancelJob,
   drawSendAfter,
+  drawSendOn,
+  secureRandom,
   jobView,
   memoryJobStore,
   replaceJobProof,
@@ -200,6 +202,21 @@ await test("send time is drawn inside the window, never right away", () => {
       assert.ok(t >= T0 + MIN_DELAY_MS && t < T0 + DELAY_WINDOWS[w]);
     }
   }
+  // drawn from the platform's cryptographic source, not Math.random
+  const realRandom = Math.random;
+  Math.random = () => 0.5;
+  try {
+    const draws = new Set(Array.from({ length: 200 }, () => drawSendAfter(T0, "day")));
+    assert.ok(draws.size > 190, `send times vary whatever Math.random says (${draws.size} of 200)`);
+    const day = T0 - (T0 % 86_400_000) + 3 * 86_400_000;
+    const dated = new Set(Array.from({ length: 200 }, () => drawSendOn(T0, day)));
+    assert.ok(dated.size > 190 && [...dated].every((t) => t >= day && t < day + 86_400_000), "a dated one too, inside its day");
+  } finally {
+    Math.random = realRandom;
+  }
+  const rs = Array.from({ length: 2000 }, secureRandom);
+  assert.ok(rs.every((r) => r >= 0 && r < 1), "in [0, 1)");
+  assert.ok(rs.some((r) => r < 0.1) && rs.some((r) => r > 0.9), "spread across it");
   assert.equal(DELAY_WINDOWS.hour, 60 * 60 * 1000);
   assert.equal(DELAY_WINDOWS["6h"], 6 * 60 * 60 * 1000);
   assert.equal(DELAY_WINDOWS.day, MAX_DELAY_MS);
@@ -425,7 +442,7 @@ await test("one live job per spend", async () => {
 await test("cancel works only before it goes out", async () => {
   const j = job({ sendAfter: T0 + 60_000 });
   const { store, chain } = await setup(j);
-  assert.equal(await cancelJob(store, j.id, T0), "cancelled");
+  assert.equal(await cancelJob(store, j.id, T0, j.nullifier), "cancelled");
   assert.equal((await store.get(j.id))!.proof, "0x");
   chain.now = T0 + 120_000;
   assert.deepEqual(await runDueJobs(store, chain.deps), []);
@@ -433,11 +450,21 @@ await test("cancel works only before it goes out", async () => {
 
   const k = job({ status: "sending" });
   await store.put(k);
-  assert.equal(await cancelJob(store, k.id, T0), "sending");
+  assert.equal(await cancelJob(store, k.id, T0, k.nullifier), "sending");
   const held = (await store.lock(k.id, 30))!;
-  assert.equal(await cancelJob(store, job().id, T0), null);
-  assert.equal(await cancelJob(store, k.id, T0), "sending", "a held lock means a run is sending it");
+  assert.equal(await cancelJob(store, job().id, T0, `0x${"11".repeat(32)}`), null);
+  assert.equal(await cancelJob(store, k.id, T0, k.nullifier), "sending", "a held lock means a run is sending it");
   await held();
+});
+
+await test("only whoever holds the note can cancel: the job's id alone is not enough", async () => {
+  const j = job({ sendAfter: T0 + 60_000 });
+  const { store } = await setup(j);
+  for (const other of [`0x${"22".repeat(32)}`, "", "0x", j.nullifier.slice(0, 40), "not hex"]) {
+    assert.equal(await cancelJob(store, j.id, T0, other), "not_yours", JSON.stringify(other));
+  }
+  assert.equal((await store.get(j.id))!.status, "scheduled", "nothing changed");
+  assert.equal(await cancelJob(store, j.id, T0, j.nullifier.toUpperCase().replace("0X", "0x")), "cancelled", "the note's own, in any letter case");
 });
 
 await test("what a person can read about a job holds no proof or inputs", async () => {
@@ -675,7 +702,7 @@ await test("2. a send that may have gone out stays 'sending': cancel refused, th
     assert.equal(after.status, "sending");
     assert.equal(after.maybeSent, true);
     assert.equal(after.proof, j.proof, "the proof is kept: it can still be read back or sent");
-    assert.equal(await cancelJob(store, j.id, chain.now), "sending");
+    assert.equal(await cancelJob(store, j.id, chain.now, j.nullifier), "sending");
     assert.equal((await store.get(j.id))!.status, "sending");
     // the app: on its way, out of the balance
     const next = nextMark({ job: j.id, at: j.sendAfter, to: TO, state: "scheduled" }, jobView(after));
@@ -719,7 +746,7 @@ await test("2. a stale 'sending' job and an unreadable node: stays 'sending', ca
   chain.now = T0 + GIVE_UP_AFTER_MS + 1;
   assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "sending" }]);
   assert.equal((await store.get(j.id))!.status, "sending");
-  assert.equal(await cancelJob(store, j.id, chain.now), "sending");
+  assert.equal(await cancelJob(store, j.id, chain.now, j.nullifier), "sending");
   assert.equal(chain.sends.length, 0);
 });
 
@@ -730,7 +757,7 @@ await test("2. once a run reached the send, cancel is refused even if it waits a
     throw new SendError("busy", "busy");
   });
   assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "scheduled" }]);
-  assert.equal(await cancelJob(store, j.id, chain.now), "sending");
+  assert.equal(await cancelJob(store, j.id, chain.now, j.nullifier), "sending");
   assert.equal((await store.get(j.id))!.status, "scheduled", "left to go out on the next pass");
 });
 
@@ -747,6 +774,23 @@ await test("2. the chain is the only way out unsent: root unknown with the note 
     throw new SendError("refused", "screened");
   });
   assert.deepEqual(await runDueJobs(s2.store, s2.chain.deps), [{ id: k.id, status: "sending" }]);
+});
+
+await test("2. a send over its gas limit went nowhere: the job tries again, and gives up in time", async () => {
+  const j = job();
+  const { store, chain } = await setup(j);
+  chain.failNextSend(() => {
+    throw new SendError("refused", "gas_most");
+  });
+  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "scheduled" }]);
+  assert.ok(!(await store.get(j.id))!.maybeSent, "nothing went out");
+
+  const late = job({ sendAfter: T0 - GIVE_UP_AFTER_MS - 1 });
+  const s2 = await setup(late);
+  s2.chain.failNextSend(() => {
+    throw new SendError("refused", "gas_most");
+  });
+  assert.deepEqual(await runDueJobs(s2.store, s2.chain.deps), [{ id: late.id, status: "failed" }]);
 });
 
 await test("2. stuck 'sending' jobs never crowd a due one out of a run", async () => {
@@ -888,7 +932,7 @@ await test("2. end to end: a dropped send through the relay keeps the job 'sendi
   };
   assert.deepEqual(await runDueJobs(store, deps), [{ id: j.id, status: "sending" }]);
   assert.equal((await store.get(j.id))!.maybeSent, true);
-  assert.equal(await cancelJob(store, j.id, clock), "sending");
+  assert.equal(await cancelJob(store, j.id, clock, j.nullifier), "sending");
   // stale: read again; the relay still holds the spend in flight, so it stays "sending"
   resetNode();
   clock += SENDING_STALE_MS + 1;
@@ -1299,8 +1343,14 @@ await test("9 (routes). PATCH swaps the proof after the same checks and dry run;
   assert.equal((await routeStore.get(id))!.root, newer.root);
   resetNode();
 
+  // cancelling needs the spend's nullifier: without it, or with another, nothing changes
+  const bare = await read(await route.DELETE(call("DELETE", id)));
+  assert.deepEqual([bare.status, bare.json.code], [400, "owner_proof"]);
+  const wrong = await read(await route.DELETE(call("DELETE", id, { nullifier: hex32(0x9999) })));
+  assert.deepEqual([wrong.status, wrong.json.code], [403, "not_yours"]);
+  assert.equal((await routeStore.get(id))!.status, "scheduled", "still waiting");
   // past waiting: cancelled, then nothing can replace it
-  const cancelled = await read(await route.DELETE(call("DELETE", id)));
+  const cancelled = await read(await route.DELETE(call("DELETE", id, { nullifier: first.nullifier })));
   assert.equal(cancelled.json.ok, true);
   const gone = await read(await route.PATCH(call("PATCH", id, newer)));
   assert.deepEqual([gone.status, gone.json.code], [409, "not_live"]);

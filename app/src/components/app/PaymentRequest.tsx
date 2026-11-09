@@ -17,7 +17,7 @@ import { shortAddress } from "@/lib/chain";
 import {
   REQUEST_NAME_MAX,
   REQUEST_NOTE_MAX,
-  buildPaymentRequestLink,
+  buildShortPaymentRequestLink,
   cleanRequestText,
   formatRequestAmount,
   isWalletRequest,
@@ -77,7 +77,7 @@ export function RequestPaymentCard({ tag }: { tag: string }) {
     }
     setAmountError(null);
     setCreated({
-      url: buildPaymentRequestLink(
+      url: buildShortPaymentRequestLink(
         { to: tag, network: network.key, asset, amount: r.value, note, name },
         window.location.origin
       ),
@@ -339,7 +339,9 @@ function RequestLinkResult({ created }: { created: Created }) {
 /**
  * Shown above Pay when a request link opened it. The name in a link is
  * whatever its maker typed, so it is only trusted when it matches a contact
- * the payer saved for that address.
+ * the payer saved for that address. A partner's name shows only when the link
+ * carries a live partner code, and it comes from the partner's Gloam account
+ * (lib/partnerLinkClient), never from the link.
  */
 export function PaymentRequestBanner({
   request,
@@ -348,6 +350,7 @@ export function PaymentRequestBanner({
   onSwitchNetwork,
   onDismiss,
   balanceHint,
+  partnerName = null,
 }: {
   request: PaymentRequest;
   contactLabel: string | null;
@@ -356,6 +359,8 @@ export function PaymentRequestBanner({
   onDismiss: () => void;
   /** e.g. no private balance in the requested token yet */
   balanceHint: { text: string; addHref?: string } | null;
+  /** The partner whose live link code opened this, from their account. */
+  partnerName?: string | null;
 }) {
   const who = contactLabel ?? request.name;
   const amount = request.amount
@@ -402,6 +407,7 @@ export function PaymentRequestBanner({
             )}
             {request.note && <span className="text-mute"> · {request.note}</span>}
           </p>
+          {partnerName && <PartnerLine name={partnerName} />}
         </div>
         <button
           type="button"
@@ -469,6 +475,20 @@ export function PaymentRequestBanner({
         </ul>
       )}
     </section>
+  );
+}
+
+/** "From Motion · Gloam partner": a partner's name from their account, for a link with their live code. */
+export function PartnerLine({ name }: { name: string }) {
+  return (
+    <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13.5px] text-soft">
+      <span className="break-words">
+        From <span className="font-medium text-foreground">{name}</span>
+      </span>
+      <span className="rounded-full bg-sealed-soft px-2 py-0.5 text-[11px] text-sealed" title="This link carries a partner code Gloam issued to them.">
+        Gloam partner
+      </span>
+    </p>
   );
 }
 

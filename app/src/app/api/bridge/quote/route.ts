@@ -10,7 +10,10 @@ import {
   RELAY_REFERRER,
   SWAP_SOURCES,
   bridgeChain,
+  bridgeFeeSetting,
   bridgeToken,
+  quotedAppFee,
+  relayAppFees,
   swapSource,
   validRefundAddress,
   type BridgeQuote,
@@ -33,18 +36,11 @@ function fail(status: number, message: string, headers?: HeadersInit) {
   return NextResponse.json({ ok: false, error: { message } }, { status, headers: { "Cache-Control": "no-store", ...headers } });
 }
 
-/** Gloam's optional cut of a bridge, set in env. Off unless both values are valid. */
-function appFees(): { recipient: string; fee: string }[] | undefined {
-  const bps = Number(process.env.BRIDGE_FEE_BPS ?? "");
-  const recipient = process.env.BRIDGE_FEE_RECIPIENT ?? "";
-  if (!Number.isInteger(bps) || bps <= 0 || bps > 100 || !isAddress(recipient)) return undefined;
-  return [{ recipient, fee: String(bps) }];
-}
-
 /**
  * A one-time Relay deposit address: { chainId, symbol, network, amount, recipient, refundTo? }.
  * The person sends `amount` of that token to the returned address and Relay
- * delivers the network's stablecoin to `recipient`. We keep nothing.
+ * delivers the network's stablecoin to `recipient`. Gloam keeps nothing unless
+ * BRIDGE_FEE_BPS is set; the quote says so either way (appFee).
  */
 export async function POST(req: Request) {
   let body: Record<string, unknown>;
@@ -96,6 +92,7 @@ export async function POST(req: Request) {
 
   const apiKey = process.env.RELAY_API_KEY;
   if (chain.needsKey && !apiKey) return fail(400, `${chain.name} transfers aren't switched on yet.`);
+  const feeSetting = bridgeFeeSetting(process.env);
 
   let res: Response;
   try {
@@ -114,7 +111,7 @@ export async function POST(req: Request) {
         tradeType: "EXACT_INPUT",
         useDepositAddress: !chain.swap,
         refundTo,
-        appFees: appFees(),
+        appFees: relayAppFees(feeSetting),
         // Relay refuses a referrer without a key; with one, it tags the request for /admin.
         ...(apiKey ? { referrer: RELAY_REFERRER } : {}),
       }),
@@ -179,6 +176,7 @@ export async function POST(req: Request) {
       logo: dest.token.logo,
     },
     feeUsd: Math.round(feeUsd * 100) / 100,
+    appFee: quotedAppFee(feeSetting, data?.fees?.app?.amountUsd, usdIn),
     timeSec: Number(data?.details?.timeEstimate ?? 0),
     bitcoin: chain.kind === "bvm",
   };

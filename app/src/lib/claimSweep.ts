@@ -112,9 +112,10 @@ export type ClaimEnv = {
   ) => Promise<{ spent: boolean | null; seen: boolean | null; block?: bigint | null }>;
   /**
    * A private swap's refund note: does its money wait at the swap's escrow, at
-   * `block` (the block stateAt read)? Null: unread.
+   * `block` (the block stateAt read)? "short": it does, but too little for this
+   * refund note (lib/vaultSwap escrowHolds). Null: unread.
    */
-  escrowWaiting?: (n: LocalNote, block: bigint) => Promise<boolean | null>;
+  escrowWaiting?: (n: LocalNote, block: bigint) => Promise<boolean | "short" | null>;
   /** Puts a swap's waiting money back as its refund note (lib/vaultSwapRun). True when one was sent. */
   finishRefund?: (n: LocalNote) => Promise<boolean | void>;
   /** How a transaction ended. Null when the chain shows no receipt yet, or the read failed. */
@@ -241,7 +242,7 @@ async function finalize(env: ClaimEnv, fresh: LocalNote, txHash: Hex | null) {
  * escrow and lands as this note once the refund is finished, so while the
  * escrow holds it (or can't be read) the note is "refund" or pending, never dead.
  */
-async function settlePending(env: ClaimEnv, fresh: LocalNote): Promise<"landed" | "dead" | "pending" | "refund"> {
+async function settlePending(env: ClaimEnv, fresh: LocalNote): Promise<"landed" | "dead" | "pending" | "refund" | "held"> {
   const { spent, seen, block } = env.stateAt
     ? await env.stateAt(fresh.sweptFrom?.nullifier ?? null, fresh.commitment)
     : {
@@ -260,6 +261,7 @@ async function settlePending(env: ClaimEnv, fresh: LocalNote): Promise<"landed" 
       if (block == null) return "pending";
       const waiting = env.escrowWaiting ? await env.escrowWaiting(fresh, block).catch(() => null) : null;
       if (waiting === true) return "refund";
+      if (waiting === "short") return "held";
       if (waiting === null) return "pending";
     }
     updateLocalNote(fresh.id, { status: "recovered", sweepPending: false });
@@ -544,7 +546,7 @@ async function markRevertedSwap(env: ClaimEnv, refund: LocalNote): Promise<boole
 }
 
 /** Refusals that mean the vault won't take the refund for now, not that the relay had a bad moment. */
-const REFUND_BLOCKED = new Set(["OverDepositLimit", "swap_asset", "swap_router", "no_swap", "BadRoute"]);
+const REFUND_BLOCKED = new Set(["OverDepositLimit", "FeeOnTransferNotSupported", "swap_asset", "swap_router", "no_swap", "BadRoute"]);
 
 /** Tries to finish a held refund and says on the note if the vault won't take it. The note stays pending either way. */
 async function finishHeldRefund(env: ClaimEnv, n: LocalNote): Promise<void> {
@@ -725,6 +727,14 @@ export async function reconcileClaims(env?: ClaimEnv): Promise<boolean> {
     for (const fresh of pending) {
       if (fresh.chainId !== e.chainId || fresh.pool.toLowerCase() !== pool.toLowerCase()) continue;
       const state = await settlePending(e, fresh);
+      if (state === "held") {
+        // the money is there and its refund note can't land: the exit is the way back
+        if (fresh.refundHeld !== "blocked") {
+          await updateLocalNote(fresh.id, { refundHeld: "blocked" }).catch(() => {});
+          changed = true;
+        }
+        continue;
+      }
       if (state === "refund") {
         if (!fresh.refundHeld) {
           await updateLocalNote(fresh.id, { refundHeld: "returning" }).catch(() => {});

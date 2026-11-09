@@ -9,18 +9,19 @@ import {
   sessionCookieOptions,
   verifySignIn,
 } from "@/lib/partnersAuth";
-import { getPartnerByOwner, partnerView } from "@/lib/partners";
+import { getPartnerByOwner, partnerView, removedNoticeFor } from "@/lib/partners";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Who is signed in, and their partner account if they made one. */
+/** Who is signed in, their partner account if they made one, and, when they have none, whether an admin removed one. */
 export async function GET(req: NextRequest) {
   const requestId = newRequestId();
   try {
     const wallet = sessionWallet(req);
     const partner = await getPartnerByOwner(wallet);
-    return apiOk({ wallet, partner: partner ? partnerView(partner) : null }, { requestId });
+    const removed = partner ? null : await removedNoticeFor(wallet);
+    return apiOk({ wallet, partner: partner ? partnerView(partner) : null, removed }, { requestId });
   } catch (e) {
     return apiFail(e, { requestId });
   }
@@ -38,7 +39,8 @@ export async function POST(req: NextRequest) {
     const token = createSession(wallet, host);
     if (!token) throw new ApiError(503, "keys_unconfigured", "Partner sign-in is not configured on this server yet.");
     const partner = await getPartnerByOwner(wallet);
-    const res = apiOk({ wallet, partner: partner ? partnerView(partner) : null }, { requestId });
+    const removed = partner ? null : await removedNoticeFor(wallet);
+    const res = apiOk({ wallet, partner: partner ? partnerView(partner) : null, removed }, { requestId });
     res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
     return res;
   } catch (e) {

@@ -48,7 +48,7 @@ export interface GloamPaywallConfig {
   server: GloamChargeServerConfig;
   /** Protection space. Default: the request's host. */
   realm?: string;
-  /** "tempo-mainnet" or "robinhood-mainnet" (mainnet), "tempo" or "robinhood" (testnet), or a chain id; "base-mainnet", "base" and "ethereum" once their pools are in. Default "tempo". */
+  /** "tempo-mainnet" or "robinhood-mainnet" (mainnet), "tempo" or "robinhood" (testnet), or a chain id; "base-mainnet", "base" and "ethereum" once their pools are in, "elysium-mainnet" and "elysium" (Elysium testnet) once the SDK has Elysium's values. Default "tempo". */
   network?: GloamChargeNetwork | number;
   /** Token address; default the network's first stablecoin (USDC.e on Tempo mainnet, USDG on Robinhood Chain mainnet, USDC on Base, PathUSD on Tempo testnet), native ETH on Robinhood Chain testnet. */
   currency?: Address;

@@ -9,6 +9,7 @@
  * eligible total honest.
  */
 import { getAddress, zeroAddress } from "viem";
+import { VAULT_SWAP_V3_ADDRESS, swapV3Live } from "@/lib/vaultSwap";
 
 export type Excluded = { address: `0x${string}`; reason: string };
 
@@ -21,6 +22,8 @@ export const EXCLUDED: Excluded[] = [
   // Gloam's contracts
   { address: "0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194", reason: "The Gloam vault. GLOAM held privately counts once private voting arrives" },
   { address: "0x34AB06208586A737Bf1607fa996Bc9162271c52d", reason: "Gloam private swaps router (first version)" },
+  // the vote page lists all of these, so the next router joins once it is live (GLOAM is on Robinhood Chain alone)
+  ...(swapV3Live(4663) ? [{ address: VAULT_SWAP_V3_ADDRESS[4663]!, reason: "Gloam private swaps router (third version)" }] : []),
   { address: "0xfCa1887e77f738ef9C5751974b3f3873d029F2DC", reason: "Gloam private swaps router" },
   // pools and launch contracts
   { address: "0x8366a39CC670B4001A1121B8F6A443A643e40951", reason: "Uniswap v4 pools, the Orynth launch pool among them" },

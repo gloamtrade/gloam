@@ -9,7 +9,7 @@
  *    final keys. Once the deploy is pasted in, the same run checks it as live.
  *  - with a placeholder pool and board put into ETHEREUM_SEPOLIA_POOL before
  *    the networks are built (a child process of this one): the network, its
- *    assets and beta limits, ETH listed, the board, the builders, payment
+ *    assets and deposit limits, ETH listed, the board, the builders, payment
  *    requests and x402, and Ethereum Sepolia listed after the other testnets.
  *
  * Run after build:  node test/ethereum-sepolia.selftest.mjs
@@ -111,7 +111,7 @@ assert(
 );
 for (const a of ETHEREUM_SEPOLIA_ASSETS) {
   const want = a.symbol === "ETH" ? [2n * 10n ** 17n, 10n * 10n ** 18n] : [500n * SIX, 25_000n * SIX];
-  assert(a.depositLimit.perDeposit === want[0] && a.depositLimit.total === want[1], `${a.symbol}: the deploy's beta limits`);
+  assert(a.depositLimit.perDeposit === want[0] && a.depositLimit.total === want[1], `${a.symbol}: the deploy's deposit limits`);
 }
 // No Sepolia token needs its allowance reset first (Tether issues no USDT there):
 // a deposit approves the exact amount once, or nothing when the allowance covers it.
@@ -176,7 +176,7 @@ if (CONFIGURED || live !== null) {
         // the vault's own answer, read live: 500 per deposit
         client: { readContract: async ({ functionName }) => (functionName === "depositLimitsOn" ? true : functionName === "depositLimit" ? [500n * SIX, 25_000n * SIX] : 0n) },
       }),
-    /beta limit/,
+    /deposit limit/,
     "the builder checks the vault's live limit before proving"
   );
 

@@ -14,6 +14,7 @@
 import "server-only";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { jsonOf, kv } from "./partnersKv";
+import type { NEWER_KEY } from "./recoveryEnd";
 
 const PREFIX = "gloam:recovery:v1:";
 /**
@@ -26,11 +27,13 @@ export const MAX_BACKUP_CHARS = 512_000;
 const HEX64 = /^[0-9a-f]{64}$/;
 const B64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
-type Stored = { w: string; c: string; n: number; t: number };
+/** `v`: a save under a newer key has reached this backup. Records older than the marker have none. */
+type Stored = { w: string; c: string; n: number; t: number; v?: typeof NEWER_KEY };
 
 export type BackupView = { c: string; n: number; t: number };
 
 export const BACKUP_GONE = "This backup isn't on the server any more.";
+export const VERSION1_ENDED = "This page no longer saves backups. Reload it to carry on.";
 
 export class RecoveryError extends Error {
   constructor(
@@ -40,6 +43,18 @@ export class RecoveryError extends Error {
     super(message);
     this.name = "RecoveryError";
   }
+}
+
+let clockOverride: (() => number) | null = null;
+
+/** Swap the server's clock (self-tests), to run past a date. Pass null to restore the real one. */
+export function setRecoveryClock(clock: (() => number) | null) {
+  clockOverride = clock;
+}
+
+/** The server's clock, which is the one the version 1 end date goes by. */
+export function recoveryNow(): number {
+  return clockOverride ? clockOverride() : Date.now();
 }
 
 const keyFor = (id: string) => PREFIX + id;
@@ -115,11 +130,14 @@ export function backupInputProblem(p: { c: unknown; n: unknown }): string | null
 /**
  * Saves a backup. The first write sets the write token; later writes must
  * present the same token and a higher version number, so an older copy can
- * never replace a newer one. `created` says this id held nothing before, which
- * is how builds that don't send `mustExist` learn that a backup has gone.
+ * never replace a newer one. `created` says this id held nothing before.
  *
  * With `mustExist`, an id holding nothing is refused with a 410. The check is
  * under the lock, so a backup deleted a moment ago can't come back this way.
+ *
+ * `v` goes on the record and stays there: a later save without it (a tab on an
+ * earlier build) doesn't take it off. What a save may do goes by the request
+ * (app/api/recovery), since records older than the marker have none.
  */
 export async function writeBackup(p: {
   id: string;
@@ -127,6 +145,7 @@ export async function writeBackup(p: {
   c: string;
   n: number;
   mustExist?: boolean;
+  v?: typeof NEWER_KEY;
 }): Promise<{ n: number; t: number; created: boolean }> {
   const problem = backupInputProblem(p);
   if (problem) throw new RecoveryError(400, problem);
@@ -140,7 +159,8 @@ export async function writeBackup(p: {
       if (!sameHash(current.w, w)) throw new RecoveryError(403, "This backup belongs to a different key.");
       if (p.n <= current.n) throw new RecoveryError(409, "A newer backup is already saved.");
     }
-    const next: Stored = { w, c: p.c, n: p.n, t: Date.now() };
+    const v = p.v ?? current?.v;
+    const next: Stored = { w, c: p.c, n: p.n, t: Date.now(), ...(v ? { v } : {}) };
     await kv([["SET", keyFor(p.id), JSON.stringify(next)]]);
     return { n: next.n, t: next.t, created: !current };
   });

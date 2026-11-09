@@ -15,7 +15,7 @@
  */
 
 import { hkdfSync } from "node:crypto";
-import type { Hex } from "viem";
+import type { Address, Hex } from "viem";
 import type { GloamPaymentRequirements, SweepChain } from "@gloamtrade/sdk";
 import {
   allowedModes,
@@ -30,6 +30,7 @@ import {
   parsePaymentChallenges,
   secondsLeft,
   toPaymentRequirements,
+  transferCheckFromCall,
   GLOAM_CHARGE_INTENT,
   GLOAM_METHOD,
   type GloamChargeChain,
@@ -125,13 +126,19 @@ export function cannotPay(ch: PaymentChallenge, request: GloamChargeRequest, now
   return null;
 }
 
-/** A GloamChargeChain over this server's chain reads plus transaction receipts with logs. */
+/**
+ * A GloamChargeChain over this server's chain reads plus transaction receipts with logs. With `call` (an eth_call),
+ * a payer's pull transfer is checked against the pool before this server submits it, and one the pool would
+ * refuse is never sent.
+ */
 export function mppChain(
   sweep: SweepChain,
-  getTransactionReceipt: (args: { hash: Hex }) => Promise<{ status: "success" | "reverted"; logs: readonly { address: string; topics: readonly string[]; data: string }[] }>
+  getTransactionReceipt: (args: { hash: Hex }) => Promise<{ status: "success" | "reverted"; logs: readonly { address: string; topics: readonly string[]; data: string }[] }>,
+  call?: (args: { to: Address; data: Hex }) => Promise<unknown>
 ): GloamChargeChain {
   return {
     ...sweep,
+    ...(call ? { transferWouldLand: transferCheckFromCall(call) } : {}),
     async getReceipt(hash): Promise<MinimalReceipt | null> {
       try {
         const r = await getTransactionReceipt({ hash });

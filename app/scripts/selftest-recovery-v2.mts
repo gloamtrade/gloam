@@ -15,10 +15,13 @@
  *   - a restore asks for version 2 only, and version 1 only on the explicit step;
  *   - a version 1 browser never brings back a backup that has left the server;
  *   - version 1 stops saving at its end date, with nothing deleted, and updating
- *     or opening an older backup works the same after it.
+ *     or opening an older backup works the same after it;
+ *   - the server holds that date on its own clock, for a browser with a wrong
+ *     clock and a tab on an earlier build, and nobody loses a backup or a note.
  *
  * Uses the real /api/recovery route and store (in-process), and real signatures
- * from a local account. Nothing leaves the process.
+ * from a local account. Nothing leaves the process. The server's clock follows
+ * the tests' clock unless a test sets it apart with serverClock().
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-recovery-v2.mts
  */
@@ -57,20 +60,33 @@ Date.now = ticking;
 const setClock = (ms: number) => void (clockShift = ms - realNow());
 
 const route = await import("../src/app/api/recovery/route");
-const { readBackup } = await import("../src/lib/recoveryStore");
-const { resetMemoryKv } = await import("../src/lib/partnersKv");
+const { readBackup, setRecoveryClock, writeBackup } = await import("../src/lib/recoveryStore");
+const { kv, resetMemoryKv } = await import("../src/lib/partnersKv");
+const { olderKeyText } = await import("../src/components/app/RecoveryPanel");
+
+/** Sets the server's clock apart from this browser's. */
+const serverClock = (ms: number) => setRecoveryClock(() => ms);
 
 /* A test can answer any call itself; everything else reaches the real route. */
 type Fault = (method: string, id: string) => Response | null | Promise<null>;
 let fault: Fault | null = null;
 const calls: string[] = [];
+/** What each save said about itself. */
+const saves: { id: string; v?: unknown; mustExist?: unknown }[] = [];
+/** While set, saves go out the way a tab on an earlier build sends them: saying nothing about their key. */
+let earlierBuild = false;
 
 globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
   const method = init?.method ?? "GET";
   const full = new URL(String(url), "https://www.gloam.trade");
-  const body = init?.body ? String(init.body) : undefined;
+  let body = init?.body ? String(init.body) : undefined;
+  if (method === "PUT" && earlierBuild) {
+    const { v: _v, mustExist: _mustExist, ...rest } = JSON.parse(body!) as Record<string, unknown>;
+    body = JSON.stringify(rest);
+  }
   const id = full.searchParams.get("id") ?? (body ? (JSON.parse(body) as { id: string }).id : "");
   calls.push(`${method} ${id}`);
+  if (method === "PUT") saves.push(JSON.parse(body!));
   const forced = await fault?.(method, id);
   if (forced) return forced;
   const req = new Request(full, {
@@ -180,6 +196,8 @@ async function tellOtherTabs() {
 /** A browser with nothing in it, and an empty server. */
 async function freshWorld() {
   setClock(BEFORE_THE_END);
+  setRecoveryClock(null);
+  earlierBuild = false;
   fault = null;
   await turnOffRecovery({ deleteBackup: false });
   await vault.setAllNotes([]);
@@ -189,6 +207,7 @@ async function freshWorld() {
   (globalThis as { __gloamMcpRate?: Map<string, unknown> }).__gloamMcpRate?.clear();
   delete process.env.GLOAM_RECOVERY_NEW_PER_DAY;
   calls.length = 0;
+  saves.length = 0;
 }
 
 /** Leaves this device behind: same server, a browser with nothing in it. */
@@ -200,10 +219,20 @@ async function newDevice() {
   calls.length = 0;
 }
 
+/** A backup as earlier builds saved it, with no marker on the record and nothing in it yet. */
+async function earlierBackup(keys: Keys) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await crypto.subtle.importKey("raw", Buffer.from(keys.key, "base64"), "AES-GCM", false, ["encrypt"]);
+  const payload = JSON.stringify({ v: 1, savedAt: 1, notes: [], receive: { current: null, previous: [] } });
+  const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(keys.id) }, key, new TextEncoder().encode(payload));
+  await writeBackup({ id: keys.id, write: keys.write, c: Buffer.concat([iv, new Uint8Array(sealed)]).toString("base64"), n: 1 });
+}
+
 /** What an older build left behind: a version 1 backup, and these settings in the browser. */
 async function version1Browser(account: PrivateKeyAccount, notes: LocalNote[]) {
   await vault.setAllNotes(notes);
   const keys = await v1Keys(account);
+  await earlierBackup(keys);
   await connectRecovery(keys, account.address);
   assert.ok(await readBackup(keys.id), "the version 1 backup is saved");
   return keys;
@@ -242,7 +271,7 @@ async function spendBudget() {
     new Request("https://www.gloam.trade/api/recovery", {
       method: "PUT",
       headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.1" },
-      body: JSON.stringify({ id: "c".repeat(64), write: "d".repeat(64), c: "AAAA", n: 1 }),
+      body: JSON.stringify({ id: "c".repeat(64), write: "d".repeat(64), c: "AAAA", n: 1, v: 2 }),
     }),
   );
   assert.equal(res.status, 200);
@@ -716,8 +745,9 @@ await test("two devices on version 1: one moves, the other writes nothing, says 
   const stale = await openPage("device-x");
   stale.startRecoverySync();
   await vault.setAllNotes([note("x"), note("only-on-x")]);
+  await earlierBackup(v1);
   await stale.connectRecovery(v1, ALICE.address);
-  assert.equal(stale.recoveryState().gone, false, "a first save isn't a backup going missing");
+  assert.equal(stale.recoveryState().gone, false);
   await deleteFromServer(v1); // device Y moved it again, while X was away
   await assert.rejects(stale.backupNow(), /stopped saving/, "Back up now can't claim a save");
   assert.equal(await readBackup(v1.id), null, "the backup is not brought back");
@@ -756,13 +786,60 @@ await test("a backup that left the server: a change writes nothing, tries once, 
   await page.turnOffRecovery({ deleteBackup: false });
 });
 
-await test("before the end date, a browser that never saved can still make its first backup", async () => {
-  // Older builds left on, savedAt null: there was no backup to lose, so a first save still goes through.
+await test("a browser that never saved makes no version 1 backup before the end date either, and says so", async () => {
+  // Older builds left on, savedAt null: the server starts no new version 1 backup, at any date.
   const v1 = await v1Keys(ALICE);
   await vault.setAllNotes([note("a")]);
+  localStorage.setItem(CONFIG_KEY, await vault.sealJson({ ...v1, n: 0, savedAt: null }));
+  const page = await openPage("never-saved-early");
+  page.startRecoverySync();
+  await until(() => page.recoveryState().ready, "a new page has read the settings");
+  await vault.setAllNotes([...vault.getAllNotes(), note("b")]);
+  await sleep(2_700);
+  assert.equal(puts(), 0, "it doesn't try");
+  assert.equal(await readBackup(v1.id), null);
+  const s = page.recoveryState();
+  assert.ok(s.on && s.olderKey && s.paused && !s.gone && !s.savedAt, "paused, and not called moved");
+  assert.equal(s.error, null);
+  assert.match(olderKeyText(s), /hasn't saved a backup yet/);
+  assert.doesNotMatch(olderKeyText(s), /Another device|moved|removed|stopped on/);
+  await assert.rejects(page.backupNow(), /stopped saving/, "Back up now can't claim a save");
+
+  // connecting those keys directly starts nothing either
+  await page.turnOffRecovery({ deleteBackup: false });
   await connectRecovery(v1, ALICE.address);
-  assert.ok(await readBackup(v1.id), "a first save makes the backup");
-  assert.equal(recoveryState().gone, false, "and isn't a backup going missing");
+  assert.ok(recoveryState().paused);
+  assert.equal(puts(), 0);
+  assert.equal(await readBackup(v1.id), null);
+
+  assert.equal(await updateRecoveryKey(walletOf(ALICE)), "newest", "updating is the way on");
+  assert.deepEqual(await backupNotes(await v2Keys(ALICE)), ["note-a", "note-b"], "with everything in it");
+  assert.ok(!recoveryState().paused && recoveryState().newerKey);
+});
+
+await test("a browser that never saved, with a backup from another device under the same key: updating takes it in", async () => {
+  const v1 = await version1BackupOnly(ALICE, [note("elsewhere")]);
+  await vault.setAllNotes([note("here")]);
+  localStorage.setItem(CONFIG_KEY, await vault.sealJson({ ...v1, n: 0, savedAt: null }));
+  const page = await openPage("never-saved-with-backup");
+  page.startRecoverySync();
+  await until(() => page.recoveryState().ready, "a new page has read the settings");
+  assert.equal(await page.updateRecoveryKey(walletOf(ALICE)), "newest");
+  assert.deepEqual(await backupNotes(await v2Keys(ALICE)), ["note-elsewhere", "note-here"]);
+  assert.equal(await readBackup(v1.id), null);
+  await page.turnOffRecovery({ deleteBackup: false });
+});
+
+await test("settings an earlier build marked gone: a browser that never saved isn't told a backup moved", async () => {
+  const v1 = await v1Keys(ALICE);
+  localStorage.setItem(CONFIG_KEY, await vault.sealJson({ ...v1, n: 0, savedAt: null, gone: true }));
+  const page = await openPage("never-saved-gone");
+  page.startRecoverySync();
+  await until(() => page.recoveryState().ready, "a new page has read the settings");
+  const s = page.recoveryState();
+  assert.ok(s.paused && !s.gone);
+  assert.match(olderKeyText(s), /hasn't saved a backup yet/);
+  await page.turnOffRecovery({ deleteBackup: false });
 });
 
 await test("a second tab follows a move instead of saving to the old backup", async () => {
@@ -1030,6 +1107,268 @@ await test("after the end date: version 2 and passkeys save as ever", async () =
   assert.deepEqual(await backupNotes(keys), ["note-a", "note-b", "note-c"]);
 });
 
+/* ------------------------------------------------------------ the end date on the server's clock */
+
+const lastSave = (id: string) => saves.filter((s) => s.id === id).at(-1);
+const marker = async (id: string) => (JSON.parse(String((await kv([["GET", `gloam:recovery:v1:${id}`]]))[0])) as { v?: number }).v;
+
+await test("every save says which key it is under: version 2 and passkeys do, version 1 never does", async () => {
+  await vault.setAllNotes([note("a")]);
+  await turnOnWithWallet(walletOf(ALICE));
+  const v2 = await v2Keys(ALICE);
+  assert.deepEqual(saves.map(({ v, mustExist }) => ({ v, mustExist })), [{ v: 2, mustExist: undefined }]);
+  await turnOffRecovery({ deleteBackup: false });
+
+  const passkey = await keysFromSecret("passkey", new Uint8Array(32).fill(9));
+  await connectRecovery(passkey, null);
+  assert.equal(lastSave(passkey.id)?.v, 2);
+  await turnOffRecovery({ deleteBackup: false });
+  await newDevice();
+
+  const v1 = await version1Browser(BOB, [note("b")]);
+  assert.equal(lastSave(v1.id)?.v, undefined);
+  assert.equal(lastSave(v1.id)?.mustExist, true, "and must find a backup there");
+  assert.equal(await marker(v1.id), undefined, "so its record has no marker");
+
+  await updateRecoveryKey(walletOf(BOB));
+  const moved = await v2Keys(BOB);
+  assert.equal(lastSave(moved.id)?.v, 2, "the copy a move makes is a newer key's save");
+  assert.equal(await marker(moved.id), 2);
+  assert.equal(await marker(v2.id), 2);
+});
+
+await test("a first-time user on the current build: fine on either side of the end date, by wallet or passkey", async () => {
+  for (const when of [BEFORE_THE_END, AFTER_THE_END]) {
+    await newDevice();
+    resetMemoryKv();
+    setClock(when);
+    await vault.setAllNotes([note("a")]);
+    assert.equal(await turnOnWithWallet(walletOf(ALICE)), 0);
+    assert.deepEqual(await backupNotes(await v2Keys(ALICE)), ["note-a"]);
+    await turnOffRecovery({ deleteBackup: false });
+    const passkey = await keysFromSecret("passkey", new Uint8Array(32).fill(9));
+    await connectRecovery(passkey, null);
+    assert.deepEqual(await backupNotes(passkey), ["note-a"]);
+    assert.ok(recoveryState().savedAt && !recoveryState().paused);
+  }
+});
+
+await test("a slow clock, past the end date: the server refuses, nothing is written, and it reads as paused", async () => {
+  const v1 = await version1Browser(ALICE, [note("a")]);
+  const before = await readBackup(v1.id);
+  serverClock(AFTER_THE_END); // this browser still thinks it is a month earlier
+  await vault.setAllNotes([...vault.getAllNotes(), note("b")]);
+  await assert.rejects(backupNow(), /stopped saving/, "Back up now can't claim a save");
+  assert.deepEqual(await readBackup(v1.id), before, "the backup stays as it was");
+  assert.equal(deletes(), 0);
+  assert.ok(here("a") && here("b"), "and everything stays here");
+  const s = recoveryState();
+  assert.ok(s.on && s.olderKey && s.paused && !s.gone, "paused, not called gone: the backup is still there");
+  assert.equal(s.error, null, "a state to show, not a failed save");
+  assert.match(olderKeyText(s), /stopped on 1 December 2026/);
+
+  const sent = puts(v1.id);
+  await vault.setAllNotes([...vault.getAllNotes(), note("c")]);
+  await sleep(2_700);
+  assert.equal(puts(v1.id), sent, "it doesn't ask again");
+
+  const page = await openPage("slow-clock");
+  page.startRecoverySync();
+  await until(() => page.recoveryState().ready, "a new page has read the settings");
+  assert.ok(page.recoveryState().paused, "a new page knows too, whatever its clock says");
+  await page.turnOffRecovery({ deleteBackup: false });
+  await connectRecovery(v1, ALICE.address, { save: false });
+
+  const w = walletOf(ALICE);
+  assert.equal(await updateRecoveryKey(w), "newest", "updating works");
+  assert.deepEqual(await backupNotes(await v2Keys(ALICE)), ["note-a", "note-b", "note-c"], "and nothing was dropped");
+  assert.equal(await readBackup(v1.id), null);
+  assert.ok(recoveryState().newerKey && !recoveryState().paused);
+});
+
+await test("a slow clock, past the end date: the older backup step still restores and moves it", async () => {
+  const v1 = await version1BackupOnly(ALICE, [note("a")]);
+  serverClock(AFTER_THE_END);
+  const { added, key } = await restoreOlderBackup(walletOf(ALICE));
+  assert.equal(added, 1);
+  assert.equal(key, "newest");
+  assert.deepEqual(await backupNotes(await v2Keys(ALICE)), ["note-a"]);
+  assert.equal(await readBackup(v1.id), null);
+});
+
+await test("a slow clock with the wallet declining version 2: the money is back, and the server keeps the backup as it was", async () => {
+  const v1 = await version1BackupOnly(ALICE, [note("a")]);
+  const before = await readBackup(v1.id);
+  serverClock(AFTER_THE_END);
+  const w = walletOf(ALICE);
+  const sign = w.sign;
+  w.sign = async (m) => {
+    if (w.prompts.length === 1) throw new Error("User rejected the request.");
+    return sign(m);
+  };
+  const { added, key } = await restoreOlderBackup(w);
+  assert.equal(added, 1);
+  assert.equal(key, "older");
+  assert.ok(here("a"));
+  await until(() => recoveryState().paused, "the first save finds out");
+  assert.deepEqual(await readBackup(v1.id), before);
+  assert.ok(!recoveryState().gone);
+});
+
+await test("a fast clock, before the end date: paused early here, nothing lost, and updating works", async () => {
+  const v1 = await version1Browser(ALICE, [note("a")]);
+  setClock(AFTER_THE_END);
+  serverClock(BEFORE_THE_END);
+  await vault.setAllNotes([...vault.getAllNotes(), note("b")]);
+  await assert.rejects(backupNow(), /stopped saving/);
+  assert.ok(await readBackup(v1.id), "nothing left the server");
+  assert.equal(await updateRecoveryKey(walletOf(ALICE)), "newest");
+  assert.deepEqual(await backupNotes(await v2Keys(ALICE)), ["note-a", "note-b"]);
+});
+
+await test("a wrong clock changes nothing on version 2 or a passkey", async () => {
+  for (const [browser, server] of [
+    [BEFORE_THE_END, AFTER_THE_END],
+    [AFTER_THE_END, BEFORE_THE_END],
+  ] as const) {
+    await newDevice();
+    resetMemoryKv();
+    setClock(browser);
+    serverClock(server);
+    await vault.setAllNotes([note("a")]);
+    await turnOnWithWallet(walletOf(ALICE));
+    await vault.setAllNotes([...vault.getAllNotes(), note("b")]);
+    await backupNow();
+    assert.deepEqual(await backupNotes(await v2Keys(ALICE)), ["note-a", "note-b"]);
+    await turnOffRecovery({ deleteBackup: false });
+    const passkey = await keysFromSecret("passkey", new Uint8Array(32).fill(9));
+    await connectRecovery(passkey, null);
+    await vault.setAllNotes([...vault.getAllNotes(), note("c")]);
+    await backupNow();
+    assert.deepEqual(await backupNotes(passkey), ["note-a", "note-b", "note-c"]);
+  }
+});
+
+await test("mid-move past the end date on the server's clock: it finishes, and the old backup is never written to", async () => {
+  const v1 = await version1Browser(ALICE, [note("a")]);
+  const v2 = await v2Keys(ALICE);
+  fault = (m, id) => (m === "PUT" && id === v2.id ? refused(1) : null);
+  assert.equal(await updateRecoveryKey(walletOf(ALICE)), "waiting");
+  serverClock(AFTER_THE_END);
+  const sent = puts(v1.id);
+  fault = null;
+  await until(() => recoveryState().newerKey, "it finishes");
+  assert.equal(puts(v1.id), sent);
+  assert.deepEqual(await backupNotes(v2), ["note-a"]);
+  await sleep(50);
+  assert.equal(await readBackup(v1.id), null, "moved, so the old copy goes as it always has");
+});
+
+await test("a backup from before the marker, past the end date: its next save from a current browser works and marks it", async () => {
+  const v2 = await v2Keys(ALICE);
+  await earlierBackup(v2);
+  assert.equal(await marker(v2.id), undefined);
+  setClock(AFTER_THE_END);
+  await vault.setAllNotes([note("a")]);
+  await restoreWithWallet(walletOf(ALICE));
+  assert.deepEqual(await backupNotes(v2), ["note-a"]);
+  assert.equal(await marker(v2.id), 2);
+
+  await turnOffRecovery({ deleteBackup: false });
+  const passkey = await keysFromSecret("passkey", new Uint8Array(32).fill(9));
+  await earlierBackup(passkey);
+  await connectRecovery(passkey, null, { mustExist: true });
+  assert.equal(await marker(passkey.id), 2, "the same for a passkey");
+});
+
+await test("a second device on an earlier build: it saves until the end date, then waits, and nothing is lost", async () => {
+  await vault.setAllNotes([note("a")]);
+  await turnOnWithWallet(walletOf(ALICE));
+  const v2 = await v2Keys(ALICE);
+  earlierBuild = true;
+  await vault.setAllNotes([...vault.getAllNotes(), note("b")]);
+  await backupNow();
+  assert.deepEqual(await backupNotes(v2), ["note-a", "note-b"], "before the date it saves as it did");
+  assert.equal(await marker(v2.id), 2, "and doesn't take the marker off");
+
+  setClock(AFTER_THE_END);
+  const before = await readBackup(v2.id);
+  await vault.setAllNotes([...vault.getAllNotes(), note("c")]);
+  await backupNow();
+  assert.deepEqual(await readBackup(v2.id), before, "after the date it writes nothing");
+  assert.ok(here("a") && here("b") && here("c"), "and keeps it all here");
+
+  earlierBuild = false; // the tab reloads, onto the current build
+  const page = await openPage("second-device");
+  page.startRecoverySync();
+  await until(() => saves.at(-1)?.v === 2, "the new page saves what the old tab couldn't");
+  await until(() => page.recoveryState().ready, "a new page has read the settings");
+  assert.ok(!page.recoveryState().gone && !page.recoveryState().paused, "and says nothing is wrong");
+  await sleep(100);
+  assert.deepEqual(await backupNotes(v2), ["note-a", "note-b", "note-c"]);
+  await page.turnOffRecovery({ deleteBackup: false });
+});
+
+await test("a first-time user on an earlier build: nothing is made, and the next page load saves it", async () => {
+  earlierBuild = true;
+  await vault.setAllNotes([note("a")]);
+  await turnOnWithWallet(walletOf(ALICE));
+  const v2 = await v2Keys(ALICE);
+  assert.equal(await readBackup(v2.id), null);
+  assert.equal(recoveryState().savedAt, null, "nothing says it is backed up");
+
+  earlierBuild = false;
+  const page = await openPage("first-time-earlier");
+  page.startRecoverySync();
+  await until(() => Boolean(page.recoveryState().savedAt), "it saved on load, with nobody asking");
+  assert.deepEqual(await backupNotes(v2), ["note-a"]);
+  await page.turnOffRecovery({ deleteBackup: false });
+});
+
+await test("a move from a tab on an earlier build: refused with version 1 as it was, and the current build finishes it", async () => {
+  const v1 = await version1Browser(ALICE, [note("a")]);
+  const before = await readBackup(v1.id);
+  const v2 = await v2Keys(ALICE);
+  earlierBuild = true;
+  assert.equal(await updateRecoveryKey(walletOf(ALICE)), "waiting");
+  assert.equal(await readBackup(v2.id), null, "no new copy");
+  assert.deepEqual(await readBackup(v1.id), before, "the old backup is as it was");
+  assert.equal(deletes(), 0);
+  assert.ok(recoveryState().moving && recoveryState().olderKey);
+  earlierBuild = false;
+  setClock(Date.now() + 2 * 60_000);
+  await backupNow();
+  assert.ok(recoveryState().newerKey, "the waiting move finishes with no prompt");
+  assert.deepEqual(await backupNotes(v2), ["note-a"]);
+  assert.equal(await marker(v2.id), 2);
+  assert.equal(await readBackup(v1.id), null);
+});
+
+await test("a version 1 browser on an earlier build: no save brings back a backup that left, at any date", async () => {
+  const v1 = await version1Browser(ALICE, [note("a")]);
+  earlierBuild = true;
+  await deleteFromServer(v1);
+  await vault.setAllNotes([...vault.getAllNotes(), note("b")]);
+  await assert.rejects(backupNow(), /stopped saving/);
+  assert.equal(await readBackup(v1.id), null);
+  assert.ok(here("a") && here("b"));
+});
+
+await test("settings an earlier build marked gone on a newer key: nothing shows, and it keeps saving", async () => {
+  await vault.setAllNotes([note("a")]);
+  await turnOnWithWallet(walletOf(ALICE));
+  const saved = await vault.openJson<Record<string, unknown>>(localStorage.getItem(CONFIG_KEY));
+  localStorage.setItem(CONFIG_KEY, await vault.sealJson({ ...saved, gone: true }));
+  const page = await openPage("newer-gone");
+  page.startRecoverySync();
+  await until(() => page.recoveryState().ready, "a new page has read the settings");
+  assert.ok(!page.recoveryState().gone && !page.recoveryState().paused);
+  await vault.setAllNotes([...vault.getAllNotes(), note("b")]);
+  await page.backupNow();
+  assert.deepEqual(await backupNotes(await v2Keys(ALICE)), ["note-a", "note-b"]);
+  await page.turnOffRecovery({ deleteBackup: false });
+});
+
 /* ------------------------------------------------------------ a version 1 backup left elsewhere */
 
 await test("recovery turned on here while a version 1 backup sits elsewhere: one signature brings it in", async () => {
@@ -1186,9 +1525,9 @@ await test("refused for longer than the page is open: the next page load picks i
 
 await test("a browser left in the stuck state by an older build recovers on its next load", async () => {
   // Older builds left on, savedAt null, no retry time, and only retried when a note changed.
-  const keys = await v1Keys(ALICE);
+  const keys = await v2Keys(ALICE);
   await vault.setAllNotes([note("a")]);
-  localStorage.setItem(CONFIG_KEY, await vault.sealJson({ ...keys, n: 0, savedAt: null }));
+  localStorage.setItem(CONFIG_KEY, await vault.sealJson({ ...keys, wallet: ALICE.address, n: 0, savedAt: null }));
   const page = await openPage("stuck");
   page.startRecoverySync();
   await until(() => Boolean(page.recoveryState().savedAt), "it saved");

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ELYSIUM, ELYSIUM_LIVE_SINCE } from "@/lib/elysium";
 import Link from "next/link";
 import { LegalLayout } from "@/components/LegalLayout";
 
@@ -24,11 +25,12 @@ export default function DisclosuresPage() {
         Upgrades, admin keys, oracles, bridges, and sequencers introduce
         additional risk. Audits do not eliminate risk.
       </p>
-      <h2>Mainnet is beta</h2>
+      <h2>Mainnet</h2>
       <p>
         Since Gloam&apos;s mainnet launch on 21 October 2026, the mainnet pools
         on Robinhood Chain and Tempo have been live, and since 26 October 2026
-        the pools on Base and Ethereum. They are beta software.
+        the pools on Base and Ethereum
+        {ELYSIUM ? `, and since ${ELYSIUM_LIVE_SINCE} the pool on Elysium, a new chain with one sequencer at launch` : ""}.
         The contracts were reviewed internally before launch. Kann Audits then
         reviewed the vault contracts (<Link href="/security">report, 1 November
         2026</Link>) and found no Critical, High or Medium issues. Its findings
@@ -36,12 +38,14 @@ export default function DisclosuresPage() {
         swap routers, circuits, app and relay were not part of that review.
       </p>
       <p>
-        Deposits are capped during the beta: 50,000 per deposit and 2,500,000
+        Deposits have limits: 50,000 per deposit and 2,500,000
         in total for each stablecoin, 20 per deposit and 1,000 in total for ETH
         on Base and Ethereum, and 2,500,000 per deposit and 25,000,000 in total
-        for $GLOAM. Cash outs and private payments are never limited.
-        Deposits and private payments are free; a cash out costs 0.25% of its
-        amount.
+        for $GLOAM{ELYSIUM ? ", and 500 per deposit and 25,000 in total for USDC on Elysium" : ""}. Cash outs and
+        private payments are never limited.
+        Direct deposits and private payments are free; a cash out costs 0.5% of
+        its amount. Money bridged in from another chain pays the bridge&apos;s
+        fees, shown before you send.
       </p>
       <p>
         The owner is a single wallet (a multisig is planned), cash-out fees go
@@ -52,6 +56,8 @@ export default function DisclosuresPage() {
         funds. Raising limits, adding assets or changing verifiers waits a
         public three-day timelock; the owner can lower limits or close
         deposits at once.
+        {ELYSIUM &&
+          " Elysium's vault is owned by a guard contract from its deploy: its verifiers can never be changed, and its limits and fee change only through the same three-day timelock."}
       </p>
       <p>
         The Robinhood Chain and Tempo testnets use test tokens and

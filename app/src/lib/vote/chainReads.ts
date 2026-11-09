@@ -33,6 +33,7 @@ const BATCH = 400;
 export function rpcVoteChain(rpcUrl?: string): VoteChain {
   const client = createPublicClient({
     chain: robinhood,
+    ccipRead: false,
     transport: rpcUrl
       ? http(rpcUrl, { timeout: 30_000, retryCount: 3 })
       : serverTransport({ chainId: robinhood.id, chain: robinhood, historyRpc: null }, { timeout: READ_TIMEOUT_MS, retryCount: 1 }),

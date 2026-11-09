@@ -125,12 +125,12 @@ contract VaultSwapV4bTest is VaultSwapReviewTest {
     }
 
     /// Every inherited test deploys v2 through here.
-    function _newRouter(PoolKey[] memory allow) internal override returns (GloamVaultSwap) {
+    function _newRouter(PoolKey[] memory allow) internal virtual override returns (GloamVaultSwap) {
         if (address(weth) == address(0)) weth = new MockWETH();
         return new GloamVaultSwapV4b(address(pool), treasury, address(pm), address(weth), owner, allow);
     }
 
-    function setUp() public override {
+    function setUp() public virtual override {
         super.setUp();
         stock = new MockERC20();
         pool.setDepositLimit(address(weth), 10 ether, 100 ether);
@@ -183,7 +183,7 @@ contract VaultSwapV4bTest is VaultSwapReviewTest {
         return keccak256(abi.encode(k));
     }
 
-    function _assertRouterEmpty() internal view override {
+    function _assertRouterEmpty() internal view virtual override {
         super._assertRouterEmpty();
         assertEq(weth.balanceOf(address(router)), 0, "router keeps no WETH");
         assertEq(stock.balanceOf(address(router)), 0, "router keeps no stock");
@@ -212,7 +212,7 @@ contract VaultSwapV4bTest is VaultSwapReviewTest {
     // ═════════════════════════════════════════════════════════════ ported, adjusted
 
     /// v1's constructor test, for v2's constructor.
-    function test_constructor_checks() public override {
+    function test_constructor_checks() public virtual override {
         PoolKey[] memory none = new PoolKey[](0);
         vm.expectRevert(GloamVaultSwap.ZeroAddress.selector);
         new GloamVaultSwapV4b(address(pool), address(0), address(pm), address(weth), owner, none);
@@ -474,7 +474,7 @@ contract VaultSwapV4bTest is VaultSwapReviewTest {
     }
 
     /// Mainnet-style WETH9 pays a withdrawal with a 2300 gas stipend: the router's receive fits.
-    function test_v2_works_with_weth9s_gas_stipend() public {
+    function test_v2_works_with_weth9s_gas_stipend() public virtual {
         MockWETH9 w9 = new MockWETH9();
         weth = w9;
         PoolKey[] memory allow = new PoolKey[](1);
@@ -675,7 +675,7 @@ contract VaultSwapV4bTest is VaultSwapReviewTest {
         HostileHook h = new HostileHook();
         pm.setHook(address(h));
         Call memory other = _call(router, 945, address(gloam), 39e18, 0x945, _route1(direct));
-        h.arm(address(router), abi.encodeCall(GloamVaultSwap.swap, (other.s, other.d, other.r, other.route)));
+        h.arm(address(router), _swapData(other));
         Call memory k = _call(router, 946, address(gloam), 39e18, 0x946, _route1(direct));
         _go(router, k);
         assertFalse(h.lastOk());
@@ -694,7 +694,7 @@ contract VaultSwapV4bTest is VaultSwapReviewTest {
 
     /// A hook that pushes ETH to the router mid-swap: the router keeps no ETH. It is
     /// wrapped, and the WETH leaves with the next WETH swap.
-    function test_v2_eth_pushed_to_the_router_is_wrapped_and_swept() public {
+    function test_v2_eth_pushed_to_the_router_is_wrapped_and_swept() public virtual {
         HostileHook h = new HostileHook();
         vm.deal(address(h), 1 ether);
         pm.setHook(address(h));

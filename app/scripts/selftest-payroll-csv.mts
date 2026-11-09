@@ -115,6 +115,17 @@ test("the template and plain lists read as before", () => {
   assert.equal(one('name,amount\r\nAda,"$1,250.00"\r\n').amount, units("1250"));
 });
 
+test("a spreadsheet's empty rows (,,, or tabs) are skipped, not error rows", () => {
+  const { rows, error } = parsePayrollCsv("name,amount\nAda,10\n,\n , \nBo,20\n,,", ASSET);
+  assert.equal(error, null);
+  assert.deepEqual(rows.map((r) => [r.name, r.error]), [["Ada", null], ["Bo", null]]);
+  assert.deepEqual(rows.map((r) => r.line), [2, 5], "line numbers still point at the file");
+  const tabs = parsePayrollCsv("Ada\tgloamr1.x\t10\n\t\t\nBo\t\t5", ASSET).rows;
+  assert.equal(tabs.length, 2);
+  // a row with only an amount still reads (a claim link for "Person N")
+  assert.equal(parsePayrollCsv("name,amount\n,7", ASSET).rows[0]!.amount, units("7"));
+});
+
 // ------------------------------------------------------------------ funding
 
 /** How a run spends, written apart from lib/payroll: rows in order, each from the smallest note that covers it. */

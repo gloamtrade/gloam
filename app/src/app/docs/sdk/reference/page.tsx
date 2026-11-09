@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { mainnetPool } from "@/lib/mainnet";
+import { swapMainnets } from "@/lib/vaultSwap";
+import { ELYSIUM } from "@/lib/elysium";
 
 /** Mainnets whose pool is not in yet (lib/mainnet.ts): "Base mainnet and Ethereum" until their deploys. */
 const NOT_YET = [mainnetPool(8453) ? null : "Base mainnet", mainnetPool(1) ? null : "Ethereum"].filter(Boolean).join(" and ");
@@ -75,7 +77,8 @@ export default function DocsSdkReferencePage() {
               <td>
                 <code>chain</code> is <code>&quot;robinhood&quot;</code>,{" "}
                 <code>&quot;tempo&quot;</code>, <code>&quot;base&quot;</code>{" "}
-                (0.3.0) or <code>&quot;ethereum&quot;</code> (0.4.0). A mainnet{" "}
+                (0.3.0), <code>&quot;ethereum&quot;</code> (0.4.0)
+                {ELYSIUM ? <> or <code>&quot;elysium&quot;</code></> : null}. A mainnet{" "}
                 <code>GloamNetwork</code>, or <code>null</code> until its pool is
                 published{NOT_YET ? ` (${NOT_YET}: not yet)` : ""}
               </td>
@@ -97,6 +100,18 @@ export default function DocsSdkReferencePage() {
               </td>
               <td>Every network Gloam runs on right now: mainnets with a pool first, then the testnets</td>
             </tr>
+            {ELYSIUM && (
+              <tr>
+                <td>
+                  <code>elysiumMainnetConfig()</code>
+                </td>
+                <td>
+                  Elysium mainnet&apos;s values (chain id, RPC, explorer, USDC, pool and deploy block) from{" "}
+                  <code>ELYSIUM_MAINNET</code>, checked, or <code>null</code> while any is missing. Gas is HYPE;
+                  the pool takes USDC only. <code>elysiumChainId()</code> gives the chain id alone
+                </td>
+              </tr>
+            )}
             <tr>
               <td>
                 <code>getGloamNetwork(key)</code>
@@ -104,7 +119,9 @@ export default function DocsSdkReferencePage() {
               <td>
                 One network by key: <code>&quot;robinhood-mainnet&quot;</code>,{" "}
                 <code>&quot;tempo-mainnet&quot;</code>, <code>&quot;base-mainnet&quot;</code>,{" "}
-                <code>&quot;ethereum-mainnet&quot;</code>, <code>&quot;robinhood&quot;</code>,{" "}
+                <code>&quot;ethereum-mainnet&quot;</code>,{" "}
+                {ELYSIUM ? <><code>&quot;elysium-mainnet&quot;</code>, </> : null}
+                <code>&quot;robinhood&quot;</code>,{" "}
                 <code>&quot;tempo&quot;</code>, <code>&quot;base&quot;</code> or{" "}
                 <code>&quot;ethereum&quot;</code>; null while its pool is not in
               </td>
@@ -150,7 +167,18 @@ export default function DocsSdkReferencePage() {
                 <code>CASH_OUT_FEE_BPS</code> / <code>cashOutFee(amount)</code>
               </td>
               <td>
-                <code>25</code> (0.25%) / what the pool keeps on a mainnet cash out
+                <code>50</code> (0.5%) / what the pool keeps on a mainnet cash out
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>readCashOutFeeBps(client, pool)</code>
+              </td>
+              <td>
+                The rate a vault charges now, from the chain (0.5.0). The pool
+                takes it when a cash out lands. Base Sepolia and Ethereum Sepolia
+                are still at <code>25</code>; pass the result to{" "}
+                <code>cashOutFee(amount, bps)</code>
               </td>
             </tr>
             <tr>
@@ -187,8 +215,8 @@ export default function DocsSdkReferencePage() {
               </td>
               <td>
                 Robinhood Chain mainnet pool assets, with <code>RH_MAINNET_GRIFT</code> and native ETH
-                (<code>NATIVE_ASSET</code>). ETH, AI, ORBIO and GRIFT take deposits once each timelocked
-                limit lands (0.4.5)
+                (<code>NATIVE_ASSET</code>). ETH, AI and ORBIO take deposits since 3 November 2026; GRIFT
+                once its timelocked limit lands (0.4.5)
               </td>
             </tr>
             <tr>
@@ -348,9 +376,9 @@ cashOutFee(500_000_000n);                     // what the pool keeps on a 500 US
         sealed trade, which is retired: the on-chain sealed-swap path stays
         disabled on testnet, and the mainnet pools have no sealed swap at all.{" "}
         <Link href="/docs/private-swaps">Private swaps</Link> replaced it. They
-        run in the Gloam app through a swap router on Robinhood Chain and
-        Tempo mainnet, and the SDK
-        does not build them yet.
+        go through a swap router on {swapMainnets()} mainnet, and from 0.5.0 the SDK
+        builds them: <code>buildSwapIntent</code>, with the refund and exit in
+        the SDK README.
       </p>
 
       <h3>Parameters</h3>
@@ -771,9 +799,10 @@ fieldToBytes32(field: bigint | string): Hex`}</code>
       <p>
         Mainnet (<code>4663</code>, <code>4217</code>
         {mainnetPool(8453) ? <>, <code>8453</code></> : null}
-        {mainnetPool(1) ? <>, <code>1</code></> : null}) is beta software,
-        on the final ceremony keys, with beta deposit limits and a
-        0.25% cash-out fee. The Robinhood Chain and Tempo testnets (
+        {mainnetPool(1) ? <>, <code>1</code></> : null}
+        {ELYSIUM ? <>, <code>{ELYSIUM.chainId}</code> (Elysium)</> : null}) runs
+        on the final ceremony keys, with deposit limits and a
+        0.5% cash-out fee. The Robinhood Chain and Tempo testnets (
         <code>46630</code>, <code>42431</code>) run on dev-ceremony keys with
         test funds; Base Sepolia (<code>84532</code>) and Ethereum Sepolia (
         <code>11155111</code>) run the final keys with test funds. Real proofs only, never a mock.

@@ -27,6 +27,9 @@ import {
   type RecoveryWallet,
 } from "@/lib/recovery";
 import { isTempoWallet } from "@/lib/tempoWallet";
+import { EMBEDDED_CONNECTOR_ID } from "@/lib/embeddedWallet";
+import { TURNKEY_CAN_OPEN_TEXT } from "@/lib/embeddedRecovery";
+import { useAutoRestore } from "@/hooks/useAutoRestore";
 
 type Busy = "on-wallet" | "on-passkey" | "restore-wallet" | "restore-passkey" | "restore-older" | "save" | "off" | "update" | "older" | null;
 /** "wait": nothing went wrong and nothing is finished yet, so it is not shown as done. */
@@ -72,8 +75,12 @@ const NO_BACKUP_YET = "Your private balance is only in this browser for now.";
 const OLDER_KEY_ENDS = new Date(VERSION1_SAVES_UNTIL).toLocaleDateString("en-GB", { timeZone: "UTC", dateStyle: "long" });
 const SIGN_THREE_TIMES = "Your wallet asks you to sign three times. It's free and sends nothing.";
 
+/** A version 1 key that no longer saves: paused, or never started. */
+const pausedTitle = (s: RecoveryState) => (s.savedAt ? "Backups are paused" : "No backup yet");
+
 /** Where a version 1 key stands. */
-function olderKeyText(s: RecoveryState): string {
+export function olderKeyText(s: RecoveryState): string {
+  if (!s.savedAt) return "This browser hasn't saved a backup yet, and the older key can't start one. Your balance stays here. Update to start saving.";
   if (s.gone) return "Another device moved or removed this backup, so this browser stopped saving. Your balance stays here. Update so your devices share one backup again.";
   if (s.paused) return `Backups from this browser stopped on ${OLDER_KEY_ENDS} and stay paused until you update. Your balance stays here.`;
   return `Backups from this browser stop on ${OLDER_KEY_ENDS} unless you update.`;
@@ -130,6 +137,9 @@ function useRecovery() {
   const active = isConnected && !demo;
   // Tempo Wallet signs with a passkey, differently every time: it can't hold a key.
   const walletOk = active && !isTempoWallet(connector);
+  // A Gloam wallet: Turnkey makes its signatures, so a passkey comes first and the
+  // wallet option says Turnkey could open a backup made with it.
+  const embedded = active && connector?.id === EMBEDDED_CONNECTOR_ID;
 
   const wallet = (): RecoveryWallet => ({ address: address as string, sign: (message) => signMessageAsync({ message }) });
 
@@ -210,7 +220,7 @@ function useRecovery() {
         : "Your older backup is merged in. This browser already had everything in it.";
     });
 
-  return { state, active, walletOk, passkeyOk, walletBrowser, busy, message, offerOlder, turnOn, restore, restoreOlder, save, off, update, older };
+  return { state, active, walletOk, embedded, passkeyOk, walletBrowser, busy, message, offerOlder, turnOn, restore, restoreOlder, save, off, update, older };
 }
 
 function Note({ message }: { message: Message }) {
@@ -277,7 +287,7 @@ export function RecoverySettingsCard() {
               <div className="min-w-0">
                 <p className="flex items-center gap-2 text-[14px] text-foreground">
                   <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${noBackup || state.paused ? "bg-warn" : "bg-sealed"}`} />
-                  {state.paused ? "Backups are paused" : noBackup ? "No backup yet" : "Recovery is on"}
+                  {state.paused ? pausedTitle(state) : noBackup ? "No backup yet" : "Recovery is on"}
                 </p>
                 <p className="mt-0.5 text-[13px] text-mute">
                   {state.source === "passkey" ? "With a passkey" : "With your wallet"}
@@ -319,6 +329,11 @@ export function RecoverySettingsCard() {
                 {NO_BACKUP_YET} This browser tries again on its own {nextTry(state.retryAt)}, or the next time you open Gloam after that.
               </p>
             )}
+            {r.embedded && state.source === "wallet" && (
+              <p className="mt-3 max-w-[62ch] text-[13px] leading-relaxed text-mute">
+                {TURNKEY_CAN_OPEN_TEXT} To move to a passkey, turn recovery off, then on with a passkey.
+              </p>
+            )}
             {state.error && r.message?.tone !== "error" && <p className="mt-3 text-[13px] text-danger">{state.error}</p>}
             <Note message={r.message} />
           </div>
@@ -327,17 +342,31 @@ export function RecoverySettingsCard() {
             <Choice
               label="Turn on recovery"
               hint={
-                r.walletOk
-                  ? "Your wallet asks you to sign twice. It's free and sends nothing."
-                  : "Tempo Wallet can't sign a recovery key, so use a passkey."
+                r.embedded
+                  ? r.passkeyOk
+                    ? `A passkey keeps the backup's key on your device. ${TURNKEY_CAN_OPEN_TEXT}`
+                    : TURNKEY_CAN_OPEN_TEXT
+                  : r.walletOk
+                    ? "Your wallet asks you to sign twice. It's free and sends nothing."
+                    : "Tempo Wallet can't sign a recovery key, so use a passkey."
               }
             >
-              {r.walletOk && (
-                <button type="button" onClick={() => r.turnOn("wallet")} disabled={Boolean(busy)} className="btn btn-ink btn-sm">
-                  {busy === "on-wallet" ? "Check your wallet…" : "With your wallet"}
+              {r.embedded && r.passkeyOk && (
+                <button type="button" onClick={() => r.turnOn("passkey")} disabled={Boolean(busy)} className="btn btn-ink btn-sm">
+                  {busy === "on-passkey" ? "Check your passkey…" : "With a passkey"}
                 </button>
               )}
-              {r.passkeyOk && (
+              {r.walletOk && (
+                <button
+                  type="button"
+                  onClick={() => r.turnOn("wallet")}
+                  disabled={Boolean(busy)}
+                  className={r.embedded ? "btn btn-ghost btn-sm" : "btn btn-ink btn-sm"}
+                >
+                  {busy === "on-wallet" ? "Check your wallet…" : r.embedded ? "With the wallet's signature" : "With your wallet"}
+                </button>
+              )}
+              {!r.embedded && r.passkeyOk && (
                 <button
                   type="button"
                   onClick={() => r.turnOn("passkey")}
@@ -448,35 +477,61 @@ function snoozeNudge() {
 }
 
 /**
- * Portfolio: asks people with a private balance to turn recovery on, offers a
- * restore to people whose wallet made deposits this browser can't see, and
+ * Portfolio: asks people with a private balance to turn recovery on, and
  * stays up (no snooze) while recovery is on with no backup to show for it. A
  * browser on the older key is asked to update, whatever it holds, and once its
  * backups have stopped that stays up too.
+ *
+ * A wallet whose deposits this browser can't see gets its balance back by itself
+ * (lib/autoRestore): nothing shows here while that runs, or after it worked. Only
+ * when it can't (a closed signature request, no backup under this sign-in, a
+ * wallet that can't make the key, a failure) does a card say why and offer the
+ * one step left. A failure stays up.
  */
 export function RecoveryNudge({ hasBalance, hasDeposits }: { hasBalance: boolean; hasDeposits: boolean }) {
   const r = useRecovery();
   const hidden = useSyncExternalStore(subscribeNudge, nudgeSnapshot, nudgeServerSnapshot) === "hidden";
 
   const restoreMode = !hasBalance && hasDeposits;
+  const auto = useAutoRestore(restoreMode);
   const older = r.state.olderKey && !r.state.moving;
+  const failed = auto.status.kind === "failed";
+  const fallback = r.active && !r.state.on && !older && (restoreMode || failed) ? auto.fallback(r.passkeyOk) : null;
   const noBackup = r.state.on && !r.state.savedAt && !r.state.paused && !older;
-  const stayUp = noBackup || (older && r.state.paused);
+  const stayUp = noBackup || (older && r.state.paused) || (Boolean(fallback) && failed);
   const done = Boolean(r.message) && r.message?.tone !== "error" && !noBackup;
-  if (!r.active || !r.state.ready || (r.state.on && !done && !noBackup && !older) || (hidden && !stayUp) || (!hasBalance && !hasDeposits && !older && !done)) return null;
+  if (!r.active || !r.state.ready || (r.state.on && !done && !noBackup && !older) || (hidden && !stayUp) || (!hasBalance && !hasDeposits && !older && !done && !fallback)) return null;
+  // Restoring by itself, or nothing left to offer: the balance says how it's going.
+  if (restoreMode && !fallback && !done && !older) return null;
+  if (fallback && !done) {
+    return (
+      <RestoreFallback
+        r={r}
+        text={fallback.text}
+        action={fallback.action}
+        failed={failed}
+        onWallet={auto.retry}
+        walletLabel={auto.kind === "embedded" || failed ? "Try again" : "Restore with your wallet"}
+        // Before November 2026 a wallet's backup used the older key, which takes one more signature to find.
+        offerOlder={auto.status.kind === "none" && r.walletOk && auto.kind === "browser"}
+        onSnooze={stayUp ? null : snoozeNudge}
+      />
+    );
+  }
 
-  const source: RecoverySource | null = r.walletOk ? "wallet" : r.passkeyOk ? "passkey" : null;
+  // A Gloam wallet's signature is Turnkey's to make: the nudge offers its passkey, and leaves
+  // the wallet option to Settings, where what it means is said.
+  const source: RecoverySource | null = r.embedded
+    ? r.passkeyOk
+      ? "passkey"
+      : null
+    : r.walletOk
+      ? "wallet"
+      : r.passkeyOk
+        ? "passkey"
+        : null;
   const busy = Boolean(r.busy);
-  const action = restoreMode ? r.restore : r.turnOn;
-  const label = noBackup
-    ? "Try now"
-    : restoreMode
-    ? source === "wallet"
-      ? "Restore with your wallet"
-      : "Restore with a passkey"
-    : source === "wallet"
-      ? "Turn on with your wallet"
-      : "Turn on with a passkey";
+  const label = noBackup ? "Try now" : source === "wallet" ? "Turn on with your wallet" : "Turn on with a passkey";
 
   return (
     <section aria-labelledby="recovery-nudge-title" className="gl-card flex gap-4 max-sm:items-start max-sm:p-5 sm:items-center sm:py-4 sm:pl-6 sm:pr-4">
@@ -492,15 +547,13 @@ export function RecoveryNudge({ hasBalance, hasDeposits }: { hasBalance: boolean
               ? r.state.gone
                 ? "This backup moved"
                 : r.state.paused
-                  ? "Backups are paused"
+                  ? pausedTitle(r.state)
                   : "Update your recovery key"
               : done
                 ? "Recovery is on"
                 : noBackup
                   ? "No backup yet"
-                  : restoreMode
-                    ? "Restore your private balance"
-                    : "Don't lose your private balance"}
+                  : "Don't lose your private balance"}
           </h2>
           {done ? (
             <p className={`mt-0.5 max-w-[62ch] text-[13px] leading-relaxed ${r.message?.tone === "wait" ? "text-warn" : "text-sealed"}`} role="status">
@@ -512,9 +565,7 @@ export function RecoveryNudge({ hasBalance, hasDeposits }: { hasBalance: boolean
                 ? `${olderKeyText(r.state)} ${r.walletOk ? SIGN_THREE_TIMES : "Connect the wallet you turned recovery on with to update."}`
                 : noBackup
                   ? `${NO_BACKUP_YET} This browser keeps trying on its own.`
-                  : restoreMode
-                    ? "This wallet made deposits this browser can't see. Sign in to bring them back from your backup."
-                    : "Turn on recovery and you can get it back on any device by signing in."}
+                  : "Turn on recovery and you can get it back on any device by signing in."}
               {noBackup && r.state.error && r.message?.tone !== "error" && <span className="mt-1 block text-danger">{r.state.error}</span>}
               {r.message?.tone === "error" && <span className="mt-1 block text-danger">{r.message.text}</span>}
             </p>
@@ -533,7 +584,7 @@ export function RecoveryNudge({ hasBalance, hasDeposits }: { hasBalance: boolean
                 {busy || r.state.busy ? "Backing up…" : label}
               </button>
             ) : source ? (
-              <button type="button" onClick={() => action(source)} disabled={busy} className="btn btn-ink btn-sm">
+              <button type="button" onClick={() => r.turnOn(source)} disabled={busy} className="btn btn-ink btn-sm">
                 {busy && r.busy !== "restore-older" ? (source === "wallet" ? "Check your wallet…" : "Check your passkey…") : label}
               </button>
             ) : null}
@@ -542,8 +593,8 @@ export function RecoveryNudge({ hasBalance, hasDeposits }: { hasBalance: boolean
                 {r.busy === "restore-older" ? "Check your wallet…" : "I have an older backup"}
               </button>
             )}
-            <Link href={!noBackup && !older && restoreMode ? "/app/settings#backup" : "/app/settings#recovery"} className="btn btn-ghost btn-sm">
-              {noBackup || older ? "See recovery" : restoreMode ? "Use a backup file" : "Other ways"}
+            <Link href="/app/settings#recovery" className="btn btn-ghost btn-sm">
+              {noBackup || older ? "See recovery" : "Other ways"}
             </Link>
           </div>
         )}
@@ -552,6 +603,82 @@ export function RecoveryNudge({ hasBalance, hasDeposits }: { hasBalance: boolean
         <button
           type="button"
           onClick={snoozeNudge}
+          aria-label="Hide for a week"
+          title="Hide for a week"
+          className="-mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground max-sm:-mt-1.5"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+          </svg>
+        </button>
+      )}
+    </section>
+  );
+}
+
+/** The one card left when the balance couldn't come back by itself: why, and the step that's left. */
+function RestoreFallback({
+  r,
+  text,
+  action,
+  failed,
+  onWallet,
+  walletLabel,
+  offerOlder,
+  onSnooze,
+}: {
+  r: ReturnType<typeof useRecovery>;
+  text: string;
+  action: "wallet" | "passkey" | null;
+  failed: boolean;
+  onWallet: () => void;
+  walletLabel: string;
+  offerOlder: boolean;
+  onSnooze: (() => void) | null;
+}) {
+  const busy = Boolean(r.busy);
+  return (
+    <section aria-labelledby="restore-fallback-title" className="gl-card flex gap-4 max-sm:items-start max-sm:p-5 sm:items-center sm:py-4 sm:pl-6 sm:pr-4">
+      <span aria-hidden className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-sealed-soft text-sealed">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4.5h-4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+      <div className="flex min-w-0 flex-1 max-sm:flex-col max-sm:gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+        <div className="min-w-0">
+          <h2 id="restore-fallback-title" className="text-[15px] text-foreground">
+            {failed ? "Your private balance didn't load" : "Bring your private balance here"}
+          </h2>
+          <p className="mt-0.5 max-w-[62ch] text-[13px] leading-relaxed text-mute">
+            {text}
+            {r.message?.tone === "error" && <span className="mt-1 block text-danger" role="alert">{r.message.text}</span>}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2 max-sm:self-start">
+          {action === "wallet" && (
+            <button type="button" onClick={onWallet} disabled={busy} className="btn btn-ink btn-sm">
+              {walletLabel}
+            </button>
+          )}
+          {action === "passkey" && (
+            <button type="button" onClick={() => r.restore("passkey")} disabled={busy} className="btn btn-ink btn-sm">
+              {r.busy === "restore-passkey" ? "Check your passkey…" : "Restore with a passkey"}
+            </button>
+          )}
+          {offerOlder && (
+            <button type="button" onClick={r.restoreOlder} disabled={busy} className="btn btn-ghost btn-sm">
+              {r.busy === "restore-older" ? "Check your wallet…" : "I have an older backup"}
+            </button>
+          )}
+          <Link href="/app/settings#backup" className="btn btn-ghost btn-sm">
+            Use a backup file
+          </Link>
+        </div>
+      </div>
+      {onSnooze && (
+        <button
+          type="button"
+          onClick={onSnooze}
           aria-label="Hide for a week"
           title="Hide for a week"
           className="-mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground max-sm:-mt-1.5"

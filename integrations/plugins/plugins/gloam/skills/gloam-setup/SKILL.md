@@ -13,7 +13,7 @@ The `gloam` MCP server runs with `npx -y @gloamtrade/mcp`. With no settings it o
 To execute it needs a key, a note-store key and limits, all read from `~/.gloam/agent.env` (mode
 600), never from the plugin config or the chat.
 
-First ask whether the user wants **mainnet** (beta: `tempo-mainnet`, `robinhood-mainnet`,
+First ask whether the user wants **mainnet** (`tempo-mainnet`, `robinhood-mainnet`,
 `base-mainnet` or `ethereum-mainnet`) or the **testnet** (`tempo`, `robinhood`, `base` or
 `ethereum`).
 Suggest practicing on testnet first if they are new to it. `GLOAM_NETWORK` in the settings file sets
@@ -41,7 +41,7 @@ leaves the owner.
 2. Run, with their values:
 
    ```bash
-   npx -y @gloamtrade/mcp@0.6.4 authorize-access-key --network tempo-mainnet --owner <their address> --generate --limit 10 --period 1d --expires 30d
+   npx -y @gloamtrade/mcp@0.8.0 authorize-access-key --network tempo-mainnet --owner <their address> --generate --limit 10 --period 1d --expires 30d
    ```
 
    This makes the agent key, saves it to `~/.gloam/agent.env` with a note-store key and matching
@@ -58,7 +58,7 @@ leaves the owner.
 5. When the user says it is sent, check it (read-only):
 
    ```bash
-   npx -y @gloamtrade/mcp@0.6.4 authorize-access-key --check --network tempo-mainnet --owner <their address>
+   npx -y @gloamtrade/mcp@0.8.0 authorize-access-key --check --network tempo-mainnet --owner <their address>
    ```
 
    Relay every warning. Ready means authorized, limited, scoped and no standing pool allowance.
@@ -70,7 +70,7 @@ key can never be authorized again; run step 2 again for a new one.
 
 ## 3. Other setups
 
-- Raw key (no onchain cap, and the only option on Robinhood Chain, Base and Ethereum): set `GLOAM_AGENT_PRIVATE_KEY`
+- Raw key (no onchain cap, and the only option on Robinhood Chain, Base and Ethereum, and on Elysium once its support, coming, is in): set `GLOAM_AGENT_PRIVATE_KEY`
   to a funded key, plus `GLOAM_NOTE_KEY` (`openssl rand -hex 32`), `GLOAM_NETWORK`, and off-chain
   limits (`GLOAM_LIMIT_ASSETS`, `GLOAM_LIMIT_MAX_PER_PAYMENT`, `GLOAM_LIMIT_MAX_PER_DAY`,
   `GLOAM_LIMIT_RECIPIENTS`, and `GLOAM_LIMIT_NETWORK` for mainnet assets) in `~/.gloam/agent.env`.

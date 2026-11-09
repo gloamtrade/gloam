@@ -66,6 +66,10 @@ const SPECIAL_LOGOS: Record<string, string> = {
   base: "/brand/chains/8453.png",
   // Ethereum's mark, the same full-tile treatment
   ethereum: "/brand/chains/1.png",
+  // Elysium's mark, its official avatar circle-cropped
+  elysium: "/brand/chains/elysium.png",
+  // HYPE, Elysium's gas coin
+  hype: "/brand/tokens/hype.png",
   // Circle's USDC, Tether's USDT and PayPal's PYUSD, the marks the bridge list uses
   usdc: "/brand/tokens/usdc.png",
   // Circle's EURC, on Base and Ethereum (from the Trust Wallet assets list)

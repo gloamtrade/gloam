@@ -13,7 +13,15 @@
  *   - a request that is not a valid backup is refused before it counts;
  *   - a save flagged mustExist makes no new backup, and spends none of the above.
  *
- * Uses the in-process store (GLOAM_PARTNERS_STORE=memory) and the real route.
+ * A save with no `v: 2` counts as version 1:
+ *   - it never makes a new backup, from the day this deployed, and spends nothing;
+ *   - it may update a backup that exists until the end date, on the server's clock;
+ *   - from the end date it is refused on any id, before the store is touched;
+ *   - reads, deletes and every save with `v: 2` carry on past the end date, on
+ *     backups from before the marker too.
+ *
+ * Uses the in-process store (GLOAM_PARTNERS_STORE=memory) and the real route. The
+ * server's clock is set here, apart from the process's own.
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-recovery-route.mts
  */
@@ -31,9 +39,11 @@ M._resolveFilename = function (req: string, ...rest: unknown[]) {
   return req === "server-only" ? stub : resolve.call(this, req, ...rest);
 };
 
-const { PUT, GET } = await import("../src/app/api/recovery/route");
-const { resetMemoryKv } = await import("../src/lib/partnersKv");
+const { PUT, GET, DELETE } = await import("../src/app/api/recovery/route");
+const { kv, resetMemoryKv } = await import("../src/lib/partnersKv");
 const { clientIp, hitRateLimit, ipBucket } = await import("../src/lib/mcpRemote/rateLimit");
+const { VERSION1_SAVES_UNTIL } = await import("../src/lib/recoveryEnd");
+const { readBackup, setRecoveryClock } = await import("../src/lib/recoveryStore");
 
 let passed = 0;
 async function test(name: string, fn: () => Promise<void>) {
@@ -41,6 +51,7 @@ async function test(name: string, fn: () => Promise<void>) {
   // a fresh day for the counters
   (globalThis as { __gloamMcpRate?: Map<string, unknown> }).__gloamMcpRate?.clear();
   delete process.env.GLOAM_RECOVERY_NEW_PER_DAY;
+  setRecoveryClock(null);
   await fn();
   passed++;
   console.log(`ok  ${name}`);
@@ -51,17 +62,19 @@ const hex64 = () => (++k).toString(16).padStart(64, "0");
 const WRITE = "b".repeat(64);
 const BLOB = Buffer.from("sealed backup").toString("base64");
 
+/** A save as a current browser sends it under a newer key. `NO_VERSION` leaves the marker off. */
 async function put(ip: string, id: string, n = 1, c = BLOB, extra: Record<string, unknown> = {}) {
   const res = await PUT(
     new Request("http://localhost/api/recovery", {
       method: "PUT",
       headers: { "content-type": "application/json", "x-forwarded-for": ip },
-      body: JSON.stringify({ id, write: WRITE, c, n, ...extra }),
+      body: JSON.stringify({ id, write: WRITE, c, n, v: 2, ...extra }),
     })
   );
   const json = (await res.json()) as { ok: boolean; error?: { message: string } };
   return { status: res.status, message: json.error?.message ?? "" };
 }
+const NO_VERSION = { v: undefined };
 
 await test("a new backup: 5 a day per connection; saving to one that exists always goes through", async () => {
   const ids = Array.from({ length: 5 }, hex64);
@@ -116,7 +129,7 @@ await test("a save says whether the id held anything, so a browser can tell its 
       new Request("http://localhost/api/recovery", {
         method: "PUT",
         headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.70" },
-        body: JSON.stringify({ id, write: WRITE, c: BLOB, n }),
+        body: JSON.stringify({ id, write: WRITE, c: BLOB, n, v: 2 }),
       })
     );
     return ((await res.json()) as { data: { created: boolean } }).data.created;
@@ -159,7 +172,7 @@ await test("a request that is not a valid backup is refused before it counts", a
     new Request("http://localhost/api/recovery", {
       method: "PUT",
       headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.50" },
-      body: JSON.stringify({ id: hex64(), write: WRITE, c: BLOB, n: 0 }),
+      body: JSON.stringify({ id: hex64(), write: WRITE, c: BLOB, n: 0, v: 2 }),
     })
   );
   assert.equal(zero.status, 400);
@@ -175,6 +188,7 @@ await test("a full-size backup still fits", async () => {
 
 const held = async (id: string) =>
   (await GET(new Request(`http://localhost/api/recovery?id=${id}`, { headers: { "x-forwarded-for": "203.0.113.90" } }))).status === 200;
+const rawRecord = async (id: string) => JSON.parse(String((await kv([["GET", `gloam:recovery:v1:${id}`]]))[0])) as Record<string, unknown>;
 
 await test("mustExist with nothing there: a 410, nothing written, and no new backup spent", async () => {
   const ip = "203.0.113.80";
@@ -206,10 +220,181 @@ await test("mustExist with a backup there: it saves as usual", async () => {
   assert.equal(r.status, 409, "a stale version is still refused");
 });
 
-await test("a save without the flag still makes a new backup, as builds already out there expect", async () => {
+await test("a newer key without the flag still makes a new backup", async () => {
   const id = hex64();
   assert.equal((await put("203.0.113.82", id, 2, BLOB, { mustExist: "yes" })).status, 200, "only true counts");
   assert.equal(await held(id), true);
+});
+
+/* ------------------------------------------------------------ the end date, on the server */
+
+const DAY = 86_400_000;
+const BEFORE_THE_END = VERSION1_SAVES_UNTIL - 30 * DAY;
+const AFTER_THE_END = VERSION1_SAVES_UNTIL + DAY;
+const atTime = (ms: number) => setRecoveryClock(() => ms);
+const marker = async (id: string) => (await rawRecord(id)).v;
+
+/** Spends a connection's five new backups and shows they were all still there. */
+async function stillHasAllFive(ip: string) {
+  for (let i = 0; i < 5; i++) assert.equal((await put(ip, hex64())).status, 200, `new backup ${i + 1}`);
+  assert.equal((await put(ip, hex64())).status, 429);
+}
+
+await test("no version, new id, before the end date: a 410, nothing written, nothing spent", async () => {
+  atTime(BEFORE_THE_END);
+  const ip = "203.0.113.100";
+  for (let i = 0; i < 8; i++) {
+    const id = hex64();
+    const r = await put(ip, id, 1, BLOB, NO_VERSION);
+    assert.equal(r.status, 410, "even with n = 1, the way a first save looks");
+    assert.equal(await held(id), false);
+  }
+  await stillHasAllFive(ip);
+});
+
+await test("no version, new id, today's real clock: refused too, not only past the date", async () => {
+  const id = hex64();
+  assert.equal((await put("203.0.113.101", id, 1, BLOB, NO_VERSION)).status, 410);
+  assert.equal(await held(id), false);
+});
+
+await test("no version goes by its own answer when the day's budget is spent, and spends none of it", async () => {
+  atTime(BEFORE_THE_END);
+  process.env.GLOAM_RECOVERY_NEW_PER_DAY = "1";
+  assert.equal((await put("192.0.2.60", hex64(), 2, BLOB, NO_VERSION)).status, 410);
+  assert.equal((await put("192.0.2.61", hex64())).status, 200, "the one new backup of the day is still there");
+  assert.equal((await put("192.0.2.62", hex64(), 2, BLOB, NO_VERSION)).status, 410, "and it isn't told to wait for tomorrow");
+});
+
+await test("no version, existing id: it saves until the end date, up to the last moment", async () => {
+  const id = hex64();
+  atTime(BEFORE_THE_END);
+  assert.equal((await put("203.0.113.102", id, 1)).status, 200);
+  assert.equal((await put("203.0.113.102", id, 2, BLOB, NO_VERSION)).status, 200);
+  atTime(VERSION1_SAVES_UNTIL - 1);
+  assert.equal((await put("203.0.113.102", id, 3, BLOB, NO_VERSION)).status, 200);
+  assert.equal((await readBackup(id))!.n, 3);
+  atTime(VERSION1_SAVES_UNTIL);
+  assert.equal((await put("203.0.113.102", id, 4, BLOB, NO_VERSION)).status, 410, "refused from the first moment of the date");
+  assert.equal((await readBackup(id))!.n, 3);
+});
+
+await test("no version, existing id, the usual checks still apply", async () => {
+  atTime(BEFORE_THE_END);
+  const id = hex64();
+  assert.equal((await put("203.0.113.103", id, 2)).status, 200);
+  assert.equal((await put("203.0.113.103", id, 2, BLOB, NO_VERSION)).status, 409);
+  assert.equal(
+    (await PUT(new Request("http://localhost/api/recovery", { method: "PUT", body: JSON.stringify({ id, write: "c".repeat(64), c: BLOB, n: 3 }) }))).status,
+    403
+  );
+});
+
+await test("no version, after the end date: refused on a new id and an existing one, nothing written or spent", async () => {
+  atTime(BEFORE_THE_END);
+  const ip = "203.0.113.104";
+  const mine = hex64();
+  assert.equal((await put(ip, mine, 1, BLOB)).status, 200);
+  const before = await readBackup(mine);
+  (globalThis as { __gloamMcpRate?: Map<string, unknown> }).__gloamMcpRate?.clear();
+  atTime(AFTER_THE_END);
+  const statuses = new Set<number>();
+  for (let i = 0; i < 80; i++) {
+    const fresh = hex64();
+    statuses.add((await put(ip, fresh, 1, BLOB, NO_VERSION)).status);
+    assert.equal(await held(fresh), false);
+  }
+  assert.deepEqual([...statuses], [410], "past any per-minute limit too: nothing is counted");
+  assert.equal((await put(ip, mine, 2, BLOB, NO_VERSION)).status, 410);
+  assert.equal((await put(ip, mine, 2, BLOB, { ...NO_VERSION, mustExist: true })).status, 410, "as a current version 1 browser sends it");
+  assert.deepEqual(await readBackup(mine), before, "the backup is as it was");
+  await stillHasAllFive(ip);
+});
+
+await test("the refusal after the end date doesn't claim the backup is gone", async () => {
+  atTime(AFTER_THE_END);
+  const { message } = await put("203.0.113.105", hex64(), 1, BLOB, NO_VERSION);
+  assert.doesNotMatch(message, /isn't on the server/);
+});
+
+await test("a bad request stays a 400 after the end date", async () => {
+  atTime(AFTER_THE_END);
+  assert.equal((await put("203.0.113.106", hex64(), 1, "not base64!", NO_VERSION)).status, 400);
+  assert.equal((await put("203.0.113.106", "nope", 1, BLOB, NO_VERSION)).status, 400);
+});
+
+await test("only v: 2 is the marker", async () => {
+  atTime(BEFORE_THE_END);
+  for (const v of ["2", 1, 3, 2.5, true, null, [2], {}]) {
+    const id = hex64();
+    assert.equal((await put("203.0.113.107", id, 1, BLOB, { v })).status, 410, `v: ${JSON.stringify(v)}`);
+    assert.equal(await held(id), false);
+  }
+});
+
+await test("version 2 after the end date: a new backup, the next save, and a backup from before the marker", async () => {
+  const old = hex64();
+  atTime(BEFORE_THE_END);
+  assert.equal((await put("203.0.113.108", old, 1)).status, 200);
+  await kv([["SET", `gloam:recovery:v1:${old}`, JSON.stringify({ ...(await rawRecord(old)), v: undefined })]]);
+  assert.equal(await marker(old), undefined, "a record from before the marker");
+
+  atTime(AFTER_THE_END);
+  const fresh = hex64();
+  assert.equal((await put("203.0.113.108", fresh, 1)).status, 200, "a first-time user");
+  assert.equal(await marker(fresh), 2);
+  assert.equal((await put("203.0.113.108", fresh, 2)).status, 200, "and their next save");
+  assert.equal((await put("203.0.113.108", old, 2)).status, 200, "the old record's next save");
+  assert.equal(await marker(old), 2, "and it carries the marker from here");
+  assert.equal((await put("203.0.113.108", old, 3)).status, 200);
+});
+
+await test("a marked record doesn't excuse a save with no version: the date goes by the request", async () => {
+  const id = hex64();
+  atTime(BEFORE_THE_END);
+  assert.equal((await put("203.0.113.109", id, 1)).status, 200);
+  assert.equal(await marker(id), 2);
+  assert.equal((await put("203.0.113.109", id, 2, BLOB, NO_VERSION)).status, 200, "a tab on an earlier build, before the date");
+  assert.equal(await marker(id), 2, "doesn't take the marker off");
+  atTime(AFTER_THE_END);
+  assert.equal((await put("203.0.113.109", id, 3, BLOB, NO_VERSION)).status, 410, "and is refused after it");
+  assert.equal((await readBackup(id))!.n, 2);
+});
+
+await test("no version, a backup deleted just after the save saw it: it stays deleted", async () => {
+  atTime(BEFORE_THE_END);
+  const ip = "203.0.113.113";
+  const id = hex64();
+  assert.equal((await put(ip, id, 1)).status, 200);
+  // The save is counted once it has seen the backup there, so another device deletes it at that moment.
+  const counts = (globalThis as unknown as { __gloamMcpRate: Map<string, unknown> }).__gloamMcpRate;
+  counts.get = function (this: Map<string, unknown>, key: string) {
+    if (key.includes("recovery-save")) void kv([["DEL", `gloam:recovery:v1:${id}`]]);
+    return Map.prototype.get.call(this, key);
+  };
+  try {
+    assert.equal((await put(ip, id, 2, BLOB, NO_VERSION)).status, 410);
+  } finally {
+    delete (counts as unknown as { get?: unknown }).get;
+  }
+  assert.equal(await held(id), false, "the save doesn't bring it back");
+});
+
+await test("reads stay open and deletes still need the token, past the end date", async () => {
+  const id = hex64();
+  atTime(BEFORE_THE_END);
+  assert.equal((await put("203.0.113.110", id, 1)).status, 200);
+  await kv([["SET", `gloam:recovery:v1:${id}`, JSON.stringify({ ...(await rawRecord(id)), v: undefined })]]);
+  atTime(AFTER_THE_END);
+  const read = await GET(new Request(`http://localhost/api/recovery?id=${id}`, { headers: { "x-forwarded-for": "203.0.113.111" } }));
+  assert.equal(read.status, 200);
+  assert.deepEqual(Object.keys(((await read.json()) as { data: object }).data).sort(), ["c", "n", "t"], "what a read has always shown");
+  const del = (write: string) =>
+    DELETE(new Request("http://localhost/api/recovery", { method: "DELETE", body: JSON.stringify({ id, write }), headers: { "x-forwarded-for": "203.0.113.112" } }));
+  assert.equal((await del("c".repeat(64))).status, 403);
+  assert.ok(await held(id), "nothing goes by itself");
+  assert.equal((await del(WRITE)).status, 200);
+  assert.equal(await held(id), false);
 });
 
 console.log(`\nrecovery route: ${passed} passed`);

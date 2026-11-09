@@ -8,7 +8,7 @@
  * SDK stays transport-agnostic.
  *
  * Robinhood Chain and Tempo, each on mainnet (the ceremony's final keys,
- * payments only, beta deposit limits) and testnet (dev keys); Base and
+ * payments only, deposit limits) and testnet (dev keys); Base and
  * Ethereum, each on mainnet and on a testnet (Base Sepolia, Ethereum Sepolia)
  * that runs the mainnet pool and final keys. A network with a pool
  * to publish (every mainnet, Base Sepolia, Ethereum Sepolia) only exists here
@@ -41,8 +41,10 @@ export type NetworkKey =
   | "robinhood-mainnet"
   | "tempo-mainnet"
   | "base-mainnet"
-  | "ethereum-mainnet";
-export type ChainFamily = "robinhood" | "tempo" | "base" | "ethereum";
+  | "ethereum-mainnet"
+  | "elysium-mainnet"
+  | "elysium";
+export type ChainFamily = "robinhood" | "tempo" | "base" | "ethereum" | "elysium";
 
 export interface McpNetwork {
   key: NetworkKey;
@@ -81,9 +83,11 @@ const NATIVE = {
   tempo: { name: "US Dollar", symbol: "USD", decimals: 18 },
   base: { name: "Ether", symbol: "ETH", decimals: 18 },
   ethereum: { name: "Ether", symbol: "ETH", decimals: 18 },
+  // Elysium, Kinetiq's Hyperliquid L2: gas in HYPE (mainnet and testnet, once the SDK has their values)
+  elysium: { name: "HYPE", symbol: "HYPE", decimals: 18 },
 } as const;
 
-const CHAIN_NAMES: Record<ChainFamily, string> = { robinhood: "Robinhood Chain", tempo: "Tempo", base: "Base", ethereum: "Ethereum" };
+const CHAIN_NAMES: Record<ChainFamily, string> = { robinhood: "Robinhood Chain", tempo: "Tempo", base: "Base", ethereum: "Ethereum", elysium: "Elysium" };
 
 /** A testnet's name: "Base Sepolia Testnet", "Ethereum Sepolia Testnet", "Tempo Testnet". */
 function testnetName(family: ChainFamily): string {
@@ -161,6 +165,8 @@ export const MCP_MAINNETS: McpNetwork[] = [
   fromSdk(mainnetNetwork("tempo")),
   fromSdk(mainnetNetwork("base")),
   fromSdk(mainnetNetwork("ethereum")),
+  // Elysium: once every value in the SDK's src/elysium.ts is in (chain id, RPC, USDC, pool)
+  fromSdk(mainnetNetwork("elysium")),
 ].filter((n): n is McpNetwork => n !== null);
 
 /** Base Sepolia, once the SDK has its pool; null before. */
@@ -168,6 +174,9 @@ export const MCP_BASE_TESTNET: McpNetwork | null = fromSdk(testnetNetwork("base"
 
 /** Ethereum Sepolia, once the SDK has its pool; null before. */
 export const MCP_ETHEREUM_TESTNET: McpNetwork | null = fromSdk(testnetNetwork("ethereum"));
+
+/** Elysium testnet (99801, gas in HYPE, test USDC), once the SDK has its pool; null before. */
+export const MCP_ELYSIUM_TESTNET: McpNetwork | null = fromSdk(testnetNetwork("elysium"));
 
 /** Every network this build can use: mainnets first, then the testnets. */
 export function allNetworks(): McpNetwork[] {
@@ -177,6 +186,7 @@ export function allNetworks(): McpNetwork[] {
     MCP_NETWORKS.tempo,
     ...(MCP_BASE_TESTNET ? [MCP_BASE_TESTNET] : []),
     ...(MCP_ETHEREUM_TESTNET ? [MCP_ETHEREUM_TESTNET] : []),
+    ...(MCP_ELYSIUM_TESTNET ? [MCP_ELYSIUM_TESTNET] : []),
   ];
 }
 
@@ -186,10 +196,12 @@ export const ALL_NETWORK_KEYS: readonly NetworkKey[] = [
   "tempo-mainnet",
   "base-mainnet",
   "ethereum-mainnet",
+  "elysium-mainnet",
   "robinhood",
   "tempo",
   "base",
   "ethereum",
+  "elysium",
 ];
 
 /** The network keys this build offers, for tool schemas (mainnets first). */

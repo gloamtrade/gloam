@@ -30,7 +30,7 @@ const GLANCE = [
   { k: "Networks", v: "Robinhood Chain and Tempo mainnet" },
   { k: "Live since", v: "21 October 2026, 13:00 UTC" },
   { k: "Fees", v: "Free to add and pay, 0.25% to cash out" },
-  { k: "Status", v: "Mainnet beta, deposit limits on" },
+  { k: "Status", v: "Live on mainnet, deposit limits on" },
 ];
 
 const READ_MORE: { label: string; href: string }[] = [
@@ -42,7 +42,7 @@ const READ_MORE: { label: string; href: string }[] = [
   { label: "Check a proof", href: "/verify" },
   { label: "The pool on Robinhood Chain", href: `https://robin.etherscan.io/address/${POOL}` },
   { label: "The pool on Tempo", href: `https://explore.tempo.xyz/address/${POOL}` },
-  { label: "Trusted setup transcript", href: "https://github.com/cryptoduke01/gloam/releases/tag/ceremony-final" },
+  { label: "Trusted setup transcript", href: "https://github.com/gloamtrade/gloam/releases/tag/ceremony-final" },
 ];
 
 export default function LiveOnMainnetPost() {
@@ -184,7 +184,7 @@ export default function LiveOnMainnetPost() {
         address costs 0.25%.
       </p>
       <p>
-        This is a beta, so deposits are capped. Each stablecoin takes up to 500
+        Deposits have limits. Each stablecoin takes up to 500
         per deposit and 25,000 in total. $GLOAM takes up to 25,000 per deposit
         and 250,000 in total. Cash-outs and private payments are never limited.
       </p>
@@ -226,8 +226,8 @@ export default function LiveOnMainnetPost() {
 
       <h2>What it does not do yet</h2>
       <p>
-        This is beta software. We would rather you know its
-        limits than assume more than it offers.
+        We would rather you know its limits than assume more than it
+        offers.
       </p>
       <p>
         The contracts and circuits were reviewed internally before launch. That

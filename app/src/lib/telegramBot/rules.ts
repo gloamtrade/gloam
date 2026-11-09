@@ -9,6 +9,7 @@ import { english } from "viem/accounts";
 import { baseSepoliaPool, ethereumSepoliaPool, isMainnetLive, liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { COPYCAT_GLOAM, GLOAM_TOKEN } from "./knowledge";
 import type { TgMessage, TgPhotoSize, TgUser } from "./telegram";
+import { ELYSIUM, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET } from "@/lib/elysium";
 
 /** Forum topics in t.me/gloamhq, by message_thread_id. General messages carry no thread id. */
 export const TOPIC = { general: 1, testers: 2, announcements: 3, help: 4, feedback: 5, buys: 798 } as const;
@@ -47,6 +48,25 @@ export function norm(text: string): string {
 /** The message's words: text, or a photo's caption. */
 export function messageText(msg: TgMessage): string {
   return (msg.text ?? msg.caption ?? "").trim();
+}
+
+/**
+ * Every link Telegram marked in a message: a url entity as written, and where
+ * a text_link (a link behind other words) points. Telegram knows every domain
+ * ending, so these catch links the text pattern can't.
+ */
+export function entityLinks(msg: TgMessage): string[] {
+  const text = msg.text ?? msg.caption ?? "";
+  const out: string[] = [];
+  for (const e of msg.entities ?? msg.caption_entities ?? []) {
+    if (e.type === "url") {
+      const link = text.slice(e.offset, e.offset + e.length).trim();
+      if (link) out.push(link);
+    } else if (e.type === "text_link" && typeof e.url === "string" && e.url.trim()) {
+      out.push(e.url.trim());
+    }
+  }
+  return out;
 }
 
 /** Which topic a group message is in. Replies inside General carry a thread id but are not topic messages. */
@@ -398,8 +418,18 @@ const DM_CHAT =
 export const INVITATION = /^\W*(?:if|when)\s+(?:you|u|ya|anyone|someone|any\s+of\s+you)\b/i;
 const WALLET_FIX =
   /\b(?:validate|validation|rectify|rectification|reactivate|synchroni[sz]e|resync|whitelist)\s+(?:your\s+|ur\s+|the\s+)?wallets?\b|\bsync\s+(?:your|ur)\s+wallets?\b|\bwallet\s+(?:validation|rectification|synchroni[sz]ation)\b/i;
-export const LINK_RE =
-  /\b(?:https?:\/\/[^\s<>"']+|www\.[^\s<>"']+|t\.me\/[^\s<>"']+|(?:[a-z0-9-]+\.)+(?:com|io|xyz|org|net|app|finance|link|site|online|live|pro|top|info|co|me|cc|vip|club|fi|dev|gg|ai|so|claims?|gift|cash|money|exchange|network|tech|trade)(?:\/[^\s<>"']*)?)/gi;
+/**
+ * Endings that look like a domain's but are file types or wallet names, never
+ * a top-level domain ("app.tsx", "duke.eth"). Any other ending of two or more
+ * letters (or an encoded one, xn--) is read as a domain: new and country
+ * endings (.ru, .cfd, .support) are where look-alike sites live.
+ */
+const NOT_A_TLD =
+  "js|jsx|mjs|cjs|ts|tsx|json|jsonl|txt|csv|tsv|png|jpe?g|gif|webp|svg|pdf|html?|s?css|sol|eth|mp[34]|wav|ya?ml|toml|lock|log|env|ini|cfg|exe|dll|wasm|zkey|circom|rb|java|kt|swift|cpp|hpp|go|gz|tar|rar";
+export const LINK_RE = new RegExp(
+  `\\b(?:https?:\\/\\/[^\\s<>"']+|www\\.[^\\s<>"']+|t\\.me\\/[^\\s<>"']+|(?:[a-z0-9-]+\\.)+(?!(?:${NOT_A_TLD})(?![a-z0-9-]))(?:xn--[a-z0-9-]{2,59}|[a-z]{2,24})(?![a-z0-9-])(?:\\/[^\\s<>"']*)?)`,
+  "gi"
+);
 const LURE =
   /\b(?:wallets?|claim(?:ing|ed)?|airdrops?|giveaways?|rewards?|bonus|free (?:tokens?|money|usdc|usdt|eth|crypto)|connect|whitelist|presale|mint|eligible|allocation)\b/i;
 /**
@@ -629,19 +659,19 @@ export function says(re: RegExp, text: string): boolean {
  * flagged. Look-alike letters, digits for letters ("airdr0p") and spaced-out
  * words are read the way a person reads them.
  */
-export function scamReason(raw: string, glued = false): ScamReason | null {
+export function scamReason(raw: string, glued = false, links: readonly string[] = []): ScamReason | null {
   const text = scorable(raw);
   let warned: ScamReason | null = null;
   for (const t of spellings(text)) {
-    const why = wordsReason(t, text, glued);
+    const why = wordsReason(t, text, glued, links);
     if (why && !WARN_ONLY.has(why)) return why;
     warned ??= why;
   }
   return warned;
 }
 
-/** scamReason for one spelling of the text; links are read from the text as written. */
-function wordsReason(text: string, written: string, glued = false): ScamReason | null {
+/** scamReason for one spelling of the text; links are read from the text as written, plus the ones Telegram marked (`links`). */
+function wordsReason(text: string, written: string, glued = false, links: readonly string[] = []): ScamReason | null {
   for (const re of [SECRET_REQUEST, SECRET_QUESTION]) {
     const m = re.exec(text);
     if (m && !negated(text, m.index, m[0])) return "secret_request";
@@ -666,7 +696,7 @@ function wordsReason(text: string, written: string, glued = false): ScamReason |
   // safety words around it ("careful", "not fake") change nothing, a negation or a question in its own sentence does
   if (says(MIGRATION, text) && says(DROP, text) && says(PRIVATE_ASK, text)) return "migration_airdrop";
   if (LURE.test(text)) {
-    for (const link of written.match(LINK_RE) ?? []) {
+    for (const link of [...(written.match(LINK_RE) ?? []), ...links]) {
       const { host } = hostOf(link);
       if (!linkAllowed(link) && (host === "t.me" || !SAFE_HOSTS.some((s) => onHost(host, s)))) return "phishing_link";
     }
@@ -811,8 +841,8 @@ export function roleScam(u: { first_name?: string; last_name?: string }, raw: st
  * split-scam joiner), where a harmless "holders, the docs are updated" and a
  * later "dm me if you get stuck" must not read as the lure.
  */
-export function memberScam(u: { first_name?: string; last_name?: string }, raw: string, glued = false): ScamReason | null {
-  const words = scamReason(raw, glued);
+export function memberScam(u: { first_name?: string; last_name?: string }, raw: string, glued = false, links: readonly string[] = []): ScamReason | null {
+  const words = scamReason(raw, glued, links);
   if (words && !WARN_ONLY.has(words)) return words;
   const role = roleScam(u, raw, glued);
   return role && !WARN_ONLY.has(role) ? role : (words ?? role);
@@ -937,11 +967,12 @@ export function moderationAsk(text: string, command: string | null, tagged: bool
  *  - address: gloamr1.<key>, a Gloam address. Made to be shared.
  *  - sealed: gloam2t.<...>, a payment sealed to one Gloam address. Only that
  *    address's owner can open it, so it is safe to share.
- *  - plain: gloam1.<...>, a plain payment code. A bearer secret: whoever has
- *    it can claim the money.
+ *  - plain: gloam1.<...>, a plain payment code, or its short form
+ *    gloam3.<letters and digits>. A bearer secret: whoever has it can claim the money.
  *  - locked: gloam1e.<...>, a code locked with a phrase. The code plus the
  *    phrase claims it.
- *  - claim_link: ...#claim=<code>, as bearer as the plain code inside it.
+ *  - claim_link: ...#claim=<code>, as bearer as the plain code inside it, or
+ *    a short one, gloam.trade/c#<letters and digits> (the same payment).
  *  - request_link: ...#to=gloamr1...&amount=..., only says where to pay.
  * A "Scan to pay privately" QR holds an address or a request, so it is safe too.
  */
@@ -959,18 +990,25 @@ const CODE_LABEL: Record<CodeKind, string> = {
 const NOT_URL = String.raw`[^\s<>"'()\[\]]`;
 /** A link with #claim=<code> (or the encoded %23claim%3D), all of it. */
 const CLAIM_LINK_RE = new RegExp(`${NOT_URL}*?(?:#|%23)claim(?:=|%3D)([A-Za-z0-9_.%=-]{20,})${NOT_URL}*`, "gi");
+/**
+ * A short claim link: gloam.trade/c#<base62> (www., a scheme, "/c/" or %23 for
+ * the "#" all read), all of it. Only on gloam.trade: a lookalike host is left
+ * for the scam checks to see.
+ */
+const SHORT_CLAIM_LINK_RE = new RegExp(String.raw`(?<![A-Za-z0-9.-])(?:https?(?::|%3A)(?:\/|%2F){2})?(?:www\.)?gloam\.trade(?:\/|%2F)c(?:\/|%2F)?(?:#|%23)[0-9A-Za-z]{20,}${NOT_URL}*`, "gi");
 /** A payment request link: to=gloamr1... in the fragment or the query. */
 const REQUEST_LINK_RE = new RegExp(`${NOT_URL}*?[#?&]to(?:=|%3D)gloamr1\\.[A-Za-z0-9_-]{20,}${NOT_URL}*`, "gi");
 /** A bare code. Real ones run to dozens or hundreds of characters; "gloamr1." in a sentence is not one. */
 // Links write the dot after the prefix as "=" (older ones "-", launch-day ones "%2E"), so a code cut
 // from one is still caught.
-const RAW_CODE_RE = /(?<![A-Za-z0-9])gloam(r1|2t|1e|1)(?:[.=-]|%2[Ee])[A-Za-z0-9_=-]{20,}/g;
+// A short code (gloam3.<base62>, the same payment as a short claim link) is as bearer as a plain one.
+const RAW_CODE_RE = /(?<![A-Za-z0-9])gloam(r1|2t|1e|1|3)(?:[.=-]|%2[Ee])[A-Za-z0-9_=-]{20,}/g;
 /**
  * What a chat app leaves of a plain code it cut at "gloam1": the base64 JSON body ("eyJ..."), maybe
  * after "%2E", ".", "=" or "-". The claim box takes it as the code, so it is masked as one.
  */
 const BARE_BODY_RE = /(?<![A-Za-z0-9_-])(?:%2[Ee]|[.=-])?eyJ[A-Za-z0-9_-]{100,}/g;
-const RAW_KIND: Record<string, CodeKind> = { r1: "address", "2t": "sealed", "1e": "locked", "1": "plain" };
+const RAW_KIND: Record<string, CodeKind> = { r1: "address", "2t": "sealed", "1e": "locked", "1": "plain", "3": "plain" };
 
 /** What a claim link carries: a locked or sealed code keeps its own rules. */
 function claimLinkKind(inner: string): { kind: CodeKind; label: string } {
@@ -993,6 +1031,12 @@ function sweepCodes(text: string, kinds: Set<CodeKind>, labels: boolean): string
       const k = claimLinkKind(inner);
       kinds.add(k.kind);
       return labels ? k.label : " ";
+    });
+  }
+  if (/gloam\.trade(?:\/|%2F)c/i.test(t)) {
+    t = t.replace(SHORT_CLAIM_LINK_RE, () => {
+      kinds.add("claim_link");
+      return labels ? CODE_LABEL.claim_link : " ";
     });
   }
   if (/to(?:=|%3D)gloamr1\./i.test(t)) {
@@ -1209,8 +1253,21 @@ export function linkAllowed(link: string): boolean {
 
 const ANY_EVM_ADDRESS = /\b0x[0-9a-fA-F]{40}\b/g;
 const ABOUT_TOKEN = /\$gloam\b|\btoken\b/i;
-/** "Send your USDG to 0x...": the helper never tells anyone to send money to an address. */
-const SEND_TO_ADDRESS = /\b(?:send|transfer|deposit|move|pay)\b[^.!?\n]*?\bto\s+(?:(?:this|that|the|my|our)\s+(?:address|wallet)\s*:?\s*)?0x[0-9a-fA-F]{40}\b/i;
+/** An address in a reply, written with or without its 0x (40 hex characters standing alone, never part of a hash). */
+const REPLY_ADDRESS = /(?<![0-9a-zA-Z])(?:0x)?[0-9a-fA-F]{40}(?![0-9a-zA-Z])/g;
+/** A wallet name ("gloambuyback.eth"): it points at an address just as one does. */
+const WALLET_NAME = /(?<![\w.-])(?:[a-z0-9-]+\.)+eth(?![\w-])/gi;
+/** "Send your USDG to 0x..." (or to a wallet name): the helper never tells anyone to send money to an address. */
+const SEND_TO_ADDRESS =
+  /\b(?:send|transfer|deposit|move|pay)\b[^.!?\n]*?\bto\s+(?:(?:this|that|the|my|our)\s+(?:address|wallet)\s*:?\s*)?(?:(?<![0-9a-zA-Z])(?:0x)?[0-9a-fA-F]{40}(?![0-9a-zA-Z])|(?:[a-z0-9-]+\.)+eth\b)/i;
+
+/** The addresses in a reply, as 0x and lower case, and its wallet names, lower case. */
+function addressesIn(s: string): string[] {
+  return (s.match(REPLY_ADDRESS) ?? []).map((a) => `0x${a.replace(/^0x/i, "").toLowerCase()}`);
+}
+function walletNamesIn(s: string): string[] {
+  return (s.match(WALLET_NAME) ?? []).map((n) => n.toLowerCase());
+}
 
 /** $GLOAM's contract and Gloam's mainnet pools (and Base Sepolia's and Ethereum Sepolia's): the addresses the helper may name on its own. */
 export function ownAddress(a: string): boolean {
@@ -1218,21 +1275,26 @@ export function ownAddress(a: string): boolean {
   if (l === GLOAM_TOKEN.address.toLowerCase()) return true;
   if (baseSepoliaPool()?.pool.toLowerCase() === l) return true;
   if (ethereumSepoliaPool()?.pool.toLowerCase() === l) return true;
+  if (ELYSIUM?.pool.toLowerCase() === l) return true;
   return ([4663, 4217, 8453, 1] as const).some((id) => mainnetPool(id)?.pool.toLowerCase() === l);
 }
 
 /**
- * A 0x address that must not go out: the known copycat token in any letter
- * case (a RobinScan link to it too), "send ... to 0x...", and any address
- * other than $GLOAM's (team chats) or other than $GLOAM's, a pool's or one the
- * asker posted (the group), so a mistyped or fake contract never goes out.
+ * An address that must not go out, with or without its 0x: the known copycat
+ * token in any letter case (a RobinScan link to it too), "send ... to 0x...",
+ * and any address other than $GLOAM's (team chats) or other than $GLOAM's, a
+ * pool's or one the asker posted (the group), so a mistyped or fake contract
+ * never goes out. A wallet name (.eth) is held to the same rule as an address.
  */
 function wrongAddress(s: string, team: boolean, posted: Set<string>): boolean {
-  const found = (s.match(ANY_EVM_ADDRESS) ?? []).map((a) => a.toLowerCase());
+  const found = addressesIn(s);
+  const names = walletNamesIn(s);
   if (found.some((a) => COPYCAT.has(a)) || SEND_TO_ADDRESS.test(s)) return true;
-  if (team) return found.some((a) => a !== GLOAM_TOKEN.address.toLowerCase());
-  // an address the asker posted may come back about their wallet, never in a line that calls it the token or a contract
-  return found.some((a) => !ownAddress(a) && (!posted.has(a) || TOKEN_TALK.test(s)));
+  if (team) return found.some((a) => a !== GLOAM_TOKEN.address.toLowerCase()) || names.length > 0;
+  // an address or wallet name the asker posted may come back about their wallet, never in a line that calls it the token or a contract
+  return (
+    found.some((a) => !ownAddress(a) && (!posted.has(a) || TOKEN_TALK.test(s))) || names.some((n) => !posted.has(n) || TOKEN_TALK.test(s))
+  );
 }
 
 /**
@@ -1339,7 +1401,8 @@ export function cleanReply(raw: string, policy: ReplyPolicy): string | null {
   if ([...scanCodes(text).kinds].some((k) => k !== "address" && k !== "request_link")) return null;
   const okHandles = new Set(["gloamtrade", "gloamhq", ...policy.handles.map((h) => h.toLowerCase())]);
   const live = policy.mainnetLive ?? isMainnetLive();
-  const posted = new Set((policy.askerText?.match(ANY_EVM_ADDRESS) ?? []).map((a) => a.toLowerCase()));
+  const asked = policy.askerText ?? "";
+  const posted = new Set([...addressesIn(asked), ...walletNamesIn(asked)]);
   const r = dropBroken(text, (s) => brokenSentence(s, Boolean(policy.team), okHandles, live, posted));
   if (!r.kept) return null;
   if (!policy.team && r.dropped * 2 > r.kept + r.dropped) return null;
@@ -1459,7 +1522,7 @@ export function welcomeHtml(joiners: Joiner[], testingOpen: boolean): string {
   return (
     `Welcome to Gloam, ${list}. Glad you're here.\n\n` +
     `Send and receive money privately on ${liveMainnetNames()} at gloam.trade/app. Questions go in Help.${testing}\n\n` +
-    `Admins never DM first.`
+    `Never share your keys with anyone.`
   );
 }
 
@@ -1530,6 +1593,9 @@ const CHAIN_NAMES: Record<number, string> = {
   8453: "Base mainnet",
   84532: "Base Sepolia testnet",
   11155111: "Ethereum Sepolia testnet",
+  // Elysium, only while it is on (lib/elysium.ts)
+  ...(ELYSIUM ? { [ELYSIUM.chainId]: "Elysium mainnet" } : {}),
+  ...(ELYSIUM_TESTNET ? { [ELYSIUM_TESTNET.chainId]: "Elysium testnet" } : {}),
 };
 
 /** Hand-add details for a chain the app can ask for. */
@@ -1542,17 +1608,31 @@ const CHAIN_DETAILS: Record<number, string> = {
   84532: "RPC https://sepolia.base.org, chain ID 84532, currency ETH.",
   1: "RPC https://ethereum-rpc.publicnode.com, chain ID 1, currency ETH.",
   11155111: "RPC https://ethereum-sepolia-rpc.publicnode.com, chain ID 11155111, currency ETH.",
+  ...(ELYSIUM ? { [ELYSIUM.chainId]: `RPC ${ELYSIUM_RPC_DISPLAY}, chain ID ${ELYSIUM.chainId}, currency HYPE.` } : {}),
+  ...(ELYSIUM_TESTNET ? { [ELYSIUM_TESTNET.chainId]: `RPC ${ELYSIUM_TESTNET.rpcUrl}, chain ID ${ELYSIUM_TESTNET.chainId}, currency HYPE.` } : {}),
 };
 
 /** The fix once mainnet is live: the wallet and the app can each be on a mainnet or a testnet. */
 function liveChainFix(name: string, m: ChainMismatch): string {
-  const mainnets = new Set<number>(([4663, 4217, 8453, 1] as const).filter((id) => mainnetPool(id)));
+  const mainnets = new Set<number>([...([4663, 4217, 8453, 1] as const).filter((id) => mainnetPool(id)), ...(ELYSIUM ? [ELYSIUM.chainId] : [])]);
   const want = `${chainLabel(m.want)} (${m.want})`;
   const tempo = m.want === 42431 || m.want === 4217;
   const base = m.want === 84532 || m.want === 8453;
   const ethereum = m.want === 11155111 || m.want === 1;
-  const button = tempo ? "Switch to Tempo" : base ? "Switch to Base" : ethereum ? "Switch to Ethereum" : "Switch to Robinhood Chain";
-  const twin: Record<number, number> = { 46630: 4663, 4663: 46630, 42431: 4217, 4217: 42431, 84532: 8453, 8453: 84532, 11155111: 1, 1: 11155111 };
+  const elysium = (ELYSIUM !== null && m.want === ELYSIUM.chainId) || (ELYSIUM_TESTNET !== null && m.want === ELYSIUM_TESTNET.chainId);
+  const button = tempo ? "Switch to Tempo" : base ? "Switch to Base" : ethereum ? "Switch to Ethereum" : elysium ? "Switch to Elysium" : "Switch to Robinhood Chain";
+  const twin: Record<number, number> = {
+    46630: 4663,
+    4663: 46630,
+    42431: 4217,
+    4217: 42431,
+    84532: 8453,
+    8453: 84532,
+    11155111: 1,
+    1: 11155111,
+    // Elysium, when both sides are on
+    ...(ELYSIUM && ELYSIUM_TESTNET ? { [ELYSIUM.chainId]: ELYSIUM_TESTNET.chainId, [ELYSIUM_TESTNET.chainId]: ELYSIUM.chainId } : {}),
+  };
   const tap = `tap "${button}" on the wallet button at the top of the app (or Settings > Network > Add to wallet), approve it in your wallet, then try again.`;
   // the wallet sits on the other side (mainnet or testnet) of the chain the app is set to
   const otherSide = twin[m.want] === m.wallet && (mainnets.has(m.wallet) || mainnets.has(m.want));

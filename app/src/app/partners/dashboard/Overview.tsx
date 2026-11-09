@@ -7,11 +7,13 @@ import { getNetwork } from "@/lib/networks";
 import type { Activity, FeeSetting, Stats } from "./client";
 import { ago, ArrowIcon, Card, fmtInt, fmtUnits, fmtUsd, fullDate, Kpi, LockIcon } from "./ui";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
+import { PartnerBreakdown, SOURCE_LABEL } from "@/components/partners/PartnerBreakdown";
 
 const KIND_LABEL: Record<Activity["kind"], string> = {
   private_payment: "Private payment",
   cash_out: "Cash out",
   deposit: "Deposit",
+  private_swap: "Private swap",
 };
 
 function fmtDay(day: string, long = false): string {
@@ -32,7 +34,7 @@ const plural = (n: number, one: string, many: string) => `${fmtInt(n)} ${n === 1
  */
 function DailyBars({ daily }: { daily: Stats["daily"] }) {
   const [hover, setHover] = useState<number | null>(null);
-  const totals = daily.map((d) => d.privatePayments + d.cashOuts + d.deposits);
+  const totals = daily.map((d) => d.privatePayments + d.cashOuts + d.deposits + d.swaps);
   const max = Math.max(1, ...totals);
   const n = daily.length;
   const d = hover != null ? daily[hover] : null;
@@ -59,7 +61,7 @@ function DailyBars({ daily }: { daily: Stats["daily"] }) {
               <button
                 key={day.day}
                 type="button"
-                aria-label={`${fmtDay(day.day, true)}: ${plural(day.privatePayments, "private payment", "private payments")}, ${plural(day.cashOuts, "cash out", "cash outs")}, ${plural(day.deposits, "deposit", "deposits")}, ${fmtUsd(day.commissionUsd)} in would-be fees`}
+                aria-label={`${fmtDay(day.day, true)}: ${plural(day.privatePayments, "private payment", "private payments")}, ${plural(day.cashOuts, "cash out", "cash outs")}, ${plural(day.deposits, "deposit", "deposits")}, ${plural(day.swaps, "private swap", "private swaps")}, ${fmtUsd(day.commissionUsd)} in would-be fees`}
                 onMouseEnter={() => setHover(i)}
                 onFocus={() => setHover(i)}
                 onBlur={() => setHover(null)}
@@ -86,6 +88,7 @@ function DailyBars({ daily }: { daily: Stats["daily"] }) {
             <span className="block">
               {plural(d.cashOuts, "cash out", "cash outs")}, {plural(d.deposits, "deposit", "deposits")}
             </span>
+            {d.swaps > 0 && <span className="block">{plural(d.swaps, "private swap", "private swaps")}</span>}
             <span className="block">{fmtUsd(d.commissionUsd)} would-be fees</span>
           </div>
         )}
@@ -105,7 +108,7 @@ function KindBadge({ kind }: { kind: Activity["kind"] }) {
       aria-hidden
       className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${sealed ? "bg-sealed-soft text-sealed" : "bg-surface text-soft"}`}
     >
-      {sealed ? <LockIcon size={13} /> : <ArrowIcon dir={kind === "cash_out" ? "out" : "in"} />}
+      {sealed ? <LockIcon size={13} /> : <ArrowIcon dir={kind === "cash_out" || kind === "private_swap" ? "out" : "in"} />}
     </span>
   );
 }
@@ -127,7 +130,7 @@ function ActivityList({ items }: { items: Activity[] }) {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[14.5px] text-foreground">{KIND_LABEL[a.kind]}</span>
               <span className="block truncate text-[12.5px] text-mute">
-                {net.label} ·{" "}
+                {SOURCE_LABEL[a.source ?? "api"]} · {net.label} ·{" "}
                 <time dateTime={new Date(a.ts).toISOString()} title={fullDate(a.ts)}>
                   {ago(a.ts)}
                 </time>
@@ -165,23 +168,51 @@ function ActivityList({ items }: { items: Activity[] }) {
   );
 }
 
+/** Mainnet or testnet: the two are never added together. */
+function TierSwitch({ tier, onTier }: { tier: "mainnet" | "testnet"; onTier: (t: "mainnet" | "testnet") => void }) {
+  return (
+    <div role="radiogroup" aria-label="Network" className="inline-flex rounded-full bg-surface-2 p-1 text-[13px]">
+      {(["mainnet", "testnet"] as const).map((t) => (
+        <button
+          key={t}
+          type="button"
+          role="radio"
+          aria-checked={tier === t}
+          onClick={() => onTier(t)}
+          className={`h-8 rounded-full px-3.5 transition-colors ${tier === t ? "bg-panel font-medium text-foreground shadow-card" : "text-mute hover:text-foreground"}`}
+        >
+          {t === "mainnet" ? "Mainnet" : "Testnet"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Overview({
   stats,
   fees,
   activeKeys,
   loading,
   onQuickstart,
+  tier,
+  onTier,
 }: {
   stats: Stats | null;
   fees: FeeSetting;
   activeKeys: number;
   loading: boolean;
   onQuickstart: () => void;
+  tier: "mainnet" | "testnet";
+  onTier: (t: "mainnet" | "testnet") => void;
 }) {
   const mainnetLive = useMainnetLive();
   if (!stats) {
     return (
-      <div aria-busy="true" className="space-y-3">
+      <div aria-busy={loading} className="space-y-3">
+        {/* the switch stays, so a tier that fails to load can be switched back */}
+        <div className="flex">
+          <TierSwitch tier={tier} onTier={onTier} />
+        </div>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="gl-card h-[118px] motion-safe:animate-pulse" />
@@ -194,17 +225,26 @@ export function Overview({
   }
   const t = stats.totals;
   const publicCount = t.cashOuts + t.deposits;
+  const testnet = stats.tier === "testnet";
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <TierSwitch tier={tier} onTier={onTier} />
+        <p className="text-[12.5px] text-mute">{testnet ? "Testnet figures: counted, never valued in dollars." : "Mainnet figures. Testnet is counted apart."}</p>
+      </div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Private payments" value={fmtInt(t.privatePayments)} sub="amounts hidden, counted" />
+        <Kpi label="Private payments" value={fmtInt(t.privatePayments)} sub="days that have ended (UTC), amounts hidden" />
         <Kpi
           label="Public volume"
-          value={fmtUsd(t.publicVolumeUsd)}
-          sub={`${fmtInt(publicCount)} cash outs and deposits${t.unpriced ? `, ${t.unpriced} unpriced` : ""}`}
+          value={testnet ? "Not priced" : fmtUsd(t.publicVolumeUsd)}
+          sub={`${fmtInt(publicCount)} cash outs and deposits${!testnet && t.unpriced ? `, ${t.unpriced} unpriced` : ""}`}
         />
-        <Kpi label="Would-be fees" value={fmtUsd(t.commissionUsd)} sub={mainnetLive ? "nothing charged yet" : "testnet, nothing charged"} />
-        <Kpi label="Active keys" value={fmtInt(activeKeys)} sub={stats.lastActivity ? `last payment ${ago(stats.lastActivity)}` : "no payments yet"} />
+        <Kpi
+          label="Would-be fees"
+          value={testnet ? "Not priced" : fmtUsd(t.commissionUsd)}
+          sub={testnet ? "testnet, nothing charged" : mainnetLive ? "nothing charged yet" : "nothing charged"}
+        />
+        <Kpi label="Active keys" value={fmtInt(activeKeys)} sub={stats.lastActivity ? `last cash out, deposit or swap ${ago(stats.lastActivity)}` : "nothing public yet"} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
@@ -223,6 +263,7 @@ export function Overview({
                 ["Private payment", `$${(fees.privatePaymentCents / 100).toFixed(2)} each`, t.privatePayments, true],
                 ["Cash out", `${(fees.cashoutBps / 100).toFixed(2)}%`, t.cashOuts, false],
                 ["Deposit", `${(fees.depositBps / 100).toFixed(2)}%`, t.deposits, false],
+                ["Private swap", "No fee", t.privateSwaps, false],
               ] as const
             ).map(([k, v, n, sealed]) => (
               <li key={k} className="flex min-h-[56px] items-center justify-between gap-3 px-5 sm:px-6">
@@ -246,16 +287,16 @@ export function Overview({
       </div>
 
       <Card
-        title="Recent payments"
+        title="Recent cash outs, deposits and swaps"
         flush
         action={<span className="text-[12.5px] text-mute">{loading ? "Checking…" : "Updates every 20 seconds"}</span>}
-        foot="Private payments never show an amount, to you or to us. Fees on cash outs and deposits would be paid in the same token."
+        foot="Cash outs, deposits and swaps are public on chain, so they are listed with their transaction. Private payments are never listed one by one, and are counted only once their day (UTC) has ended, so no hidden payment can be tied to an invoice, a link or a moment. Fees on cash outs and deposits would be paid in the same token."
       >
         {stats.recent.length === 0 ? (
           <div className="px-5 py-12 text-center sm:px-6">
-            <p className="text-[15px] text-foreground">No payments yet</p>
+            <p className="text-[15px] text-foreground">Nothing listed yet</p>
             <p className="mx-auto mt-1.5 max-w-[46ch] text-[13.5px] leading-relaxed text-mute">
-              Relay a payment with one of your keys and it shows up here within seconds.
+              Relay a payment with one of your keys, or share a link with your link code, and it shows up here once it lands.
             </p>
             <button type="button" onClick={onQuickstart} className="btn btn-ghost btn-sm mt-5">
               See the quickstart
@@ -266,8 +307,15 @@ export function Overview({
         )}
       </Card>
 
+      <PartnerBreakdown
+        stats={stats}
+        days={stats.days ?? 14}
+        notMatched={stats.notMatched}
+        csv={{ daily: `/api/partners/export?type=daily&tier=${stats.tier}`, transactions: `/api/partners/export?type=transactions&tier=${stats.tier}` }}
+      />
+
       {stats.byAsset.length > 0 && (
-        <Card title="By token" flush foot="Whole tokens. Fees would be paid in the token the user moved, to your payout address on that network.">
+        <Card title="Would-be fees by token" flush foot="Whole tokens. Fees would be paid in the token the user moved, to your payout address on that network.">
           <div className="overflow-x-auto">
             <table className="tnum w-full text-left text-[14px]">
               <thead className="border-b border-line bg-surface">

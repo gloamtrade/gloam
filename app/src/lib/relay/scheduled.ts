@@ -77,8 +77,8 @@ export const DAY_MS = 24 * 60 * 60 * 1000;
 export const MAX_DATED_DAYS = 90;
 /**
  * Chains that take no dated jobs. A top-up is two relay transactions paid for
- * out of a 0.25% fee, and at Ethereum mainnet's gas that loses money on any
- * amount the vault takes. Its testnet keeps them.
+ * out of the cash-out fee, and Ethereum mainnet's gas costs more than that
+ * brings in. Its testnet keeps them.
  */
 const DATED_OFF_CHAINS: ReadonlySet<number> = new Set([1]);
 export const DATED_OFF_MESSAGE =
@@ -174,8 +174,18 @@ export function jobView(j: CashOutJob): JobView {
   };
 }
 
+/**
+ * A uniform draw in [0, 1) from the platform's cryptographic random source (Web
+ * Crypto, in Node and the browser alike), 53 bits of it, so a send time can't
+ * be worked out from earlier ones.
+ */
+export function secureRandom(): number {
+  const [hi, lo] = globalThis.crypto.getRandomValues(new Uint32Array(2));
+  return (hi! * 2 ** 21 + (lo! >>> 11)) / 2 ** 53;
+}
+
 /** A send time drawn uniformly inside the window, never sooner than MIN_DELAY_MS. */
-export function drawSendAfter(now: number, window: DelayWindow, random: () => number = Math.random): number {
+export function drawSendAfter(now: number, window: DelayWindow, random: () => number = secureRandom): number {
   const span = DELAY_WINDOWS[window];
   return now + MIN_DELAY_MS + Math.floor(random() * (span - MIN_DELAY_MS));
 }
@@ -194,7 +204,7 @@ export function sendDayProblem(day: unknown, now: number): string | null {
 }
 
 /** A send time drawn uniformly inside the UTC day `day`, never sooner than MIN_DELAY_MS. */
-export function drawSendOn(now: number, day: number, random: () => number = Math.random): number {
+export function drawSendOn(now: number, day: number, random: () => number = secureRandom): number {
   const from = Math.max(day, now + MIN_DELAY_MS);
   return from + Math.floor(random() * Math.max(1, day + DAY_MS - from));
 }
@@ -348,6 +358,8 @@ const REFUSED = new Set([
   "rate_limit",
   "check_failed",
   "gas_high",
+  "gas_most",
+  "spend_cap",
 ]);
 /** Of those, the ones that mean this cash out can never go out as it is. */
 const PERMANENT = new Set(["screened", "asset_policy", "vault_recipient", "bad_request", "network"]);
@@ -542,17 +554,26 @@ function waitForGas(store: JobStore, job: CashOutJob, now: number): Promise<JobS
   return settle(store, job, "scheduled", now, { notBefore: now + GAS_RECHECK_MS, reason: GAS_WAIT_REASON, gasHeldAt: now });
 }
 
+/** Two hex strings the same, in any letter case. */
+function sameHex(a: unknown, b: unknown): boolean {
+  return typeof a === "string" && typeof b === "string" && /^0x[0-9a-fA-F]{64}$/.test(b) && a.toLowerCase() === b.toLowerCase();
+}
+
 /**
- * Cancels a job that has not gone out. Returns its status after the call:
+ * Cancels a job that has not gone out, for whoever holds its note: `nullifier`
+ * must be the spend's own (the app works it out from the note's secret; it is
+ * not public until the cash out lands). Returns its status after the call:
  * "sending" once a run has reached the send (it may be on its way, so only
- * the chain can settle it), whatever its status says.
+ * the chain can settle it), whatever its status says; "not_yours" when the
+ * nullifier is not this job's (nothing changes).
  */
-export async function cancelJob(store: JobStore, id: string, now: number): Promise<JobStatus | null> {
+export async function cancelJob(store: JobStore, id: string, now: number, nullifier: string): Promise<JobStatus | "not_yours" | null> {
   const release = await store.lock(id, 30);
   if (!release) return "sending";
   try {
     const job = await store.get(id);
     if (!job) return null;
+    if (!sameHex(job.nullifier, nullifier)) return "not_yours";
     if (job.status === "scheduled" && (job.attempts > 0 || job.maybeSent)) return "sending";
     if (job.status !== "scheduled") return job.status;
     await store.put(retire({ ...job, status: "cancelled", updatedAt: now }, "cancelled"));

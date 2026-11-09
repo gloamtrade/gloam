@@ -188,5 +188,5 @@ export function getPublicClient(net: McpNetwork = MCP_NETWORKS.robinhood) {
   const transport = net.historyRpc
     ? splitReadTransport<HttpTransport>({ fresh, history: http(net.historyRpc.url), recentBlocks: net.historyRpc.recentBlocks })
     : fresh;
-  return createPublicClient({ chain: chainFor(net), transport });
+  return createPublicClient({ chain: chainFor(net), ccipRead: false, transport });
 }

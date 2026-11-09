@@ -68,6 +68,7 @@ import {
   type PayrollRowStatus,
 } from "@/lib/payroll";
 import { holdsPendingPayment } from "@/lib/payrollStore";
+import { walletErrorForPeople } from "@/lib/walletErrors";
 import {
   cadenceLabel,
   dayLabel,
@@ -489,12 +490,26 @@ export function PayrollView() {
   const [batches, setBatches] = useState<PayrollBatch[]>([]);
   const [active, setActive] = useState<PayrollBatch | null>(null);
   const [running, setRunning] = useState(false);
+  const startGate = useRef(false);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   /** The finished run whose total is being proven (the Prove the total dialog). */
   const [proving, setProving] = useState<PayrollBatch | null>(null);
   const stopRef = useRef(false);
+
+  // An open run belongs to its network: its claim links, explorer links and labels are
+  // built from the network shown. A switch closes it (it stays in that network's history);
+  // a run still going is left alone and closes once it ends.
+  const shownChain = useRef(network.chainId);
+  useEffect(() => {
+    if (shownChain.current === network.chainId || running) return;
+    shownChain.current = network.chainId;
+    setActive(null);
+    setProving(null);
+  }, [network.chainId, running]);
 
   const reloadBatches = useCallback(() => {
     // A demo keeps its runs in memory only.
@@ -620,7 +635,7 @@ export function PayrollView() {
         clearDraft();
       }
     } catch (e) {
-      setRunError(e instanceof Error ? e.message : "Payroll stopped.");
+      setRunError(walletErrorForPeople(e, "Payroll stopped."));
     } finally {
       setRunning(false);
       refreshNotes();
@@ -633,7 +648,15 @@ export function PayrollView() {
     if (!address || !pool || !canRun) return;
     // The schedule's cap is a hard stop, checked again right before anything is built.
     if (loaded && (wrongAsset || overCap(total, loaded) > 0n)) return;
-    const batch = newBatch({
+    // Saving the run takes a moment (a lock, then the stored runs re-sealed) before
+    // `running` is set: a second click then would start a second run of the same list.
+    if (startGate.current) return;
+    startGate.current = true;
+    setStarting(true);
+    setStartError(null);
+    let batch: PayrollBatch;
+    try {
+      batch = newBatch({
       title: title.trim() || "Payroll",
       chainId: network.chainId,
       pool,
@@ -642,8 +665,15 @@ export function PayrollView() {
       relay: relayOn,
       rows: parsed.rows,
       schedule: loaded && fromSchedule ? fromSchedule : undefined,
-    });
-    if (!demo) await saveBatch(batch);
+      });
+      if (!demo) await saveBatch(batch);
+    } catch {
+      setStartError("Couldn't save this run in the browser, so nothing was paid. Free up some space or leave private browsing, then try again.");
+      return;
+    } finally {
+      startGate.current = false;
+      setStarting(false);
+    }
     track("payroll_run_started", { people: batch.rows.length, chainId: batch.chainId, relay: batch.relay && relayAvailable });
     if (batch.scheduleId) track("schedule_run", { people: batch.rows.length, chainId: batch.chainId });
     await execute(batch);
@@ -1531,9 +1561,23 @@ export function PayrollView() {
                   Add {formatAssetAmountExact(plan.shortfall, asset)} {token.symbol} privately
                 </Link>
               ) : (
-                <button type="button" disabled={!canRun} onClick={() => void startRun()} className="btn btn-ink btn-lg btn-block">
-                  {validRows.length > 0 ? `Pay ${people(validRows.length)} privately` : "Pay privately"}
+                <button type="button" disabled={!canRun || starting} onClick={() => void startRun()} className="btn btn-ink btn-lg btn-block">
+                  {starting ? (
+                    <>
+                      <Spinner className="h-4 w-4" />
+                      Starting…
+                    </>
+                  ) : validRows.length > 0 ? (
+                    `Pay ${people(validRows.length)} privately`
+                  ) : (
+                    "Pay privately"
+                  )}
                 </button>
+              )}
+              {startError && (
+                <p role="alert" className="mt-2.5 text-center text-[12.5px] text-danger">
+                  {startError}
+                </p>
               )}
               {blocker && <p className="mt-2.5 text-center text-[12.5px] text-mute">{blocker}</p>}
               {!blocker && validRows.length === 0 && (

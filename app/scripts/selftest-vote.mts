@@ -63,7 +63,7 @@ const final = await import("../src/lib/vote/final");
 const { ballotsCsv } = await import("../src/lib/vote/results");
 const { kv, resetMemoryKv } = await import("../src/lib/partnersKv");
 const directory = await import("../src/lib/contractDirectory");
-const { VAULT_SWAP_ROUTERS, VAULT_SWAP_V2_ROUTER } = await import("../src/lib/vaultSwap");
+const { VAULT_SWAP_ROUTERS, VAULT_SWAP_V2_ROUTER, VAULT_SWAP_V3_ADDRESS, swapV3Live } = await import("../src/lib/vaultSwap");
 
 type VoteConfig = (typeof VOTES)[number];
 type Ballot = import("../src/lib/vote/core").Ballot;
@@ -212,7 +212,9 @@ await test("the standing exclusions name the team wallets, the vault, the swap r
   assert.ok(has(directory.GLOAM_DEPLOYER), "deployer");
   for (const r of directory.GLOAM_RELAYERS) assert.ok(has(r), "relayer");
   assert.ok(has("0x39e28cde55cab798874746ac52cb4b5cc99a0194"), "vault");
-  for (const r of [...Object.values(VAULT_SWAP_ROUTERS), ...Object.values(VAULT_SWAP_V2_ROUTER)]) if (r) assert.ok(has(r), `router ${r}`);
+  // Robinhood Chain's routers: GLOAM lives there, and the next one is listed once it is live
+  for (const r of [VAULT_SWAP_ROUTERS[4663], ...Object.values(VAULT_SWAP_V2_ROUTER)]) if (r) assert.ok(has(r), `router ${r}`);
+  assert.equal(has(VAULT_SWAP_V3_ADDRESS[4663]!), swapV3Live(4663), "the next router, only once it is live");
   assert.ok(has("0x8366a39cc670b4001a1121b8f6a443a643e40951"), "v4 PoolManager");
   assert.ok(has("0x0000000000000000000000000000000000000000"), "zero");
   // a vote's own extras add to the list, never replace it
@@ -338,6 +340,18 @@ await test("the voting window and the signing time are enforced", async () => {
   // a fast clock signing past the close is refused, so it can't replace a vote that counts with one that doesn't
   await rejects(submitBallot(await sign(alice, 1, Math.floor(END / 1000)), ctx({ now: END - 1_000 })), "stale");
   await rejects(submitBallot(await sign(alice, 1, Math.floor(END / 1000) + 30), ctx({ now: END - 1_000 })), "stale");
+  // a signature from before the open is refused when it is sent, since the count would leave it out
+  const early = await sign(bob, 1, Math.floor(START / 1000) - 90);
+  await rejects(submitBallot(early, ctx({ now: START + 5_000 })), "stale");
+  await rejects(submitBallot(await sign(bob, 1, Math.floor(START / 1000) - 1), ctx({ now: START + 1_000 })), "stale");
+  try {
+    await submitBallot(early, ctx({ now: START + 5_000 }));
+  } catch (e) {
+    assert.match((e as Error).message, /before this vote opened/);
+  }
+  assert.ok(!(await listBallots(testVote.id)).some((b) => b.voter.toLowerCase() === bob.address.toLowerCase()), "nothing kept");
+  // the first second of the window counts
+  await submitBallot(await sign(bob, 1, Math.floor(START / 1000)), ctx({ now: START + 1_000 }));
 });
 
 await test("bad input is refused before any check", async () => {
@@ -666,26 +680,47 @@ await test("connected holders: the signed votes are noted, and stay noted", asyn
   assert.ok(csv.includes(getAddress(topHolder)) && csv.includes(topWei) && csv.includes('"yes"'));
 });
 
+await test("holder records: only a wallet with $GLOAM, a signed vote or a team listing is stored new", () => {
+  const none = { address: carol.address, snapshot: "0", eligible: false, excluded: null, signed: [] as string[] };
+  assert.equal(holders.worthRecording(none, null), false);
+  assert.equal(holders.worthRecording(none, 0n), false);
+  assert.equal(holders.worthRecording(none, 1n), true, "holds some now");
+  assert.equal(holders.worthRecording({ ...none, snapshot: "1" }, null), true, "held at a snapshot");
+  assert.equal(holders.worthRecording({ ...none, signed: ["v"] }, null), true, "signed a vote");
+  assert.equal(holders.worthRecording({ ...none, excluded: "Team" }, null), true, "a listed team address");
+});
+
 await test("the seen route: balances from the server only, bad input refused, rate limited", async () => {
   // whatever balance the browser claims is ignored
   const res = await seenRoute.POST(seenReq({ address: carol.address, snapshot: (999n * ONE).toString(), current: (999n * ONE).toString(), eligible: true }));
   assert.equal(res.status, 200);
   const j = (await res.json()) as { data: { current: string | null; recorded: boolean } };
   assert.equal(j.data.current, null, "no chain read in the self-test");
-  assert.equal(j.data.recorded, true);
-  const rec = await holders.getHolder(carol.address);
-  assert.equal(rec!.snapshot, "0");
-  assert.equal(rec!.current, null);
-  assert.equal(rec!.eligible, false);
+  // nothing at the snapshot, nothing read now, no vote signed: answered, not stored
+  assert.equal(j.data.recorded, false, "a wallet with no $GLOAM is not stored");
+  assert.equal(await holders.getHolder(carol.address), null);
+  // a flood of made-up addresses stores nothing
+  const stored = (await holders.listHolders()).length;
+  for (let i = 0; i < 10; i++) {
+    const r = await seenRoute.POST(seenReq({ address: privateKeyToAccount(generatePrivateKey()).address }, `198.51.100.${i + 1}`));
+    assert.equal(((await r.json()) as { data: { recorded: boolean } }).data.recorded, false);
+  }
+  assert.equal((await holders.listHolders()).length, stored, "nothing new stored");
   // a team wallet is recorded as excluded
   await seenRoute.POST(seenReq({ address: TEAM_WALLET }));
   const t = await holders.getHolder(TEAM_WALLET);
   assert.equal(t!.eligible, false);
   assert.match(t!.excluded ?? "", /Team/);
-  // twice is still one record
-  await seenRoute.POST(seenReq({ address: carol.address }));
-  assert.equal((await holders.listHolders()).length, 2);
-  assert.equal((await holders.getHolder(carol.address))!.visits, 2);
+  // a holder at the snapshot is recorded, whatever the browser claims; twice is still one record
+  const before = (await holders.getHolder(topHolder))?.visits ?? 0;
+  const h = await seenRoute.POST(seenReq({ address: topHolder, snapshot: "1" }));
+  assert.equal(((await h.json()) as { data: { recorded: boolean } }).data.recorded, true);
+  const rec = await holders.getHolder(topHolder);
+  assert.equal(rec!.snapshot, topWei);
+  assert.equal(rec!.visits, before + 1);
+  await seenRoute.POST(seenReq({ address: topHolder }));
+  assert.equal((await holders.getHolder(topHolder))!.visits, before + 2);
+  assert.equal((await holders.listHolders()).length, stored + 1 + (before === 0 ? 1 : 0), "the team wallet and the holder, once each");
 
   for (const bad of [{}, { address: "nope" }, { address: 42 }, "not json"]) assert.equal((await seenRoute.POST(seenReq(bad))).status, 400);
   assert.equal((await seenRoute.POST(seenReq({ address: `0x${"1".repeat(40)}`, pad: "x".repeat(600) }))).status, 413);
@@ -969,6 +1004,13 @@ await test("weight at close: stored once, on the first results request after the
   assert.equal(doc.ballots.find((b) => b.voter === dave.address)?.weight, (130n * ONE).toString());
   // a snapshot-weighted vote never has a final count
   assert.equal(await final.ensureFinal(testVote, excluded, snapshot, { now: after }), null);
+});
+
+await test("a closed vote's outcome reaches Glim, and an open one's doesn't", async () => {
+  const { voteFacts } = await import("../src/lib/vote/glim");
+  const v = { ...VOTES[0]!, outcome: "Stablecoin swaps are next." };
+  assert.match(voteFacts([v], Date.parse(v.end) + 1000) ?? "", /Result: Stablecoin swaps are next\./);
+  assert.doesNotMatch(voteFacts([v], Date.parse(v.start) + 1000) ?? "", /Result:/);
 });
 
 await test("weight at close: feedback and Glim follow what a wallet holds now", async () => {

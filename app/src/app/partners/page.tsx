@@ -8,6 +8,7 @@ import { SealDots } from "@/components/ui/SealDots";
 import { CodeTabs, type CodeTab } from "@/app/sdk/SdkClient";
 import { MainnetCopy } from "@/components/MainnetCountdown";
 import { MAINNET_CONFIGURED } from "@/lib/mainnet";
+import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
 import { LivePartnersSection } from "@/components/LivePartners";
 
 export const metadata: Metadata = {
@@ -138,7 +139,9 @@ const FEES = [
 const STEPS = [
   {
     title: "Get a key",
-    body: "Sign in with your wallet, name your app, and make an API key. It is shown once; we keep only a fingerprint of it.",
+    body: EMBEDDED_WALLETS
+      ? "Sign in with your wallet or email, name your app, and make an API key. It is shown once; we keep only a fingerprint of it."
+      : "Sign in with your wallet, name your app, and make an API key. It is shown once; we keep only a fingerprint of it.",
   },
   {
     title: "Set your fee",
@@ -221,8 +224,13 @@ export default function PartnersPage() {
                 </p>
                 <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
                   <Link href="/partners/dashboard" className="btn btn-ink btn-lg">
-                    Sign in with your wallet
+                    {EMBEDDED_WALLETS ? "Connect wallet" : "Sign in with your wallet"}
                   </Link>
+                  {EMBEDDED_WALLETS && (
+                    <Link href="/partners/dashboard?with=email" className="btn btn-ghost btn-lg">
+                      Sign in with email
+                    </Link>
+                  )}
                   <Link href="/docs/partners" className="gl-arrowlink">
                     Read the API docs <span aria-hidden>→</span>
                   </Link>
@@ -326,7 +334,7 @@ export default function PartnersPage() {
                           zero-knowledge circuits and the vault contract, so the fee
                           is paid by the proof itself and nobody can skip it. The
                           mainnet pools do not have one yet. The only fee on mainnet
-                          today is Gloam&apos;s own 0.25% on cash outs.
+                          today is Gloam&apos;s own 0.5% on cash outs.
                         </p>
                       </div>
                     </>

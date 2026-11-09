@@ -1,3 +1,5 @@
+import { ELYSIUM, ELYSIUM_TESTNET, isElysiumChainId, isElysiumFamilyChainId, isElysiumTestnetChainId } from "./elysium";
+
 /**
  * Robinhood Chain testnet stock tokens (from public explorer / faucet).
  * Balances are real onchain. USD marks use live equity prices.
@@ -117,9 +119,9 @@ const CASHCAT: OnchainToken = { id: "cashcat", symbol: "CASHCAT", name: "Cash Ca
 
 /**
  * Robinhood Chain mainnet (4663): exactly what the mainnet pool lists. USDG and
- * $GLOAM, San Verano's $GRIFT once its limit lands, PONS and CASHCAT (open now),
- * then AI and ORBIO once theirs land. Native ETH is listed too (supportsNativeShield)
- * and opens the same way (isNativeAddable). The app reads every limit from the pool
+ * $GLOAM, PONS, CASHCAT, AI and ORBIO (AI and ORBIO open since 2026-11-03), and
+ * San Verano's $GRIFT once its limit lands. Native ETH is listed too
+ * (supportsNativeShield) and opened with AI and ORBIO (isNativeAddable). The app reads every limit from the pool
  * (see ShieldView); the values are in RH_MAINNET_ASSETS (packages/sdk).
  */
 export const RH_MAINNET_TOKENS: OnchainToken[] = [
@@ -179,7 +181,7 @@ export const RH_MAINNET_SWAP_TOKENS: OnchainToken[] = [
 
 /**
  * Tempo mainnet (4217): the four TIP-20 stablecoins the mainnet pool lists, 6
- * decimals each. Beta limits: 50,000 per deposit / 2,500,000 in total for each.
+ * decimals each. Deposit limits: 50,000 per deposit / 2,500,000 in total for each.
  */
 export const TEMPO_MAINNET_TOKENS: OnchainToken[] = [
   { id: "usdce", symbol: "USDC.e", name: "Bridged USDC", address: "0x20c000000000000000000000b9537d11c60e8b50", decimals: 6, yahoo: "", kind: "stablecoin" },
@@ -213,7 +215,7 @@ const BDX: OnchainToken = {
  * Base mainnet (8453): the stablecoins the mainnet pool lists, 6 decimals each,
  * checked on chain 2026-10-24. USDC and EURC are Circle's own (Circle can
  * blacklist an address); USDT is Tether bridged from Ethereum over Base's
- * standard bridge. Native ETH is listed too (supportsNativeShield). Beta limits:
+ * standard bridge. Native ETH is listed too (supportsNativeShield). Deposit limits:
  * 50,000 per deposit / 2,500,000 in total for each stablecoin, 20 / 1,000 ETH. Then BDX,
  * taken once its limit lands.
  */
@@ -226,7 +228,7 @@ export const BASE_MAINNET_TOKENS: OnchainToken[] = [
 
 /**
  * Base Sepolia (84532): Circle's test USDC and EURC (faucet.circle.com), 6
- * decimals, checked on chain 2026-10-24. Beta limits: 500 per deposit / 25,000 in
+ * decimals, checked on chain 2026-10-24. Deposit limits: 500 per deposit / 25,000 in
  * total for each, 0.2 / 10 ETH. There is no USDT on Base Sepolia to list.
  */
 export const BASE_SEPOLIA_TOKENS: OnchainToken[] = [
@@ -240,7 +242,7 @@ export const BASE_SEPOLIA_TOKENS: OnchainToken[] = [
  * Circle's, USDT is Tether's, USDG and PYUSD are Paxos's (PYUSD for PayPal); every
  * issuer can freeze an address. USDT's approve() and transfer() return nothing,
  * and approve() refuses to change one non-zero allowance into another. Native ETH
- * is listed too (supportsNativeShield). Beta limits: 50,000 per deposit / 2,500,000 in
+ * is listed too (supportsNativeShield). Deposit limits: 50,000 per deposit / 2,500,000 in
  * total for each stablecoin, 20 / 1,000 ETH. Then BDX (9 decimals), taken once its
  * limit lands.
  */
@@ -298,8 +300,30 @@ export const ETHEREUM_SEPOLIA_TOKENS: OnchainToken[] = [
   { id: "eurc", symbol: "EURC", name: "Euro Coin", address: "0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4", decimals: 6, yahoo: "", kind: "stablecoin", coingecko: "euro-coin", peg: "EUR" },
 ];
 
+/** Native ETH, as a private swap lists it: the vault's address(0), on the chains that hold it. */
+export const NATIVE_ETH_TOKEN: OnchainToken = { id: "eth", symbol: "ETH", name: "Ether", address: "0x0000000000000000000000000000000000000000", decimals: 18, yahoo: "", kind: "token", coingecko: "ethereum" };
+
+/**
+ * Elysium mainnet: USDC only at launch, with the launch limits (500 per deposit,
+ * 25,000 in total), behind NEXT_PUBLIC_ELYSIUM_ENABLED (lib/elysium.ts). Its
+ * address and decimals come from there. HYPE, the gas coin, is not listed.
+ */
+export const ELYSIUM_MAINNET_TOKENS: OnchainToken[] = ELYSIUM
+  ? [{ id: "usdc", symbol: "USDC", name: "USD Coin", address: ELYSIUM.usdc, decimals: ELYSIUM.usdcDecimals, yahoo: "", kind: "stablecoin" }]
+  : [];
+
+/**
+ * Elysium testnet (99801): Kinetiq's test USDC only, behind
+ * NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED (lib/elysium.ts). HYPE is not listed.
+ */
+export const ELYSIUM_TESTNET_TOKENS: OnchainToken[] = ELYSIUM_TESTNET
+  ? [{ id: "usdc", symbol: "USDC", name: "USD Coin", address: ELYSIUM_TESTNET.usdc, decimals: ELYSIUM_TESTNET.usdcDecimals, yahoo: "", kind: "stablecoin" }]
+  : [];
+
 /** ERC-20 tokens shieldable on a given chain (stablecoins first). */
 export function shieldTokensFor(chainId: number): OnchainToken[] {
+  if (isElysiumChainId(chainId)) return ELYSIUM_MAINNET_TOKENS;
+  if (isElysiumTestnetChainId(chainId)) return ELYSIUM_TESTNET_TOKENS;
   if (chainId === 11155111) return ETHEREUM_SEPOLIA_TOKENS;
   if (chainId === 4663) return RH_MAINNET_TOKENS;
   if (chainId === 4217) return TEMPO_MAINNET_TOKENS;
@@ -438,6 +462,8 @@ export function knownTokens(chainId?: number): OnchainToken[] {
  * isNativeAddable says so.
  */
 export function supportsNativeShield(chainId: number): boolean {
+  // Elysium's vaults (mainnet and testnet) do not list HYPE.
+  if (isElysiumFamilyChainId(chainId)) return false;
   return chainId !== 42431 && chainId !== 4217;
 }
 

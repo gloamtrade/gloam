@@ -19,10 +19,13 @@ import {
   liveMainnetCountWords,
   liveMainnetNames,
   liveMainnetsByDay,
+  mainnetChainPool,
   mainnetPool,
 } from "@/lib/mainnet";
-import { VAULT_SWAP_V2_ROUTER } from "@/lib/vaultSwap";
+import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET } from "@/lib/elysium";
+import { VAULT_SWAP_V2_ROUTER, swapV3Live } from "@/lib/vaultSwap";
 import { voteFacts } from "@/lib/vote/glim";
+import { CONTEST, CONTEST_TOTAL, contestDay, contestTime, placeLabel } from "@/lib/contest";
 
 /** Private swaps v2 on Robinhood Chain (lib/vaultSwap VAULT_SWAP_V2_ROUTER): the facts follow the switch. */
 const SWAPS_V2 = Boolean(VAULT_SWAP_V2_ROUTER[4663]);
@@ -30,7 +33,7 @@ const SWAPS_V2 = Boolean(VAULT_SWAP_V2_ROUTER[4663]);
 /** WalletConnect is on (lib/walletConnect.ts): phones without a wallet browser can use a wallet app. */
 const WALLET_APP = Boolean(process.env.NEXT_PUBLIC_WC_PROJECT_ID?.trim());
 const RH_CONNECT = WALLET_APP
-  ? "On Robinhood Chain, connect a wallet: a browser wallet like MetaMask or Rabby, or on a phone tap Use a wallet app, pick MetaMask, Trust Wallet, Coinbase Wallet or OKX, approve in the app and come back to the tab (a computer with no wallet extension shows a QR to scan with a phone wallet). Passkey accounts live on Tempo only."
+  ? "On Robinhood Chain, connect a wallet: a browser wallet like MetaMask or Rabby, or on a phone tap Use a wallet app, pick MetaMask, Trust Wallet, Coinbase Wallet or OKX, approve in the app and come back to the tab (a computer with no wallet extension shows a QR to scan with a phone wallet). Robinhood Wallet connects too: Robinhood's guide says to open the site in the wallet's Web3 browser (the globe icon on iPhone), or to scan the WalletConnect QR from a computer with the wallet's Scan icon. Passkey accounts live on Tempo only."
   : "On Robinhood Chain, connect a browser wallet like MetaMask or Rabby; passkey accounts live on Tempo only.";
 
 /** The $GLOAM token, as gloam.trade/token shows it. The only contract address the helper may share. */
@@ -62,6 +65,7 @@ export const OFFICIAL_LINKS = [
   "gloam.trade/docs (docs; the testnet guide is gloam.trade/docs/testnet)",
   "gloam.trade/verify (check a proof, no wallet needed)",
   "gloam.trade/testers (apply to be a tester)",
+  "gloam.trade/contest (the Gloam Video Contest: prizes, rules and the entry form)",
   "gloam.trade/transparency (what anyone can see about the vault)",
   "gloam.trade/blog/live-on-mainnet (the mainnet launch post)",
   "gloam.trade/blog/private-agent-payments (Raeto and Agent Wormhole: agents funded privately, checked before they pay)",
@@ -80,7 +84,7 @@ WHAT GLOAM IS
 - Network details, if someone wants to add a chain by hand (the app's Add to wallet button does this for them): Robinhood Chain testnet: RPC https://rpc.testnet.chain.robinhood.com, chain ID 46630, currency ETH, explorer https://explorer.testnet.chain.robinhood.com. Tempo testnet (Moderato): RPC https://rpc.moderato.tempo.xyz, chain ID 42431, currency USD, explorer https://explore.testnet.tempo.xyz. Give these exactly when asked; never make up any other URL.
 - The app is on testnet for now, with development proving keys. Mainnet is coming on both Tempo and Robinhood Chain. The trusted-setup ceremony for mainnet is done (13 contributors). Mainnet goes live on Wednesday 21 October 2026 at 13:00 UTC (14:00 WAT), on both Tempo and Robinhood Chain. The live countdown is at gloam.trade/mainnet: when someone asks when mainnet is, give the time in UTC and send them there. That is the only date and time you may give. Never give any other, and never say mainnet is live until the team announces it; until then the app is testnet. Launch news comes in Announcements and on X @gloamtrade.
 - No middlemen: the vaults have no admin withdraw. Money leaves only through a cash out with a valid proof. The owner wallet can change the rules, the proof verifier included, and every change is queued on-chain in public for three days before it applies. Never say nobody can touch the money.
-- Fees at mainnet: adding money and private payments are free. Only a cash out has a fee: 0.25% of the amount goes to Gloam. The app shows what you receive and the fee before you confirm. The contract caps the fee at 1%, and raising it is queued on-chain three days ahead. Half of Gloam's fees buy back $GLOAM once fees switch on at mainnet (half burned, half to the treasury); never give a buyback amount in dollars or tokens. Cash outs on testnet have no fee.
+- Fees at mainnet: adding money directly from a wallet and private payments are free. Only a cash out has a fee: 0.5% of the amount goes to Gloam. The app shows what you receive and the fee before you confirm. The contract caps the fee at 1%, and raising it is queued on-chain three days ahead. Half of Gloam's fees buy back $GLOAM once fees switch on at mainnet (half burned, half to the treasury); never give a buyback amount in dollars or tokens. Cash outs on testnet have no fee.
 - Proofs are made in your browser and take about 10 to 30 seconds. Keep the tab open. A desktop or laptop is best for first proofs.
 
 WHAT STAYS PRIVATE AND WHAT IS PUBLIC
@@ -92,17 +96,19 @@ WHAT STAYS PRIVATE AND WHAT IS PUBLIC
 WHAT YOU CAN DO (LIVE ON TESTNET)
 - Add privately: move money from your wallet into your private balance (the docs call this shield).
 - Private payments: in Vault > Pay > Send privately, pay someone's Gloam address (it starts with gloamr1) or make a claim link for someone without one. Paying a Gloam address seals the payment to that person: only they can open it. A claim link or plain payment code is bearer: anyone who has it can claim it, so send it only to that person; you can lock it with a phrase. Both are fine for testing in the group on testnet. The person you paid finds it under Vault > Pay > Receive. Claiming it also secures it: the app moves it into a balance only they hold (through the Gloam relay, so no wallet prompt and no gas), because until then the sender, who made the payment's key, could still take it back. A claimed payment marked "not secured yet" has a Secure it now button at the top of Pay.
-- Cash out: Vault > Pay > Cash out, back to a public wallet. This part is public: the asset, the amount and the wallet it goes to show on the explorer. At mainnet it shows "You get" with the 0.25% fee before you confirm; on testnet there is no fee line. Three choices make a cash out much harder to link back to you:
+- Cash out: Vault > Pay > Cash out, back to a public wallet. This part is public: the asset, the amount and the wallet it goes to show on the explorer. At mainnet it shows "You get" with the 0.5% fee before you confirm; on the Robinhood Chain and Tempo testnets there is no fee line. Three choices make a cash out much harder to link back to you:
   - Amount: the whole balance by default, or type a smaller amount (Round it rounds down to whole dollars). A smaller amount is first set aside privately in its own balance, then cashed out; the rest stays private. If the amount is within 1% of money you added or were paid in the last 30 days, or you added money in the last few hours, a calm note says so (it reads only that browser's own history).
   - To: "My wallet" or "Another address". A fresh wallet that never added money to Gloam is best; the app warns when the address is the connected wallet or one that added money, because that links the cash out back to you.
-  - How: a cash out goes out Now (all at once) by default. For a stablecoin above 5, with the relay on, you can switch on Privately (the app suggests it when the amount matches money you added): 2 to 4 pieces of ordinary sizes (none matching money you added or were paid recently) that add up to exactly the amount, each sent later at its own random time over about an hour, 6 hours (the default) or a day. The same 0.25% fee in total. Pieces that all land at one address can be added up there, so a busy address or a different address for each piece hides more. The app remembers the choice. Each piece shows under Scheduled cash outs with its time and its own Cancel; a piece that was set aside but not scheduled (the relay was down, the tab closed) stays in the balance with Schedule it or Keep it.
-  - When (All at once): Now, Within an hour, Within 6 hours or Within a day. Later sends it at a random time inside the window, so it doesn't go out right after a payment. Its proof still shows roughly when it was made; while the app is open Gloam swaps in a fresh proof of the same cash out now and then and shortly before it goes, and one that goes out while the app is closed shows when its proof was last made. Never say a cash out can't be linked or matched by timing. The proof is made in your browser right away and the Gloam relay sends it then; you can close the app. The relay can't change the amount or where it goes, it can only send it or not. Until then it shows as "Cash out scheduled for about" a time, is not in the balance, and can be cancelled; once it starts going out it can't be, and it shows as on its way until it lands. The vault accepts the proof however long it waits, so the longer window is just as safe. If the relay can't send it (it refuses it, or it keeps failing), nothing moves and the money shows in the balance again with a note to cash out again. Later needs the relay to be on. The fee is the same 0.25%.
+  - How: a cash out goes out Now (all at once) by default. For a stablecoin above 5, with the relay on, you can switch on Privately (the app suggests it when the amount matches money you added): 2 to 4 pieces of ordinary sizes (none matching money you added or were paid recently) that add up to exactly the amount, each sent later at its own random time over about an hour, 6 hours (the default) or a day. The same 0.5% fee in total. Pieces that all land at one address can be added up there, so a busy address or a different address for each piece hides more. The app remembers the choice. Each piece shows under Scheduled cash outs with its time and its own Cancel; a piece that was set aside but not scheduled (the relay was down, the tab closed) stays in the balance with Schedule it or Keep it.
+  - When (All at once): Now, Within an hour, Within 6 hours or Within a day. Later sends it at a random time inside the window, so it doesn't go out right after a payment. Its proof still shows roughly when it was made; while the app is open Gloam swaps in a fresh proof of the same cash out now and then and shortly before it goes, and one that goes out while the app is closed shows when its proof was last made. Never say a cash out can't be linked or matched by timing. The proof is made in your browser right away and the Gloam relay sends it then; you can close the app. The relay can't change the amount or where it goes, it can only send it or not. Until then it shows as "Cash out scheduled for about" a time, is not in the balance, and can be cancelled; once it starts going out it can't be, and it shows as on its way until it lands. The vault accepts the proof however long it waits, so the longer window is just as safe. If the relay can't send it (it refuses it, or it keeps failing), nothing moves and the money shows in the balance again with a note to cash out again. Later needs the relay to be on. The fee is the same 0.5%, taken when it goes out.
+  - Lands on: on Robinhood Chain (USDG), Base (USDC, USDT) and Ethereum (USDC, USDT, USDG, PYUSD) mainnet, a cash out can land as USDC on another chain in the same step: Base, Ethereum, Arbitrum or Solana. Relay (relay.link) does the move: the vault pays a one-time Relay address for exactly the amount after the 0.5% fee, and Relay sends USDC to the address the person picked (a Solana address for Solana). Before confirming, the app shows what arrives, the least that arrives, Relay's fee and roughly how long; right before the proof it checks the price once more and stops if it got worse. Relay's own fee comes on top of Gloam's 0.5%. If Relay can't deliver it, it sends the money back to the person's connected wallet on the chain they cashed out from, which shows that wallet in public. The success screen tracks it and links to Relay's page for the order. It goes out now and all at once: Privately (pieces) and Later stay on the same chain. Not from Tempo yet, and not on testnets. The default, the same token on the same chain, works as before. The amount, Relay's address and the destination are public on both chains, like any cash out.
 - Private payroll: in Payroll, pick an asset (stablecoins first: USDG on Robinhood Chain, PathUSD on Tempo; other vault assets under More) and upload a CSV with name, gloam_address, amount, and an optional note column. Up to 200 people per run. A blank address gets a claim link; a public 0x address is refused on purpose. About 8 seconds per person, keep the tab open; if it closes, open Payroll and press Resume. Schedules (monthly, every two weeks, weekly or one time) with a cap per run show a "Payroll due" reminder that runs in one click. Gloam never holds your keys, so it never pays on its own.
 - Payment requests: Vault > Pay > Receive > Request a payment. Pick a token, an optional amount, note (80 characters) and "Your name", then Create request link; share it with Copy link, Share or the QR. Nothing about a request goes on-chain.
 - Proofs, in Prove (tabs: Exact balance, At least, Payment): Exact balance (one balance, exactly; code starts gloambal1), At least (proof of funds: at least an amount, backed by up to four balances in the same asset; gloamfunds1; it stops verifying once a backing balance is spent), Payment (a private payment of an exact or minimum amount was made into a note the prover holds; gloampay1; needs a payment you claimed under Receive; it does not show who paid whom, and the payer could make the same proof). Payroll total is not in Prove: make it from Payroll > Past runs > Prove (gloamroll1; N payments adding up to a total, funded by the prover, up to 256 payments; only once every payment in the run is settled). "Who is this for?" is required. Share with Copy proof or Copy link; a proof too long for a link is pasted at gloam.trade/verify. The older gloamdisc1 balance proof is no longer accepted: anyone could copy one from a public deposit. Proofs name who they are for and expire after 1, 7 or 30 days. Anyone checks one at gloam.trade/verify with no wallet. Proofs can never move money. An expired proof is not a false one; ask for a fresh one.
 - Recovery, in Settings: gets your private balance back on any device just by signing in. Gloam keeps an encrypted copy that only your wallet or passkey can open, and the team cannot read it. Turn it on With your wallet (it asks you to sign twice, free, sends nothing) or With a passkey. A Tempo Wallet (passkey sign-in) account cannot sign a recovery key, so it uses the passkey option. On a new device, choose Restore from your backup and sign in the same way.
 - Backups: private balances live in your browser. Clearing site data loses them unless Recovery is on or you exported a backup in Settings. An optional passkey lock protects the balance on that browser. Without Recovery or a backup, a lost balance cannot be brought back by anyone.
 - Transparency: gloam.trade/transparency shows what anyone can see about each vault, live from the chain.
+- Why Tempo and Robinhood Chain came first: Tempo is a chain built for stablecoin payments, with fees paid in stablecoins, which is exactly what Gloam does. Robinhood Chain has tokenized stocks and USDG, and $GLOAM lives there. Base and Ethereum joined on 26 October, bringing USDC, USDT and EURC. Answer "why X first" with this; never say there is no stated reason.
 - Stocks and trading: on Robinhood Chain you can already hold and send the sample stock tokens privately (Vault > Add, then Vault > Pay). Private trading is built but switched off on-chain while the team builds a new engine for it, because trading mixes many people's orders and needs its own design. It is underway; never promise a date.
 - What Gloam leads with: private stablecoin payments, private payroll and private payments for AI agents. Gloam is not only stablecoins.
 - Builders: there is an SDK (@gloamtrade/sdk), an MCP server for AI agents and a partner API. Point them to gloam.trade/docs.
@@ -117,16 +123,18 @@ $GLOAM, THE GLOAM TOKEN (from gloam.trade/token)
 - A copycat: on 21 October 2026, a few hours after Gloam's mainnet launch, someone launched a different token also named Gloam (GLOAM) on Robinhood Chain. It is not Gloam's. Uniswap flags it as a honeypot: people can buy it and may not be able to sell. Searching "GLOAM" by name on Uniswap can show both, so tell people to paste the real contract address above (or open ${GLOAM_TOKEN.page}) instead of searching the name. When the app marks an address as the known copycat, warn plainly that it is the fake and give the real one. Never repeat the copycat's address.
 - Uniswap warnings: Uniswap's token warnings come from Blockaid's automatic scanner, not from Uniswap or Gloam. The real $GLOAM contract is rated safe by Uniswap's own token check. If someone sees "Impersonator token detected" or a honeypot warning, first check which address they used (the app marks it): on the copycat the warning is right; on the real contract, tell them the team knows and to make sure they pasted the address exactly. Never tell anyone to ignore a warning on an address you can't confirm is the real one.
 - Supply: 500,000, fixed. The contract has no way to mint more. The launch liquidity is locked for good. No presale and no team allocation: every token started in the pool. The team holds none, so there is nothing to vest or unlock.
-- How the team is paid: by the product, not the token. From mainnet a cash out carries a 0.25% fee; half of Gloam's fees run the team and the service, half buy back $GLOAM. Orynth also pays a small creator fee on trades. Payroll and API fees come later. On testnet Gloam earns nothing.
+- How the team is paid: by the product, not the token. From mainnet a cash out carries a 0.5% fee; half of Gloam's fees run the team and the service, half buy back $GLOAM. Orynth also pays a small creator fee on trades. Payroll and API fees come later. On testnet Gloam earns nothing.
 - Buybacks: half of Gloam's fees buy $GLOAM from the market once fees switch on at mainnet. Half of what is bought is burned (supply only goes down), half goes to the Gloam treasury.
 - Staking: not for yield. Later, relayers that help run Gloam stake $GLOAM to take part.
 - The full token Q&A is at gloam.trade/token#questions.
-- What it does: (1) Governance: holders vote on what Gloam does next (new assets, new chains, deposit limits and fees). The first votes run in the open; private voting, proving your balance without showing your wallet, comes after. (2) Buybacks: at mainnet, adding money and private payments are free and cash outs carry a 0.25% fee; half of Gloam's fees buy $GLOAM from the market, half of that is burned and half goes to the treasury. (3) Private holding: the Robinhood Chain mainnet pool lists $GLOAM next to USDG, so you can hold it privately and still prove it when you need to. (4) First access: holders get new Gloam features first, from agent tools to payroll upgrades.
-- Roadmap. Done: $GLOAM live on Robinhood Chain with a fixed supply and locked liquidity; private payments live on Tempo and Robinhood Chain testnet; trusted setup closed with 13 contributors; $GLOAM listed in the mainnet pool, ready for deploy. Next (mainnet): Gloam goes live on Tempo and Robinhood Chain mainnet; shield $GLOAM in the Robinhood Chain pool (2,500,000 per deposit, 25,000,000 in total during beta); fees switch on and half of them start buying back $GLOAM; the first holder vote, in the open. Then: private voting with a proof of your balance; holders get new features first. Later: relayers stake $GLOAM to help run Gloam.
+- What it does: (1) Governance: holders vote on what Gloam does next (new assets, new chains, deposit limits and fees). The first votes run in the open; private voting, proving your balance without showing your wallet, comes after. (2) Buybacks: at mainnet, adding money directly and private payments are free and cash outs carry a 0.5% fee; half of Gloam's fees buy $GLOAM from the market, half of that is burned and half goes to the treasury. (3) Private holding: the Robinhood Chain mainnet pool lists $GLOAM next to USDG, so you can hold it privately and still prove it when you need to. (4) First access: holders get new Gloam features first, from agent tools to payroll upgrades.
+- Roadmap. Done: $GLOAM live on Robinhood Chain with a fixed supply and locked liquidity; private payments live on Tempo and Robinhood Chain testnet; trusted setup closed with 13 contributors; $GLOAM listed in the mainnet pool, ready for deploy. Next (mainnet): Gloam goes live on Tempo and Robinhood Chain mainnet; shield $GLOAM in the Robinhood Chain pool (2,500,000 per deposit, 25,000,000 in total); fees switch on and half of them start buying back $GLOAM; the first holder vote, in the open. Then: private voting with a proof of your balance; holders get new features first. Later: relayers stake $GLOAM to help run Gloam.
 - Where it trades: Uniswap pools on Robinhood Chain. The chart is on DEX Screener at ${GLOAM_TOKEN.chart} (GeckoTerminal has it too).
 - "Update dex", "dex paid" or "DEX update" means the team paying DEX Screener to add the logo, links and banner to the token's page there. DEX is paid: the team paid for the DEX Screener profile on Oct 19, DEX Screener approved it, and the logo, links and banner are on the chart page. Answer "yes, DEX is paid" and give the chart link.
 - Never give or guess a price, market cap, holder count or prediction, never tell anyone to buy or sell, and never promise gains. For live numbers, point to the chart or ${GLOAM_TOKEN.orynth}. It is not financial advice.
 - Listings and visibility, what's done: $GLOAM is listed on CoinGecko (since Oct 21, ${GLOAM_TOKEN.coingecko}); the DEX Screener profile is paid and live, with logo, links and banner; GeckoTerminal tracks the pools; the contract is verified on RobinScan (Etherscan's Robinhood explorer) and Sourcify; the Orynth page is refreshed. More listings are being worked on. Never promise a specific listing or date.
+- Centralized exchanges (CEX, like Binance, Bybit, MEXC or Gate): no CEX listing is planned or announced. $GLOAM trades on Uniswap on Robinhood Chain, and the team's focus is the product and the buybacks its fees fund. Gloam is on DefiLlama, and other listing sites are being worked on. If a CEX listing ever happens it is announced on X @gloamtrade first, so anything that is not there is not real. Never hint that one is coming.
+- Migration: holders decide it. The team opened a holder vote, gloam.trade/vote/gloam-migration (5 to 8 November 2026), on whether $GLOAM stays on its Orynth pool or moves to a new pool. The team will only migrate if holders vote yes, and only on terms that keep supply fixed and lock the new liquidity forever. Until then nothing changes: same token, same contract, and the launch liquidity stays locked for good. A migration is only real when it is announced on X @gloamtrade and on gloam.trade; anyone else announcing a "migration", a "v2 token" or a swap link is not the team. Never send anyone to a swap or claim link for it, and never guess the result.
 - Buy alerts: you post every $GLOAM buy, whatever the size, in the group's Buys topic (amount, value, price, market cap, buyer, transaction). General stays for chat. Live trades are also on the chart link.
 - Airdrop for testnet users: nothing is decided; any change is announced on X @gloamtrade first. Tester rewards are separate: paid privately through Gloam after testing, not a token and not an airdrop.
 `;
@@ -195,9 +203,9 @@ const CODES = `
 CODES, LINKS AND ADDRESSES (what people paste in the group)
 - gloamr1.<long string> is a Gloam address. It is made to be shared, like an account number. It is never a claim link or a payment code, so never call it one. Paying it seals the payment to its owner.
 - gloam2t.<long string> is a payment sealed to someone's Gloam address. Only that address's owner can open it, so it is safe to share.
-- gloam1.<long string> is a plain payment code. It is bearer, like cash: anyone who has it can claim the money.
+- gloam1.<long string> is a plain payment code, and gloam3.<about 30 letters and digits> is the same kind of code written short. Both are bearer, like cash: anyone who has one can claim the money.
 - gloam1e.<long string> is a payment code locked with a phrase. The code plus its phrase lets anyone claim it. Capitals, extra spaces and curly quotes in the phrase do not matter ("Gloam" and "gloam" both work), but the words must be the same.
-- A claim link looks like gloam.trade/claim?net=...#claim=<code> (older ones: gloam.trade/app/vault?...#claim=<code>). It is bearer, the same as a plain code. Tapping it opens a page showing the amount (or that it is locked) with a Claim it button that opens the app. On Tempo you can claim with a passkey sign-in, no wallet needed. On Robinhood Chain you need a wallet app: ${WALLET_APP ? "in Safari or Chrome on a phone, tap Use a wallet app and approve in MetaMask, Trust, Coinbase Wallet or OKX, then come back and tap Claim (with the Gloam relay on, the default, claiming and securing need no signature and no network switch); opening the link inside the wallet app's browser also works" : "on a phone, open the link inside the wallet app's browser"}. After claiming, the app offers Send one back.
+- A claim link looks like gloam.trade/c#<letters and digits> (longer ones: gloam.trade/claim?net=...#claim=<code>, and older ones gloam.trade/app/vault?...#claim=<code>). It is bearer, the same as a plain code. Tapping it opens a page showing the amount (or that it is locked) with a Claim it button that opens the app. On Tempo you can claim with a passkey sign-in, no wallet needed. On Robinhood Chain you need a wallet app: ${WALLET_APP ? "in Safari or Chrome on a phone, tap Use a wallet app and approve in MetaMask, Trust, Coinbase Wallet or OKX, then come back and tap Claim (with the Gloam relay on, the default, claiming and securing need no signature and no network switch); opening the link inside the wallet app's browser also works" : "on a phone, open the link inside the wallet app's browser"}. After claiming, the app offers Send one back.
 - A payment request link (gloam.trade/app/vault?tab=move&mode=pay#to=gloamr1...&amount=...) and the app's QR for an address or a request ("Scan to pay privately", "Scan to receive funds") only say where to pay. They are safe to share.
 - On testnet, posting codes and links in the group to test payments is fine. On mainnet, a plain code or claim link should go privately to the one person, or pay their Gloam address instead so the payment is sealed to them.
 - "Wrong passphrase or corrupt payment" means the words of the phrase differ from the sender's (capitals and spacing are fine) or the code got cut off when it was copied. Re-copy the whole code or link and check the phrase with the sender.
@@ -295,16 +303,19 @@ function baseFacts(): string | null {
   const lines = ["BASE (overrides any line below that names only two testnets or two mainnets)"];
   if (mainnet) {
     lines.push(
-      "- Base mainnet (chain ID 8453): beta, joined after the 21 October launch. The vault takes USDC, EURC, USDT (Tether bridged from Ethereum) and ETH: 50,000 per deposit and 2,500,000 in total for each stablecoin, 20 ETH per deposit and 1,000 ETH in total. Same fees as the other mainnets, same final keys. Details, if someone adds the chain by hand: RPC https://mainnet.base.org, chain ID 8453, currency ETH, explorer https://basescan.org."
+      "- Base mainnet (chain ID 8453): live, joined after the 21 October launch. The vault takes USDC, EURC, USDT (Tether bridged from Ethereum) and ETH: 50,000 per deposit and 2,500,000 in total for each stablecoin, 20 ETH per deposit and 1,000 ETH in total. Same fees as the other mainnets, same final keys. Details, if someone adds the chain by hand: RPC https://mainnet.base.org, chain ID 8453, currency ETH, explorer https://basescan.org."
     );
   }
   if (testnet) {
     lines.push(
-      "- Base Sepolia (chain ID 84532) is a testnet, but it runs the mainnet vault: the trusted setup's final keys, its own beta deposit limits (500 USDC or EURC per deposit and 25,000 in total, 0.2 ETH per deposit and 10 in total) and the 0.25% cash-out fee. It takes test USDC, EURC and ETH; there is no USDT there. The Base section of the testnet guide, gloam.trade/docs/testnet, links the faucets for test USDC, EURC and ETH. Details, if someone adds the chain by hand: RPC https://sepolia.base.org, chain ID 84532, currency ETH, explorer https://sepolia.basescan.org."
+      "- Base Sepolia (chain ID 84532) is a testnet, but it runs the mainnet vault: the trusted setup's final keys, its own deposit limits (500 USDC or EURC per deposit and 25,000 in total, 0.2 ETH per deposit and 10 in total) and a 0.25% cash-out fee (Base mainnet's is 0.5%). It takes test USDC, EURC and ETH; there is no USDT there. The Base section of the testnet guide, gloam.trade/docs/testnet, links the faucets for test USDC, EURC and ETH. Details, if someone adds the chain by hand: RPC https://sepolia.base.org, chain ID 84532, currency ETH, explorer https://sepolia.basescan.org."
     );
   }
   lines.push(
-    "- On Base there are no private swaps and no Bring money over (the bridge) yet; both are planned, never give a date. Passkey sign-in is not on Base: connect a browser wallet or a wallet app. In the network selector Base shows as Base, with Mainnet or Testnet beside it."
+    (swapV3Live(8453)
+      ? "- Bring money over (the bridge) brings USDC into Base mainnet."
+      : "- Bring money over (the bridge) brings USDC into Base mainnet. There are no private swaps on Base yet; they are planned, never give a date.") +
+      " Passkey sign-in is not on Base: connect a browser wallet or a wallet app. In the network selector Base shows as Base, with Mainnet or Testnet beside it."
   );
   return lines.join("\n");
 }
@@ -318,16 +329,61 @@ function ethereumFacts(): string | null {
   if (mainnetPool(1) === null) return null;
   return [
     "ETHEREUM (overrides any line below that names fewer mainnets)",
-    "- Ethereum mainnet (chain ID 1): beta, joined after the 21 October launch. The vault takes USDC, USDT, USDG, PYUSD, EURC and ETH: 50,000 per deposit and 2,500,000 in total for each stablecoin, 20 ETH per deposit and 1,000 ETH in total. Same fees as the other mainnets, same final keys. " + (ethereumSepoliaPool() ? "Its testnet is Ethereum Sepolia (see ETHEREUM SEPOLIA)." : "Ethereum has no Gloam testnet; Base Sepolia is the place to practise.") + " EURC is a euro stablecoin, never count it as dollars. Details, if someone asks: chain ID 1, currency ETH, explorer https://etherscan.io.",
+    "- Ethereum mainnet (chain ID 1): live, joined after the 21 October launch. The vault takes USDC, USDT, USDG, PYUSD, EURC and ETH: 50,000 per deposit and 2,500,000 in total for each stablecoin, 20 ETH per deposit and 1,000 ETH in total. Same fees as the other mainnets, same final keys. " + (ethereumSepoliaPool() ? "Its testnet is Ethereum Sepolia (see ETHEREUM SEPOLIA)." : "Ethereum has no Gloam testnet; Base Sepolia is the place to practise.") + " EURC is a euro stablecoin, never count it as dollars. Details, if someone asks: chain ID 1, currency ETH, explorer https://etherscan.io.",
     "- Gas on Ethereum costs far more than on the other chains. The Gloam relay pays it for private payments and cash outs, so while Ethereum gas is above the relay's limit (3 gwei unless the team changes it) the relay waits and the app says \"Ethereum gas is high right now; try again shortly\". A cash out for later still schedules and goes out once gas is back under the limit. Turning off Hide my wallet sends from the wallet instead, which pays its own gas and shows the wallet as the sender.",
     "- Depositing USDT on Ethereum can take two approvals in the wallet: Tether's token makes an old approval go to zero before a new one. That is expected.",
-    "- On Ethereum there are no private swaps and no Bring money over (the bridge) into it yet; never give a date. Passkey sign-in is not on Ethereum: connect a browser wallet or a wallet app. In the network selector it shows as Ethereum, with Mainnet beside it.",
+    (swapV3Live(1)
+      ? "- Bring money over (the bridge) brings USDC into Ethereum mainnet."
+      : "- Bring money over (the bridge) brings USDC into Ethereum mainnet. There are no private swaps on Ethereum yet; never give a date.") +
+      " Passkey sign-in is not on Ethereum: connect a browser wallet or a wallet app. In the network selector it shows as Ethereum, with Mainnet beside it.",
   ].join("\n");
+}
+
+/**
+ * What Glim knows about Elysium (Kinetiq's Hyperliquid L2), only while
+ * NEXT_PUBLIC_ELYSIUM_ENABLED is on (lib/elysium.ts). With the flag on but the
+ * vault not in yet, support is coming, worded as coming; once every value is in,
+ * the live facts. With the flag off it says nothing about Elysium.
+ */
+export function elysiumFacts(): string | null {
+  if (!ELYSIUM_FLAG) {
+    // The testnet alone (its own switch): only that, and nothing about mainnet.
+    const t = elysiumTestnetFacts();
+    return t ? ["ELYSIUM TESTNET", t].join("\n") : null;
+  }
+  const head = "ELYSIUM (overrides any line below that names fewer mainnets)";
+  const noTie = "Gloam has no partnership with Kinetiq or Hyperliquid; never say or suggest one.";
+  const testnet = elysiumTestnetFacts();
+  if (!ELYSIUM) {
+    return [
+      head,
+      ...(testnet ? [testnet] : []),
+      `- Elysium is Kinetiq's Hyperliquid L2, with HYPE as its gas coin. Gloam support for Elysium is coming, planned for the day Elysium mainnet launches. It is not live yet: never say it is, and never give a date or time; news comes in Announcements and on X @gloamtrade. ${noTie}`,
+    ].join("\n");
+  }
+  const e = ELYSIUM;
+  return [
+    head,
+    `- Elysium mainnet (chain ID ${e.chainId}): live, joined after the 21 October launch. Elysium is Kinetiq's Hyperliquid L2. The vault takes USDC only: 500 per deposit and 25,000 in total. Gas on Elysium is paid in HYPE, not ETH; HYPE itself can't be added privately. Same 0.5% cash-out fee as the other mainnets, same final keys. ${noTie}`,
+    "- Elysium's vault is owned by a guard contract from the day it was deployed: nobody, the Gloam team included, can ever change its proof checkers. Limits and the fee still change only with three days of public notice, and can be lowered at once.",
+    `- There are no private swaps on Elysium and Bring money over (the bridge) does not bring money into Elysium yet; never give a date. In the network selector it shows as Elysium, with Mainnet beside it. Details, if someone adds the chain by hand: RPC ${ELYSIUM_RPC_DISPLAY}, chain ID ${e.chainId}, currency HYPE, explorer ${e.explorerUrl}.`,
+    ...(testnet ? [testnet] : []),
+  ].join("\n");
+}
+
+/**
+ * Elysium testnet (99801), only while NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED is on
+ * and its pool is in (lib/elysium.ts). Null otherwise.
+ */
+function elysiumTestnetFacts(): string | null {
+  const t = ELYSIUM_TESTNET;
+  if (!t) return null;
+  return `- Elysium testnet (chain ID ${t.chainId}): a Gloam testnet like Base Sepolia, on the mainnet vault and its final keys, with test USDC only. Gas is HYPE from Elysium's testnet. In the network selector it shows as Elysium, with Testnet beside it. Add it by hand: RPC ${t.rpcUrl}, chain ID ${t.chainId}, currency HYPE, explorer ${t.explorerUrl}. Gloam has no partnership with Kinetiq or Hyperliquid; never say or suggest one.`;
 }
 
 /** The mainnets that joined after the 21 October launch, with a pool in: "Base", "Base and Ethereum". */
 export function laterMainnets(): string[] {
-  return [mainnetPool(8453) ? "Base" : null, mainnetPool(1) ? "Ethereum" : null].filter((n): n is string => n !== null);
+  return [mainnetPool(8453) ? "Base" : null, mainnetPool(1) ? "Ethereum" : null, ELYSIUM ? "Elysium" : null].filter((n): n is string => n !== null);
 }
 
 /** The day the later mainnets went live ("26 October 2026"), or null when none is in or they joined on different days. */
@@ -353,7 +409,7 @@ function ethereumSepoliaFacts(): string | null {
   if (ethereumSepoliaPool() === null) return null;
   return [
     "ETHEREUM SEPOLIA (overrides any line below that names fewer testnets)",
-    "- Ethereum Sepolia (chain ID 11155111) is Ethereum's testnet. It runs the mainnet vault: the trusted setup's final keys, its own beta deposit limits (500 of each stablecoin per deposit and 25,000 in total, 0.2 ETH per deposit and 10 in total) and the 0.25% cash-out fee. It takes test USDC, USDG, PYUSD, EURC and ETH; Tether issues no USDT on Sepolia. EURC is a euro stablecoin, never counted as a dollar.",
+    "- Ethereum Sepolia (chain ID 11155111) is Ethereum's testnet. It runs the mainnet vault: the trusted setup's final keys, its own deposit limits (500 of each stablecoin per deposit and 25,000 in total, 0.2 ETH per deposit and 10 in total) and a 0.25% cash-out fee (mainnet's is 0.5%). It takes test USDC, USDG, PYUSD, EURC and ETH; Tether issues no USDT on Sepolia. EURC is a euro stablecoin, never counted as a dollar.",
     "- Faucets, in the Ethereum Sepolia section of gloam.trade/docs/testnet: Sepolia ETH from Google Cloud's Web3 faucet or the Sepolia PoW faucet (neither needs ETH on mainnet), test USDC and EURC from Circle's faucet, test PYUSD and USDG from Paxos's faucet. Gas on Sepolia costs a tiny fraction of a cent.",
     "- On Ethereum Sepolia there are no private swaps and no Bring money over (the bridge). Passkey sign-in is not there: connect a browser wallet or a wallet app. In the network selector it shows as Ethereum, with Testnet beside it. Details, if someone adds the chain by hand: RPC https://ethereum-sepolia-rpc.publicnode.com, chain ID 11155111, currency ETH, explorer https://sepolia.etherscan.io.",
   ].join("\n");
@@ -376,7 +432,7 @@ function mainnetLiveFacts(): string {
     "MAINNET IS LIVE (this overrides any line below that says the app is testnet only, that mainnet is coming, or that names fewer mainnets)",
     `- Gloam is live on ${liveMainnetsSummary()}. It went live on mainnet on Wednesday 21 October 2026 at 13:00 UTC, on ${launchNames()}.${joined} The vault has the same address on every mainnet; it is listed on gloam.trade/docs/chain, so point there instead of writing it out. Say so plainly when asked, and point to gloam.trade/app.`,
     ...(rh
-      ? ["- Robinhood Chain mainnet (chain ID 4663): the vault takes USDG, $GLOAM, PONS and CASHCAT. ETH, AI, ORBIO and GRIFT are listed too and open once each deposit limit lands through the public three-day timelock: the app offers each one only once the vault takes it, and until then ETH just pays gas. Details, if someone adds the chain by hand: RPC https://rpc.mainnet.chain.robinhood.com, chain ID 4663, currency ETH, explorer RobinScan https://robin.etherscan.io (a transaction is at robin.etherscan.io/tx/ and its hash, an address at robin.etherscan.io/address/ and the address)."]
+      ? ["- Robinhood Chain mainnet (chain ID 4663): the vault takes USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO (ETH, AI and ORBIO opened on 3 November 2026, and AI and ORBIO also swap privately with USDG). GRIFT is listed too and opens once its deposit limit lands through the public three-day timelock: the app offers it only once the vault takes it. Details, if someone adds the chain by hand: RPC https://rpc.mainnet.chain.robinhood.com, chain ID 4663, currency ETH, explorer RobinScan https://robin.etherscan.io (a transaction is at robin.etherscan.io/tx/ and its hash, an address at robin.etherscan.io/address/ and the address)."]
       : []),
     ...(tempo
       ? ["- Tempo mainnet (chain ID 4217): the vault takes USDC.e, pathUSD, USDT0 and OUSD, and fees are paid in stablecoins. Details, if someone adds the chain by hand: RPC https://rpc.tempo.xyz, chain ID 4217, currency USD, explorer https://explore.tempo.xyz."]
@@ -384,13 +440,14 @@ function mainnetLiveFacts(): string {
     ...(usdc.length
       ? [`- USDC is in the vault: on ${joinNames(usdc)} mainnet as USDC${tempo ? ", and on Tempo as USDC.e (USDC bridged to Tempo)" : ""}. On Robinhood Chain the dollar stablecoin is USDG. Never say Gloam has no USDC.`]
       : []),
-    "- Beta deposit limits on mainnet: 50,000 per deposit and 2,500,000 in total for each stablecoin; $GLOAM 2,500,000 per deposit and 25,000,000 in total. The app shows the room left before you sign.",
+    "- Deposit limits on mainnet: 50,000 per deposit and 2,500,000 in total for each stablecoin; $GLOAM 2,500,000 per deposit and 25,000,000 in total. The app shows the room left before you sign.",
     "- Mainnet proofs use the trusted setup's final keys (13 contributors). Private stock swaps are live on Robinhood Chain mainnet (see PRIVATE SWAPS); only the sample stock tokens on Robinhood Chain testnet cannot be swapped. The old private trade (sealed swaps) is retired and stays off; private swaps replaced it on mainnet (see PRIVATE SWAPS).",
     "- In the app, the network selector marks every network Mainnet or Testnet. The testnets stay open for trying things first, and test funds never move to mainnet.",
     "- Passkey sign-in (Tempo Wallet) is on Tempo testnet. On mainnet, connect a browser wallet or a wallet app.",
     "- On mainnet, a plain payment code or claim link works like cash: anyone who sees it can claim it. Send it privately to the one person, or pay their Gloam address so the payment is sealed to them.",
-    "- Fees on mainnet: adding money and private payments are free; a cash out costs 0.25% of its amount, shown before you confirm. A private swap pays the same 0.25% plus its price buffer (see PRIVATE SWAPS). Partner API fees are not charged yet. Cash outs and private payments are never limited.",
-    "- Security: Gloam had an internal review before launch, finished on 20 October 2026 with no Critical or High findings open. Kann Audits then reviewed the vault contracts (report dated 1 November 2026, at gloam.trade/security) and found no Critical, High or Medium issues. That review covered the vault contracts only: the swap routers, circuits, app and relay were not part of it. Its findings are acknowledged, not fixed, and changes land in the next vault. Say it that way, and never say Gloam is audited or fully audited. Mainnet is beta software: say so plainly when someone asks if it is safe.",
+    "- Fees on mainnet: adding money directly from a wallet on the vault's chain and private payments are free; a cash out costs 0.5% of its amount, shown before you confirm. A private swap pays the same 0.5% plus its price buffer (see PRIVATE SWAPS). Money brought over from another chain is not free: Relay charges for the route, and Gloam may add a fee of its own, up to 1%; both show before the person sends anything. Partner API fees are not charged yet. Cash outs and private payments are never limited.",
+    "- The cash-out fee went from 0.25% to 0.5% on all four mainnets on 3 November 2026, after the public three-day wait. A proof fixes the amount and the address, not the fee: the vault takes the fee when a cash out lands, at the rate that day. So a cash out for later or an agent top-up set up before the rise still goes out, and the person or agent gets a little less than the screen showed then. The app says so on each one and on the Vault home, and each can be cancelled until it goes; the money stays in the private balance. Base Sepolia and Ethereum Sepolia stay at 0.25%.",
+    "- Security: Gloam had an internal review before launch, finished on 20 October 2026 with no Critical or High findings open. Kann Audits then reviewed the vault contracts (report dated 1 November 2026, at gloam.trade/security) and found no Critical, High or Medium issues. That review covered the vault contracts only: the swap routers, circuits, app and relay were not part of it. Its findings are acknowledged, not fixed, and changes land in the next vault. Say it that way, and never say Gloam is audited or fully audited. When someone asks if it is safe, say plainly what was reviewed and what was not, that deposit limits apply, and that a review lowers risk but does not remove it. Never call Gloam beta.",
     "- The owner is one wallet (a multisig is planned). Since 24 October the cash-out fees go to Gloam's own treasury wallet, a change that waited out the public three-day timelock. The Gloam team runs the relay. The relay only submits payments already proven in the browser and pays their network fee; it cannot move or redirect money. Raising limits, adding assets or changing where fees go waits a public three-day timelock; the owner can lower limits or close deposits at once.",
     "- The mainnet vaults are new, so their crowd is still small: treat privacy there as weaker for now too.",
     "",
@@ -403,7 +460,7 @@ function mainnetLiveFacts(): string {
     "6. Turn on Recovery in Settings, or save a backup (Copy backup or Download), so a new device never loses your balance.",
     "",
     "GETTING MONEY IN ON MAINNET",
-    "- Bring money over (the bridge, powered by Relay): on Vault > Add, the Money on another chain? card, button Bring money over. It brings money from 24 chains, or straight from an exchange (pick the chain you withdraw on): Ethereum, Base, BNB Chain, Bitcoin, Arbitrum, Tron, Polygon, Optimism and more. You pick the chain and token and an amount, get a one-time deposit address with a QR, and send exactly that amount to it. It lands in your own wallet as USDG on Robinhood Chain, or as USDC on Tempo (listed in the vault as USDC.e). From 1 to 25,000 dollars at a time; the bridge fee and arrival time show first; usually a minute or two, Bitcoin waits for its confirmations. Bridging is public, like any deposit. Send only that token on that chain to that address, once.",
+    "- Bring money over (the bridge, powered by Relay): on Vault > Add, the Money on another chain? card, button Bring money over. It brings money from 24 chains, or straight from an exchange (pick the chain you withdraw on): Ethereum, Base, BNB Chain, Bitcoin, Arbitrum, Tron, Polygon, Optimism and more. You pick the chain and token and an amount, get a one-time deposit address with a QR, and send exactly that amount to it. It lands in your own wallet as USDG on Robinhood Chain, as USDC on Tempo (listed in the vault as USDC.e), or as USDC on Base or Ethereum mainnet. From 1 to 25,000 dollars at a time; Relay's fee, any Gloam fee and the arrival time show first, because bringing money over is not free the way a direct deposit is; usually a minute or two, Bitcoin waits for its confirmations. Bridging is public, like any deposit. Send only that token on that chain to that address, once.",
     "- Paying from your own wallet can go straight into the private balance in one step, when the panel offers it. Otherwise, when the money arrives the panel shows Add it privately, which you confirm yourself. Either way the deposit proof is made in your browser, which is what keeps it self-custodial.",
     "- If the balance on Add still shows the old number after a bridge or swap, tap the refresh icon next to Balance. The app also reads it again by itself a few seconds after money lands.",
     "- Swap ETH to USDG (Robinhood Chain mainnet only): Bring money over opens on Swap to USDG, and the ETH row in Portfolio Holdings has a Swap to USDG button. Type an amount or tap 25%, 50%, 75% or Max (Max keeps a little ETH back for gas). It shows the live price as you type: what you get, the rate, the least you get, the swap fee and the network fee (a few cents of ETH). Review the swap, then confirm once in your wallet. It is a public swap in your own wallet, powered by Relay, then Add it privately.",
@@ -420,11 +477,27 @@ function mainnetLiveFacts(): string {
     "- Private: who swapped (the relay sends it, so the wallet never shows), which balance it came from, and where the output goes next. Public: the two tokens and the two amounts, like any DEX trade. Never say a swap hides the amounts, and never call it anonymous or fully private.",
     "- Privacy tips: don't swap exactly what you deposited (a swap the same size as a recent deposit links back to it), and don't cash out exactly what a swap gave you. Send it on, or cash out a different amount.",
     "- One note per swap: a swap spends one private note, so Max is the largest single part of the balance, not the whole balance. When the balance is in several parts, the app says how much one swap can take; swap the rest in a second swap. A smaller amount is set aside privately first, and the rest stays in the private balance.",
-    "- Costs: the vault's 0.25% cash-out fee on the amount swapped, plus a price buffer, 0.5% on Robinhood Chain and 0.1% on Tempo. The swap asks a little below the quote so a small price move doesn't make it fail, and what the trade doesn't use goes to the Gloam treasury. The amount shown is the least you get: the quote refreshes every 15 seconds, and the app prices the swap once more right before it goes and uses whichever gives you more. Pool fees are already in the price, and the relay pays the network fee. Details, under the rate, shows each part before you swap.",
-    "- Beta limits apply to what lands, because the new note is a deposit: one swap brings in at most 50,000 of a stablecoin or 2,500,000 $GLOAM, and only while the vault has room. \"Too large for the vault right now\" means swap a smaller amount.",
-    "- Prices: with a wallet connected, Vault > Swap prices any amount, even before you have a private balance. To swap, add one of the swap tokens in Vault > Add first. An example on Tempo: 1 pathUSD gets about 0.9964 USDC.e. Never give a $GLOAM swap price or rate; point to Vault > Swap for the live quote.",
+    "- Costs: the vault's 0.5% cash-out fee on the amount swapped, plus a price buffer, 0.5% on Robinhood Chain and 0.1% on Tempo. The swap asks a little below the quote so a small price move doesn't make it fail, and what the trade doesn't use goes to the Gloam treasury. The amount shown is the least you get: the quote refreshes every 15 seconds, and the app prices the swap once more right before it goes and uses whichever gives you more. Pool fees are already in the price, and the relay pays the network fee. Details, under the rate, shows each part before you swap.",
+    "- Deposit limits apply to what lands, because the new note is a deposit: one swap brings in at most 50,000 of a stablecoin or 2,500,000 $GLOAM, and only while the vault has room. \"Too large for the vault right now\" means swap a smaller amount.",
+    "- Prices: with a wallet connected, Vault > Swap prices any amount, even before you have a private balance. To swap, add one of the swap tokens in Vault > Add first. An example on Tempo: 1 pathUSD gets about 0.9937 USDC.e. Never give a $GLOAM swap price or rate; point to Vault > Swap for the live quote.",
     "- If a swap can't finish: once a swap is sent, anyone can make it fail on purpose by sending its first step on its own. The money can't go anywhere else. It comes back to the private balance by itself as a refund, less 1%: the vault's cash-out fee and a safety margin that goes to the Gloam treasury. If a swap just didn't go through (the price moved), nothing moved: refresh in a minute, then get a new quote. That swap isn't cancelled, though: anyone can send it again, and it lands if the price comes back within the buffer, exactly as the user made it, and the app counts it when it does. Spending the same money on anything else first ends the old swap.",
     "- Swaps only go through the Gloam relay, never from the wallet. If the button says The Gloam relay is off, try again a bit later.",
+    "- Swap links: a trading app can link to gloam.trade/app/vault?tab=swap#from=USDG&to=TSLA&amount=100&chain=robinhood-mainnet&p=<their link code>. It opens Vault > Swap with that swap filled in and, with a live partner code, the partner's name as Gloam approved it (From Motion); only tokens the swap router lists on that chain are filled in, and nothing swaps until the person checks the quote and taps Swap privately. Like any swap it hides who swapped, not the tokens or the amounts. Guide: gloam.trade/docs/partners#swap-link.",
+    "- Partner link codes: a partner puts p=<code> in their pay and swap links. The Gloam app ties each payment, cash out or swap from the link to the code before it is sent (through the relay, or registered from the payer's wallet), and Gloam counts it to that partner once it lands, checked on chain, keeping only public transaction facts (hash, chain, kind, token, amount, time), never the payer's wallet or IP. Partners see private payments only as counts for days that have ended. Nothing is charged. Guide: gloam.trade/docs/partners#link-codes.",
+    ...(swapV3Live(4663) ? ["- On Robinhood Chain a swap can use a native ETH note as well as a WETH note, on either side, wherever the vault takes ETH."] : []),
+    ...(swapV3Live(8453) ? ["- Private swaps are live on Base mainnet too: USDC, USDT, EURC and ETH, any one for another, on Uniswap v4. The price buffer there is 0.1% between two dollar stablecoins and 0.5% otherwise."] : []),
+    ...(swapV3Live(1)
+      ? [
+          "- Private swaps are live on Ethereum mainnet too: USDC, USDT, USDG, EURC and ETH, any one for another, on Uniswap v4. The price buffer there is 0.1% between two dollar stablecoins and 0.5% otherwise. PYUSD can be held and sent but not swapped: its plain Uniswap v4 pools return about $10 for $100.",
+          "- On Ethereum a swap has a smallest size. The relay pays the gas, so a swap's vault fee has to cover it, and the step that sets part of a note aside when there is one. The swap tab shows the smallest one right now. It moves with gas, so never give a number; point to the swap tab. \"Smallest swap right now\" means swap more, or wait for gas to fall. A refund isn't held to it, though a small one can wait for the next hour when the relay's hourly budget for small refunds is used up.",
+        ]
+      : []),
+    ...(swapV3Live(8453) || swapV3Live(1)
+      ? ["- On Base and Ethereum the app won't send a swap that moves its pool by more than 2%, or that gives less than 98 cents on the dollar between two dollar stablecoins. \"This pool is too thin for that amount\" comes with a size that fits. EURC's pool on Base is thin, so large EURC swaps there are refused."]
+      : []),
+    ...(swapV3Live(4663) || swapV3Live(4217) || swapV3Live(8453) || swapV3Live(1)
+      ? ["- A refund through the newest routers comes back less the vault's cash-out fee and 0.1%, not the 1% it can be through an earlier one.", "- If the vault's limit keeps a refund from landing, the money waits at the swap's escrow and comes back privately once there is room. The person can also take it out now, from the held line in Portfolio, to a wallet they pick. That pays a public address, so that money stops being private. Only they can do it. A swap through an earlier router has no exit.", `- A swap through the newest routers carries a deadline, ${swapV3Live(8453) || swapV3Live(1) ? "10 minutes after it is made on Base and Ethereum and 30 minutes elsewhere" : "30 minutes after it is made"}, and can't land after that. A refund and an exit have no deadline.`]
+      : []),
     SWAPS_V2
       ? "- The swap routers cannot be upgraded and have no function that moves money, and the vault itself did not change. On Robinhood Chain the router's owner can add a pool only with 3 days of public notice and can take one off at once, and can do nothing else. They were reviewed internally, not externally audited. Their addresses are on gloam.trade/docs/private-swaps; point there instead of writing them out. Full guide: gloam.trade/docs/private-swaps."
       : "- The swap routers have no owner, no admin and no upgrade, and the vault itself did not change. They were reviewed internally, not externally audited. Their addresses are on gloam.trade/docs/private-swaps; point there instead of writing them out. Full guide: gloam.trade/docs/private-swaps.",
@@ -440,7 +513,7 @@ function mainnetLiveFacts(): string {
     "- A sender can take back a link nobody has claimed yet, from Sent links under Send privately (Take back).",
     "",
     "SAFETY",
-    "- Gloam and its team never DM first, and never ask for a seed phrase, private key, passkey or a claim link. Anyone who does is a scammer.",
+    "- Gloam and its team never ask for a seed phrase, private key, passkey, claim link or funds. Anyone who does is a scammer, whatever name they use.",
     "- Copycat GLOAM tokens exist. The only real one is the contract address in the token part; any other is fake.",
     "",
     "MORE ON MAINNET",
@@ -458,7 +531,7 @@ function liveSwaps(): [string, string][] {
   const laterSince = laterMainnetsSince();
   const rh = mainnetPool(4663) !== null;
   const usdc = [mainnetPool(8453) ? "Base" : null, mainnetPool(1) ? "Ethereum" : null].filter((n): n is string => n !== null);
-  const mainnetIds = MAINNET_CHAINS.filter((c) => mainnetPool(c.chainId)).map((c) => `${c.name} ${c.chainId}`);
+  const mainnetIds = MAINNET_CHAINS.filter((c) => mainnetChainPool(c.chainId)).map((c) => `${c.name} ${c.chainId}`);
   return [
     [
       "- The app is on testnet for now, with development proving keys. Mainnet is coming on both Tempo and Robinhood Chain. The trusted-setup ceremony for mainnet is done (13 contributors). Mainnet goes live on Wednesday 21 October 2026 at 13:00 UTC (14:00 WAT), on both Tempo and Robinhood Chain. The live countdown is at gloam.trade/mainnet: when someone asks when mainnet is, give the time in UTC and send them there. That is the only date and time you may give. Never give any other, and never say mainnet is live until the team announces it; until then the app is testnet. Launch news comes in Announcements and on X @gloamtrade.",
@@ -469,10 +542,10 @@ function liveSwaps(): [string, string][] {
       "The app is live on mainnet too; the token is not a testnet token.",
     ],
     [
-      "$GLOAM listed in the mainnet pool, ready for deploy. Next (mainnet): Gloam goes live on Tempo and Robinhood Chain mainnet; shield $GLOAM in the Robinhood Chain pool (2,500,000 per deposit, 25,000,000 in total during beta); fees switch on and half of them start buying back $GLOAM; the first holder vote, in the open.",
+      "$GLOAM listed in the mainnet pool, ready for deploy. Next (mainnet): Gloam goes live on Tempo and Robinhood Chain mainnet; shield $GLOAM in the Robinhood Chain pool (2,500,000 per deposit, 25,000,000 in total); fees switch on and half of them start buying back $GLOAM; the first holder vote, in the open.",
       rh
-        ? `$GLOAM listed in the mainnet pool; Gloam live on ${liveMainnetCountWords()} (${names}); shield $GLOAM in the Robinhood Chain pool (2,500,000 per deposit, 25,000,000 in total during beta); private swaps from the private balance on Robinhood Chain and Tempo; fees on, paid to a dedicated treasury wallet; $GLOAM listed on CoinGecko. Next: the first buyback is done; the first holder vote, in the open.`
-        : `$GLOAM listed in the mainnet pool; Gloam live on ${liveMainnetCountWords()} (${names}); fees on, paid to a dedicated treasury wallet; $GLOAM listed on CoinGecko. Next: shield $GLOAM in the Robinhood Chain pool (2,500,000 per deposit, 25,000,000 in total during beta); the first buyback is done; the first holder vote, in the open.`,
+        ? `$GLOAM listed in the mainnet pool; Gloam live on ${liveMainnetCountWords()} (${names}); shield $GLOAM in the Robinhood Chain pool (2,500,000 per deposit, 25,000,000 in total); private swaps from the private balance on Robinhood Chain and Tempo; fees on, paid to a dedicated treasury wallet; $GLOAM listed on CoinGecko. Next: the first buyback is done; the first holder vote, in the open.`
+        : `$GLOAM listed in the mainnet pool; Gloam live on ${liveMainnetCountWords()} (${names}); fees on, paid to a dedicated treasury wallet; $GLOAM listed on CoinGecko. Next: shield $GLOAM in the Robinhood Chain pool (2,500,000 per deposit, 25,000,000 in total); the first buyback is done; the first holder vote, in the open.`,
     ],
     ["gloam.trade/app (the testnet app)", "gloam.trade/app (the app: mainnet and testnet)"],
     // fees, the relay and what you can do read as now, not as "at mainnet"
@@ -485,7 +558,7 @@ function liveSwaps(): [string, string][] {
       "half of Gloam's fees buy $GLOAM from the market once fees switch on at mainnet.",
       "half of Gloam's fees are set to buy $GLOAM from the market. The first buyback is done: see BUYBACKS at the top.",
     ],
-    ["From mainnet a cash out carries a 0.25% fee", "On mainnet a cash out carries a 0.25% fee"],
+    ["From mainnet a cash out carries a 0.5% fee", "On mainnet a cash out carries a 0.5% fee"],
     ["(2) Buybacks: at mainnet, adding money", "(2) Buybacks: on mainnet, adding money"],
     [
       "It is on by default in Payroll and Vault and free on testnet.",
@@ -501,7 +574,7 @@ function liveSwaps(): [string, string][] {
         ? "The old private trade (sealed swaps) is retired and stays off. On mainnet, private swaps replaced it: see PRIVATE SWAPS."
         : "The old private trade (sealed swaps) is retired and stays off. On mainnet, private swaps replaced it: see PRIVATE SWAPS. Stock tokens can't be swapped yet: swaps into 28 more Robinhood Chain tokens, stock tokens and ETH included, are coming, and the vault limits for them are already queued on-chain behind the public 3-day timelock. Never give a date.",
     ],
-    ["Only a cash out has a fee: 0.25% of the amount goes to Gloam.", "A cash out has a fee: 0.25% of the amount goes to Gloam, and a private swap pays the same fee (see PRIVATE SWAPS)."],
+    ["Only a cash out has a fee: 0.5% of the amount goes to Gloam.", "A cash out has a fee: 0.5% of the amount goes to Gloam, and a private swap pays the same fee (see PRIVATE SWAPS)."],
     [
       "sends private payments, cash outs and payment notices from Gloam's own account",
       "sends private payments, cash outs, private swaps and payment notices from Gloam's own account",
@@ -550,6 +623,22 @@ function liveSwaps(): [string, string][] {
   ];
 }
 
+/** The video contest, from CONTEST (lib/contest), so the dates and prizes match the page. */
+function contestFacts(): string {
+  const prizes = CONTEST.prizes.map((usd, i) => `${placeLabel(i)} $${usd}`).join(", ");
+  const closes = `${contestDay(CONTEST.closesAt)} at ${contestTime(CONTEST.closesAt)}`;
+  return [
+    "VIDEO CONTEST",
+    `- The ${CONTEST.name}: $${CONTEST_TOTAL} for videos about Gloam, ${CONTEST.minMinutes} to ${CONTEST.maxMinutes} minutes long, in any style: explainers, tutorials, short films, animations, skits, memes. No AI-generated videos: footage, avatars, voices or animation made by an AI generator are not accepted and such entries are removed; animation and motion graphics the creator made themselves (After Effects, Blender, Figma, Rive and the like) are fine, and so are normal editing tools. Prizes: ${prizes}. Winners are paid privately with a Gloam claim link, in USDG on Robinhood Chain or USDC on Base, their choice.`,
+    `- Entries open ${contestDay(CONTEST.opensAt)} and close ${closes}. Winners are announced by ${contestDay(CONTEST.winnersBy)} on @${CONTEST.account}.`,
+    `- To enter: upload the video to a post on X (entries come from X only; a YouTube or other link does not count), quote the contest announcement (${CONTEST.announcementUrl ?? "on X @gloamtrade"}) and tag @${CONTEST.account} (no hashtag needed), then send the post link with the form at gloam.trade/contest. Both the post and the form are needed. The form also asks the entrant to agree that Gloam may repost, clip and use the video in its marketing, with credit to them. One entry per X account; sending the form again with the same handle replaces it.`,
+    `- Creators can ask questions and share drafts in the Creators topic of this group: ${CONTEST.telegramUrl}.`,
+    "- Judged by the Gloam team on clarity (40%), creativity (30%), production quality (20%) and showing a real flow in the app on mainnet (10%). Likes and views do not count. The team's decision is final. Testnet footage is not accepted; a video about the idea needs no app use and no deposit.",
+    `- Entering never needs a private key, seed phrase or wallet connection. Gloam never DMs first asking for keys or funds, and winners are contacted only from @${CONTEST.account}. You never ask anyone for keys either. Anyone in DMs claiming to judge or verify an entry is a scammer.`,
+    "- Never say who is winning, who entered or how many entries there are, and never promise anyone a prize.",
+  ].join("\n");
+}
+
 /**
  * The knowledge block for the system prompt. `live` defaults to whether
  * mainnet is live now; before that the block is exactly what it always was.
@@ -558,17 +647,20 @@ export function knowledgeBlock(testingOpen: boolean, live: boolean = isMainnetLi
   const base = baseFacts();
   const ethereum = ethereumFacts();
   const sepolia = ethereumSepoliaFacts();
+  const elysium = elysiumFacts();
   const block = [
     ABOUT.trim(),
     ...(base ? [base] : []),
     ...(ethereum ? [ethereum] : []),
     ...(sepolia ? [sepolia] : []),
+    ...(elysium ? [elysium] : []),
     TOKEN.trim(),
     ...[voteFacts()].filter((v): v is string => v !== null),
     CRYPTO_TALK.trim(),
     APP_MAP.trim(),
     (testingOpen ? START_OPEN : START_CLOSED).trim(),
     REWARDS.trim(),
+    contestFacts(),
     CODES.trim(),
     ISSUES.trim(),
     `OFFICIAL LINKS (the only ones you may share)\n${OFFICIAL_LINKS.map((l) => `- ${l}`).join("\n")}`,

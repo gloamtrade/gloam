@@ -71,6 +71,7 @@ function clientFor(n: GloamNetwork): PublicClient {
   if (hit) return hit;
   const c = createPublicClient({
     chain: n.chain,
+    ccipRead: false,
     // viem retries 429s, 5xx and timeouts with backoff.
     transport: serverTransport(n, { timeout: 15_000, retryCount: 3, retryDelay: 400 }),
   });

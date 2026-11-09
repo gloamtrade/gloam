@@ -4,6 +4,8 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { DailyChart } from "@/components/stats/DailyChart";
 import { TokenLogo } from "@/components/app/TokenLogo";
+import { chainLogoSrc } from "@/lib/chainLogo";
+import { liveMainnetCountWords, liveMainnetNames } from "@/lib/mainnet";
 import { getPublicStats, type PublicNetwork, type PublicStats } from "@/lib/publicStats";
 
 /**
@@ -24,7 +26,7 @@ export const maxDuration = 60;
 export const metadata: Metadata = {
   title: "Stats",
   description:
-    "Live public numbers for Gloam on Robinhood Chain, Tempo, Base and Ethereum: what the vaults hold, and how many deposits, private transfers, cash-outs and payment messages there have been since launch.",
+    `Live public numbers for Gloam on ${liveMainnetNames()}: what the vaults hold, and how many deposits, private transfers, cash-outs and payment messages there have been since launch.`,
   alternates: { canonical: "/stats" },
 };
 
@@ -69,9 +71,9 @@ function ChainMark({ chainId, size = 28 }: { chainId: number; size?: number }) {
   return (
     <span className="relative inline-block shrink-0 overflow-hidden rounded-full" style={{ width: size, height: size }}>
       {/* eslint-disable-next-line @next/next/no-img-element -- small local logos */}
-      <img src={`/brand/chains/${chainId}.png`} alt="" width={size} height={size} className="h-full w-full object-cover dark:hidden" />
+      <img src={chainLogoSrc(chainId)} alt="" width={size} height={size} className="h-full w-full object-cover dark:hidden" />
       {/* eslint-disable-next-line @next/next/no-img-element -- small local logos */}
-      <img src={`/brand/chains/${chainId}-dark.png`} alt="" width={size} height={size} className="hidden h-full w-full object-cover dark:block" />
+      <img src={chainLogoSrc(chainId, true)} alt="" width={size} height={size} className="hidden h-full w-full object-cover dark:block" />
     </span>
   );
 }
@@ -214,7 +216,7 @@ function HowWeCount({ stats }: { stats: PublicStats | null }) {
   const items = [
     {
       title: "What is counted",
-      body: "Every deposit, private transfer, cash-out and payment message recorded by the Gloam vaults on Robinhood Chain, Tempo, Base and Ethereum, plus what each vault holds right now. Testnets are not included.",
+      body: `Every deposit, private transfer, cash-out and payment message recorded by the Gloam vaults on ${liveMainnetNames()}, plus what each vault holds right now. Testnets are not included.`,
     },
     {
       title: "Since when",
@@ -256,7 +258,7 @@ export default async function StatsPage() {
   const readAt = stats ? Date.parse(stats.asOf) : null;
   // A snapshot older than a quarter of an hour: a newer read did not finish in time.
   const stale = stats != null && stats.ageSec > 900;
-  const chainNames = stats?.networks.length ? listJoin(stats.networks.map((n) => n.label)) : "Robinhood Chain, Tempo, Base and Ethereum";
+  const chainNames = stats?.networks.length ? listJoin(stats.networks.map((n) => n.label)) : liveMainnetNames();
 
   return (
     <div className="relative min-h-screen bg-background text-foreground">
@@ -316,7 +318,7 @@ export default async function StatsPage() {
               </div>
             </Section>
 
-            <Section title="Since launch" lead="All four mainnets together.">
+            <Section title="Since launch" lead={`All ${liveMainnetCountWords()} together.`}>
               <dl className="grid grid-cols-2 gap-x-6 gap-y-10 lg:grid-cols-4">
                 {COUNTS.map((c) => (
                   <div key={c.key} className="border-t border-line-strong pt-4">
@@ -333,7 +335,7 @@ export default async function StatsPage() {
             {stats.daily.length > 0 && (
               <Section
                 title="Each day"
-                lead="Deposits, private transfers and cash-outs per UTC day, all four mainnets together. Tap or point at a bar to read its day."
+                lead={`Deposits, private transfers and cash-outs per UTC day, all ${liveMainnetCountWords()} together. Tap or point at a bar to read its day.`}
               >
                 <DailyChart days={stats.daily} />
                 {stats.undated > 0 && (

@@ -117,7 +117,7 @@ async function signatureValid(address: Address, message: string, signature: Hex,
   const net = NETWORK_KEYS.map(getNetwork).find((n) => n.chainId === chainId);
   if (!net) return false;
   try {
-    const client = createPublicClient({ chain: net.chain, transport: serverTransport(net, { timeout: 15_000 }) });
+    const client = createPublicClient({ chain: net.chain, ccipRead: false, transport: serverTransport(net, { timeout: 15_000 }) });
     return await client.verifyMessage({ address, message, signature });
   } catch {
     return false;
@@ -255,6 +255,29 @@ export function sessionCookieOptions(maxAge = SESSION_MAX_AGE_SEC) {
 export function sameSiteJson(req: Request): boolean {
   const type = req.headers.get("content-type") ?? "";
   return /^application\/json\b/i.test(type) && originAllowed(req);
+}
+
+/** The origins the app runs on. A local dev server is let in outside production. */
+const GLOAM_ORIGINS = new Set(["gloam.trade", "www.gloam.trade"]);
+
+/**
+ * For the routes only the Gloam app calls (partner link lookups, registrations
+ * and counts): a JSON body from https://gloam.trade or https://www.gloam.trade.
+ * A missing Origin is refused, so a script can't call them without saying where
+ * it comes from. Outside production, a localhost origin is let in too.
+ */
+export function gloamOriginJson(req: Request): boolean {
+  if (!/^application\/json\b/i.test(req.headers.get("content-type") ?? "")) return false;
+  const origin = req.headers.get("origin");
+  if (!origin) return false;
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (url.protocol === "https:" && GLOAM_ORIGINS.has(url.host.toLowerCase())) return true;
+  return process.env.NODE_ENV !== "production" && /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(url.host);
 }
 
 /** No Origin header (not a browser), or this site's own origin. */

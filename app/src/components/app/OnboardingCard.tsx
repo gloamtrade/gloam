@@ -7,7 +7,6 @@ import { useModalFocus } from "@/hooks/useModalFocus";
 import { FAUCET_URL, faucetFor } from "@/lib/faucet";
 import { useNetwork } from "./NetworkProvider";
 import { useTempoFaucet } from "@/hooks/useTempoFaucet";
-import { readDemo } from "@/lib/demoFlag";
 import { SealedField } from "@/components/ui/SealedField";
 import {
   ONBOARDING_STEPS,
@@ -27,10 +26,8 @@ export function openOnboarding() {
 }
 
 /**
- * Getting-started guide as a first-run modal rather than an inline card. It
- * auto-opens once per session while steps remain and the note is not dismissed,
- * and can be reopened anytime via the "Getting started" link in the portfolio
- * strip (which dispatches OPEN_ONBOARDING_EVENT).
+ * Getting-started guide as a modal. It opens only from the "Getting started"
+ * link in the portfolio strip (which dispatches OPEN_ONBOARDING_EVENT).
  */
 export function OnboardingCard() {
   const [state, setState] = useState<OnboardingState | null>(null);
@@ -48,17 +45,12 @@ export function OnboardingCard() {
 
   const refresh = useCallback(() => setState(loadOnboarding()), []);
 
-  // Load persisted state and auto-open once if there is unfinished setup.
+  // Load persisted progress. The guide never opens by itself: a first visit gets
+  // the welcome, and returning users shouldn't meet a checklist every session.
+  // It opens from the "Getting started" link (OPEN_ONBOARDING_EVENT).
   useEffect(() => {
-    const s = loadOnboarding();
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- setup progress lives in this browser; read once after mount, and open the card if steps remain
-    setState(s);
-    const remaining = ONBOARDING_STEPS.filter((x) => !s.done.includes(x.id));
-    // The welcome already gives the quick start, so a first visit lands on the
-    // page, not on a second dialog behind it. Getting started opens next visit.
-    const welcomeUp = document.getElementById("gl-welcome")?.hidden === false;
-    // A recording opens on a wallet that is already set up.
-    if (!s.dismissed && remaining.length > 0 && !readDemo() && !welcomeUp) setOpen(true);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- setup progress lives in this browser; read once after mount
+    setState(loadOnboarding());
   }, []);
 
   // Let any "Getting started" trigger reopen it (even after dismiss).

@@ -99,7 +99,7 @@ class GloamPlugin {
     return new GameFunction({
       name: "gloam_add_privately",
       description:
-        "Move money from the agent's wallet into its private balance. The deposit is public (wallet, asset and amount show); what the agent does with the money afterwards is private. Each deposit is capped during the beta: 50,000 of a stablecoin on mainnet, 500 on Base Sepolia.",
+        "Move money from the agent's wallet into its private balance. The deposit is public (wallet, asset and amount show); what the agent does with the money afterwards is private. Each deposit is capped: 50,000 of a stablecoin on mainnet, 500 on Base Sepolia.",
       args: [
         { name: "amount", description: "How much, in the asset's units, for example 25.", type: "string" },
         { name: "asset", description: "The asset symbol, for example USDC on Base or USDG on Robinhood Chain. Default: the network's first asset.", type: "string", optional: true },
@@ -165,7 +165,7 @@ class GloamPlugin {
     return new GameFunction({
       name: "gloam_cash_out",
       description:
-        "Cash out from the private balance to a public 0x address. The cash out is public (asset, amount and recipient show), not which private payment funded it. The pool keeps 0.25% on mainnet and on Base Sepolia. Refused when the address or amount is outside the owner's limits.",
+        "Cash out from the private balance to a public 0x address. The cash out is public (asset, amount and recipient show), not which private payment funded it. The pool keeps 0.5% on mainnet and 0.25% on Base Sepolia. A note behind a proof of funds the agent made is first moved to a fresh note, so the proof does not lead to the cash out. Refused when the address or amount is outside the owner's limits.",
       args: [
         { name: "amount", description: "How much to cash out, in the asset's units.", type: "string" },
         { name: "to", description: "The 0x address to send it to.", type: "string" },

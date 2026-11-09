@@ -35,6 +35,7 @@ import type { PoseidonMerklePath } from "./merkle.js";
 import type { Prover } from "./prove.js";
 import type { NoteExport } from "./witness.js";
 import { noteCommitmentPoseidon } from "./note.js";
+import { fromB64, toB64 } from "./b64.js";
 import { fieldToHex } from "./poseidon.js";
 import { NATIVE_ASSET, RH_TESTNET_CHAIN_ID, poolForChainId } from "./constants.js";
 import {
@@ -301,6 +302,13 @@ export interface GloamPaymentPayload {
     exec: PrivateSendIntent["exec"];
     /** Optional issuer-scoped compliance disclosure. */
     disclosure?: GloamComplianceDisclosure;
+    /**
+     * HMAC-SHA256 keyed by the payment note's secret over the payee, pool, chain and
+     * note (gloamPaymentBinding), base64url. Only the payer and the payee know the
+     * secret, so it shows the payment was made as this x402 payment, not copied from
+     * a sealed ticket posted elsewhere (the payment board). Payers before it left it out.
+     */
+    binding?: string;
   };
 }
 
@@ -406,6 +414,14 @@ export async function buildGloamPayment(
       )
     : encodePaymentNote(intent.paymentNote);
 
+  const binding = await gloamPaymentBinding({
+    secret: intent.paymentNote.secret,
+    network: req.network,
+    poolAddress: req.poolAddress,
+    payTo: req.payTo,
+    commitment: intent.paymentNote.commitment,
+  });
+
   const payload: GloamPaymentPayload = {
     x402Version: GLOAM_X402_VERSION,
     scheme: GLOAM_X402_SCHEME,
@@ -415,6 +431,7 @@ export async function buildGloamPayment(
       txHash: null,
       exec: intent.exec,
       ...(disclosure ? { disclosure } : {}),
+      binding,
     },
   };
 
@@ -534,6 +551,9 @@ export function verifyGloamPayment(args: {
   if (pay.payload.disclosure && !isComplianceDisclosureShape(pay.payload.disclosure)) {
     return fail("compliance disclosure is malformed");
   }
+  if (pay.payload.binding !== undefined && !BINDING_SHAPE.test(String(pay.payload.binding))) {
+    return fail("payment binding is malformed");
+  }
 
   return {
     ok: true,
@@ -546,6 +566,7 @@ export function verifyGloamPayment(args: {
     finality: GLOAM_NOT_FINAL,
     onchainChecksRequired: [
       "verifyPaymentNoteBinding(note) === true (the claimed amount binds to the commitment; a structural check alone would trust a lying payer)",
+      "checkGloamPaymentBinding({ requirements, payload, note }) === null (the payment was made as this x402 payment, not copied from a ticket posted on the payment board); settleGloamPayment runs it",
       `pool.commitmentSeen(${note.commitment}) === true (payment note is a real leaf)`,
       pay.payload.txHash
         ? `transfer tx ${pay.payload.txHash} succeeded on ${req.poolAddress}`
@@ -583,6 +604,92 @@ export async function verifyPaymentNoteBinding(note: NoteExport): Promise<boolea
   }
 }
 
+/** Domain separator of an x402 payment's binding (gloamPaymentBinding). */
+export const GLOAM_X402_BINDING_DOMAIN = "gloam-x402-binding-v1" as const;
+const BINDING_SHAPE = /^[A-Za-z0-9_-]{43}$/;
+
+function bindingKeyBytes(secret: string): Uint8Array {
+  const h = BigInt(secret).toString(16).padStart(64, "0");
+  if (h.length > 64) throw new Error("The note secret is wider than 32 bytes.");
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+function base64url(bytes: Uint8Array): string {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * An x402 payment's binding: HMAC-SHA256, keyed by the payment note's secret, over
+ * the chain, the pool, the payee's receive tag and the note's commitment, base64url
+ * (43 characters). The payer makes it in buildGloamPayment; the payee, who opens the
+ * note and so knows the secret, checks it (checkGloamPaymentBinding).
+ *
+ * Why. A sealed ticket for the payee can also be public: a payment made with the
+ * app or buildPrivatePaymentWithReceipt posts it on the payment board so the payee
+ * finds it. Anyone can copy that ticket into an X-PAYMENT header, and it opens and
+ * verifies like a payment. Nobody but the payer and the payee can make the binding,
+ * so a copied ticket has none, and the seller refuses it.
+ */
+export async function gloamPaymentBinding(args: {
+  secret: string;
+  network: number;
+  poolAddress: string;
+  payTo: string;
+  commitment: string;
+}): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", bindingKeyBytes(args.secret) as unknown as ArrayBuffer, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const msg = JSON.stringify([
+    GLOAM_X402_BINDING_DOMAIN,
+    args.network,
+    args.poolAddress.toLowerCase(),
+    String(args.payTo).trim(),
+    args.commitment.toLowerCase(),
+  ]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg) as unknown as ArrayBuffer));
+  return base64url(mac);
+}
+
+/**
+ * Payee side: whether an x402 payment carries the binding only its payer could make,
+ * for these requirements and this opened note. Null when it does; otherwise why not.
+ * A payment from a payer older than the binding has none: `allowUnbound` lets that
+ * through (and nothing else), for a seller that still takes such payers, accepting
+ * that a ticket copied from the payment board passes then too.
+ */
+export async function checkGloamPaymentBinding(args: {
+  requirements: Pick<GloamPaymentRequirements, "network" | "poolAddress" | "payTo">;
+  payload: GloamPaymentPayload;
+  note: NoteExport;
+  allowUnbound?: boolean;
+}): Promise<string | null> {
+  const given = args.payload.payload?.binding;
+  if (given === undefined || given === null || given === "") {
+    return args.allowUnbound
+      ? null
+      : "This payment carries no binding to its payee, so it may be a sealed ticket copied from the payment board. Pay with a current Gloam SDK or MCP server (it adds the binding), or have the seller allow unbound payments.";
+  }
+  if (typeof given !== "string" || !BINDING_SHAPE.test(given)) return "The payment binding is malformed.";
+  let expected: string;
+  try {
+    expected = await gloamPaymentBinding({
+      secret: args.note.secret,
+      network: args.requirements.network,
+      poolAddress: args.requirements.poolAddress,
+      payTo: args.requirements.payTo,
+      commitment: args.note.commitment,
+    });
+  } catch {
+    return "The payment binding could not be checked.";
+  }
+  let diff = 0;
+  for (let i = 0; i < 43; i++) diff |= expected.charCodeAt(i) ^ given.charCodeAt(i);
+  return diff === 0 ? null : "The payment binding does not match: this payment was not made for this payee.";
+}
+
 export function encodePaymentHeader(p: GloamPaymentPayload): string {
   return PAY_PREFIX + toB64(jsonStringify(p));
 }
@@ -606,14 +713,4 @@ function jsonStringify(obj: unknown): string {
   return JSON.stringify(obj, (_k, v) =>
     typeof v === "bigint" ? v.toString() : v
   );
-}
-
-// Base64 helpers that work in Node and the browser without a Buffer dependency.
-function toB64(s: string): string {
-  if (typeof btoa === "function") return btoa(unescape(encodeURIComponent(s)));
-  return Buffer.from(s, "utf-8").toString("base64");
-}
-function fromB64(s: string): string {
-  if (typeof atob === "function") return decodeURIComponent(escape(atob(s)));
-  return Buffer.from(s, "base64").toString("utf-8");
 }

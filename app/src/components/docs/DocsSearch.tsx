@@ -14,6 +14,8 @@ import {
 } from "react";
 import { FLAT_DOCS_NAV, DOCS_NAV, findDocHeading, slugify } from "./DocsNav";
 import { CloseIcon, HashIcon, Kbd, PageIcon, SearchIcon, useIsMac } from "./docsUi";
+import { liveMainnetCountWords, liveMainnetNames } from "@/lib/mainnet";
+import { ELYSIUM_FLAG, ELYSIUM_TESTNET_FLAG } from "@/lib/elysium";
 
 /* ------------------------------------------------------------------ */
 /* Static index: the nav list plus a hand-written description, a few   */
@@ -140,6 +142,7 @@ const PAGE_META: Record<string, PageMeta> = {
       "Why agents need this most",
       "Two ways in",
       "For Virtuals agents",
+      "For agent kits and marketplaces",
       "Connect by URL",
       "Keep an agent topped up",
       "Reference agent (the SDK path)",
@@ -164,6 +167,21 @@ const PAGE_META: Record<string, PageMeta> = {
       "What is public and what is not",
       "Limits worth knowing",
       "Reference integration",
+    ],
+  },
+  "/docs/integrate": {
+    description: "Add private payments to an agent kit or MCP add-on with a preview-then-execute tool pack, or let x402 marketplace sellers take private payments next to standard ones.",
+    keywords: ["agent kit", "kit", "tool pack", "tools", "mcp add-on", "marketplace", "x402", "x402 marketplace", "seller", "middleware", "gloam-private", "gloam-cashout", "splitter", "public payee", "verifyGloamCashout", "exact", "payment-required", "x-payment", "preview", "execute", "approval", "claim link", "cash out", "proof of funds", "partner", "dashboard", "integrate", "integration", "usdg", "robinhood"],
+    headings: [
+      "Pick a path",
+      "The tool pack",
+      "Preview, then execute",
+      "Secrets stay with the kit",
+      "Or bundle the Gloam MCP server",
+      "For x402 marketplaces",
+      "Get your integration counted",
+      "What is public, fees and networks",
+      "FAQ",
     ],
   },
   "/docs/virtuals": {
@@ -227,7 +245,7 @@ const PAGE_META: Record<string, PageMeta> = {
     ],
   },
   "/docs/private-swaps": {
-    description: "Swap straight from your private balance on Robinhood Chain and Tempo mainnet. Who swapped stays private; the amounts are public.",
+    description: "Swap straight from your private balance on mainnet. Who swapped stays private; the amounts are public.",
     keywords: ["swap", "swaps", "private swap", "trade", "exchange", "dex", "uniswap", "usdg", "gloam", "pathusd", "usdc.e", "usdt0", "ousd", "refund", "buffer", "router", "escrow", "max"],
     headings: [
       "How a swap works",
@@ -306,16 +324,18 @@ const PAGE_META: Record<string, PageMeta> = {
     ],
   },
   "/docs/chain": {
-    description: "Robinhood Chain, Tempo, Base and Ethereum mainnet, and their testnets: chain IDs, RPCs, pools, assets and beta limits.",
-    keywords: ["robinhood", "tempo", "base", "base sepolia", "chain id", "rpc", "network", "mainnet", "testnet", "4663", "4217", "8453", "46630", "42431", "84532", "1", "ethereum", "explorer", "pool address", "beta limits", "deposit limit", "usdg", "usdc.e", "usdt0", "usdc", "eurc", "usdt", "pyusd", "gas", "gloam token", "relayer", "fees", "swap router", "treasury", "ethereum sepolia", "sepolia", "11155111"],
+    description: `${liveMainnetNames()} mainnet, and their testnets: chain IDs, RPCs, pools, assets and deposit limits.`,
+    keywords: ["robinhood", "tempo", "base", "base sepolia", "chain id", "rpc", "network", "mainnet", "testnet", "4663", "4217", "8453", "46630", "42431", "84532", "1", "ethereum", "explorer", "pool address", "deposit limits", "deposit limit", "usdg", "usdc.e", "usdt0", "usdc", "eurc", "usdt", "pyusd", "gas", "gloam token", "relayer", "fees", "swap router", "treasury", "ethereum sepolia", "sepolia", "11155111", ...(ELYSIUM_FLAG || ELYSIUM_TESTNET_FLAG ? ["elysium", "hype", "hyperliquid", "99801"] : [])],
     headings: [
-      "Four mainnets, one shielded pool design",
+      `${liveMainnetCountWords().replace(/^./, (c) => c.toUpperCase())}, one shielded pool design`,
       "Mainnet",
       "Robinhood Chain",
       "Tempo",
       "Base",
       "Ethereum",
       "Ethereum Sepolia",
+      ...(ELYSIUM_FLAG ? ["Elysium"] : []),
+      ...(ELYSIUM_TESTNET_FLAG ? ["Elysium testnet"] : []),
       "Switching networks in the app",
       "Honest status",
     ],
@@ -334,7 +354,7 @@ const PAGE_META: Record<string, PageMeta> = {
   },
   "/docs/production": {
     description: "What mainnet cleared before launch, and what is still ahead.",
-    keywords: ["mainnet", "launch", "ceremony", "keys", "security", "audit", "kann", "review", "multisig", "beta limits", "timelock", "checklist"],
+    keywords: ["mainnet", "launch", "ceremony", "keys", "security", "audit", "kann", "review", "multisig", "deposit limits", "timelock", "checklist"],
     headings: [
       "Why this page exists",
       "Ceremony checklist (keys)",

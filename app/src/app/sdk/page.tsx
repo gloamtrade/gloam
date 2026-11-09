@@ -17,7 +17,7 @@ export const metadata: Metadata = {
     `@gloamtrade/sdk: private balances, private payments and proofs for any app or agent on ${liveMainnetNames()}. Plus an MCP server so AI agents can pay over x402 without showing their treasury.`,
 };
 
-const GITHUB = "https://github.com/cryptoduke01/gloam";
+const GITHUB = "https://github.com/gloamtrade/gloam";
 
 
 /* ---------- line icons (same hand as the landing) ---------- */
@@ -216,7 +216,7 @@ const exit = await buildUnshieldIntent({
   prove: artifactProver(circuitArtifactUrls("unshield", net.chainId)),
 });
 
-// On mainnet the pool keeps cashOutFee(amount), 0.25%, and pays the rest.
+// On mainnet the pool keeps cashOutFee(amount), 0.5%, and pays the rest.
 const fee = cashOutFee(parseUnits("6", 6));
 
 // The relay can submit it or refuse it. It cannot send it anywhere else.
@@ -568,8 +568,8 @@ export default function SdkPage() {
             <div className="grid grid-cols-1 gap-10 sm:grid-cols-3">
               {[
                 {
-                  title: "Mainnet, in beta",
-                  body: `Live on ${liveMainnetNames()} mainnet, under beta deposit limits. The testnets stay open.`,
+                  title: "Live on mainnet",
+                  body: `Live on ${liveMainnetNames()} mainnet, under deposit limits. The testnets stay open.`,
                 },
                 {
                   title: "Keys",

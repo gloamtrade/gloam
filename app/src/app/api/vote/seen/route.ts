@@ -19,7 +19,9 @@ function fail(status: number, code: string, message: string, headers?: HeadersIn
  * Chain right now. No signature: a wallet address is public, and every
  * balance is worked out here (the snapshot file and a chain read), never
  * taken from the browser. Saving the note is best effort; the answer comes
- * back either way.
+ * back either way. A wallet first seen with no $GLOAM (at a snapshot or now),
+ * no signed vote and no team listing is answered and not stored
+ * (lib/vote/holders worthRecording).
  */
 export async function POST(req: Request) {
   const rate = await hitRateLimit(clientIp(req), "vote-seen", PER_MINUTE);

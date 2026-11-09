@@ -8,6 +8,8 @@ import { StocksLiveNote } from "@/components/StocksLiveNote";
 import { VaultActionIcon, VaultHome } from "./VaultHome";
 import { useNetwork } from "./NetworkProvider";
 import { swapOpenTo, vaultSwapRouter } from "@/lib/vaultSwap";
+import { swapLinkNetwork, swapsElsewhereNote } from "@/lib/swapLink";
+import { SwapsElsewhere } from "./SwapLinkBanner";
 import { useAppAccount } from "@/lib/demo";
 import { tabKeyTarget } from "@/lib/tabKeys";
 import {
@@ -81,7 +83,7 @@ const AgentTopUpsView = dynamic(() => import("./AgentTopUpsView").then((m) => m.
 export function VaultHub() {
   const router = useRouter();
   const sp = useSearchParams();
-  const { network, settled } = useNetwork();
+  const { network, networkKey, setNetworkKey, settled } = useNetwork();
   const { address } = useAppAccount();
   // The views read the saved network and wallet, which only exist in the
   // browser: render them once hydrated (this suspends apart from the network
@@ -119,6 +121,19 @@ export function VaultHub() {
   const action = vaultActionFromUrl(tab, mode, hash, actions);
   const current = actions.find((a) => a.id === action) ?? null;
 
+  // A swap link (lib/swapLink) names its network: move there once, as a
+  // payment request does, so Swap opens even from a network without swaps.
+  // Once per link, so switching back by hand afterwards sticks.
+  const swapLinkTo = tab === "swap" ? swapLinkNetwork(hash) : null;
+  const [switchedFor, setSwitchedFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (!settled || !swapLinkTo || switchedFor === hash) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the fragment is read after mount; this marks the link as moved for
+    setSwitchedFor(hash);
+    if (swapLinkTo !== networkKey) setNetworkKey(swapLinkTo);
+  }, [settled, swapLinkTo, switchedFor, hash, networkKey, setNetworkKey]);
+  const switching = Boolean(swapLinkTo && swapLinkTo !== networkKey && switchedFor !== hash);
+
   function select(id: VaultActionId) {
     if (id === action || !actions.some((a) => a.id === id)) return;
     setHash("");
@@ -139,9 +154,20 @@ export function VaultHub() {
   }
 
   if (!current) {
+    // A swap link on its way to its network: the Swap tab opens once there.
+    if (switching) {
+      return (
+        <div className="space-y-6">
+          <PanelSkeleton />
+        </div>
+      );
+    }
+    // Swap asked for on a network without it: say where it runs, not just the overview.
+    const swapNote = tab === "swap" ? swapsElsewhereNote(networkKey, hash) : null;
     return (
       <div className="space-y-6">
         <StocksLiveNote chainId={network.chainId} where="vault" />
+        {swapNote && <SwapsElsewhere note={swapNote} onSwitch={setNetworkKey} />}
         <VaultHome actions={actions} />
       </div>
     );

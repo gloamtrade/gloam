@@ -24,7 +24,7 @@ export { packageVersion };
 type Env = Record<string, string | undefined>;
 
 export const HELP = `gloam-mcp {version}: Gloam's MCP server for AI agents. Private stablecoin payments on Tempo and
-Robinhood Chain (x402 and MPP), with spending limits. Mainnet (beta) and testnet.
+Robinhood Chain (x402 and MPP), with spending limits. Mainnet and testnet.
 
 Usage
   gloam-mcp                         Start the MCP server on stdio. This is what MCP clients run.
@@ -41,6 +41,8 @@ Settings
                             robinhood-mainnet (mainnet), tempo or robinhood (testnet, the default).
                             base-mainnet, ethereum-mainnet and ethereum (Ethereum Sepolia) work
                             once a release has their pools; base (Base Sepolia) is live.
+                            elysium-mainnet and elysium (Elysium mainnet and testnet, gas
+                            in HYPE) are coming: each works once a release has its values.
                             A mainnet here also puts the Tempo access key on Tempo mainnet.
   GLOAM_AGENT_PRIVATE_KEY   The agent's key. Without it, tools read and plan but never execute.
   GLOAM_TEMPO_ACCOUNT       Owner's Tempo account. With it, the key is an access key on Tempo and the
@@ -50,7 +52,7 @@ Settings
                             GLOAM_LIMIT_NETWORK=tempo-mainnet makes them name mainnet assets.
   GLOAM_RPC_URL_<chainId>   Use another RPC for a network, e.g. GLOAM_RPC_URL_4217 for Tempo mainnet.
 
-Docs: https://github.com/cryptoduke01/gloam/tree/main/mcp#readme
+Docs: https://github.com/gloamtrade/gloam/tree/main/mcp#readme
 `;
 
 export const ACCESS_KEY_HELP = `gloam-mcp authorize-access-key: an access key for the agent on Tempo (mainnet or testnet).

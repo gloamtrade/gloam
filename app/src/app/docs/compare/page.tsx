@@ -338,7 +338,7 @@ export default function DocsComparePage() {
                 0.5% to deposit, 0.5% to withdraw, private transfers free, plus a network fee (
                 <Src href={NM.docsFees}>fees</Src>)
               </td>
-              <td>Deposits and private payments free; 0.25% to cash out</td>
+              <td>Direct deposits and private payments free; 0.5% to cash out</td>
             </tr>
             <tr>
               <td>Gas</td>
@@ -412,7 +412,7 @@ export default function DocsComparePage() {
         <li>
           <strong>New on mainnet.</strong> Gloam went live on mainnet on 21
           October 2026, on the final keys from a 13-contributor ceremony, with
-          beta deposit limits on what the pools take. It is beta software.
+          deposit limits on what the pools take.
         </li>
         <li>
           <strong>External review covers the vault only.</strong> Kann Audits reviewed the vault
