@@ -3,12 +3,13 @@
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, useSyncExternalStore } from "react";
+import { ELYSIUM_ENABLED } from "@/lib/elysium";
 
 /** The day-one announcement on X, where the note points. */
 const ANNOUNCEMENT_URL = "https://x.com/gloamtrade/status/2119148611095433322";
 
-// Its own key, so someone who closed an earlier note still hears about Elysium.
-const KEY = "gloam:announce-dismissed:elysium-v1";
+// Its own key per note, so someone who closed the "coming" note still hears it is live.
+const KEY = ELYSIUM_ENABLED ? "gloam:announce-dismissed:elysium-live-v1" : "gloam:announce-dismissed:elysium-v1";
 
 // Keep the note on marketing + docs; stay out of the working app (it has its own notices).
 const HIDDEN_ON = ["/app", "/admin", "/verify", "/pitch", "/claim", "/mainnet"];
@@ -35,7 +36,7 @@ function dismissedSnapshot(): boolean {
 const linkClass =
   "gl-tap shrink-0 text-[13px] font-medium text-white underline decoration-white/40 underline-offset-4 transition-colors hover:decoration-white";
 
-/** Slim site-wide note: Gloam is coming to Elysium on day one. Dismissible per browser. */
+/** Slim site-wide note about Gloam on Elysium: coming, then live once the flag is on. Dismissible per browser. */
 export function AnnouncementBanner() {
   const pathname = usePathname();
   // The server can't see what this browser closed, so it renders the note.
@@ -63,12 +64,27 @@ export function AnnouncementBanner() {
       <div className="mx-auto flex max-w-[1400px] items-center justify-center gap-3 py-2 pl-4 pr-12 sm:px-14">
         <Image src="/brand/chains/elysium.png" alt="" width={16} height={16} className="shrink-0 rounded-full" />
         <p className="min-w-0 truncate text-[13px] leading-tight">
-          <span className="font-medium">Elysium is coming.</span>{" "}
-          <span className="text-white/60 max-sm:hidden">Private payments on Hyperliquid&apos;s new L2, from day one. 9 November.</span>
+          {ELYSIUM_ENABLED ? (
+            <>
+              <span className="font-medium">Gloam is live on Elysium.</span>{" "}
+              <span className="text-white/60 max-sm:hidden">Private payments on Hyperliquid&apos;s new L2.</span>
+            </>
+          ) : (
+            <>
+              <span className="font-medium">Elysium is coming.</span>{" "}
+              <span className="text-white/60 max-sm:hidden">Private payments on Hyperliquid&apos;s new L2, from day one.</span>
+            </>
+          )}
         </p>
-        <a href={ANNOUNCEMENT_URL} target="_blank" rel="noopener noreferrer" className={linkClass}>
-          See the announcement
-        </a>
+        {ELYSIUM_ENABLED ? (
+          <a href="/app" className={linkClass}>
+            Open the app
+          </a>
+        ) : (
+          <a href={ANNOUNCEMENT_URL} target="_blank" rel="noopener noreferrer" className={linkClass}>
+            See the announcement
+          </a>
+        )}
         <button
           type="button"
           onClick={dismiss}

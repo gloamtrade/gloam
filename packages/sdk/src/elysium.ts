@@ -53,8 +53,8 @@ export const ELYSIUM_MAINNET: ElysiumMainnetInput = {
   explorerUrl: "https://elysium.kinetiq.xyz/explorer",
   usdc: "0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65",
   usdcDecimals: 6,
-  pool: null,
-  deployBlock: null,
+  pool: "0x89d3042390204f57b8b4F8949D3c2203E4002164",
+  deployBlock: 3248495n,
   payMemo: null,
   payMemoBlock: null,
 };
