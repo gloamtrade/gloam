@@ -31,7 +31,7 @@ $ rm -rf .cache    # cold start: neither side has kept the pool tree yet
 ================================================================
 
 ================================================================
-$ pnpm server      # terminal 1: the E2B-style route (full log, all four purchases)
+$ pnpm proxy      # terminal 1: the E2B-style route (full log, all four purchases)
 ================================================================
 [server 22:15:18] E2B-style MPP proxy on http://127.0.0.1:4402  (POST /sandboxes)
 [server 22:15:18] network     Tempo testnet, chain 42431, Gloam pool 0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb
