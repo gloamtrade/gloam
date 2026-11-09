@@ -6,6 +6,8 @@ import { MARKETS, type Market } from "@/lib/markets";
 type ApiResponse = {
   markets: Market[];
   ethUsd?: number | null;
+  /** HYPE in USD, Elysium's gas coin. */
+  hypeUsd?: number | null;
   meta?: {
     liveCount: number;
     total: number;
@@ -43,6 +45,7 @@ export function useEthPrice() {
   const q = useLiveMarkets();
   return {
     ethUsd: q.data?.ethUsd ?? null,
+    hypeUsd: q.data?.hypeUsd ?? null,
     isLoading: q.isLoading,
   };
 }

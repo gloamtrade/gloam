@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { loadEthUsd, loadLiveMarkets } from "@/lib/live-quotes";
+import { loadEthUsd, loadHypeUsd, loadLiveMarkets } from "@/lib/live-quotes";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +13,7 @@ const CACHE_MS = 20_000;
 type Body = {
   markets: Awaited<ReturnType<typeof loadLiveMarkets>>;
   ethUsd: number | null;
+  hypeUsd: number | null;
   meta: { liveCount: number; total: number; fetchedAt: number };
 };
 
@@ -20,9 +21,9 @@ let cached: { at: number; body: Body } | null = null;
 let inflight: Promise<Body> | null = null;
 
 async function load(): Promise<Body> {
-  const [markets, ethUsd] = await Promise.all([loadLiveMarkets(), loadEthUsd()]);
+  const [markets, ethUsd, hypeUsd] = await Promise.all([loadLiveMarkets(), loadEthUsd(), loadHypeUsd()]);
   const liveCount = markets.filter((m) => m.source === "live").length;
-  return { markets, ethUsd, meta: { liveCount, total: markets.length, fetchedAt: Date.now() } };
+  return { markets, ethUsd, hypeUsd, meta: { liveCount, total: markets.length, fetchedAt: Date.now() } };
 }
 
 async function fresh(): Promise<Body> {
@@ -44,7 +45,7 @@ export async function GET(req: Request) {
   const rate = await hitRateLimit(clientIp(req), "markets", PER_IP_PER_MIN);
   if (!rate.allowed) {
     return NextResponse.json(
-      { markets: [], ethUsd: null, error: "rate_limited" },
+      { markets: [], ethUsd: null, hypeUsd: null, error: "rate_limited" },
       { status: 429, headers: { "Retry-After": String(rate.retryAfterSec), "Cache-Control": "no-store" } },
     );
   }
@@ -58,7 +59,7 @@ export async function GET(req: Request) {
   } catch (e) {
     console.error("gloam_markets", e instanceof Error ? e.message : "unknown");
     return NextResponse.json(
-      { markets: [], ethUsd: null, error: "quote_failed" },
+      { markets: [], ethUsd: null, hypeUsd: null, error: "quote_failed" },
       { status: 502, headers: { "Cache-Control": "no-store" } },
     );
   }
