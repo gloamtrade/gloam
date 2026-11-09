@@ -1,0 +1,151 @@
+Real run on Gloam's Tempo testnet pool (Moderato, chain 42431), 9 Nov 2026.
+Verbatim terminal output. Nothing is redacted: no key or note secret is ever printed.
+
+================================================================
+$ pnpm fund        # throwaway testnet key, Tempo faucet, 1 PathUSD deposit
+================================================================
+Setup on Tempo testnet (chain 42431), Gloam pool 0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb
+
+Made a throwaway testnet key for the agent (in .env, not printed).
+Made the seller's receive key (in .env, not printed).
+Made the MPP secret that binds challenge ids (in .env, not printed).
+Agent address (testnet only): 0x93C009052b2c29e3Db289005899e5C756433E698
+
+Asking the Tempo testnet faucet (tempo_fundAddress) for test stablecoins...
+Agent holds 1000000 PathUSD on testnet (gas on Tempo is paid in a stablecoin).
+
+Depositing 1 PathUSD into the Gloam pool (proving the deposit)...
+Deposited. Note 0x1326a983...0ae816 saved to .wallet/agent-notes.json (secret not printed).
+  deposit tx  https://explore.testnet.tempo.xyz/tx/0xa7c9dfdfac090fa04ba8e53a6830e7fa07849eeaf9c1c4982b5810de9aad3776
+  This deposit is public (this address put 1 PathUSD into the pool). The payments that follow are not.
+
+================================================================
+$ pnpm server      # terminal 1: the E2B-style route (full log, both purchases)
+================================================================
+[server 21:09:37] E2B-style MPP proxy on http://127.0.0.1:4402  (POST /sandboxes)
+[server 21:09:37] network     Tempo testnet, chain 42431, Gloam pool 0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb
+[server 21:09:37] price       E2B's quote for a base sandbox, 0.008721 PathUSD for 300s
+[server 21:09:37] gloam pays  E2B's receive tag gloamr1.MFkwEwYHKo...r7e9sA (no wallet address)
+[server 21:09:37] E2B API     no E2B_API_KEY: answering with a labelled mock sandbox
+[server 21:09:41] POST /sandboxes without payment -> 402, 0.008721 PathUSD, offers: tempo (public), gloam (private)
+[server 21:10:24] POST /sandboxes without payment -> 402, 0.008721 PathUSD, offers: tempo (public), gloam (private)
+[server 21:10:34] relay submitted a pool transfer   https://explore.testnet.tempo.xyz/tx/0x95f122d4c1edf756a230c3a11ff4503810947b1dabf5c3d3ed72f16f9f2603ef
+[server 21:11:33] sweeping the payment into a fresh note 0x0f7107a2...398eb0 (secret stored, not printed)
+[server 21:11:36] relay submitted a pool transfer   https://explore.testnet.tempo.xyz/tx/0xaef4151b328395f526d142cbba347d9887290f3a34c50bfa54bd44f92c90e6bc
+[server 21:11:36] POST /sandboxes paid privately and swept. Creating the sandbox (mock, no E2B_API_KEY)
+[server 21:11:36] -> 201 sandboxID mock-s9abq8uonbl8w8un0wod
+[server 21:11:53] POST /sandboxes without payment -> 402, 0.008721 PathUSD, offers: tempo (public), gloam (private)
+[server 21:12:50] POST /sandboxes without payment -> 402, 0.008721 PathUSD, offers: tempo (public), gloam (private)
+[server 21:12:58] relay submitted a pool transfer   https://explore.testnet.tempo.xyz/tx/0x2f400aedac0c71c936727085ce2e667206a0505bb5e92eda4a34a288cba48c78
+[server 21:14:06] sweeping the payment into a fresh note 0x19eb3531...79df8a (secret stored, not printed)
+[server 21:14:09] relay submitted a pool transfer   https://explore.testnet.tempo.xyz/tx/0x7347f25ee62d55779526fa746b1f2382a55a08f681eee39011eb56e6c3fba08f
+[server 21:14:12] POST /sandboxes paid privately and swept. Creating the sandbox (mock, no E2B_API_KEY)
+[server 21:14:12] -> 201 sandboxID mock-u0ai792a71ruiziy1hbt
+
+================================================================
+$ pnpm agent       # terminal 2: first purchase
+================================================================
+[agent 21:09:41] private balance 1 PathUSD in 1 note(s) in the Gloam pool on Tempo testnet
+[agent 21:09:41] POST http://127.0.0.1:4402/sandboxes {"templateID":"base","timeout":300}
+[agent 21:09:41] 402 Payment Required. The offers:
+[agent 21:09:41]   tempo/charge  0.008721 PathUSD  to wallet 0xb10ACa684083730D93D68EcB71486b17bDf71460  (public: payer, payee and amount on chain)
+[agent 21:09:41]   gloam/charge  0.008721 PathUSD  to receive tag gloamr1.MFkwEwYHKo...r7e9sA  via pool 0x841DC046...F2d5eb  (private)
+[agent 21:09:41] Syncing the pool's tree for the note's membership path...
+[agent 21:10:24] paying from note 0x1326a983...0ae816 (1 PathUSD)
+[agent 21:10:24] proved a private send of 0.008721 PathUSD, mode pull; change note 0x018b64a5...99515a kept (0.991279 PathUSD)
+[agent 21:11:37] 201 in 73.1s
+[agent 21:11:37] Payment-Receipt  method=gloam status=success chainId=42431 reference=0xaef4151b328395f526d142cbba347d9887290f3a34c50bfa54bd44f92c90e6bc
+[agent 21:11:37] sandbox          {"mock":true,"note":"MOCK sandbox: set E2B_API_KEY to forward paid requests to api.e2b.app","alias":"base","sandboxID":"mock-s9abq8uonbl8w8un0wod","templateID":"base","clientID":"mock","envdVersion":"mock"}
+[agent 21:11:37] sandboxID        mock-s9abq8uonbl8w8un0wod  (MOCK: the server has no E2B_API_KEY)
+[agent 21:11:37] private balance  0.991279 PathUSD
+
+[agent 21:11:37] What the chain shows for this payment (read from the public RPC, no keys):
+
+[agent 21:11:39] 1. the agent's payment (pull: submitted by E2B's server through the Gloam relay)
+[agent 21:11:39]   tx        https://explore.testnet.tempo.xyz/tx/0x95f122d4c1edf756a230c3a11ff4503810947b1dabf5c3d3ed72f16f9f2603ef
+[agent 21:11:39]   from      0xb1e994586e62994648a0b866bf33f2edd942512e  (the Gloam relay's account)
+[agent 21:11:39]   to        0x841dc046ea3cc842ba3a855731472c6eb0f2d5eb  (the Gloam pool)
+[agent 21:11:39]   call      transfer(proof, root, nullifier, newCommitments)  <- the whole calldata
+[agent 21:11:39]     proof           256 bytes (Groth16)
+[agent 21:11:39]     root            0x0270d5a13bc347ec8a097719dcb2e70c9940463beecc2a042e99abf7c93b4188
+[agent 21:11:39]     nullifier       0x00bfe3faf4866067ddfb8918283a7721997fa030ba9ccf55f7ab42c8c2b132cc
+[agent 21:11:39]     newCommitments  0x2d3cfd16de19686330c09f71313367b4c0394f35cbc5ff5aed694f3ca39d13f3
+[agent 21:11:39]                     0x018b64a550ef971858c0a88e9946929f6d48c66e63d5ea1fe87408e4bf99515a
+[agent 21:11:39]   event     Transferred(nullifier 0x00bfe3fa...b132cc, commitments 0x2d3cfd16...9d13f3, 0x018b64a5...99515a)
+[agent 21:11:39]   event     token Transfer 0xb1E99458...42512e -> 0xfeEC0000...000000 0.001745 at 0x20c00000...000000  (gas fee, paid by the relay)
+[agent 21:11:39]   agent's wallet in calldata or logs     no
+[agent 21:11:39]   a token transfer of the price (0.008721 PathUSD)  no
+[agent 21:11:39]   E2B's address                          none exists: E2B is paid to a receive tag, which never goes on chain
+
+[agent 21:11:39] 2. E2B's sweep into a fresh note only E2B knows
+[agent 21:11:39]   tx        https://explore.testnet.tempo.xyz/tx/0xaef4151b328395f526d142cbba347d9887290f3a34c50bfa54bd44f92c90e6bc
+[agent 21:11:39]   from      0xb1e994586e62994648a0b866bf33f2edd942512e  (the Gloam relay's account)
+[agent 21:11:39]   to        0x841dc046ea3cc842ba3a855731472c6eb0f2d5eb  (the Gloam pool)
+[agent 21:11:39]   call      transfer(proof, root, nullifier, newCommitments)  <- the whole calldata
+[agent 21:11:39]     proof           256 bytes (Groth16)
+[agent 21:11:39]     root            0x0efc71aa84c2400fd4aad9f1d57654e3a75712d80a39f78e3182ef6cfd691042
+[agent 21:11:39]     nullifier       0x2171bc8cb5c5b791d1ae2bc0b03b8c3736c4a740003e709769bff6632e6aa9d2
+[agent 21:11:39]     newCommitments  0x0f7107a248dc62b28445b46bf0f591055fc5bf4781173f2adecebba5a0398eb0
+[agent 21:11:39]                     0x22395466409eb2045ab5bcf6f4ce8976dcd78f6477e61b30c9a5e0b29b11cca1
+[agent 21:11:39]   event     Transferred(nullifier 0x2171bc8c...6aa9d2, commitments 0x0f7107a2...398eb0, 0x22395466...11cca1)
+[agent 21:11:39]   event     token Transfer 0xb1E99458...42512e -> 0xfeEC0000...000000 0.001743 at 0x20c00000...000000  (gas fee, paid by the relay)
+[agent 21:11:39]   agent's wallet in calldata or logs     no
+[agent 21:11:39]   a token transfer of the price (0.008721 PathUSD)  no
+[agent 21:11:39]   E2B's address                          none exists: E2B is paid to a receive tag, which never goes on chain
+
+[agent 21:11:39] On chain: two pool transfers, each a nullifier and two commitments, sent by the relay.
+[agent 21:11:39] No amount, no asset, no payer, no payee. Only the agent and E2B know this was a 0.008721 PathUSD sandbox purchase.
+
+================================================================
+$ pnpm agent       # terminal 2: second purchase, paid from the change note
+================================================================
+[agent 21:11:52] private balance 0.991279 PathUSD in 1 note(s) in the Gloam pool on Tempo testnet
+[agent 21:11:52] POST http://127.0.0.1:4402/sandboxes {"templateID":"base","timeout":300}
+[agent 21:11:53] 402 Payment Required. The offers:
+[agent 21:11:53]   tempo/charge  0.008721 PathUSD  to wallet 0xb10ACa684083730D93D68EcB71486b17bDf71460  (public: payer, payee and amount on chain)
+[agent 21:11:53]   gloam/charge  0.008721 PathUSD  to receive tag gloamr1.MFkwEwYHKo...r7e9sA  via pool 0x841DC046...F2d5eb  (private)
+[agent 21:11:53] Syncing the pool's tree for the note's membership path...
+[agent 21:12:50] paying from note 0x018b64a5...99515a (0.991279 PathUSD)
+[agent 21:12:51] proved a private send of 0.008721 PathUSD, mode pull; change note 0x1336a1cb...9583df kept (0.982558 PathUSD)
+[agent 21:14:13] 201 in 82.6s
+[agent 21:14:13] Payment-Receipt  method=gloam status=success chainId=42431 reference=0x7347f25ee62d55779526fa746b1f2382a55a08f681eee39011eb56e6c3fba08f
+[agent 21:14:13] sandbox          {"mock":true,"note":"MOCK sandbox: set E2B_API_KEY to forward paid requests to api.e2b.app","alias":"base","sandboxID":"mock-u0ai792a71ruiziy1hbt","templateID":"base","clientID":"mock","envdVersion":"mock"}
+[agent 21:14:13] sandboxID        mock-u0ai792a71ruiziy1hbt  (MOCK: the server has no E2B_API_KEY)
+[agent 21:14:13] private balance  0.982558 PathUSD
+
+[agent 21:14:13] What the chain shows for this payment (read from the public RPC, no keys):
+
+[agent 21:14:16] 1. the agent's payment (pull: submitted by E2B's server through the Gloam relay)
+[agent 21:14:16]   tx        https://explore.testnet.tempo.xyz/tx/0x2f400aedac0c71c936727085ce2e667206a0505bb5e92eda4a34a288cba48c78
+[agent 21:14:16]   from      0xb1e994586e62994648a0b866bf33f2edd942512e  (the Gloam relay's account)
+[agent 21:14:16]   to        0x841dc046ea3cc842ba3a855731472c6eb0f2d5eb  (the Gloam pool)
+[agent 21:14:16]   call      transfer(proof, root, nullifier, newCommitments)  <- the whole calldata
+[agent 21:14:16]     proof           256 bytes (Groth16)
+[agent 21:14:16]     root            0x2bd78a19d7ee21e321d6efa0dd47ba89b526d3b03cfbac663846b654971be298
+[agent 21:14:16]     nullifier       0x1af56749d8b1eeda9d423bd0afcbd30a4e1900d0e5245ba8f2a697c174c8d692
+[agent 21:14:16]     newCommitments  0x2b6e3fd56efb8cd1417f1f5cb92fc4ded2d00cf564bf7fba8539ee7b92a197ed
+[agent 21:14:16]                     0x1336a1cb7070a24214dbc3c30549b0daba0ee39d684ec11387f0462c169583df
+[agent 21:14:16]   event     Transferred(nullifier 0x1af56749...c8d692, commitments 0x2b6e3fd5...a197ed, 0x1336a1cb...9583df)
+[agent 21:14:16]   event     token Transfer 0xb1E99458...42512e -> 0xfeEC0000...000000 0.001743 at 0x20c00000...000000  (gas fee, paid by the relay)
+[agent 21:14:16]   agent's wallet in calldata or logs     no
+[agent 21:14:16]   a token transfer of the price (0.008721 PathUSD)  no
+[agent 21:14:16]   E2B's address                          none exists: E2B is paid to a receive tag, which never goes on chain
+
+[agent 21:14:16] 2. E2B's sweep into a fresh note only E2B knows
+[agent 21:14:16]   tx        https://explore.testnet.tempo.xyz/tx/0x7347f25ee62d55779526fa746b1f2382a55a08f681eee39011eb56e6c3fba08f
+[agent 21:14:16]   from      0xb1e994586e62994648a0b866bf33f2edd942512e  (the Gloam relay's account)
+[agent 21:14:16]   to        0x841dc046ea3cc842ba3a855731472c6eb0f2d5eb  (the Gloam pool)
+[agent 21:14:16]   call      transfer(proof, root, nullifier, newCommitments)  <- the whole calldata
+[agent 21:14:16]     proof           256 bytes (Groth16)
+[agent 21:14:16]     root            0x210233c1ab4a0214de0fa97b1b0d5df0b7782b930ce373d23d6cd4b72fdd025d
+[agent 21:14:16]     nullifier       0x207fcf6a222c163d557e9bdd0d596777dece6b4ae265e5f7ca123b64557d7458
+[agent 21:14:16]     newCommitments  0x19eb3531c7b5c6bf329e846b62877cd44d8f01390d81b26f9067b0263279df8a
+[agent 21:14:16]                     0x2d2dd648f4ead4743804cdc79e363d109b61724245988c0ae07f857751a6d9e2
+[agent 21:14:16]   event     Transferred(nullifier 0x207fcf6a...7d7458, commitments 0x19eb3531...79df8a, 0x2d2dd648...a6d9e2)
+[agent 21:14:16]   event     token Transfer 0xb1E99458...42512e -> 0xfeEC0000...000000 0.00174 at 0x20c00000...000000  (gas fee, paid by the relay)
+[agent 21:14:16]   agent's wallet in calldata or logs     no
+[agent 21:14:16]   a token transfer of the price (0.008721 PathUSD)  no
+[agent 21:14:16]   E2B's address                          none exists: E2B is paid to a receive tag, which never goes on chain
+
+[agent 21:14:16] On chain: two pool transfers, each a nullifier and two commitments, sent by the relay.
+[agent 21:14:16] No amount, no asset, no payer, no payee. Only the agent and E2B know this was a 0.008721 PathUSD sandbox purchase.

@@ -1,0 +1,53 @@
+POST https://mpp.e2b.dev/sandboxes {"templateID":"base","timeout":300}   (no payment attached)
+
+HTTP 402 Payment Required
+WWW-Authenticate offers 4 ways to pay:
+
+  method="tempo" intent="charge"
+    description  Create sandbox - 2 vCPU, 512 MiB, 300s
+    amount       8721 base units = $0.008721
+    currency     OUSD (0x20c0000000000000000000006a37DA5C996874BE)
+    recipient    0xb10ACa684083730D93D68EcB71486b17bDf71460
+    chainId      4217 (Tempo mainnet)
+
+  method="tempo" intent="charge"
+    description  Create sandbox - 2 vCPU, 512 MiB, 300s
+    amount       8721 base units = $0.008721
+    currency     USDC.e (0x20c000000000000000000000b9537d11c60e8b50)
+    recipient    0xb10ACa684083730D93D68EcB71486b17bDf71460
+    chainId      4217 (Tempo mainnet)
+
+  method="tempo" intent="session"
+    description  Create sandbox - 2 vCPU, 512 MiB, 300s
+    amount       8721 base units = $0.008721
+    currency     OUSD (0x20c0000000000000000000006a37DA5C996874BE)
+    recipient    0xb10ACa684083730D93D68EcB71486b17bDf71460
+    chainId      4217 (Tempo mainnet)
+
+  method="tempo" intent="session"
+    description  Create sandbox - 2 vCPU, 512 MiB, 300s
+    amount       8721 base units = $0.008721
+    currency     USDC.e (0x20c000000000000000000000b9537d11c60e8b50)
+    recipient    0xb10ACa684083730D93D68EcB71486b17bDf71460
+    chainId      4217 (Tempo mainnet)
+
+Decoded challenge `request` (the first one, verbatim):
+  {"amount":"8721","currency":"0x20c0000000000000000000006a37DA5C996874BE","methodDetails":{"chainId":4217,"feePayer":true,"machineTokenEnabled":true,"supportedModes":["pull"]},"recipient":"0xb10ACa684083730D93D68EcB71486b17bDf71460"}
+
+If the agent pays this, Tempo mainnet records in the clear:
+  from     the agent's wallet address
+  to       0xb10ACa684083730D93D68EcB71486b17bDf71460  (E2B's receiving wallet, the same on every charge)
+  amount   $0.008721 in OUSD or USDC.e
+  when     the block time
+Anyone can list every agent paying E2B, how much and how often, from one RPC query.
+
+The public record, last ~90,000 blocks of Tempo mainnet (eth_getLogs, no key, no account):
+  81 payments into 0xb10ACa...1460 from 5 distinct payer wallets, $0.105453 in total
+  2026-11-09T18:13:42.000Z  0xce5ada...e902 -> E2B  $0.000100 OUSD  https://explore.tempo.xyz/tx/0x6a64e6bdec34da7ffeb358311f50981bfbe30008ce7c4bbbb3fcfdcf5fa38aef
+  2026-11-09T18:13:48.000Z  0xce5ada...e902 -> E2B  $0.000100 OUSD  https://explore.tempo.xyz/tx/0xd5764262b370f591449d8b5ee4a1c8ce645a46e823f150abe1c749b2d29beb0e
+  2026-11-09T18:13:59.000Z  0xce5ada...e902 -> E2B  $0.001824 OUSD  https://explore.tempo.xyz/tx/0x1e98668dde0fe8460dbf9754724d0dec6b153b42adfbf0165edf7bd591cb127f
+  2026-11-09T18:14:06.000Z  0xce5ada...e902 -> E2B  $0.000100 OUSD  https://explore.tempo.xyz/tx/0x64a0ed8e4d87e34215af626060a52b3f2233b187694d9493e49b21a172c07c78
+  2026-11-09T18:14:14.000Z  0xce5ada...e902 -> E2B  $0.000100 OUSD  https://explore.tempo.xyz/tx/0xb60f371a9e1e8a2864c062d5fd84caefab8989e9c63bee34094edd2ad0e005a6
+  (payer addresses shortened here; the chain shows them in full)
+
+No payment was made.

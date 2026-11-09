@@ -1,0 +1,6 @@
+# Throwaway testnet key, the seller's receive key and MPP secret. Never commit.
+.env
+.env.*
+# Note secrets (the agent's balance, the seller's swept notes). Never commit.
+.wallet/
+node_modules/

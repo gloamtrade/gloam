@@ -1,0 +1,25 @@
+{
+  "name": "gloam-e2b-private-mpp-example",
+  "private": true,
+  "type": "module",
+  "description": "Agents buy E2B sandboxes over MPP and pay privately with the \"gloam\" method. A real run on Gloam's Tempo testnet pool.",
+  "scripts": {
+    "public-402": "node public-402.mjs",
+    "fund": "tsx fund.ts",
+    "server": "tsx server.ts",
+    "agent": "tsx agent.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@gloamtrade/mppx-gloam": "workspace:*",
+    "@gloamtrade/sdk": "workspace:*",
+    "mppx": "^0.13.1",
+    "snarkjs": "^0.7.5",
+    "viem": "^2.55.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}
