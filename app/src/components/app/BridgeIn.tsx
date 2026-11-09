@@ -31,7 +31,7 @@ import {
 import { prepareBridgeNote, settleBridgeNote } from "@/lib/bridgePrivate";
 import { useAppBalance, useAppSendTransaction, useAppTxReceipt, useDemo } from "@/lib/demo";
 import { MAINNET_ENABLED, type GloamChainId } from "@/lib/networks";
-import { isElysiumChainId } from "@/lib/elysium";
+import { elysiumPrivateTrial, isElysiumChainId } from "@/lib/elysium";
 import { originChain } from "@/lib/originChains";
 import { useVaultStatus } from "@/lib/passkey";
 import { dropUnsentNote, formatFeePercent, saveLocalNote, updateLocalNote, type LocalNote } from "@/lib/shield";
@@ -291,9 +291,11 @@ function BridgeSheet({
   // Elysium: the plain bridge only (into the wallet, then Add privately), until a
   // private landing there is proven end to end. The first one (9 Nov 2026) sat at
   // Relay with no fill on Elysium.
+  // A browser opened with ?trial=elysium-private gets it, to prove the route with a small amount.
+  const elysiumTrial = isElysiumChainId(network.chainId) && elysiumPrivateTrial();
   const canPrivate =
     !demo &&
-    !isElysiumChainId(network.chainId) &&
+    (!isElysiumChainId(network.chainId) || elysiumTrial) &&
     !network.chain.testnet &&
     Boolean(network.pool) &&
     privateBridgeable(chain) &&
@@ -632,6 +634,7 @@ function BridgeSheet({
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        ...(elysiumTrial ? { trial: true } : {}),
         chainId: chain.id,
         symbol: token.symbol,
         network: network.key,
