@@ -50,20 +50,30 @@ const RULES = [
   `Videos are ${CONTEST.minMinutes} to ${CONTEST.maxMinutes} minutes long.`,
   "Entries come from X only, with the video uploaded to the post.",
   "Original work only.",
+  "No AI-generated videos: no AI footage, AI avatars or AI voices.",
   "One entry per X account.",
   "The video stays public until winners are paid.",
   "No impersonating other projects.",
   "No bought likes, views or followers.",
   "Entries that break a rule are removed.",
   "Gloam may repost, clip and use entries in its marketing, with credit to the creator.",
+  `Winners are contacted only from @${CONTEST.account}.`,
 ];
 
 const FAQ: [string, string][] = [
-  ["Do I need to use the app?", "No. A video about the idea works too. If you show the app, show it on mainnet: testnet footage is not accepted."],
+  ["Do I need to use the app?", "It helps. Videos that show a real private payment or cash out on mainnet score higher. Testnet footage is not accepted."],
   ["How long should my video be?", `Between ${CONTEST.minMinutes} and ${CONTEST.maxMinutes} minutes.`],
   [
     "Can I post it on YouTube instead?",
     "Entries come from X only. Upload the video to your post on X; a link to YouTube or another site doesn’t count.",
+  ],
+  [
+    "Can I use AI?",
+    "No AI-generated videos. Footage, avatars, voices and animation made by an AI generator are not accepted, and entries that use them are removed. Normal editing tools are fine.",
+  ],
+  [
+    "Are animation and motion graphics allowed?",
+    "Yes, if you made them yourself, in tools like After Effects, Blender, Figma or Rive. Animation made by an AI generator is not.",
   ],
   [
     "Where can I ask questions?",
@@ -157,7 +167,7 @@ export default function ContestPage() {
             label="What to make"
             title={`A ${CONTEST.minMinutes} to ${CONTEST.maxMinutes} minute video about Gloam.`}
           >
-            An explainer, a tutorial, a short film, an animation, a skit or a meme. Any style is welcome, and a carefully
+            An explainer, a tutorial, a short film, an animation you made yourself, a skit or a meme. No AI-generated videos. Any style is welcome, and a carefully
             made video gets the attention it deserves. It has to show Gloam clearly, the app or the idea, and be posted
             on X.
           </SectionHead>
@@ -240,13 +250,6 @@ export default function ContestPage() {
               </li>
             ))}
           </ul>
-          <div className="mt-10 max-w-[720px] rounded-2xl bg-sealed-soft px-5 py-5 sm:px-6">
-            <p className="text-[15px] font-medium text-foreground">You never need to deposit money.</p>
-            <p className="mt-2 text-[14.5px] leading-relaxed text-soft">
-              A video about the idea works without the app. If you show the app, use mainnet; testnet footage is not accepted. We never ask for a private key, a seed phrase or a wallet connection to enter. Gloam
-              never asks for keys or funds in DMs, and winners are contacted only from @{CONTEST.account}.
-            </p>
-          </div>
         </section>
 
         {/* the form */}
