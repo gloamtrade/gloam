@@ -588,6 +588,19 @@ function SecuritySection({ live }: { live: TokenLive }) {
       ),
     },
     {
+      title: "Independent audit",
+      body: (
+        <>
+          Kann Audits reviewed the vault contracts (report of 1 November 2026) and found no Critical, High or Medium
+          issues. The swap routers, circuits, app and relay were not part of it. Read it on{" "}
+          <Link href="/security" className={LINK}>
+            Security
+          </Link>
+          .
+        </>
+      ),
+    },
+    {
       title: "Trusted setup",
       body: (
         <>
@@ -633,7 +646,7 @@ function SecuritySection({ live }: { live: TokenLive }) {
           </ul>
           {INDEPENDENT_REVIEW_REQUESTED && (
             <p className="mt-6 max-w-[62ch] text-[14.5px] leading-relaxed text-mute">
-              An independent review by Zero Cool (<ExtLink href="https://zerocool.ai">zerocool.ai</ExtLink>) has been
+              A second independent review, by Zero Cool (<ExtLink href="https://zerocool.ai">zerocool.ai</ExtLink>) has been
               requested, funded by Kinetiq&apos;s Elysium builder credits. We will publish the report and the fix review
               here.
             </p>
