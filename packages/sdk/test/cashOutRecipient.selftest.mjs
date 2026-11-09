@@ -53,6 +53,8 @@ const BOARDS = {
   "tempo-mainnet": chains[4217].GloamPayMemo,
   "base-mainnet": deployed("base-mainnet.json").contracts.GloamPayMemo,
   "ethereum-mainnet": deployed("ethereum-mainnet.json").contracts.GloamPayMemo,
+  // No board deployed on Elysium yet: the record has none and the SDK's payMemo is null.
+  "elysium-mainnet": deployed("elysium-mainnet.json").contracts.GloamPayMemo ?? null,
   robinhood: deployed("poseidon-testnet.json").contracts.GloamPayMemo,
   tempo: GLOAM_NETWORKS.tempo.payMemo, // Moderato has no deployment record
   base: deployed("base-sepolia.json").contracts.GloamPayMemo,
@@ -62,6 +64,14 @@ const ROUTERS = { "robinhood-mainnet": [RH_V1, RH_V2], "tempo-mainnet": [TEMPO_R
 
 const nets = gloamNetworks();
 is(nets.length, Object.keys(BOARDS).length, "every network is checked, none skipped");
+for (const net of nets) assert(net.key in BOARDS, `${net.key} has a board entry`);
+
+// Elysium's vault and USDC in the SDK are the deployed ones.
+const elysiumDeploy = deployed("elysium-mainnet.json");
+const elysiumNet = getGloamNetwork("elysium-mainnet");
+is(elysiumNet.chainId, elysiumDeploy.chainId, "Elysium's chain id");
+is(elysiumNet.pool.toLowerCase(), elysiumDeploy.contracts.ShieldPoolPayments.toLowerCase(), "Elysium's vault");
+is(elysiumNet.assets.map((a) => a.address.toLowerCase()).join(), elysiumDeploy.assets.USDC.address.toLowerCase(), "Elysium lists its USDC only");
 
 // The same answer on every network, in any letter case.
 const spellings = (a) => [a, a.toLowerCase(), a.toUpperCase().replace("0X", "0x"), `  ${a}\n`];
@@ -70,7 +80,8 @@ for (const net of nets) {
     for (const to of spellings(a)) is(cashOutTargetProblem(to, net), message, `${what} on ${net.key} (${to})`);
   };
   refuses(net.pool, CASH_OUT_TO_VAULT_MESSAGE, "the vault");
-  refuses(BOARDS[net.key], CASH_OUT_TO_BOARD_MESSAGE, "the board");
+  if (BOARDS[net.key]) refuses(BOARDS[net.key], CASH_OUT_TO_BOARD_MESSAGE, "the board");
+  else is(net.payMemo ?? null, null, `${net.key} has no board, in the record or the SDK`);
   refuses(ZERO, CASH_OUT_TO_ZERO_MESSAGE, "the zero address");
   for (const r of ROUTERS[net.key] ?? []) refuses(r, CASH_OUT_TO_ROUTER_MESSAGE, "a router");
   const tokens = net.assets.filter((a) => a.address !== NATIVE_ASSET);
