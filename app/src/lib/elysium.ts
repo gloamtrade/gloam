@@ -171,22 +171,3 @@ export const ELYSIUM_LIVE_SINCE = text(process.env.NEXT_PUBLIC_ELYSIUM_LIVE_SINC
 export function isElysiumChainId(chainId: unknown): boolean {
   return ELYSIUM !== null && Number(chainId) === ELYSIUM.chainId;
 }
-
-const ELYSIUM_PRIVATE_TRIAL_KEY = "gloam:elysium-private-trial";
-
-/**
- * The private landing on Elysium is off until one has landed end to end. Opening the
- * app once with ?trial=elysium-private turns it on in that browser only, for a test
- * with a small amount; ?trial=off turns it back off.
- */
-export function elysiumPrivateTrial(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const flag = new URLSearchParams(window.location.search).get("trial");
-    if (flag === "elysium-private") window.localStorage.setItem(ELYSIUM_PRIVATE_TRIAL_KEY, "1");
-    if (flag === "off") window.localStorage.removeItem(ELYSIUM_PRIVATE_TRIAL_KEY);
-    return window.localStorage.getItem(ELYSIUM_PRIVATE_TRIAL_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
