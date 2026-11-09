@@ -1781,9 +1781,9 @@ function PoweredByRelay() {
         className="inline-block align-baseline opacity-80 transition-opacity hover:opacity-100"
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- small local logo */}
-        <img src="/brand/partners/relay.svg" alt="" width={66} height={15} className="relative top-[3px] inline-block h-[15px] w-auto dark:hidden" />
+        <img src="/brand/partners/relay.svg" alt="" width={66} height={15} className="inline-block h-[15px] w-auto dark:hidden" />
         {/* eslint-disable-next-line @next/next/no-img-element -- small local logo */}
-        <img src="/brand/partners/relay-white.svg" alt="" width={66} height={15} className="relative top-[3px] hidden h-[15px] w-auto dark:inline-block" />
+        <img src="/brand/partners/relay-white.svg" alt="" width={66} height={15} className="hidden h-[15px] w-auto dark:inline-block" />
       </a>
     </span>
   );
