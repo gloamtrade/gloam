@@ -280,9 +280,15 @@ export function bridgeFeeLines(q: { feeUsd: number; appFee: BridgeAppFee | null 
 
 export type BridgeQuote = {
   requestId: string;
-  /** Empty for a swap, which the wallet signs as `tx` instead. */
+  /** Empty for a swap, which the wallet signs as `tx` instead, and for a bridge the wallet signs (`evmTxs`). */
   depositAddress: string;
   tx: { to: string; data: string; value: string; chainId: number } | null;
+  /**
+   * A bridge paid from the connected EVM wallet to itself on the destination
+   * chain: the transactions it signs in order (an approve, then the deposit; or
+   * the deposit alone). Checked by walletBridgeTxs before it is handed out.
+   */
+  evmTxs?: { to: string; data: string; value: string; chainId: number }[];
   send: { amount: string; symbol: string; chain: string; chainId: number; logo: string; usd: number | null };
   receive: { amount: string; minimum: string; symbol: string; chain: string; logo: string };
   /** Everything taken in fees: Relay's, and Gloam's own when it takes one (appFee). */
@@ -292,6 +298,69 @@ export type BridgeQuote = {
   timeSec: number;
   bitcoin: boolean;
 };
+
+const APPROVE_SELECTOR = "0x095ea7b3";
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const HEX = /^0x[0-9a-fA-F]*$/;
+
+/**
+ * The transactions a connected EVM wallet signs to bridge `amount` of `token`
+ * to itself, read from Relay's /quote answer (`data`), or null when they are
+ * anything but the plain shape. Nothing else is handed to a wallet:
+ *  - every step a "transaction" with one item, on `chain.id`, to an address,
+ *    with hex data (and from `from`, when Relay names a sender);
+ *  - [approve, deposit] for a token, or [deposit] alone;
+ *  - the approve is `token`'s own approve(spender, n), spender the deposit's
+ *    contract, n at least `amount`, no value;
+ *  - the deposit sends no value for a token, and exactly `amount` for the
+ *    chain's own coin (which never needs an approve).
+ */
+export function walletBridgeTxs(
+  data: unknown,
+  chain: { id: number },
+  token: { address: string },
+  amount: bigint,
+  from?: string,
+): { to: string; data: string; value: string; chainId: number }[] | null {
+  const steps = (data as { steps?: unknown } | null)?.steps;
+  if (!Array.isArray(steps) || steps.length < 1 || steps.length > 2) return null;
+  const txs: { to: string; data: string; value: string; chainId: number }[] = [];
+  for (const s of steps as { kind?: unknown; items?: unknown }[]) {
+    if (s?.kind !== "transaction" || !Array.isArray(s.items) || s.items.length !== 1) return null;
+    const x = (s.items[0] as { data?: Record<string, unknown> } | null)?.data;
+    if (!x || Number(x.chainId) !== chain.id) return null;
+    if (typeof x.to !== "string" || !isAddress(x.to) || typeof x.data !== "string" || !HEX.test(x.data)) return null;
+    if (x.from !== undefined && (typeof from !== "string" || String(x.from).toLowerCase() !== from.toLowerCase())) return null;
+    let value: bigint;
+    try {
+      value = BigInt((x.value as string | number | undefined) ?? 0);
+    } catch {
+      return null;
+    }
+    if (value < BigInt(0)) return null;
+    txs.push({ to: x.to, data: x.data, value: value.toString(), chainId: chain.id });
+  }
+  const native = token.address.toLowerCase() === ZERO_ADDRESS;
+  const deposit = txs[txs.length - 1]!;
+  if (deposit.data.slice(0, 10).toLowerCase() === APPROVE_SELECTOR) return null;
+  if (native) {
+    if (txs.length !== 1 || BigInt(deposit.value) !== amount) return null;
+    return txs;
+  }
+  if (BigInt(deposit.value) !== BigInt(0)) return null;
+  if (txs.length === 2) {
+    const approve = txs[0]!;
+    // approve(address,uint256): selector, then two 32-byte words
+    const d = approve.data.toLowerCase();
+    if (d.length !== 10 + 64 * 2 || d.slice(0, 10) !== APPROVE_SELECTOR) return null;
+    if (approve.to.toLowerCase() !== token.address.toLowerCase() || BigInt(approve.value) !== BigInt(0)) return null;
+    if (d.slice(10, 34) !== "0".repeat(24)) return null;
+    const spender = `0x${d.slice(34, 74)}`;
+    if (spender !== deposit.to.toLowerCase()) return null;
+    if (BigInt(`0x${d.slice(74, 138)}`) < amount) return null;
+  }
+  return txs;
+}
 
 /**
  * Chains a connected wallet can pay from straight into the private balance:

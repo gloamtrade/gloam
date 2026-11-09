@@ -99,6 +99,17 @@ type PrivateStage =
   | { kind: "late"; quote: PrivateBridgeQuote }
   | { kind: "failed"; quote: PrivateBridgeQuote };
 
+/**
+ * A plain bridge paid from the connected EVM wallet to itself on the
+ * destination chain: no deposit address, the wallet signs an approve (for a
+ * token) and the deposit, and Relay delivers to the same wallet.
+ */
+type WalletStage =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "review"; quote: BridgeQuote; at: number; signing: boolean; progress: string | null; error: string | null }
+  | { kind: "sent"; quote: BridgeQuote; hash: Hex | null; unsure: boolean };
+
 /** A chain's logo, with its dark-theme version when Relay ships one. */
 function ChainLogo({ id, size = 24, className = "" }: { id: number; size?: number; className?: string }) {
   return (
@@ -146,7 +157,9 @@ export function BridgeInCard({
   // never offer the chain the money lands on as where it comes from
   const sources = dest ? bridgeSources(CHAINS, dest.chainId) : CHAINS;
   const featured = FEATURED.filter((id) => sources.some((c) => c.id === id));
-  const solanaPrivate = !network.chain.testnet && Boolean(network.pool) && sources.some(privateBridgeable);
+  // Elysium has the plain bridge only (see canPrivate in BridgeSheet), so the card doesn't promise more.
+  const solanaPrivate =
+    !network.chain.testnet && !isElysiumChainId(network.chainId) && Boolean(network.pool) && sources.some(privateBridgeable);
   // No bridge into this chain yet: nothing to offer.
   if (!dest) return null;
 
@@ -344,6 +357,17 @@ function BridgeSheet({
   const srcRead = nativeToken ? srcCoin : srcToken;
   const srcBalance: bigint | null = balanceReadable && !srcRead.isError ? (nativeToken ? srcCoin.data?.value : srcToken.data) ?? null : null;
   const srcLoading = balanceReadable && srcRead.isLoading;
+  // Not private, from an EVM chain, with a wallet that can switch there: the wallet
+  // signs the bridge to itself. A deposit address stays one tap away, for an exchange.
+  const walletPays =
+    !privately &&
+    !swapping &&
+    !demo &&
+    chain.kind === "evm" &&
+    switchable &&
+    isAddress(recipient) &&
+    config.chains.some((c) => c.id === chain.id);
+  const [wallet, setWallet] = useState<WalletStage>({ kind: "idle" });
   const send = useAppSendTransaction();
   const receipt = useAppTxReceipt({ hash: send.data, chainId: (swap?.id ?? network.chainId) as GloamChainId });
   const resetSend = send.reset;
@@ -352,6 +376,7 @@ function BridgeSheet({
     setStage({ kind: "form", error: null });
     setStatus(null);
     setPriv({ kind: "idle" });
+    setWallet({ kind: "idle" });
     resetSend();
   }, [resetSend]);
 
@@ -453,7 +478,9 @@ function BridgeSheet({
       ? stage.quote.requestId
       : priv.kind === "sent" && (!priv.quote.sameChain || !priv.hash)
         ? priv.quote.requestId
-        : null;
+        : wallet.kind === "sent"
+          ? wallet.quote.requestId
+          : null;
   // An open deposit address can be filled under a newer request (another amount,
   // an exchange's fee taken off), so the status check also looks the address up.
   const depositAddress = stage.kind === "address" && !stage.quote.tx ? stage.quote.depositAddress : "";
@@ -494,6 +521,12 @@ function BridgeSheet({
       once(`arrived:${shown.requestId}`, "bridge_arrived", { source: shown.send.chain, token: shown.send.symbol });
     }
   }, [shown, status, once]);
+  const walletSent = wallet.kind === "sent" ? wallet.quote : null;
+  useEffect(() => {
+    if (walletSent && status?.stage === "done") {
+      once(`arrived:${walletSent.requestId}`, "bridge_arrived", { source: walletSent.send.chain, token: walletSent.send.symbol });
+    }
+  }, [walletSent, status, once]);
   useEffect(() => {
     if (shown?.tx && send.data) once(`sent:${send.data}`, "swap_submit", { token: shown.send.symbol });
   }, [shown, send.data, once]);
@@ -810,8 +843,131 @@ function BridgeSheet({
   }
 
 
-  async function getAddress(e: React.FormEvent) {
+  /** A fresh Relay order the connected wallet signs, to itself on the destination chain. */
+  async function walletQuote(amountText: string): Promise<BridgeQuote> {
+    const res = await fetch("/api/bridge/quote", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chainId: chain.id, symbol: token.symbol, network: network.key, amount: amountText, recipient, fromWallet: true }),
+    });
+    const json = (await res.json().catch(() => null)) as { ok: boolean; data?: BridgeQuote; error?: { message: string } } | null;
+    if (!json?.ok || !json.data?.evmTxs?.length) throw new Error(json?.error?.message ?? "The bridge couldn't make a route right now. Try again.");
+    return json.data;
+  }
+
+  /** Price the bridge from the wallet and show what it signs. */
+  async function startWallet(e: React.FormEvent) {
     e.preventDefault();
+    setStage({ kind: "form", error: null });
+    setWallet({ kind: "loading" });
+    try {
+      const quote = await walletQuote(amount);
+      setWallet({ kind: "review", quote, at: Date.now(), signing: false, progress: null, error: null });
+      once(`wallet-review:${quote.requestId}`, "bridge_wallet_review", { source: quote.send.chain, token: quote.send.symbol });
+    } catch (err) {
+      setWallet({ kind: "idle" });
+      setStage({
+        kind: "form",
+        error: err instanceof Error && err.message ? err.message : "Couldn't reach the bridge. Check your connection and try again.",
+      });
+    }
+  }
+
+  /** The wallet signs the approve (for a token), then the deposit, on the source chain. */
+  async function confirmWallet() {
+    if (wallet.kind !== "review" || wallet.signing) return;
+    const r = wallet;
+    setWallet({ ...r, signing: true, progress: null, error: null });
+    let quote = r.quote;
+    try {
+      // A quote is only good for about a minute: an older one is fetched again.
+      if (Date.now() - r.at > 40_000) quote = await walletQuote(r.quote.send.amount);
+    } catch (err) {
+      setWallet({ ...r, signing: false, error: err instanceof Error ? err.message : "Couldn't refresh the price. Try again." });
+      return;
+    }
+    const at = quote === r.quote ? r.at : Date.now();
+    const txs = quote.evmTxs ?? [];
+    let hash: Hex | null = null;
+    let approved = false;
+    // Set once the last transaction (the deposit) is handed to the wallet.
+    let paying = false;
+    try {
+      for (let i = 0; i < txs.length; i++) {
+        const tx = txs[i]!;
+        const last = i === txs.length - 1;
+        const chainId = tx.chainId as GloamChainId;
+        setWallet({
+          kind: "review",
+          quote,
+          at,
+          signing: true,
+          error: null,
+          progress: txs.length > 1 ? (last ? "Now confirm the bridge in your wallet…" : "Approve in your wallet first (1 of 2)…") : null,
+        });
+        if (getAccount(config).chainId !== tx.chainId) {
+          if (tx.chainId !== network.chainId) switchedAway.current = true;
+          await switchChain(config, { chainId });
+        }
+        paying = last;
+        const sent = await sendTransaction(config, { to: tx.to as Address, data: tx.data as Hex, value: BigInt(tx.value), chainId });
+        if (last) {
+          hash = sent;
+        } else {
+          // wagmi throws on a reverted receipt, with a reason decoded from raw bytes: read it plainly then
+          const rec = await waitForTransactionReceipt(config, { hash: sent, chainId }).catch(async (e) => {
+            const plain = await getTransactionReceipt(config, { hash: sent, chainId }).catch(() => null);
+            if (plain) return plain;
+            throw e;
+          });
+          if (rec.status !== "success") throw new Error("The approval didn't go through.");
+          // Some wallets (OKX among them) let the approval be edited down. A bridge
+          // above what was approved fails in the wallet's own check, so stop here and
+          // say so instead of handing over a deposit that cannot go through.
+          if (tx.data.slice(0, 10).toLowerCase() === "0x095ea7b3") {
+            const spender = `0x${tx.data.slice(34, 74)}` as Address;
+            const needed = BigInt(`0x${tx.data.slice(74, 138)}`);
+            const allowed = await readContract(config, { address: tx.to as Address, abi: erc20Abi, functionName: "allowance", args: [getAccount(config).address as Address, spender], chainId }).catch(() => null);
+            if (allowed !== null && allowed < needed) {
+              throw new Error(`Your wallet approved less than this payment needs (${formatUnits(allowed, token.decimals)} of ${quote.send.amount} ${quote.send.symbol}). Try again and approve the amount shown, without editing it.`);
+            }
+          }
+          approved = true;
+          // Some wallets check the deposit against a node that hasn't seen the approval yet
+          // and call it a failed contract call: give the chain a few seconds first.
+          setWallet({ kind: "review", quote, at, signing: true, error: null, progress: "Approval done. Getting the bridge ready…" });
+          await new Promise((res) => window.setTimeout(res, 4000));
+        }
+      }
+    } catch (err) {
+      // Before the deposit, or a clear no from the wallet: nothing went out. A
+      // timeout or lost reply on the deposit may come after the wallet sent it:
+      // follow the order then, Relay says whether it arrived.
+      if (!paying || surelyNotSent(err)) {
+        setWallet({
+          kind: "review",
+          quote,
+          at,
+          signing: false,
+          progress: null,
+          error: walletDeclined(err)
+            ? approved
+              ? "You cancelled the bridge. Nothing moved; the approval can be used next time."
+              : "You cancelled it in your wallet. Nothing moved."
+            : failedBeforeSend(err) && /chain/i.test(walletErrorText(err))
+              ? `Switch your wallet to ${quote.send.chain} to bridge from there.`
+              : walletErrorText(err) || "It didn't send. Try again.",
+        });
+        return;
+      }
+    }
+    setStatus(null);
+    setWallet({ kind: "sent", quote, hash, unsure: !hash });
+    once(`wallet-sent:${quote.requestId}`, "bridge_wallet_sent", { source: quote.send.chain, token: quote.send.symbol });
+  }
+
+  async function getAddress(e?: React.FormEvent) {
+    e?.preventDefault();
     // A swap price from the last few seconds is the review: no second wait.
     if (swapping && live?.quote && Date.now() - live.at < 25_000) {
       setStage({ kind: "address", quote: live.quote, qr: null });
@@ -887,8 +1043,11 @@ function BridgeSheet({
     : (token.stable ? amountNum >= BRIDGE_MIN_USD && amountNum <= BRIDGE_MAX_USD : amountNum > 0) && !overBalance;
   const refundOk = privately || chain.kind === "evm" || refundTo.trim().length > 20;
   const refundName = ADDRESS_NAME[chain.kind] ?? chain.name;
-  const working = priv.kind === "working" ? priv.text : null;
-  const privatePanel = priv.kind !== "idle" && priv.kind !== "working";
+  const working = priv.kind === "working" ? priv.text : wallet.kind === "loading" ? "Getting a price…" : null;
+  const privatePanel = (priv.kind !== "idle" && priv.kind !== "working") || wallet.kind === "review" || wallet.kind === "sent";
+  // From the wallet, more than it holds there can't be signed. A deposit address
+  // (an exchange) is still offered below.
+  const walletOk = amountOk && refundOk && !(walletPays && overSource);
 
   return createPortal(
     <div
@@ -934,7 +1093,9 @@ function BridgeSheet({
                       : `Swap ${token.symbol} for ${dest.token.symbol} in your wallet on ${dest.chain}.`
                     : privately
                       ? `From ${chain.kind === "svm" ? "your Solana wallet" : chain.name} to your private balance on ${dest.chain}.`
-                      : `From another chain or an exchange, into your wallet on ${dest.chain}.`}
+                      : walletPays && stage.kind !== "address"
+                        ? `From your wallet on ${chain.name} to your wallet on ${dest.chain}.`
+                        : `From another chain or an exchange, into your wallet on ${dest.chain}.`}
               </p>
             </div>
             <button
@@ -1007,7 +1168,7 @@ function BridgeSheet({
         )}
 
         {!picking && stage.kind !== "address" && !privatePanel && (
-          <form onSubmit={privately ? startPrivate : getAddress} className="mt-5 grid gap-4">
+          <form onSubmit={privately ? startPrivate : walletPays ? startWallet : getAddress} className="mt-5 grid gap-4">
             <div>
               <p className="text-[13px] text-mute">From</p>
               <button
@@ -1252,14 +1413,16 @@ function BridgeSheet({
                       : `${solWallet ? `${solWallet.name} pays` : "Pay from this wallet"} and it arrives private. Sending from an exchange? Turn this off for a deposit address.`
                     : swapping
                       ? `It lands in your wallet as ${dest.token.symbol}, then you add it privately.`
-                      : `A deposit address: it lands in your wallet on ${dest.chain}, then you add it privately.`
+                      : walletPays
+                        ? `It lands in your wallet on ${dest.chain}, then you add it privately.`
+                        : `A deposit address: it lands in your wallet on ${dest.chain}, then you add it privately.`
                 }
               />
             )}
 
             <button
               type="submit"
-              disabled={!amountOk || !refundOk || stage.kind === "loading" || working !== null}
+              disabled={!(walletPays ? walletOk : amountOk && refundOk) || stage.kind === "loading" || working !== null}
               className="btn btn-ink btn-lg btn-block"
             >
               {working ??
@@ -1271,8 +1434,22 @@ function BridgeSheet({
                     ? "Continue"
                     : swapping
                       ? "Review the swap"
-                      : "Get a deposit address")}
+                      : walletPays
+                        ? amountNum > 0 && /^\d+(\.\d+)?$/.test(amount)
+                          ? `Bridge ${amount} ${token.symbol} from your wallet`
+                          : "Bridge from your wallet"
+                        : "Get a deposit address")}
             </button>
+            {walletPays && (
+              <button
+                type="button"
+                onClick={() => void getAddress()}
+                disabled={!amountOk || !refundOk || stage.kind === "loading" || working !== null}
+                className="-mt-1 text-center text-[13px] text-mute underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:opacity-50 disabled:hover:no-underline"
+              >
+                Sending from an exchange? Get a deposit address
+              </button>
+            )}
             <p className="text-center text-[12px] leading-relaxed text-mute">
               {privately
                 ? "Paying in is public, like any deposit. What you do with it after stays private."
@@ -1318,6 +1495,84 @@ function BridgeSheet({
                   reset();
                 }}
               />
+            )}
+          </div>
+        )}
+
+        {!picking && wallet.kind === "review" && (
+          <WalletReview
+            review={wallet}
+            onConfirm={() => void confirmWallet()}
+            onReset={() => {
+              reset();
+              backToNetwork();
+            }}
+          />
+        )}
+
+        {!picking && wallet.kind === "sent" && (
+          <div className="mt-5" aria-live="polite">
+            <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[14px] leading-relaxed text-foreground">
+              Arriving in your wallet on
+              <ChainLogo id={dest.chainId} size={18} />
+              {dest.chain}
+            </p>
+            <dl className="mt-4 divide-y divide-line text-[14px]">
+              <div className="flex min-h-11 items-center justify-between gap-3">
+                <dt className="text-mute">Sent</dt>
+                <dd className="tnum flex items-center gap-1.5 text-right text-foreground">
+                  <TokenMark src={wallet.quote.send.logo} size={18} />
+                  {wallet.quote.send.amount} {wallet.quote.send.symbol} on {wallet.quote.send.chain}
+                </dd>
+              </div>
+              <div className="flex min-h-11 items-center justify-between gap-3">
+                <dt className="text-mute">You get about</dt>
+                <dd className="tnum text-right text-foreground">
+                  {Number(wallet.quote.receive.amount).toFixed(2)} {wallet.quote.receive.symbol}
+                </dd>
+              </div>
+              {wallet.hash && txLink(wallet.quote.send.chainId, wallet.hash) && (
+                <div className="flex min-h-11 items-center justify-between gap-3">
+                  <dt className="text-mute">Transaction</dt>
+                  <dd className="text-right">
+                    <a
+                      href={txLink(wallet.quote.send.chainId, wallet.hash)!}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-foreground underline underline-offset-4"
+                    >
+                      View on {wallet.quote.send.chain}
+                    </a>
+                  </dd>
+                </div>
+              )}
+            </dl>
+
+            <StatusLine status={status} quote={wallet.quote} fromWallet unsure={wallet.unsure} />
+
+            {status?.stage === "done" ? (
+              <button
+                type="button"
+                onClick={() => onArrived(floor2(wallet.quote.receive.minimum))}
+                className="btn btn-ink btn-lg btn-block mt-4"
+              >
+                Add it privately
+              </button>
+            ) : status?.stage === "failed" || status?.stage === "refunded" ? (
+              <button
+                type="button"
+                onClick={() => {
+                  reset();
+                  backToNetwork();
+                }}
+                className="btn btn-ghost btn-sm mt-4"
+              >
+                Start over
+              </button>
+            ) : (
+              <p className="mt-3 text-[12px] leading-relaxed text-mute">
+                You can close this. It arrives in your wallet on {dest.chain} by itself.
+              </p>
             )}
           </div>
         )}
@@ -1434,18 +1689,35 @@ function BridgeSheet({
   );
 }
 
-function StatusLine({ status, quote }: { status: BridgeStatus | null; quote: BridgeQuote }) {
+function StatusLine({
+  status,
+  quote,
+  fromWallet = false,
+  unsure = false,
+}: {
+  status: BridgeStatus | null;
+  quote: BridgeQuote;
+  /** Paid from the connected wallet: it waits on the source chain, and a refund goes back to that wallet. */
+  fromWallet?: boolean;
+  /** The wallet gave no clear answer on the deposit. */
+  unsure?: boolean;
+}) {
   const stage = status?.stage ?? "waiting";
+  const back = fromWallet ? `your wallet on ${quote.send.chain}` : `your ${quote.send.chain} address`;
   const text =
     stage === "waiting"
-      ? `Waiting for your ${quote.send.symbol}…`
+      ? fromWallet
+        ? unsure
+          ? "Checking whether your wallet sent it…"
+          : `Sent from your wallet. Waiting for ${quote.send.chain} to confirm…`
+        : `Waiting for your ${quote.send.symbol}…`
       : stage === "moving"
         ? `Received. Sending it to ${quote.receive.chain}…`
         : stage === "done"
           ? `Arrived in your wallet on ${quote.receive.chain}.`
           : stage === "refunded"
-            ? `Sent back to your ${quote.send.chain} address.`
-            : `The transfer didn't go through. Relay returns the money to your ${quote.send.chain} address.`;
+            ? `Sent back to ${back}.`
+            : `The transfer didn't go through. Relay returns the money to ${back}.`;
   const tone = stage === "done" ? "text-sealed" : stage === "failed" || stage === "refunded" ? "text-danger" : "text-foreground";
   return (
     <p className={`mt-4 flex items-center gap-2.5 rounded-2xl bg-surface px-4 py-3 text-[13.5px] ${tone}`}>
@@ -1457,6 +1729,107 @@ function StatusLine({ status, quote }: { status: BridgeStatus | null; quote: Bri
       />
       {text}
     </p>
+  );
+}
+
+/** A transaction's page on the source chain's explorer, when wagmi knows one. */
+function txLink(chainId: number, hash: string): string | null {
+  const url = originChain(chainId)?.blockExplorers?.default.url;
+  return url ? `${url.replace(/\/$/, "")}/tx/${hash}` : null;
+}
+
+/** The bridge from the connected wallet, before it signs: what lands, the fees, when. */
+function WalletReview({
+  review,
+  onConfirm,
+  onReset,
+}: {
+  review: Extract<WalletStage, { kind: "review" }>;
+  onConfirm: () => void;
+  onReset: () => void;
+}) {
+  const q = review.quote;
+  const steps = q.evmTxs?.length ?? 1;
+  return (
+    <div className="mt-5" aria-live="polite">
+      <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[14px] leading-relaxed text-foreground">
+        Bridge
+        <TokenMark src={q.send.logo} size={18} />
+        <span className="tnum font-medium">
+          {q.send.amount} {q.send.symbol}
+        </span>
+        from your wallet on
+        <ChainLogo id={q.send.chainId} size={18} />
+        {q.send.chain}
+        {q.send.usd !== null && !q.send.symbol.startsWith("USD") && (
+          <span className="tnum text-mute">(about ${fmtMoney(q.send.usd)})</span>
+        )}
+      </p>
+
+      <dl className="mt-4 divide-y divide-line text-[14px]">
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <dt className="text-mute">You get about</dt>
+          <dd className="tnum flex items-center gap-1.5 text-right text-foreground">
+            <TokenMark src={q.receive.logo} size={18} />
+            {Number(q.receive.amount).toFixed(2)} {q.receive.symbol}
+          </dd>
+        </div>
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <dt className="text-mute">At least</dt>
+          <dd className="tnum text-right text-foreground">
+            {Number(q.receive.minimum).toFixed(2)} {q.receive.symbol}
+          </dd>
+        </div>
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <dt className="text-mute">To</dt>
+          <dd className="text-right text-foreground">Your wallet on {q.receive.chain}</dd>
+        </div>
+        {feeRows(q, "Bridge fee").map(([k, v]) => (
+          <div key={k} className="flex min-h-11 items-center justify-between gap-3">
+            <dt className="text-mute">{k}</dt>
+            <dd className="tnum text-right text-foreground">{v}</dd>
+          </div>
+        ))}
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <dt className="text-mute">Network fee</dt>
+          <dd className="text-right text-foreground">Shown in your wallet</dd>
+        </div>
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <dt className="text-mute">Arrives</dt>
+          <dd className="text-right text-foreground">
+            {q.timeSec > 0 && q.timeSec < 60 ? "In under a minute" : `In about ${Math.max(1, Math.round(q.timeSec / 60))} min`}
+          </dd>
+        </div>
+      </dl>
+
+      <CostWarning quote={q} />
+
+      {review.signing && review.progress && (
+        <p className="mt-4 flex items-center gap-2.5 rounded-2xl bg-surface px-4 py-3 text-[13.5px] text-foreground">
+          <span aria-hidden className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-foreground/50" />
+          {review.progress}
+        </p>
+      )}
+
+      {review.error && (
+        <p role="alert" className="mt-4 rounded-xl bg-danger-soft px-4 py-3 text-[13px] leading-relaxed text-danger">
+          {review.error}
+        </p>
+      )}
+
+      <button type="button" onClick={onConfirm} disabled={review.signing} className="btn btn-ink btn-lg btn-block mt-4">
+        {review.signing ? "Waiting for your wallet…" : "Confirm in your wallet"}
+      </button>
+      {!review.signing && (
+        <button type="button" onClick={onReset} className="btn btn-ghost btn-sm mt-3">
+          Start over
+        </button>
+      )}
+      <p className="mt-3 text-[12px] leading-relaxed text-mute">
+        It lands in this same wallet on {q.receive.chain}. If the bridge can&apos;t finish, Relay sends it back to this wallet on {q.send.chain}.
+        {steps > 1 && " Your wallet asks twice: once to approve, once to bridge."}
+      </p>
+    </div>
   );
 }
 
