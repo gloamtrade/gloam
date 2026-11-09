@@ -24,6 +24,7 @@
 import { formatUnits, isAddress } from "viem";
 import type { ChainFamily, GloamNetwork } from "./networks";
 import { ELYSIUM } from "./elysium";
+import { chainLogoSrc } from "./chainLogo";
 
 export type BridgeChainKind = "evm" | "svm" | "tvm" | "bvm";
 
@@ -211,8 +212,9 @@ export function bridgeToken(chain: BridgeChain, symbol: string): BridgeToken | n
   return chain.tokens.find((t) => t.symbol === symbol) ?? null;
 }
 
+/** Elysium's id is not a literal, so its mark comes from lib/chainLogo (no /brand/chains/99901.png). */
 export function chainLogo(id: number, dark = false): string {
-  return `/brand/chains/${id}${dark ? "-dark" : ""}.png`;
+  return chainLogoSrc(id, dark);
 }
 
 /** Shown on mainnets, or anywhere when the preview flag is on. */
