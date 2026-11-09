@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { SealedField } from "@/components/ui/SealedField";
-import { SealDots } from "@/components/ui/SealDots";
 import { ClaimSafetyLine } from "@/components/app/ClaimSafetyLine";
 import { appClaimPath, codeFromHash, shortCodeFromHash } from "@/lib/claimLink";
 import { countLinkOpened, isClaimLink } from "@/lib/funnel";
@@ -13,7 +12,9 @@ import { decodeNotePackage, isEncryptedPackage, paymentCodeIn } from "@/lib/note
 import { inWalletBrowser } from "@/lib/passkey";
 import { relayFor } from "@/lib/relay/client";
 import { WALLETCONNECT_ENABLED } from "@/lib/walletConnect";
-import { formatAssetLabel } from "@/lib/shield";
+import { assetLabel, formatAssetAmount } from "@/lib/shield";
+import { TokenLogo } from "@/components/app/TokenLogo";
+import { chainLogoSrc } from "@/lib/chainLogo";
 import { SHORT_CLAIM_PREFIX, readShortClaim } from "@gloamtrade/sdk";
 
 /**
@@ -27,7 +28,7 @@ import { SHORT_CLAIM_PREFIX, readShortClaim } from "@gloamtrade/sdk";
 type View =
   | { kind: "loading" }
   | { kind: "missing" }
-  | { kind: "ready"; code: string; net: NetworkKey; amount: string | null; locked: boolean; note?: string };
+  | { kind: "ready"; code: string; net: NetworkKey; amount: string | null; symbol: string | null; locked: boolean; note?: string };
 
 /**
  * A claim view for a code, with its amount and note when the code is not locked.
@@ -36,6 +37,7 @@ type View =
  */
 async function readyView(code: string, linkNet: NetworkKey): Promise<View | "damaged"> {
   let amount: string | null = null;
+  let symbol: string | null = null;
   let note: string | undefined;
   let net = linkNet;
   const locked = isEncryptedPackage(code);
@@ -46,7 +48,8 @@ async function readyView(code: string, linkNet: NetworkKey): Promise<View | "dam
       const pack = code.startsWith(SHORT_CLAIM_PREFIX)
         ? readShortClaim(code.slice(SHORT_CLAIM_PREFIX.length))
         : await decodeNotePackage(code);
-      amount = formatAssetLabel(pack.amountWei, pack.asset);
+      amount = formatAssetAmount(pack.amountWei, pack.asset);
+      symbol = assetLabel(pack.asset);
       note = pack.note;
       // A code that names its chain is on that network, whatever ?net= says (a chat app can cut it off).
       const own = pack.chainId === undefined ? undefined : NETWORK_KEYS.find((k) => getNetwork(k).chainId === pack.chainId);
@@ -55,7 +58,7 @@ async function readyView(code: string, linkNet: NetworkKey): Promise<View | "dam
       return "damaged";
     }
   }
-  return { kind: "ready", code, net, amount, locked, note };
+  return { kind: "ready", code, net, amount, symbol, locked, note };
 }
 
 /** The network a link or pasted message names (?net=...), or null. */
@@ -257,9 +260,16 @@ export default function ClaimPage() {
                   </>
                 ) : view.amount ? (
                   <>
-                    <h1 className="tnum mt-4 text-[44px] font-light leading-none tracking-[-0.025em]">{view.amount}</h1>
-                    <p className="mt-3 text-[15px] leading-relaxed text-soft">
-                      sent to you privately on {getNetwork(view.net).label}. Only you will see it once it&apos;s claimed.
+                    <div className="mt-4 flex items-center gap-3">
+                      {view.symbol && <TokenLogo id={view.symbol.toLowerCase()} symbol={view.symbol} size={44} />}
+                      <h1 className="tnum text-[44px] font-light leading-none tracking-[-0.025em]">
+                        {view.amount} {view.symbol}
+                      </h1>
+                    </div>
+                    <p className="mt-4 inline-flex items-center gap-2 rounded-full bg-surface py-1.5 pl-1.5 pr-3.5 text-[14px] text-soft">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- small local logo */}
+                      <img src={chainLogoSrc(getNetwork(view.net).chainId)} alt="" width={22} height={22} className="h-[22px] w-[22px] rounded-full object-cover" />
+                      On {getNetwork(view.net).label}
                     </p>
                   </>
                 ) : (
@@ -282,9 +292,9 @@ export default function ClaimPage() {
                   {view.net === "tempo"
                     ? "No wallet needed: sign in with a passkey on the next screen."
                     : walletBrowser
-                      ? "Connect your wallet on the next screen, then tap Claim."
+                      ? "Connect your wallet on the next screen."
                       : WALLETCONNECT_ENABLED
-                        ? "Connect a wallet app such as MetaMask on the next screen, then tap Claim."
+                        ? "Connect a wallet on the next screen."
                         : `You'll need a wallet app such as MetaMask or Rabby to claim on ${getNetwork(view.net).label}.`}
                 </p>
               </div>
@@ -302,26 +312,17 @@ export default function ClaimPage() {
 
             <ol className="mt-8 grid gap-4 px-1">
               {[
-                ["Sign in or connect a wallet", realNet ? "It takes a few seconds." : "It takes a few seconds and costs nothing on testnet."],
-                ["Tap Claim", "The money moves into your private balance on this device."],
-                ["It stays private", "The explorer never shows how much you hold or who paid you."],
-              ].map(([t, s], i) => (
-                <li key={t} className="grid grid-cols-[28px_minmax(0,1fr)] gap-3">
+                "Sign in or connect a wallet",
+                "Tap Claim",
+                "Only you see your balance",
+              ].map((t, i) => (
+                <li key={t} className="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-3">
                   <span className="tnum grid h-7 w-7 place-items-center rounded-full bg-sealed-soft text-[13px] font-medium text-sealed">{i + 1}</span>
-                  <span>
-                    <span className="block text-[15px] text-foreground">{t}</span>
-                    <span className="block text-[13.5px] leading-relaxed text-mute">{s}</span>
-                  </span>
+                  <span className="text-[15px] text-foreground">{t}</span>
                 </li>
               ))}
             </ol>
 
-            <div className="mt-8 flex items-start gap-3 rounded-[20px] border border-line px-5 py-4 text-[13.5px] leading-relaxed text-soft">
-              <span className="mt-1 shrink-0 text-sealed" aria-hidden>
-                <SealDots n={3} />
-              </span>
-              <span>Every new person in the vault makes every payment in it harder to trace. Claiming this makes it more private for everyone, you included.</span>
-            </div>
           </>
         )}
 
