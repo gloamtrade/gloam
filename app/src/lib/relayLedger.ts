@@ -12,6 +12,7 @@
  *    the person's wallet, and it is dropped once the quote closes. A quote
  *    nobody pays is dropped when its window ends.
  *  - finished requests: the rows lib/relayVolume keeps, with no wallets.
+ *  - how far Relay's history has been read: two times and Relay's page cursor.
  *
  * Best effort throughout: a store that is slow or down must never touch a quote,
  * so nothing here throws.
@@ -20,6 +21,7 @@ import { kv } from "./partnersKv";
 
 const OPEN_KEY = "gloam:relay:own:open:v1";
 const ROWS_KEY = "gloam:relay:own:rows:v1";
+const WALK_KEY = "gloam:relay:own:walk:v1";
 /** Open quotes kept; the oldest go first, so a burst of unpaid quotes can't grow the store. */
 const MAX_OPEN = 2_000;
 /** How long an unpaid quote stays open. An exchange withdrawal can take a while. */
@@ -62,11 +64,20 @@ export async function noteRelayQuote(requestId: string, depositAddress?: string 
   await Promise.race([write, new Promise<void>((done) => setTimeout(done, WRITE_WAIT_MS))]);
 }
 
-/** The open quotes asked about longest ago, up to `limit`, so each gets a turn. */
+/**
+ * The open quotes asked about longest ago, up to `limit`, so each gets a turn.
+ * An entry that can't be read is removed: it would never be asked about, so it
+ * would never move, and with one lookup a refresh it would hold the queue for good.
+ */
 export async function dueRelayQuotes(limit: number): Promise<(OpenQuote & { raw: string })[]> {
+  // Zero has to stop here: ZRANGE 0 -1 is the whole list, not none of it.
+  if (limit <= 0) return [];
   try {
     const [raw] = await kv([["ZRANGE", OPEN_KEY, 0, limit - 1]]);
-    return (Array.isArray(raw) ? raw : []).map(parseMember).filter((q): q is OpenQuote & { raw: string } => q !== null);
+    const entries: unknown[] = Array.isArray(raw) ? raw : [];
+    const unreadable = entries.filter((m) => parseMember(m) === null).map(String);
+    if (unreadable.length) await kv([["ZREM", OPEN_KEY, ...unreadable]]);
+    return entries.map(parseMember).filter((q): q is OpenQuote & { raw: string } => q !== null);
   } catch {
     return [];
   }
@@ -104,12 +115,50 @@ export async function readRelayRows<T>(): Promise<Map<string, T>> {
   return out;
 }
 
-/** Add finished requests to the record. Relay's id is the key, so a request is only ever kept once. */
-export async function saveRelayRows<T>(rows: readonly (readonly [string, T])[]): Promise<void> {
-  if (!rows.length) return;
+/**
+ * Add finished requests to the record. Relay's id is the key, so a request is
+ * only ever kept once. False when they couldn't be written, so the caller doesn't
+ * move past rows it won't read again.
+ */
+export async function saveRelayRows<T>(rows: readonly (readonly [string, T])[]): Promise<boolean> {
+  if (!rows.length) return true;
   try {
     await kv([["HSET", ROWS_KEY, ...rows.flatMap(([id, row]) => [id, JSON.stringify(row)])]]);
+    return true;
   } catch {
-    /* the next read tries again */
+    return false; /* the next read tries again */
+  }
+}
+
+/**
+ * How far Relay's history has been read. Relay answers newest first, one page a
+ * call, so a history longer than a refresh can read is walked over several.
+ */
+export type RelayWalk = {
+  /** Unix seconds. Everything Relay made up to here has been read. */
+  floor: number;
+  /** Unix seconds. What `floor` becomes when the walk ends: the newest request when it began. */
+  top: number;
+  /** Relay's cursor for the next older page. Null when there is no walk under way. */
+  cursor: string | null;
+};
+
+/** One walk for each history read: a v2 cursor means nothing to v3. Null with no record of one. */
+export async function readRelayWalk(source: string): Promise<RelayWalk | null> {
+  try {
+    const [raw] = await kv([["GET", `${WALK_KEY}:${source}`]]);
+    const walk = typeof raw === "string" ? (JSON.parse(raw) as Partial<RelayWalk>) : null;
+    if (typeof walk?.floor !== "number" || typeof walk.top !== "number") return null;
+    return { floor: walk.floor, top: walk.top, cursor: typeof walk.cursor === "string" ? walk.cursor : null };
+  } catch {
+    return null;
+  }
+}
+
+export async function saveRelayWalk(source: string, walk: RelayWalk): Promise<void> {
+  try {
+    await kv([["SET", `${WALK_KEY}:${source}`, JSON.stringify(walk)]]);
+  } catch {
+    /* the next read goes over the same page again */
   }
 }

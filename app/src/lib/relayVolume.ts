@@ -18,22 +18,40 @@
  *
  * Bridges from before the tag went live have neither, so they can't be counted.
  *
+ * Relay's dashboard gives this API key 2 calls a minute on /requests/*, so a
+ * refresh goes in order, one call at a time: the newest page of history, always,
+ * so new requests never wait; then, if there is more history to read, the next
+ * older page from where the last refresh stopped (lib/relayLedger keeps the
+ * place); then open quotes, with whatever is left of READS_PER_REFRESH.
+ *
  * Relay's answers name each request's wallets; they are dropped here and never
  * reach the page or the store. What is kept: chains, tokens, amounts, dollar
  * values, Relay's fees, the delivery transaction and the time.
  */
 
 import { RELAY_REFERRER } from "./bridge";
-import { OPEN_MS, dueRelayQuotes, readRelayRows, saveRelayRows, settleRelayQuotes } from "./relayLedger";
+import {
+  OPEN_MS,
+  dueRelayQuotes,
+  readRelayRows,
+  readRelayWalk,
+  saveRelayRows,
+  saveRelayWalk,
+  settleRelayQuotes,
+  type RelayWalk,
+} from "./relayLedger";
 import { cacheGetJson, cacheSetJson, lastDays, utcDay } from "./tractionStore";
 
 const RELAY_API = "https://api.relay.link";
 /** Relay pages at most 50 requests. */
 const PAGE = 50;
-/** Pages read per refresh; more than this and the totals say they were cut short. */
-const MAX_PAGES = 20;
-/** Open quotes looked up per refresh. Under Relay's 200 a minute, and the rest get their turn next time. */
-const CHECKS_PER_REFRESH = 20;
+/**
+ * Calls to Relay's /requests/* one refresh may make, history and open quotes
+ * together. Relay's dashboard shows a limit of 2 a minute for this API key, and
+ * FRESH_MS keeps refreshes about a minute apart. With history taking one page, that
+ * leaves one open quote a refresh; the rest get their turn later.
+ */
+export const READS_PER_REFRESH = 2;
 const DAILY_WINDOW = 30;
 const RECENT_KEEP = 25;
 const FRESH_MS = 60_000;
@@ -82,7 +100,7 @@ export type RelayVolume =
       historyError: string | null;
       /** Unix seconds of the first counted request; null with none yet. */
       since: number | null;
-      /** True when there were more requests than one refresh reads. */
+      /** True while part of the history is still unread. Later refreshes carry on from where this one stopped. */
       truncated: boolean;
       /** Finished requests only. */
       all: Record<RelayKind, RelayTotals>;
@@ -172,6 +190,19 @@ function emptyTotals(): Record<RelayKind, RelayTotals> {
   };
 }
 
+class RelayReadError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** Relay's limit is spent, so another call this refresh would only be refused too. */
+const rateLimited = (e: unknown) => e instanceof RelayReadError && e.status === 429;
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : "unknown");
+
 async function relayGet(url: string, apiKey: string, timeoutMs: number): Promise<any> {
   const res = await fetch(url, {
     headers: { "x-api-key": apiKey },
@@ -180,76 +211,118 @@ async function relayGet(url: string, apiKey: string, timeoutMs: number): Promise
   });
   const json = (await res.json().catch(() => null)) as any;
   if (!res.ok || !Array.isArray(json?.requests)) {
-    throw new Error(typeof json?.message === "string" ? json.message.slice(0, 160) : `Relay answered ${res.status}`);
+    throw new RelayReadError(typeof json?.message === "string" ? json.message.slice(0, 160) : `Relay answered ${res.status}`, res.status);
   }
   return json;
 }
 
 const relayKeyId = () => process.env.RELAY_API_KEY_ID?.trim() || null;
 
+type HistoryRead = {
+  rows: KeyedRow[];
+  /** Where the walk stands after this read, to keep once the rows are safe. Null: leave it as it was. */
+  walk: RelayWalk | null;
+  truncated: boolean;
+  /** Why the newest page couldn't be read. A later page failing is `truncated`, not this: the newest rows did arrive. */
+  error: string | null;
+  /** Calls spent, so the open quotes get only what's left. */
+  reads: number;
+  /** Relay answered 429, so nothing is left. */
+  limited: boolean;
+};
+
 /**
  * Every request tagged to Gloam. With RELAY_API_KEY_ID this is v3, the lasting
  * read; the id is not a secret, and the key itself stays out of the URL, which
  * is why it isn't passed as v3's `apiKey` filter instead. Pending requests are
  * asked for because v3 leaves them out otherwise; quotes nobody paid are not.
+ *
+ * The newest page comes first on every refresh. Older pages are a walk that
+ * survives between refreshes: it starts when a full page of history doesn't reach
+ * back to `floor`, so requests may be sitting unread behind it, and it ends at
+ * `floor` or the end of the history. Rows merge by Relay's id, so pages that
+ * overlap as new requests push old ones down count once.
  */
-async function readHistory(apiKey: string): Promise<{ rows: KeyedRow[]; truncated: boolean }> {
+async function readHistory(apiKey: string): Promise<HistoryRead> {
   const keyId = relayKeyId();
   const rows: KeyedRow[] = [];
-  let continuation: string | null = null;
-  let truncated = false;
-  for (let page = 0; ; page++) {
-    if (page >= MAX_PAGES) {
-      truncated = true;
-      break;
-    }
-    const q = new URLSearchParams({ referrer: RELAY_REFERRER, limit: String(PAGE) });
+  const readPage = async (continuation: string | null) => {
+    const q = new URLSearchParams({ referrer: RELAY_REFERRER, limit: String(PAGE), sortBy: "createdAt", sortDirection: "desc" });
     if (keyId) {
       q.set("apiKeyId", keyId);
       q.set("includePendingRequests", "true");
     }
     if (continuation) q.set("continuation", continuation);
     const json = await relayGet(`${RELAY_API}/requests/${keyId ? "v3" : "v2"}?${q}`, apiKey, 15_000);
-    for (const r of json.requests) {
-      const row = toRow(r);
-      if (row) rows.push(row);
+    const found = (json.requests as unknown[]).map(toRow).filter((r): r is KeyedRow => r !== null);
+    rows.push(...found);
+    const more = typeof json.continuation === "string" && json.continuation && json.requests.length >= PAGE;
+    const times = found.map((r) => r.ts);
+    return { next: more ? (json.continuation as string) : null, newest: Math.max(...times), oldest: Math.min(...times) };
+  };
+
+  let walk: RelayWalk = (await readRelayWalk(keyId ? "v3" : "v2")) ?? { floor: 0, top: 0, cursor: null };
+  let reads = 1;
+  try {
+    const first = await readPage(null);
+    if (!walk.cursor) {
+      const top = Math.max(walk.floor, first.newest);
+      walk = first.next && first.oldest > walk.floor ? { ...walk, top, cursor: first.next } : { floor: top, top, cursor: null };
     }
-    continuation = typeof json.continuation === "string" && json.continuation ? json.continuation : null;
-    if (!continuation || json.requests.length < PAGE) break;
+  } catch (e) {
+    return { rows, walk: null, truncated: Boolean(walk.cursor), error: errorText(e), reads, limited: rateLimited(e) };
   }
-  return { rows, truncated };
+
+  let cut = false;
+  let limited = false;
+  while (walk.cursor && reads < READS_PER_REFRESH) {
+    reads++;
+    try {
+      const older = await readPage(walk.cursor);
+      walk = older.next && older.oldest >= walk.floor ? { ...walk, cursor: older.next } : { floor: walk.top, top: walk.top, cursor: null };
+    } catch (e) {
+      console.error("gloam_admin_relay_history", errorText(e));
+      cut = true;
+      limited = rateLimited(e);
+      // After a 429 the page is still there for next time. Anything else might be
+      // a cursor Relay won't take: dropping it costs some rereading, never a row,
+      // and a bad one kept would block the walk and the open quotes for good.
+      if (!limited) walk = { ...walk, cursor: null };
+      break;
+    }
+  }
+  return { rows, walk, truncated: cut || Boolean(walk.cursor), error: null, reads, limited };
 }
 
 /**
- * What became of the open quotes that are due. A deposit address is looked up by
- * address, Relay's own advice: the fill can run under a new request id (another
- * amount, a native deposit, a requote) while the quoted id stays `waiting`
- * forever. Everything else fills under the quoted id. A quote that finds
- * nothing stays open until its window ends; one Relay couldn't answer for stays
- * open and is asked about again.
+ * What became of the open quotes that are due, one call at a time, `budget` at
+ * most. A deposit address is looked up by address, Relay's own advice: the fill
+ * can run under a new request id (another amount, a native deposit, a requote)
+ * while the quoted id stays `waiting` forever. Everything else fills under the
+ * quoted id. A quote that finds nothing stays open until its window ends; one
+ * Relay couldn't answer for stays open and is asked about again. Either way it
+ * goes to the back of the queue, so it can't keep the others waiting.
  */
-async function readOpenQuotes(apiKey: string, now: number): Promise<KeyedRow[]> {
-  const due = await dueRelayQuotes(CHECKS_PER_REFRESH);
-  const answers = await Promise.all(
-    due.map(async (q) => {
-      const key = q.depositAddress ? `depositAddress=${encodeURIComponent(q.depositAddress)}` : `id=${q.requestId}`;
-      try {
-        const json = await relayGet(`${RELAY_API}/requests/v3?${key}&limit=20`, apiKey, 8_000);
-        return (json.requests as unknown[]).map(toRow).filter((r): r is KeyedRow => r !== null && r.stage !== "pending");
-      } catch {
-        return null;
-      }
-    })
-  );
+async function readOpenQuotes(apiKey: string, now: number, budget: number): Promise<KeyedRow[]> {
+  const rows: KeyedRow[] = [];
   const closed: string[] = [];
   const waiting: string[] = [];
-  due.forEach((q, i) => {
-    const found = answers[i];
-    if (found?.length || (found && now - q.at > OPEN_MS)) closed.push(q.raw);
-    else waiting.push(q.raw);
-  });
+  for (const q of await dueRelayQuotes(budget)) {
+    const key = q.depositAddress ? `depositAddress=${encodeURIComponent(q.depositAddress)}` : `id=${q.requestId}`;
+    try {
+      const json = await relayGet(`${RELAY_API}/requests/v3?${key}&limit=20`, apiKey, 8_000);
+      const found = (json.requests as unknown[]).map(toRow).filter((r): r is KeyedRow => r !== null && r.stage !== "pending");
+      rows.push(...found);
+      if (found.length || now - q.at > OPEN_MS) closed.push(q.raw);
+      else waiting.push(q.raw);
+    } catch (e) {
+      waiting.push(q.raw);
+      // The quotes not reached keep their place: nobody asked about them.
+      if (rateLimited(e)) break;
+    }
+  }
   await settleRelayQuotes(closed, waiting, now);
-  return answers.flatMap((a) => a ?? []);
+  return rows;
 }
 
 /** The panel's figures, from the merged rows. */
@@ -312,15 +385,10 @@ export function summarizeRelayRows(rows: readonly RelayRow[], now = Date.now()) 
 /** Relay's history and Gloam's own record, merged. Either can fail alone: the other still counts. */
 export async function readRelayVolume(apiKey: string): Promise<LiveVolume> {
   const now = Date.now();
-  const [own, open, history] = await Promise.all([
-    readRelayRows<RelayRow>(),
-    readOpenQuotes(apiKey, now),
-    readHistory(apiKey).then(
-      (h) => ({ ...h, error: null as string | null }),
-      (e: unknown) => ({ rows: [] as KeyedRow[], truncated: false, error: e instanceof Error ? e.message : "unknown" })
-    ),
-  ]);
+  const own = await readRelayRows<RelayRow>();
+  const history = await readHistory(apiKey);
   if (history.error) console.error("gloam_admin_relay_history", history.error);
+  const open = await readOpenQuotes(apiKey, now, history.limited ? 0 : READS_PER_REFRESH - history.reads);
 
   const merged = new Map<string, RelayRow>(own);
   const add = (r: KeyedRow) => {
@@ -332,7 +400,9 @@ export async function readRelayVolume(apiKey: string): Promise<LiveVolume> {
 
   // Kept for good: a finished row outlives v2, and costs nothing to hold.
   const finished = [...open, ...history.rows].filter((r) => r.stage !== "pending" && !own.has(r.id));
-  await saveRelayRows(finished.map(({ id, ...row }) => [id, row] as const));
+  const saved = await saveRelayRows(finished.map(({ id, ...row }) => [id, row] as const));
+  // The walk won't read these pages again, so it moves on only once their rows are safe.
+  if (saved && history.walk) await saveRelayWalk(relayKeyId() ? "v3" : "v2", history.walk);
 
   return {
     enabled: true,
