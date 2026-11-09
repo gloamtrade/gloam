@@ -235,6 +235,23 @@ test("pull: the server submits the payer's transfer, so the payer never touches 
   await rejects(settle(ch, paid.credential.payload, config), /already used/);
 });
 
+test("pull: a transfer that lands between validation and settling (someone else sent it) still settles once", async () => {
+  const pool = mockPool();
+  const ch = await challengeFor(250n);
+  const paid = await pay(pool, ch, "pull");
+  const config = serverConfig(pool);
+  const validated = await validateGloamCharge({ challenge: ch, payload: paid.credential.payload, config });
+  assert.equal(validated.landed, false);
+  assert.equal(typeof validated.checkedAt, "number");
+  // The payer's transfer goes out from elsewhere right after the server read the pool.
+  const t = (paid.credential.payload as { transfer: { proof: Hex; root: Hex; nullifier: Hex; newCommitments: [Hex, Hex] } }).transfer;
+  await pool.transfer([t.proof, t.root, t.nullifier, t.newCommitments]);
+  const receipt = await settleGloamCharge({ challenge: ch, payload: paid.credential.payload, config, validated });
+  assert.equal(receipt.status, "success");
+  assert.deepEqual(pool.submitted, ["payee", "payee"], "the server's own submit of it reverts, the pool shows it landed, and the sweep follows");
+  await rejects(settle(ch, paid.credential.payload, config), /already used/);
+});
+
 test("pull: a transfer the pool would refuse is refused before anything is sent", async () => {
   const pool = mockPool();
   const ch = await challengeFor(250n);

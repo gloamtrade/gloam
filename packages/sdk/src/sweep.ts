@@ -16,7 +16,7 @@
  * through the Gloam relay, and tests can run it against a mock chain.
  */
 
-import type { Address, Hex, PublicClient } from "viem";
+import { keccak256, toBytes, type Address, type Hex, type PublicClient } from "viem";
 import { buildPrivateSendIntent, type PrivateSendIntent } from "./builders.js";
 import type { PoseidonMerklePath } from "./merkle.js";
 import { noteNullifierPoseidon } from "./note.js";
@@ -24,7 +24,7 @@ import { fieldToHex, hexToField } from "./poseidon.js";
 import type { Prover } from "./prove.js";
 import type { ReceiveKey, ReceiveKeyJwk } from "./receiveTag.js";
 import { GloamRelayError, RELAY_MAYBE_SENT, relayIntent, type RelayOptions } from "./relay.js";
-import { syncTree, type SyncTreeParams } from "./sync.js";
+import { createTreeSync, type TreeSync, type TreeSyncParams } from "./sync.js";
 import type { NoteExport } from "./witness.js";
 import {
   checkGloamPaymentBinding,
@@ -75,6 +75,28 @@ export function transferCallArgs(intent: PrivateSendIntent): readonly [Hex, Hex,
   return intent.exec.args as readonly [Hex, Hex, Hex, readonly [Hex, Hex]];
 }
 
+/** A log as a receipt carries it. */
+export interface ReceiptLog {
+  address: string;
+  topics: readonly string[];
+  data: string;
+}
+
+/** topic0 of the pool's Transferred(bytes32 indexed nullifier, bytes32[2] newCommitments). */
+const TRANSFERRED_TOPIC0 = keccak256(toBytes("Transferred(bytes32,bytes32[2])"));
+
+/** Whether `logs` hold a Transferred event from `pool` whose payment output is `commitment`. */
+export function receiptInsertsCommitment(logs: readonly ReceiptLog[], pool: Address, commitment: Hex): boolean {
+  const want = commitment.toLowerCase().slice(2);
+  return logs.some(
+    (l) =>
+      l.address.toLowerCase() === pool.toLowerCase() &&
+      (l.topics[0] ?? "").toLowerCase() === TRANSFERRED_TOPIC0 &&
+      /^0x[0-9a-fA-F]{128}$/.test(l.data) &&
+      l.data.slice(2, 66).toLowerCase() === want
+  );
+}
+
 /** What a sweep needs to know about the chain. */
 export interface SweepChain {
   /** pool.isSpent(nullifier) */
@@ -83,8 +105,12 @@ export interface SweepChain {
   isCommitmentSeen(commitment: Hex): Promise<boolean>;
   /** Membership path for a commitment, or null when it is not a leaf yet. */
   pathForCommitment(commitment: Hex): Promise<PoseidonMerklePath | null>;
-  /** Wait for a submitted transaction and report how it ended. */
-  waitForReceipt(hash: Hex): Promise<{ status: "success" | "reverted" }>;
+  /**
+   * Wait for a submitted transaction and report how it ended. With its logs, a
+   * sweep that emitted the fresh note from the pool is final without one more
+   * read of the pool (commitmentSeen).
+   */
+  waitForReceipt(hash: Hex): Promise<{ status: "success" | "reverted"; logs?: readonly ReceiptLog[] }>;
   /**
    * The chain these reads answer for (the RPC's own eth_chainId). Gloam's vault
    * has one address on every chain and native ETH is 0x0 on all of them, so a
@@ -124,10 +150,27 @@ function sentHashOf(e: unknown): Hex | null {
   return typeof h === "string" && /^0x[0-9a-fA-F]{64}$/.test(h) ? (h as Hex) : null;
 }
 
-/** A SweepChain over a viem PublicClient: reads the pool and rebuilds the tree for each path. */
-export function sweepChainFromClient(client: PublicClient, params: SyncTreeParams): SweepChain {
+export interface SweepChainParams extends TreeSyncParams {
+  /** A tree to share (one per pool per process). Default: one made from these params, kept by this chain. */
+  tree?: TreeSync;
+  /** How often to poll for a receipt, in ms. Default: the client's pollingInterval. */
+  pollingInterval?: number;
+}
+
+/**
+ * A SweepChain over a viem PublicClient: reads the pool, and keeps the pool's
+ * tree (createTreeSync), so each path reads only the blocks since the last one.
+ * Pass a `store` and a `seed` (see createTreeSync) to skip the walk over the
+ * pool's history on a cold start too.
+ */
+export function sweepChainFromClient(client: PublicClient, params: SweepChainParams): SweepChain {
   // asked of the RPC once (a client's chain label can say one chain while its RPC is another's)
   let id: Promise<number> | null = null;
+  const tree = params.tree ?? createTreeSync(client, params);
+  /** The newest block a receipt was read in: a payment that just landed is in it or before it. */
+  let receiptBlock: bigint | undefined;
+  const isCommitmentSeen = (commitment: Hex) =>
+    client.readContract({ address: params.pool, abi: POOL_STATE_ABI, functionName: "commitmentSeen", args: [commitment] });
   return {
     chainId: () =>
       (id ??= client.getChainId().catch((e: unknown) => {
@@ -136,10 +179,21 @@ export function sweepChainFromClient(client: PublicClient, params: SyncTreeParam
       })),
     isSpent: (nullifier) =>
       client.readContract({ address: params.pool, abi: POOL_STATE_ABI, functionName: "isSpent", args: [nullifier] }),
-    isCommitmentSeen: (commitment) =>
-      client.readContract({ address: params.pool, abi: POOL_STATE_ABI, functionName: "commitmentSeen", args: [commitment] }),
-    pathForCommitment: async (commitment) => (await syncTree(client, params)).pathForCommitment(commitment),
-    waitForReceipt: async (hash) => ({ status: (await client.waitForTransactionReceipt({ hash })).status }),
+    isCommitmentSeen,
+    pathForCommitment: async (commitment) => {
+      for (let attempt = 0; ; attempt++) {
+        const path = await tree.pathForCommitment(commitment, attempt === 0 ? { atBlock: receiptBlock } : undefined);
+        if (path || attempt >= 4) return path;
+        // In the pool but not in the logs yet: the node that served them is a little behind.
+        if (!(await isCommitmentSeen(commitment).catch(() => false))) return null;
+        await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+      }
+    },
+    waitForReceipt: async (hash) => {
+      const r = await client.waitForTransactionReceipt({ hash, ...(params.pollingInterval ? { pollingInterval: params.pollingInterval } : {}) });
+      if (receiptBlock === undefined || r.blockNumber > receiptBlock) receiptBlock = r.blockNumber;
+      return { status: r.status, logs: r.logs };
+    },
   };
 }
 
@@ -222,8 +276,15 @@ export async function sweepReceivedNote(params: SweepParams): Promise<SweepResul
     return result("bad_note", "The received note's amount does not match its commitment.");
   }
   const nullifier = fieldToHex(await noteNullifierPoseidon(hexToField(note.secret), hexToField(note.commitment)));
+  // Both reads at once (the path is only used when the note is unspent).
+  const pathRead = chain.pathForCommitment(note.commitment).then(
+    (p) => ({ p }),
+    (e: unknown) => ({ e })
+  );
   if (await chain.isSpent(nullifier)) return result("already_spent", ALREADY_SPENT);
-  const path = await chain.pathForCommitment(note.commitment);
+  const read = await pathRead;
+  if ("e" in read) throw read.e;
+  const path = read.p;
   if (!path) {
     return result("not_settled", "The payment is not in the pool yet. Wait for the payer's transfer to confirm, then try again.");
   }
@@ -256,8 +317,13 @@ export async function sweepReceivedNote(params: SweepParams): Promise<SweepResul
     if (receipt.status === "success") {
       // A receipt's status is the outer transaction's. Sent through a smart account, a bundler,
       // a batch or a forwarder, it can succeed while the pool transfer inside it reverted (say,
-      // on a note the payer spent back first). Only the fresh note in the pool proves the sweep.
-      if ((await chain.isCommitmentSeen(fresh.commitment).catch(() => null)) === true) {
+      // on a note the payer spent back first). Only the fresh note in the pool proves the sweep:
+      // the pool's own Transferred event for it in this receipt (a reverted call leaves no logs),
+      // or the pool saying it has seen it.
+      if (
+        (receipt.logs && receiptInsertsCommitment(receipt.logs, params.poolAddress, fresh.commitment)) ||
+        (await chain.isCommitmentSeen(fresh.commitment).catch(() => null)) === true
+      ) {
         return result("swept", null, { hash, freshNote: fresh });
       }
       outerOnly = true;

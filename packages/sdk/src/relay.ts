@@ -12,7 +12,7 @@ import type { Address, Hex } from "viem";
 import type { GloamIntent } from "./intents.js";
 import { assertSwapSendable, type SwapRelayCall } from "./swapIntent.js";
 
-export const GLOAM_RELAY_URL = "https://gloam.trade/api/relay";
+export const GLOAM_RELAY_URL = "https://www.gloam.trade/api/relay";
 
 export interface RelayOptions {
   /** Relay endpoint; defaults to the hosted Gloam relay. */

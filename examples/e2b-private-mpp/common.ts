@@ -9,16 +9,20 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPublicClient, http, type Chain, type Hex } from "viem";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import {
   artifactProver,
   circuitArtifactFiles,
   circuitArtifactUrls,
+  gloamLeafSeed,
   GLOAM_NETWORKS,
   syncTree,
   TEMPO_PATHUSD,
   type PoolCircuit,
   type Prover,
   type ReceiveKey,
+  type TreeStore,
+  type TreeSyncParams,
 } from "@gloamtrade/sdk";
 
 export const HERE = dirname(fileURLToPath(import.meta.url));
@@ -29,12 +33,42 @@ export const ASSET = { symbol: "PathUSD", address: TEMPO_PATHUSD, decimals: 6 } 
 export const RPC = process.env.GLOAM_RPC?.trim() || NET.rpcUrl;
 export const EXPLORER = NET.explorerUrl;
 export const txUrl = (h: string) => `${EXPLORER}/tx/${h}`;
-/** The public RPC caps eth_getLogs at 100,000 blocks. */
-export const TREE = { pool: NET.pool, fromBlock: NET.deployBlock, chunkSize: 99_000n };
+
+/**
+ * The pool's tree, kept between runs. Each side keeps its own copy in
+ * .cache/ (gitignored, public chain data only) and reads only the blocks since
+ * the last run. A cold start loads Gloam's public leaf list in one request
+ * instead of walking ~6M blocks of logs; the SDK checks the rebuilt root
+ * against the pool before using it, and walks the chain itself on a mismatch.
+ */
+export const treeCacheFile = (who: "agent" | "server") => join(HERE, ".cache", `${who}-tree-${NET.chainId}.json`);
+export function treeParams(who: "agent" | "server"): TreeSyncParams {
+  return {
+    pool: NET.pool,
+    fromBlock: NET.deployBlock,
+    chunkSize: 99_000n, // the public RPC caps eth_getLogs at 100,000 blocks
+    concurrency: 3, // only used if the chain has to be walked
+    seed: gloamLeafSeed(NET.key),
+    store: fileTreeStore(treeCacheFile(who)),
+  };
+}
+
+/** A TreeStore in a JSON file (written to a temp file, then renamed). */
+export function fileTreeStore(path: string): TreeStore {
+  return {
+    load: async () => JSON.parse(await readFile(path, "utf8")),
+    save: async (snapshot) => {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(`${path}.tmp`, JSON.stringify(snapshot));
+      await rename(`${path}.tmp`, path);
+    },
+  };
+}
 
 /** The SDK's chain object, typed for this package's viem (the SDK is built against an older one). */
 export const CHAIN = NET.chain as unknown as Chain;
-export const publicClient = createPublicClient({ chain: CHAIN, transport: http(RPC) });
+/** Tempo makes a block about every half second: poll receipts at that pace, not viem's 4 s default. */
+export const publicClient = createPublicClient({ chain: CHAIN, transport: http(RPC), pollingInterval: 250 });
 /**
  * The same client, typed for the SDK. mppx 0.13 needs a newer viem than the
  * SDK in this repo was built against; the client is the same at runtime.
@@ -116,3 +150,36 @@ export async function proverFor(circuit: PoolCircuit): Promise<Prover> {
 
 export const short = (s: string, n = 10) => (s.length > 2 * n + 1 ? `${s.slice(0, n)}...${s.slice(-6)}` : s);
 export const stamp = () => new Date().toISOString().slice(11, 19);
+
+/** Wall-clock time per phase of one purchase, printed after it. Overlapping calls in one phase count once. */
+export class Phases {
+  readonly start = Date.now();
+  private rows: [string, number][] = [];
+  private open = new Map<string, { n: number; since: number }>();
+  add(name: string, ms: number) {
+    const row = this.rows.find((r) => r[0] === name);
+    if (row) row[1] += ms;
+    else this.rows.push([name, ms]);
+  }
+  total(name: string): number {
+    return this.rows.find((r) => r[0] === name)?.[1] ?? 0;
+  }
+  async time<T>(name: string, fn: () => Promise<T>): Promise<T> {
+    const o = this.open.get(name) ?? { n: 0, since: 0 };
+    if (o.n++ === 0) o.since = Date.now();
+    this.open.set(name, o);
+    if (!this.rows.some((r) => r[0] === name)) this.rows.push([name, 0]);
+    try {
+      return await fn();
+    } finally {
+      if (--o.n === 0) this.add(name, Date.now() - o.since);
+    }
+  }
+  summary(): string {
+    const total = Date.now() - this.start;
+    const s = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+    const timed = this.rows.reduce((a, r) => a + r[1], 0);
+    const rows = [...this.rows, ...(total - timed > 50 ? [["other", total - timed] as [string, number]] : [])];
+    return `${rows.map(([n, ms]) => `${n} ${s(ms)}`).join(" | ")} | total ${s(total)}`;
+  }
+}

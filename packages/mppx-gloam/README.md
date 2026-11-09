@@ -47,6 +47,28 @@ With Hono: `import { Mppx } from "mppx/hono"` and `app.get("/answer", mppx.charg
 
 Options: `modes: ["push"]` or `["pull"]` to accept one submission mode (default both), `replay` for a shared replay store when several instances settle (default in memory), `pools` only for a private deployment you trust.
 
+### Settling fast
+
+A sweep needs the payment's membership path, so the server needs the pool's tree. `gloamChargeChainFromClient` keeps it for the life of the server (the SDK's `createTreeSync`) and reads only the blocks since the last payment. Make it once, start it before the first request, and keep it current:
+
+```ts
+import { createTreeSync, gloamLeafSeed } from "@gloamtrade/sdk";
+
+const tree = createTreeSync(publicClient, {
+  pool: tempo.pool,
+  fromBlock: tempo.deployBlock,
+  chunkSize: 99_000n,                     // Tempo's RPC caps eth_getLogs at 100,000 blocks
+  seed: gloamLeafSeed("tempo-mainnet"),   // cold start: Gloam's public leaf list, checked against the pool's root
+  store: fileStore(".cache/tree.json"),   // optional: a restart reads only the blocks since
+  reuseMs: 5_000,
+});
+const chain = gloamChargeChainFromClient(publicClient, { pool: tempo.pool, tree, pollingInterval: 250 });
+await chain.warm();                       // at startup: the tree and the RPC's chain id
+tree.follow(1_000);                       // a payment's leaf is usually there before the sweep asks
+```
+
+What a payment still waits for, and should: the payer's transfer to confirm (pull mode), then the sweep to confirm with its fresh note in the pool. A receipt is served only after that, since until the sweep lands the payer could spend the payment note back. The sweep's own receipt is enough proof when it carries the pool's `Transferred` event for the fresh note; otherwise the pool is asked (`commitmentSeen`). Neither wait can be turned off. On Tempo testnet from a laptop a warm payment settles in about 7 to 8 seconds, most of it the two relay submissions and their blocks (see `examples/e2b-private-mpp`).
+
 ## Client (mppx)
 
 ```ts
