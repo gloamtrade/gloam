@@ -12,6 +12,7 @@
  * Run after build:  node test/base.selftest.mjs
  */
 import { MAINNET_POOLS, BASE_SEPOLIA_POOL } from "../dist/mainnet.js";
+import { elysiumMainnetConfig, elysiumTestnetConfig } from "../dist/elysium.js";
 
 /** Base mainnet's real vault, once base-mainnet-after-deploy.sh has filled it in; its memo board comes with it. */
 const LIVE = MAINNET_POOLS[8453].pool !== null ? { ...MAINNET_POOLS[8453] } : null;
@@ -105,9 +106,21 @@ assert(baseSepoliaPool()?.pool === TEST_POOL, "baseSepoliaPool reads BASE_SEPOLI
 
 // ── lookups ──────────────────────────────────────────────────────────────────────
 // Ethereum sits with the mainnets once MAINNET_POOLS[1] is filled in, and Ethereum Sepolia after
-// Base Sepolia once its pool is in (ethereum-sepolia.selftest.mjs); nothing here needs editing then.
+// Base Sepolia once its pool is in (ethereum-sepolia.selftest.mjs). Elysium comes last on each side:
+// its mainnet once src/elysium.ts has every value in, its testnet once ELYSIUM_TESTNET's pool is in
+// (elysium.selftest.mjs); nothing here needs editing then.
 const keys = gloamNetworks().map((n) => n.key).filter((k) => k !== "ethereum");
-const order = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", ...(mainnetPoolFor(1) ? ["ethereum-mainnet"] : []), "robinhood", "tempo", "base"];
+const order = [
+  "robinhood-mainnet",
+  "tempo-mainnet",
+  "base-mainnet",
+  ...(mainnetPoolFor(1) ? ["ethereum-mainnet"] : []),
+  ...(elysiumMainnetConfig() ? ["elysium-mainnet"] : []),
+  "robinhood",
+  "tempo",
+  "base",
+  ...(elysiumTestnetConfig() ? ["elysium"] : []),
+];
 assert(keys.join() === order.join(), `network order (${keys.join()})`);
 assert(getGloamNetwork("base") === test && getGloamNetwork("base-mainnet") === main, "by key");
 assert(networkForChainId(84532) === test && networkForChainId(8453) === main, "by chain id");
