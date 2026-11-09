@@ -29,7 +29,8 @@ SDK_ELYSIUM=${SDK_ELYSIUM:-../packages/sdk/src/elysium.ts}
 # A starting figure: set it again once a relayed send's cost in HYPE is known.
 RELAYER_TARGET=${RELAYER_TARGET:-0.5}
 
-DEPLOYER=0x891E74a11abC5D0eC2EE855B2BD521fF9D18F411
+# The wallet that ran the deploy (a fresh one since 9 Nov 2026; the first, 0x891E...F411, is retired).
+DEPLOYER=${DEPLOYER:?set DEPLOYER, the address that ran the deploy}
 TREASURY=0xB3900ac9350903218e4c7597bAb0f008F01B30B8
 RELAYER=0xb1E994586E62994648a0b866BF33F2EDd942512e
 ZERO=0x0000000000000000000000000000000000000000

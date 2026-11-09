@@ -43,13 +43,13 @@ Plus, for the deploy only: `GUARD_CONTROLLER`, the multisig that will run the gu
 - [ ] **Gas in HYPE**: `cast gas-price` and the deploy-gas line from `elysium-mainnet-env.sh` (creating `ShieldVerifierFinal`, about 390k gas elsewhere, a little more on Orbit). Far above that means the parent-chain data cost is high: add `--gas-estimate-multiplier` as below.
 - [ ] **Multicall3** at `0xcA11bde05977b3631167028862bE2a173976CA11` has code (the app batches reads through it; without it reads still work, slower).
 - [ ] **A Safe** exists on Elysium for `GUARD_CONTROLLER`. If not, use the owner wallet `0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8` with `GUARD_CONTROLLER_EOA=1` and move it to a Safe later with `transferController`.
-- [ ] **Deployer nonce is 0** (`cast nonce 0x891E74a11abC5D0eC2EE855B2BD521fF9D18F411`), so the vault lands at `0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194` like everywhere else.
+- [ ] **Deployer**: a fresh wallet (nonce 0) made for this deploy. The first deployer `0x891E…F411` was retired on 9 Nov 2026, so the Elysium vault lands at its own address, not `0x39E2…0194`; `elysium-mainnet-after-deploy.sh` records the real one.
 
 ## Steps
 
 From `contracts/` in a fresh worktree of `main`.
 
-1. **Fund, in HYPE.** Deployer `0x891E…F411`: enough for about 9M gas at the gas
+1. **Fund, in HYPE.** The new deployer: enough for about 9M gas at the gas
    price you saw (keep a margin of several times that). Relayer
    `0xb1E994586E62994648a0b866BF33F2EDd942512e`: at least 0.5 HYPE to start (the
    after-deploy script warns under that; one relayed private send is about 1.9M gas).

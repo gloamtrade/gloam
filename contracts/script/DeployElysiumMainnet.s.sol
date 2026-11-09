@@ -34,7 +34,7 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  *   export ELYSIUM_CHAIN_ID=...         # Elysium mainnet's chain id, from Kinetiq's docs, checked with cast chain-id
  *   export RPC_URL=...                  # an Elysium mainnet RPC
  *   export DEPLOYER_PK=0x...            # funded mainnet deployer (gas is paid in HYPE)
- *   export DEPLOYER=0x891E74a11abC5D0eC2EE855B2BD521fF9D18F411   # the key must be this address's
+ *   export DEPLOYER=0x...               # the deployer's address; the key must be this address's
  *   export POSEIDON2=0x...              # PoseidonT3 from step 2
  *   # USDC only at launch. Its address comes from Kinetiq's or Circle's docs, checked on
  *   # chain (symbol USDC, and its decimals). 500 per deposit and 25,000 in total, the Base

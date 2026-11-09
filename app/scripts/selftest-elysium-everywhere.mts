@@ -207,10 +207,12 @@ if (MODE === "off") {
   const one = await networksText("elysium");
   ok(!one.isError && one.text.includes("HYPE") && one.text.includes(String(TESTNET_ID)), "on: the remote MCP names its testnet, gas in HYPE");
   ok(/Elysium/.test(toolText), "on: the remote MCP's tool text names Elysium");
-  // Claim links on both networks round-trip. The app's values here come from the env,
-  // not the SDK file, so ids 45 and 46 stay reserved and the link writes the place out.
-  const { encodeShortClaim, decodeShortClaim, randomNoteSeed, SHORT_LINK_WHERE } = await import("@gloamtrade/sdk");
-  ok(SHORT_LINK_WHERE.length >= 46 && SHORT_LINK_WHERE[44]!.chainId === 0 && SHORT_LINK_WHERE[45]!.chainId === 0, "on: ids 45 and 46 stay reserved without the SDK file's values");
+  // Claim links on both networks round-trip. Id 45 is Elysium mainnet's USDC once the SDK
+  // file carries every value (launch day, 9 Nov 2026), and reserved before that; id 46
+  // stays reserved. The env's placeholder pool differs, so these links write the place out.
+  const { encodeShortClaim, decodeShortClaim, randomNoteSeed, SHORT_LINK_WHERE, ELYSIUM_MAINNET: SDK_ELY } = await import("@gloamtrade/sdk");
+  const sdkFilled = [SDK_ELY.rpcUrl, SDK_ELY.explorerUrl, SDK_ELY.usdc, SDK_ELY.pool, SDK_ELY.deployBlock].every((v) => v != null);
+  ok(SHORT_LINK_WHERE.length >= 46 && SHORT_LINK_WHERE[44]!.chainId === (sdkFilled ? CHAIN_ID : 0) && SHORT_LINK_WHERE[45]!.chainId === 0, sdkFilled ? "on: id 45 is Elysium's USDC, 46 stays reserved" : "on: ids 45 and 46 stay reserved without the SDK file's values");
   for (const [chainId, pool, asset] of [
     [CHAIN_ID, POOL, USDC],
     [TESTNET_ID, TESTNET_POOL, "0x7D29d8047B905000459c0E80c34a26CeedcB47b2"],

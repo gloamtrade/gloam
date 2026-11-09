@@ -19,6 +19,7 @@
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-elysium.mts
  */
+import { ELYSIUM_MAINNET as SDK_ELYSIUM_MAINNET } from "@gloamtrade/sdk";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -157,8 +158,15 @@ if (MODE === "off" || MODE === "coming") {
   ok(!one.isError && one.text.includes("HYPE") && one.text.includes(String(CHAIN_ID)), "on: the remote MCP names it, gas in HYPE");
 }
 
+// "coming" (flag on, no values) only exists until the SDK carries Elysium's values.
+// Once packages/sdk/src/elysium.ts is filled in, the flag alone turns Elysium on.
+const SDK_FILLED = ["rpcUrl", "explorerUrl", "usdc", "pool", "deployBlock"].every(
+  (k) => (SDK_ELYSIUM_MAINNET as unknown as Record<string, unknown>)[k] != null,
+);
 if (MODE === "off") {
-  for (const mode of ["coming", "on", "bad", "wrongid"]) {
+  const modes = SDK_FILLED ? ["on", "bad", "wrongid"] : ["coming", "on", "bad", "wrongid"];
+  if (SDK_FILLED) console.log("selftest-elysium: the SDK has Elysium's values, so there is no coming state to test");
+  for (const mode of modes) {
     const child = spawnSync(process.execPath, [...process.execArgv, fileURLToPath(import.meta.url)], {
       env: { ...process.env, GLOAM_SELFTEST_ELYSIUM: mode },
       encoding: "utf8",
