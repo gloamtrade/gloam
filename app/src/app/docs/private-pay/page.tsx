@@ -100,7 +100,10 @@ export default function DocsPrivatePayPage() {
         <li>
           <strong>If it cannot finish</strong> (a closed wallet prompt, a dropped
           connection), the payment stays in the balance marked not secured yet,
-          and Move offers to secure it. Nothing is lost: the new note is saved
+          and Move offers to secure it. With the relay on, the app also tries
+          again on its own while the page is open, and as soon as the
+          connection is back. A move whose reply was lost is looked for on the
+          chain, never sent twice. Nothing is lost: the new note is saved
           before anything is sent.
         </li>
         <li>

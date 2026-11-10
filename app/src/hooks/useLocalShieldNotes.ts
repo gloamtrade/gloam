@@ -6,7 +6,13 @@ import { publicClientFor } from "@/lib/rhClient";
 import { useDemoLive } from "@/lib/demo";
 import { readDemo } from "@/lib/demoFlag";
 import { unlockNoteVault, syncFromDisk, onNotesSaved, NOTES_KEY } from "@/lib/noteVault";
-import { reconcileClaims, reconcileUnfunded, reopenGhostEthNotes } from "@/lib/claimSweep";
+import {
+  isUnsecuredClaim,
+  reconcileClaims,
+  reconcileUnfunded,
+  reopenGhostEthNotes,
+  secureClaimsInBackground,
+} from "@/lib/claimSweep";
 import { reconcileCashOuts } from "@/lib/cashOutLater";
 import { markSpentNotes } from "@/lib/spentCheck";
 import {
@@ -30,7 +36,11 @@ import {
 import { useNetwork } from "@/components/app/NetworkProvider";
 import type { GloamNetwork } from "@/lib/networks";
 
-/** How often the page syncs while a note a reverted swap left behind waits to move. */
+/**
+ * How often the page syncs while a note a reverted swap left behind waits to
+ * move, or a claimed payment waits to be secured (each try is paced in
+ * lib/claimSweep, so most of these only read).
+ */
 const MOVE_SYNC_MS = 60_000;
 
 /**
@@ -104,6 +114,9 @@ export function useLocalShieldNotes(address?: string | null) {
       // cash-out splits whose move landed (or never can) since last time.
       if ((await reconcileUnfunded().catch(() => false)) && still()) setLocal(loadLocalNotes(address, net));
       if ((await reconcileClaims().catch(() => false)) && still()) setLocal(loadLocalNotes(address, net));
+      // Claimed payments the payer can still take back: secured through the relay with no one
+      // asking, once any move already sent has been settled above (never sent twice). Not waited on.
+      void secureClaimsInBackground().catch(() => undefined);
       // once per vault: ETH notes an older sync wrongly marked spent, reopened while the vault still holds them
       if ((await reopenGhostEthNotes().catch(() => false)) && still()) setLocal(loadLocalNotes(address, net));
       // Spent checks only ask about notes with a secret, which chain rows never
@@ -189,11 +202,25 @@ export function useLocalShieldNotes(address?: string | null) {
       lastFocusSync.current = now;
       refresh();
     };
+    // A phone browser coming back to the tab often fires no focus event, only this one.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") onFocus();
+    };
+    // The connection is back: a claim waiting to be secured is tried at once, not at its next turn.
+    const onOnline = () => {
+      void secureClaimsInBackground(undefined, { now: true }).catch(() => undefined);
+      lastFocusSync.current = Date.now();
+      refresh();
+    };
     window.addEventListener("storage", onStorage);
     window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refresh, refreshLocal]);
 
@@ -215,8 +242,12 @@ export function useLocalShieldNotes(address?: string | null) {
   const confirmed = useMemo(() => confirmedNotes(merged), [merged]);
   // A note a reverted swap left behind moves right away, and the sync tries again if that
   // try fails (lib/claimSweep moveRevertedNotes): keep syncing while one waits, as nothing else
-  // would if this page is just left open. A top-up's note with its proof still out waits the same way.
-  const moveWaiting = useMemo(() => open.some((n) => n.swapProofAt) || merged.some(proofLoose), [open, merged]);
+  // would if this page is just left open. A top-up's note with its proof still out waits the same
+  // way, and so does a claimed payment not secured yet (lib/claimSweep secureClaimsInBackground).
+  const moveWaiting = useMemo(
+    () => open.some((n) => n.swapProofAt || isUnsecuredClaim(n)) || merged.some(proofLoose),
+    [open, merged]
+  );
   useEffect(() => {
     if (!moveWaiting) return;
     const t = setInterval(refresh, MOVE_SYNC_MS);
