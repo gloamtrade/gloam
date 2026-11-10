@@ -702,7 +702,8 @@ async function swapQuote(args: Args, ctx: ToolContext): Promise<CallToolResult> 
   if (from.address === to.address) return fail("Pick two different assets.");
   const units = wholeUnits(amountIn, from.decimals, from.symbol);
   if (typeof units === "string") return fail(units);
-  const rl = await hitRateLimit(ctx.ip, "swap-quote", SWAP_QUOTE_PER_MINUTE);
+  // its own bucket: the bridge panel's swap prices (bridge/quote) count apart
+  const rl = await hitRateLimit(ctx.ip, "mcp-swap-quote", SWAP_QUOTE_PER_MINUTE);
   if (!rl.allowed) return fail(`Too many swap quotes from here in the last minute. Try again in ${rl.retryAfterSec} seconds.`);
   let q: SwapQuote;
   try {
