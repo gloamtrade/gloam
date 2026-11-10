@@ -84,7 +84,7 @@
     "test": "tsc --noEmit && tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "@gloamtrade/sdk": "workspace:*",
+    "@gloamtrade/sdk": "workspace:^",
     "viem": "^2.55.2"
   },
   "peerDependencies": {

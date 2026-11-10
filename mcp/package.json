@@ -67,8 +67,8 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@gloamtrade/mppx-gloam": "workspace:*",
-    "@gloamtrade/sdk": "workspace:*",
+    "@gloamtrade/mppx-gloam": "workspace:^",
+    "@gloamtrade/sdk": "workspace:^",
     "@types/node": "^20",
     "esbuild": "^0.28.1",
     "tsx": "^4",
