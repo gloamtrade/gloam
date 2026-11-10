@@ -19,7 +19,6 @@ import {
 } from "@/lib/secretBox";
 import {
   circuitArtifactsFor,
-  assertSealedSwapArtifacts,
   assertTransferArtifacts,
   assertUnshieldArtifacts,
 } from "@/lib/circuitArtifacts";
@@ -852,10 +851,8 @@ export function SettingsView() {
             [
               ["Cash out proof key", circuitArtifactsFor(network.ceremony).unshieldZkey.sha256],
               ["Send proof key", circuitArtifactsFor(network.ceremony).transferZkey.sha256],
-              ["Private trade proof key", circuitArtifactsFor(network.ceremony).sealedSwapZkey.sha256],
               ["Cash out proof program", circuitArtifactsFor(network.ceremony).unshieldWasm.sha256],
               ["Send proof program", circuitArtifactsFor(network.ceremony).transferWasm.sha256],
-              ["Private trade proof program", circuitArtifactsFor(network.ceremony).sealedSwapWasm.sha256],
             ] as const
           ).map(([label, hash]) => (
             <li key={label} className="flex min-h-[44px] justify-between gap-x-4 gap-y-0.5 py-2.5 max-sm:flex-col sm:items-center">
@@ -877,8 +874,7 @@ export function SettingsView() {
                 try {
                   await assertUnshieldArtifacts();
                   await assertTransferArtifacts();
-                  await assertSealedSwapArtifacts();
-                  setIntegrityMsg("All six proof files check out.");
+                  setIntegrityMsg("All four proof files check out.");
                 } catch (e) {
                   setIntegrityMsg(
                     e instanceof Error ? e.message : "Check failed. Files do not match."

@@ -41,16 +41,6 @@ export const CIRCUIT_ARTIFACTS = {
     sha256:
       "f75bc324f12e1f467f5779a7275737aa0fa514a6c317e3d775f1dba8f0234666",
   },
-  sealedSwapWasm: {
-    path: "/circuits/sealed_swap.wasm",
-    sha256:
-      "7b8d18f3274d2e3e8d65ed3e41b66ab940082c9906d9281b28a25491f74405b0",
-  },
-  sealedSwapZkey: {
-    path: "/circuits/sealed_swap_final.zkey",
-    sha256:
-      "c8521ebffe9a2181d5072e5351392c0f311a8a2f30be1b3ae954b77b1f728920",
-  },
   shieldWasm: {
     path: "/circuits/shield.wasm",
     sha256:
@@ -116,12 +106,6 @@ export async function assertTransferArtifacts(): Promise<void> {
   await assertArtifactIntegrity(a.transferZkey.path, a.transferZkey.sha256);
 }
 
-export async function assertSealedSwapArtifacts(): Promise<void> {
-  const a = activeCircuitArtifacts();
-  await assertArtifactIntegrity(a.sealedSwapWasm.path, a.sealedSwapWasm.sha256);
-  await assertArtifactIntegrity(a.sealedSwapZkey.path, a.sealedSwapZkey.sha256);
-}
-
 export async function assertShieldArtifacts(): Promise<void> {
   const a = activeCircuitArtifacts();
   await assertArtifactIntegrity(a.shieldWasm.path, a.shieldWasm.sha256);
@@ -154,7 +138,7 @@ const FINAL_ZKEYS = {
 
 type ArtifactSet = { [K in keyof typeof CIRCUIT_ARTIFACTS]: { path: string; sha256: string } };
 
-/** The files for one key set. Sealed swap has no final keys: it stays off on mainnet. */
+/** The files for one key set. */
 export function circuitArtifactsFor(ceremony: CeremonyKind): ArtifactSet {
   return ceremony === "production" ? { ...CIRCUIT_ARTIFACTS, ...FINAL_ZKEYS } : CIRCUIT_ARTIFACTS;
 }

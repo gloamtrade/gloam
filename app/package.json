@@ -7,7 +7,7 @@
     "build": "next build --webpack",
     "start": "next start --port 3000",
     "lint": "eslint",
-    "smoke": "node scripts/smoke-note-package.mjs && node scripts/smoke-sealed-rates.mjs"
+    "smoke": "node scripts/smoke-note-package.mjs"
   },
   "dependencies": {
     "@gloamtrade/sdk": "workspace:*",
