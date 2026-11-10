@@ -15,3 +15,9 @@ export const MAX_CASH_OUT_FEE_BPS = 100;
 export function bpsPercent(bps: number): string {
   return `${Number((bps / 100).toFixed(2))}%`;
 }
+
+/**
+ * The cash-out fee as copy writes it ("0.5%"). Pages, docs and Glim name the
+ * fee through this, so a fee change updates all of them.
+ */
+export const CASH_OUT_FEE_PERCENT = bpsPercent(CASH_OUT_FEE_BPS);

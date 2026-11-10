@@ -4,6 +4,7 @@ import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { BRIDGE_MAX_USD, BRIDGE_MIN_USD, EXPENSIVE_ROUTE_MIN_USD, EXPENSIVE_ROUTE_SHARE } from "@/lib/bridge";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = {
   title: "Deposit from another chain",
@@ -85,7 +86,7 @@ export default function DocsBridgePage() {
         cash out can land as USDC on Base, Ethereum, Arbitrum or Solana in one
         step. Under <strong>Lands on</strong>, pick the chain, then the address
         there. The vault pays a one-time Relay address for exactly the amount
-        after the 0.5% cash-out fee, and Relay sends the USDC on.
+        after the {CASH_OUT_FEE_PERCENT} cash-out fee, and Relay sends the USDC on.
       </p>
       <p>
         Before you confirm you see what arrives, the least that will arrive,

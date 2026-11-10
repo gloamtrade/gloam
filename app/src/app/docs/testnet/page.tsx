@@ -16,6 +16,7 @@ const ETHEREUM_SEPOLIA_LIVE = ethereumSepoliaPool() !== null;
 const GOOGLE_SEPOLIA_FAUCET_URL = "https://cloud.google.com/application/web3/faucet/ethereum/sepolia";
 const POW_SEPOLIA_FAUCET_URL = "https://sepolia-faucet.pk910.de/";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = {
   title: "Practice on testnet",
@@ -216,7 +217,7 @@ export default function DocsTestnetPage() {
         It is the testnet for Base, and it runs the mainnet vault: the
         final keys, its own deposit limits (500 USDC or EURC
         per deposit and 25,000 in total, 0.2 ETH per deposit and 10 in total)
-        and a 0.25% cash-out fee (Base mainnet&apos;s is 0.5%), all on test funds. It takes test USDC, EURC
+        and a 0.25% cash-out fee (Base mainnet&apos;s is {CASH_OUT_FEE_PERCENT}), all on test funds. It takes test USDC, EURC
         and ETH; there is no USDT on Base Sepolia.
       </p>
       <ul>
@@ -253,7 +254,7 @@ export default function DocsTestnetPage() {
         Like Base Sepolia it runs the mainnet vault: the final keys, its
         own deposit limits (500 of each stablecoin per deposit and 25,000
         in total, 0.2 ETH per deposit and 10 in total) and a 0.25% cash-out
-        fee (mainnet&apos;s is 0.5%). It takes test USDC, USDG, PYUSD, EURC and ETH; Tether issues no
+        fee (mainnet&apos;s is {CASH_OUT_FEE_PERCENT}). It takes test USDC, USDG, PYUSD, EURC and ETH; Tether issues no
         USDT on Sepolia.
       </p>
       <ul>

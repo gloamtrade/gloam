@@ -3,6 +3,7 @@ import { liveMainnetNames } from "@/lib/mainnet";
 import Link from "next/link";
 import { LegalLayout } from "@/components/LegalLayout";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = { title: "Privacy Policy" };
 
@@ -198,8 +199,8 @@ export default function PrivacyPage() {
         Beyond the transaction itself, which is public on chain, the relay
         keeps only a hashed rate-limit count and, for up to about three minutes, a
         lock on each spend so the same proof is not sent twice. The relay pays
-        the network fee for what it submits. On mainnet, Gloam takes 0.5% of a
-        cash out, kept by the vault. A private swap pays the same 0.5% on the
+        the network fee for what it submits. On mainnet, Gloam takes {CASH_OUT_FEE_PERCENT} of a
+        cash out, kept by the vault. A private swap pays the same {CASH_OUT_FEE_PERCENT} on the
         amount swapped, and what its price buffer does not use goes to the
         Gloam treasury. Base Sepolia and Ethereum Sepolia keep 0.25% of a cash out;
         the other testnets charge nothing.

@@ -4,6 +4,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { swapMainnets } from "@/lib/vaultSwap";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { ELYSIUM_ENABLED } from "@/lib/elysium";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = {
   title: "Agents",
@@ -227,7 +228,7 @@ export default function DocsAgentsPage() {
         to a server. A Gloam address opens Pay and makes a private payment,
         free, with the amount hidden. A 0x address or an ENS name opens Cash out
         to that wallet: the relay sends it from the user&apos;s private balance
-        for 0.5%, so their wallet does not show, while the receiving wallet,
+        for {CASH_OUT_FEE_PERCENT}, so their wallet does not show, while the receiving wallet,
         the token and the amount are public. An ENS name is looked up on
         Ethereum mainnet and paid on the network the link names. A field that
         does not check out is left blank, with the reason shown to the user.
@@ -278,7 +279,7 @@ export default function DocsAgentsPage() {
           from the same screen.
         </li>
         <li>
-          <strong>Each top-up pays the usual 0.5% cash-out fee,</strong> taken
+          <strong>Each top-up pays the usual {CASH_OUT_FEE_PERCENT} cash-out fee,</strong> taken
           from that top-up when it goes out, at the vault&apos;s rate that day.
           A proof fixes the amount and the agent&apos;s wallet, not the fee, so if
           the fee goes up, the top-ups still ahead pay the agent less. The screen

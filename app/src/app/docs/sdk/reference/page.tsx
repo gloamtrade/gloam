@@ -4,6 +4,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { mainnetPool } from "@/lib/mainnet";
 import { swapMainnets } from "@/lib/vaultSwap";
 import { ELYSIUM } from "@/lib/elysium";
+import { CASH_OUT_FEE_BPS, CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 /** Mainnets whose pool is not in yet (lib/mainnet.ts): "Base mainnet and Ethereum" until their deploys. */
 const NOT_YET = [mainnetPool(8453) ? null : "Base mainnet", mainnetPool(1) ? null : "Ethereum"].filter(Boolean).join(" and ");
@@ -167,7 +168,7 @@ export default function DocsSdkReferencePage() {
                 <code>CASH_OUT_FEE_BPS</code> / <code>cashOutFee(amount)</code>
               </td>
               <td>
-                <code>50</code> (0.5%) / what the pool keeps on a mainnet cash out
+                <code>{CASH_OUT_FEE_BPS}</code> ({CASH_OUT_FEE_PERCENT}) / what the pool keeps on a mainnet cash out
               </td>
             </tr>
             <tr>
@@ -802,7 +803,7 @@ fieldToBytes32(field: bigint | string): Hex`}</code>
         {mainnetPool(1) ? <>, <code>1</code></> : null}
         {ELYSIUM ? <>, <code>{ELYSIUM.chainId}</code> (Elysium)</> : null}) runs
         on the final ceremony keys, with deposit limits and a
-        0.5% cash-out fee. The Robinhood Chain and Tempo testnets (
+        {CASH_OUT_FEE_PERCENT} cash-out fee. The Robinhood Chain and Tempo testnets (
         <code>46630</code>, <code>42431</code>) run on dev-ceremony keys with
         test funds; Base Sepolia (<code>84532</code>) and Ethereum Sepolia (
         <code>11155111</code>) run the final keys with test funds. Real proofs only, never a mock.

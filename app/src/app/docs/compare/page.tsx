@@ -4,6 +4,7 @@ import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { liveMainnetNames } from "@/lib/mainnet";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 /** The mainnets with a pool in, as words: Base and Ethereum join once theirs are (lib/mainnet.ts). */
 const MAINNETS = liveMainnetNames();
@@ -338,7 +339,7 @@ export default function DocsComparePage() {
                 0.5% to deposit, 0.5% to withdraw, private transfers free, plus a network fee (
                 <Src href={NM.docsFees}>fees</Src>)
               </td>
-              <td>Direct deposits and private payments free; 0.5% to cash out</td>
+              <td>Direct deposits and private payments free; {CASH_OUT_FEE_PERCENT} to cash out</td>
             </tr>
             <tr>
               <td>Gas</td>

@@ -5,6 +5,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram, PoolPicture } from "@/components/docs/FlowDiagram";
 import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { ELYSIUM_ENABLED } from "@/lib/elysium";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 /** The mainnets with a pool in, as words: "Robinhood Chain and Tempo" until Base and Ethereum are in. */
 const MAINNETS = liveMainnetNames();
@@ -47,7 +48,7 @@ export default function DocsOverviewPage() {
         limits cap what goes in. The code was reviewed internally before
         launch, and Kann Audits has since reviewed the vault contracts (
         <Link href="/security">report, 1 November 2026</Link>) and found no Critical, High or Medium issues. Deposits and private payments are
-        free, and cashing out costs 0.5%. The Robinhood Chain and Tempo
+        free, and cashing out costs {CASH_OUT_FEE_PERCENT}. The Robinhood Chain and Tempo
         testnets keep <strong>development proving keys</strong>; Base Sepolia
         and Ethereum Sepolia run the final keys. Details: <Link href="/docs/chain">Networks</Link>.
       </p>

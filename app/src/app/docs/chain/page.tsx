@@ -8,6 +8,7 @@ import { getNetwork } from "@/lib/networks";
 import { VAULT_SWAP_ROUTERS, swapMainnets, swapV3Live } from "@/lib/vaultSwap";
 import { GLOAM_OWNER, GLOAM_RELAYERS, GLOAM_TREASURY, MAINNET_POSEIDON_T3 } from "@/lib/contractDirectory";
 import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_LIVE_SINCE, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET, ELYSIUM_TESTNET_FLAG } from "@/lib/elysium";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = {
   title: "Networks",
@@ -354,7 +355,7 @@ export default function DocsNetworksPage() {
         </li>
         <li>
           <strong>Fees.</strong> Direct deposits and private payments are free. A
-          cash out costs 0.5%, kept by the pool. A private swap pays the same 0.5%
+          cash out costs {CASH_OUT_FEE_PERCENT}, kept by the pool. A private swap pays the same {CASH_OUT_FEE_PERCENT}
           on the amount swapped, plus a price buffer (0.5% on Robinhood Chain,
           0.1% on Tempo{swapV3Live(8453) || swapV3Live(1) ? ", and on Base and Ethereum 0.1% between two dollar stablecoins and 0.5% otherwise" : ""})
           whose unused part goes to the swap treasury. Money{" "}
@@ -574,7 +575,7 @@ export default function DocsNetworksPage() {
         Base is an Ethereum L2 (OP Stack) where a lot of USDC already moves.
         Gloam on Base is the same vault as on the other mainnets:{" "}
         <code>ShieldPoolPayments</code>, the ceremony&apos;s final keys,
-        deposit limits and the 0.5% cash-out fee. Base Sepolia, the testnet,
+        deposit limits and the {CASH_OUT_FEE_PERCENT} cash-out fee. Base Sepolia, the testnet,
         went live on 24 October 2026 and Base mainnet on 26 October 2026, on
         the same code.{" "}
         {BASE_MAINNET_LIVE
@@ -685,7 +686,7 @@ export default function DocsNetworksPage() {
       <p>
         Gloam on Ethereum mainnet is the same vault as on the other mainnets:{" "}
         <code>ShieldPoolPayments</code>, the ceremony&apos;s final keys,
-        deposit limits and the 0.5% cash-out fee. Its testnet is
+        deposit limits and the {CASH_OUT_FEE_PERCENT} cash-out fee. Its testnet is
         Ethereum Sepolia, below, on the same contract and keys.{" "}
         {ETHEREUM_LIVE
           ? "Ethereum mainnet is live."
@@ -846,7 +847,7 @@ export default function DocsNetworksPage() {
                 that settles to HyperEVM, with HYPE as its gas coin. Gloam on
                 Elysium mainnet is the same vault as on the other mainnets:{" "}
                 <code>ShieldPoolPayments</code>, the ceremony&apos;s final keys,
-                deposit limits and the 0.5% cash-out fee. One thing is new: its
+                deposit limits and the {CASH_OUT_FEE_PERCENT} cash-out fee. One thing is new: its
                 owner is a <code>VaultOwnerGuard</code> from the deploy itself, so
                 its proof checkers can never be replaced and its ownership can
                 never move.{ELYSIUM_TESTNET ? " Its testnet is below." : " There is no Gloam testnet on Elysium yet."}

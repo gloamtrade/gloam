@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = {
   title: "Private payroll",
@@ -203,7 +204,7 @@ Robin,gloamr1.3mPz...c4Ta,4200`}</code>
         wallet on, Gloam submits your private sends, cash outs and payment
         notices from its own account, so your wallet never appears next to
         them. It is on by default in Payroll and in Vault. Private payments are
-        free; on mainnet a cash out costs 0.5%, kept by the vault.
+        free; on mainnet a cash out costs {CASH_OUT_FEE_PERCENT}, kept by the vault.
       </p>
       <p>
         <strong>The relay cannot take or redirect money.</strong> Each payment

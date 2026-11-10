@@ -10,6 +10,7 @@ import { CodeTabs, type CodeTab } from "./SdkClient";
 import { CodeBlock } from "@/components/ui/CodeBlock";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { liveMainnetNames } from "@/lib/mainnet";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = {
   title: "SDK",
@@ -216,7 +217,7 @@ const exit = await buildUnshieldIntent({
   prove: artifactProver(circuitArtifactUrls("unshield", net.chainId)),
 });
 
-// On mainnet the pool keeps cashOutFee(amount), 0.5%, and pays the rest.
+// On mainnet the pool keeps cashOutFee(amount), ${CASH_OUT_FEE_PERCENT}, and pays the rest.
 const fee = cashOutFee(parseUnits("6", 6));
 
 // The relay can submit it or refuse it. It cannot send it anywhere else.

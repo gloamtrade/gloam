@@ -6,6 +6,7 @@ import { Header } from "@/components/Header";
 import { FlowField } from "@/components/ui/FlowField";
 import { MAINNET_LAUNCH_LABEL, liveMainnetNames } from "@/lib/mainnet";
 import { swapMainnets } from "@/lib/vaultSwap";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 /** The mainnets with a pool in, as words: Base and Ethereum join once theirs are (lib/mainnet.ts). */
 const MAINNETS = liveMainnetNames();
@@ -22,7 +23,7 @@ export const metadata: Metadata = {
 
 const LIVE = [
   { title: MAINNETS, body: "Private payments on each mainnet, for people, teams and agents." },
-  { title: "Free to pay", body: "Direct deposits and private payments are free. Cash-outs carry a 0.5% fee." },
+  { title: "Free to pay", body: `Direct deposits and private payments are free. Cash-outs carry a ${CASH_OUT_FEE_PERCENT} fee.` },
   { title: "$GLOAM, held privately", body: "Shield $GLOAM next to USDG in the Robinhood Chain pool." },
   { title: "Private swaps", body: `Swap from your private balance on ${swapMainnets()}. Who swapped stays private; the amounts are public.` },
 ];

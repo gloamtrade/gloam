@@ -4,6 +4,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { joinNames, mainnetPool } from "@/lib/mainnet";
 import { ELYSIUM, ELYSIUM_LIVE_SINCE } from "@/lib/elysium";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 /** Base and Ethereum mainnet move from "still ahead" to live once their pools are in (lib/mainnet.ts). */
 const BASE_LIVE = mainnetPool(8453) !== null;
@@ -126,7 +127,7 @@ export default function DocsProductionPage() {
         </li>
         <li>
           <strong>Fees.</strong> Direct deposits and private payments are free. A
-          cash out costs 0.5%. Money bridged in from another chain pays the
+          cash out costs {CASH_OUT_FEE_PERCENT}. Money bridged in from another chain pays the
           bridge&apos;s fees. Half of Gloam&apos;s fees buy back $GLOAM; half of
           that is burned and half goes to the treasury.
         </li>

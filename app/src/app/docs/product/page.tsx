@@ -5,6 +5,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { mainnetPool } from "@/lib/mainnet";
 import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_LIVE_SINCE } from "@/lib/elysium";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 /** Base and Ethereum mainnet show as live once their pools are in (lib/mainnet.ts). */
 const BASE_LIVE = mainnetPool(8453) !== null;
@@ -65,7 +66,7 @@ export default function DocsProductPage() {
           {
             n: "●",
             title: "Mainnet",
-            body: `Live on Robinhood Chain and Tempo since 21 October 2026, 13:00 UTC${LATER ? `, and on ${LATER} since 26 October 2026` : ""}${ELYSIUM ? `, and on Elysium since ${ELYSIUM_LIVE_SINCE}` : ""}, on the same vault, the final ceremony keys and deposit limits. Direct deposits and private payments are free; a cash out costs 0.5%.`,
+            body: `Live on Robinhood Chain and Tempo since 21 October 2026, 13:00 UTC${LATER ? `, and on ${LATER} since 26 October 2026` : ""}${ELYSIUM ? `, and on Elysium since ${ELYSIUM_LIVE_SINCE}` : ""}, on the same vault, the final ceremony keys and deposit limits. Direct deposits and private payments are free; a cash out costs ${CASH_OUT_FEE_PERCENT}.`,
           },
           {
             n: "●",

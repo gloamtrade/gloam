@@ -8,6 +8,7 @@ import { SealDots } from "@/components/ui/SealDots";
 import { CodeTabs, type CodeTab } from "@/app/sdk/SdkClient";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
 import { LivePartnersSection } from "@/components/LivePartners";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = {
   title: "Partners",
@@ -324,7 +325,7 @@ export default function PartnersPage() {
                     zero-knowledge circuits and the vault contract, so the fee
                     is paid by the proof itself and nobody can skip it. The
                     mainnet pools do not have one yet. The only fee on mainnet
-                    today is Gloam&apos;s own 0.5% on cash outs.
+                    today is Gloam&apos;s own {CASH_OUT_FEE_PERCENT} on cash outs.
                   </p>
                 </div>
               </div>
