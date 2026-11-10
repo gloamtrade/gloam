@@ -7,7 +7,8 @@ optimizer = true
 optimizer_runs = 200
 # shanghai: RH faucet tokens use PUSH0; paris sim hits NotActivated on balanceOf
 evm_version = "shanghai"
-fs_permissions = [{ access = "read", path = "./test/fixtures" }]
+# deployments: the mainnet deploy scripts read each chain's recorded vault (script/RedeployGuard.sol)
+fs_permissions = [{ access = "read", path = "./test/fixtures" }, { access = "read", path = "./deployments" }]
 
 [rpc_endpoints]
 rh_testnet = "https://rpc.testnet.chain.robinhood.com"

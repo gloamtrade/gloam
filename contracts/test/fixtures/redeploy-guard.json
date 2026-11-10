@@ -1,0 +1,7 @@
+{
+  "note": "A stand-in deployments file for test/RedeployGuard.t.sol: one recorded vault, shaped like contracts/deployments/base-mainnet.json.",
+  "chainId": 8453,
+  "contracts": {
+    "ShieldPoolPayments": "0x00000000000000000000000000000000000fa4e1"
+  }
+}

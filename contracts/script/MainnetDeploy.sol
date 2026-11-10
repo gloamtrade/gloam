@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {console2} from "forge-std/Script.sol";
-import {DeployerBroadcast} from "./DeployerBroadcast.sol";
+import {RedeployGuard} from "./RedeployGuard.sol";
 import {ShieldPoolPayments} from "../src/ShieldPoolPayments.sol";
 import {IVerifier} from "../src/interfaces/IVerifier.sol";
 import {ShieldVerifierFinal} from "../src/verifiers/final/ShieldVerifierFinal.sol";
@@ -42,6 +42,10 @@ import {VaultOwnerGuard} from "../src/VaultOwnerGuard.sol";
  * After the broadcast every setting is checked again and any mismatch fails the
  * run (GATE 1, F3): if it fails, do not announce the pool, deploy a fresh one.
  *
+ * Runs once per chain: on a mainnet whose vault is already deployed (recorded
+ * in contracts/deployments/ with code on chain, or made by this deployer) the
+ * script stops before it reads a key or sends anything (script/RedeployGuard.sol).
+ *
  * Environment (read by every chain's script):
  *   DEPLOYER_PK          funded deployer
  *   DEPLOYER             optional: the deployer's address. Next to DEPLOYER_PK the key must be
@@ -55,8 +59,9 @@ import {VaultOwnerGuard} from "../src/VaultOwnerGuard.sol";
  *   FEE_RECIPIENT        who collects cash-out fees; unset means the fee stays OFF
  *   NEW_OWNER            the owner multisig; it must call acceptOwnership() afterwards. It must
  *                        be a contract unless NEW_OWNER_EOA=1. Unset: the deployer keeps the pool.
+ *   GLOAM_ALLOW_REDEPLOY 1 deploys a second vault on a chain that has one. Unset: refused.
  */
-abstract contract MainnetDeploy is DeployerBroadcast {
+abstract contract MainnetDeploy is RedeployGuard {
     struct Limits {
         address[] assets;
         uint256[] perDeposit;
@@ -69,6 +74,7 @@ abstract contract MainnetDeploy is DeployerBroadcast {
      */
     function _deployMainnet(uint256 chainId, bool allowNative) internal {
         require(block.chainid == chainId, "wrong chain for this script");
+        _refuseRedeploy();
 
         address poseidon2 = vm.envAddress("POSEIDON2");
         require(poseidon2.code.length > 0, "POSEIDON2 has no code on this chain");
@@ -110,6 +116,7 @@ abstract contract MainnetDeploy is DeployerBroadcast {
      */
     function _deployMainnetGuarded(uint256 chainId, bool allowNative) internal {
         require(block.chainid == chainId, "wrong chain for this script");
+        _refuseRedeploy();
         require(_envAddressOrZero("NEW_OWNER") == address(0), "NEW_OWNER must be unset: the guard owns this vault");
 
         address poseidon2 = vm.envAddress("POSEIDON2");

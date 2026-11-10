@@ -76,6 +76,9 @@ contract EthereumMainnetForkTest is Test {
         vm.setEnv("FEE_RECIPIENT", vm.toString(TREASURY));
         vm.setEnv("NEW_OWNER", vm.toString(OWNER));
         vm.setEnv("NEW_OWNER_EOA", "1");
+        // The vault is live on this fork, so the deploy's redeploy check would stop
+        // this rehearsal (script/RedeployGuard.sol): a second vault here is the point.
+        vm.setEnv("GLOAM_ALLOW_REDEPLOY", "1");
 
         uint256 n = vm.getNonce(vm.addr(PK));
         new DeployEthereumMainnet().run();

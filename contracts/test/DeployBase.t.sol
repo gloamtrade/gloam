@@ -97,13 +97,22 @@ contract DeployBaseTest is Test, ElysiumDeploySteps {
 
     /// One test runs every deploy in turn: the settings travel in process env vars,
     /// which tests running side by side would overwrite for each other. So the
-    /// Ethereum deploy runs here too, not in a test file of its own.
+    /// Ethereum deploy runs here too, not in a test file of its own. Each deploy
+    /// runs from a state snapshot it rolls back: the chains share one local EVM, and
+    /// a mainnet deploy refuses to run where a vault is already deployed
+    /// (script/RedeployGuard.sol, test/RedeployGuard.t.sol).
     function test_deploys_with_runbook_settings() public {
         // Elysium (test/DeployElysium.t.sol) first, from the fresh deployer, rolled back after.
         _elysiumSteps();
+        uint256 snap = vm.snapshotState();
         _ethereumSepoliaDeploy();
+        vm.revertToState(snap);
+        snap = vm.snapshotState();
         _sepoliaDeploy();
+        vm.revertToState(snap);
+        snap = vm.snapshotState();
         _mainnetDeploy();
+        vm.revertToState(snap);
         _ethereumDeploy();
     }
 
