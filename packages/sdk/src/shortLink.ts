@@ -43,6 +43,10 @@
  * names it is refused. A link to Elysium made before then is written out in
  * full (id 0). Only the SDK's own file decides them, never an app's env, so
  * every reader agrees on what ids 45 and 46 mean.
+ *
+ * Id 47 is KNTQ (Kinetiq) in the same Elysium mainnet vault, given after
+ * launch when the app listed it (0xe45a355d9e9cAd2aD85F2d03E3eE3102A036acF0);
+ * like id 45 it takes the vault from src/elysium.ts.
  */
 
 import { getAddress, keccak256, type Address, type Hex } from "viem";
@@ -82,6 +86,15 @@ function elysiumUsdc(): ShortLinkPlace {
 function elysiumTestnetUsdc(): ShortLinkPlace {
   const cfg = elysiumTestnetConfig();
   return cfg ? at(cfg.chainId, cfg.pool, cfg.usdc) : RESERVED;
+}
+
+/** KNTQ (Kinetiq) on Elysium mainnet, 18 decimals, bridged through Elysium's canonical gateway. */
+const ELYSIUM_KNTQ: Address = "0xe45a355d9e9cAd2aD85F2d03E3eE3102A036acF0";
+
+/** Elysium mainnet's KNTQ (id 47) in the vault from src/elysium.ts, reserved while its values are not in. */
+function elysiumKntq(): ShortLinkPlace {
+  const cfg = elysiumMainnetConfig();
+  return cfg ? at(cfg.chainId, cfg.pool, ELYSIUM_KNTQ) : RESERVED;
 }
 
 /**
@@ -146,6 +159,8 @@ export const SHORT_LINK_WHERE: readonly ShortLinkPlace[] = Object.freeze([
   elysiumUsdc(), // 45 USDC
   // Elysium testnet (99801): test USDC, from src/elysium.ts; reserved until its pool is in
   elysiumTestnetUsdc(), // 46 USDC
+  // Elysium mainnet (99901): KNTQ, in the vault from src/elysium.ts
+  elysiumKntq(), // 47 KNTQ
 ]);
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();

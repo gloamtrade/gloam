@@ -59,6 +59,9 @@ const PINNED = [
   [42, 46630, "0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740", "0x1FBE1a0e43594b3455993B5dE5Fd0A7A266298d0"],
   [43, 46630, "0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740", "0x3b8262A63d25f0477c4DDE23F83cfe22Cb768C93"],
   [44, 46630, "0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740", "0x71178BAc73cBeb415514eB542a8995b82669778d"],
+  // Elysium mainnet, from src/elysium.ts (live since 9 November 2026). 46 stays reserved for its testnet.
+  [45, 99901, "0x89d3042390204f57b8b4F8949D3c2203E4002164", "0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65"],
+  [47, 99901, "0x89d3042390204f57b8b4F8949D3c2203E4002164", "0xe45a355d9e9cAd2aD85F2d03E3eE3102A036acF0"],
 ];
 
 assert.ok(SHORT_LINK_WHERE.length >= PINNED.length, `the table only grows: ${SHORT_LINK_WHERE.length} < ${PINNED.length}`);
@@ -75,7 +78,7 @@ const placed = SHORT_LINK_WHERE.filter((w) => w.chainId !== 0);
 assert.equal(new Set(placed.map(key)).size, placed.length, "no place has two ids");
 n++;
 
-// fixed bodies: a seed link on ids 1, 16 (with a note) and 44, and a 32-byte secret link on id 10.
+// fixed bodies: a seed link on ids 1, 16 (with a note), 44 and 47, and a 32-byte secret link on id 10.
 // Made once; they must read back the same forever, and the same payment must still write them.
 const seedBytes = Uint8Array.from({ length: 16 }, (_, i) => i * 17 + 3);
 const seed = "0x031425364758697a8b9cadbecfe0f102";
@@ -106,6 +109,12 @@ const VECTORS = [
     id: 10,
     fields: { chainId: 4217, pool: "0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194", asset: "0x20c0000000000000000000000000000000000000", amountWei: "250000", secret: "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0b" },
     commitment: "0x11c8f5cc6d8de91b6710c5cd5427db3c651b1a06021385655528d91477b4867a",
+  },
+  {
+    body: "9XDl76TRltakYTOTGuUg0Q7skmNv",
+    id: 47,
+    fields: { chainId: 99901, pool: "0x89d3042390204f57b8b4F8949D3c2203E4002164", asset: "0xe45a355d9e9cAd2aD85F2d03E3eE3102A036acF0", amountWei: "40000000000000000000", secret: seedSecret, seed },
+    commitment: "0x05cfe42323db2add42bf23f1fe13345cff507634c0eb40431675fd62d2aa68ac",
   },
 ];
 for (const v of VECTORS) {
