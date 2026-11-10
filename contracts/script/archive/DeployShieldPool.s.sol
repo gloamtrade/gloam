@@ -2,14 +2,14 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {ShieldPool} from "../src/ShieldPool.sol";
+import {ShieldPool} from "../../src/ShieldPool.sol";
 
 /**
  * @notice Deploy ShieldPool to Robinhood testnet (46630).
  *
  *   export DEPLOYER_PK=0x...          # never commit
  *   # optional: VERIFIER_ADDRESS=0x...  (default 0 = lock transfer/unshield)
- *   forge script script/DeployShieldPool.s.sol \
+ *   forge script script/archive/DeployShieldPool.s.sol \
  *     --rpc-url https://rpc.testnet.chain.robinhood.com \
  *     --broadcast -vvvv
  *

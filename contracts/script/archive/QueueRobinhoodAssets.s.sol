@@ -37,7 +37,7 @@ interface IERC20Meta {
  *
  * Step 1, now: queue every limit (each one is a public ChangeQueued event).
  *   cd contracts
- *   forge script script/QueueRobinhoodAssets.s.sol:QueueRobinhoodAssets --sig "queue()" \
+ *   forge script script/archive/QueueRobinhoodAssets.s.sol:QueueRobinhoodAssets --sig "queue()" \
  *     --rpc-url https://rpc.mainnet.chain.robinhood.com \
  *     --sender 0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8 --interactives 1 --broadcast --slow
  *
@@ -46,7 +46,7 @@ interface IERC20Meta {
  * limit landed as queued.
  *
  * Any time, no key, nothing sent:
- *   forge script script/QueueRobinhoodAssets.s.sol:QueueRobinhoodAssets --sig "status()" \
+ *   forge script script/archive/QueueRobinhoodAssets.s.sol:QueueRobinhoodAssets --sig "status()" \
  *     --rpc-url https://rpc.mainnet.chain.robinhood.com
  *
  * Limits are in each asset's own units, about $25,000 per deposit and $250,000 in

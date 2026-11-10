@@ -369,7 +369,7 @@ const sepoliaStableLimit: DepositLimit = { perDeposit: units(500n, 6), total: un
  * so the vault refuses it and assertDepositWithinLiveLimit says so.
  *
  * ETH, AI and ORBIO are the same: about $25,000 per deposit and $250,000 in total
- * at the prices of 2026-10-31, queued through contracts/script/
+ * at the prices of 2026-10-31, queued through contracts/script/archive/
  * QueueRobinhoodAssets.s.sol (ready on 2026-11-03), 0 on chain until each lands.
  * In every case the live read wins.
  */

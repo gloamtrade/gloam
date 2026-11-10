@@ -13,7 +13,7 @@ import {Script, console2} from "forge-std/Script.sol";
  *   export RH_TESTNET_RPC=https://rpc.testnet.chain.robinhood.com
  *   # optional: SHIELD_POOL=0xaEbB…  TOKEN_AMT=1000000000000000000  ETH_AMT=0
  *
- *   forge script script/SeedVaultInventory.s.sol \
+ *   forge script script/archive/SeedVaultInventory.s.sol \
  *     --rpc-url $RH_TESTNET_RPC --broadcast --gas-estimate-multiplier 200 -vvvv
  */
 interface IShieldPool {

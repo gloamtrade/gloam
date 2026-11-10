@@ -21,8 +21,8 @@ import {Script} from "forge-std/Script.sol";
  *     (ZK review I-1), so deploying it ships none of the hardening.
  *
  * Only after that, run the guarded scripts with GLOAM_ACK_SEALED_SWAP_H1_ZK1=1.
- * Same idea as the shieldVerifier check in SeedVaultInventory.s.sol: refuse by
- * default, never guess.
+ * Same idea as the shieldVerifier check in script/archive/SeedVaultInventory.s.sol:
+ * refuse by default, never guess.
  */
 abstract contract SealedSwapGuard is Script {
     string internal constant SEALED_SWAP_ACK_ENV = "GLOAM_ACK_SEALED_SWAP_H1_ZK1";

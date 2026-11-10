@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {ShieldPoolPoseidon} from "../src/ShieldPoolPoseidon.sol";
+import {ShieldPoolPoseidon} from "../../src/ShieldPoolPoseidon.sol";
 
 /**
  * Deploy ONLY the pool, reusing verifiers already deployed by DeployTempo.
@@ -16,7 +16,7 @@ import {ShieldPoolPoseidon} from "../src/ShieldPoolPoseidon.sol";
  *   export POSEIDON2=0x...          # Poseidon2 from deploy-poseidon.mjs
  *   export DUAL_VERIFIER=0x...      # DualProofVerifier from DeployTempo
  *   export SHIELD_IVERIFIER=0x...   # ShieldIVerifier from DeployTempo
- *   forge script script/DeployTempoPool.s.sol:DeployTempoPool --rpc-url $RPC_URL --broadcast \
+ *   forge script script/archive/DeployTempoPool.s.sol:DeployTempoPool --rpc-url $RPC_URL --broadcast \
  *     --gas-estimate-multiplier 105
  *
  * Tempo caps a transaction at 30M gas and meters deployed code at ~1,100 gas

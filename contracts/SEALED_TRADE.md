@@ -57,7 +57,7 @@ Seed throwaway inventory (only relevant once swaps re-enable; needs faucet token
 export DEPLOYER_PK=0x...
 export RH_TESTNET_RPC=https://rpc.testnet.chain.robinhood.com
 # optional: TOKEN_AMT=1000000000000000000  (1e18 per stock)
-forge script script/SeedVaultInventory.s.sol \
+forge script script/archive/SeedVaultInventory.s.sol \
   --rpc-url $RH_TESTNET_RPC --broadcast --gas-estimate-multiplier 200 -vvvv
 ```
 

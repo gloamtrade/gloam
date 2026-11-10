@@ -33,7 +33,7 @@ import {stdJson} from "forge-std/StdJson.sol";
 import {ShieldPoolCore} from "../../src/ShieldPoolCore.sol";
 import {ShieldPoolPayments} from "../../src/ShieldPoolPayments.sol";
 import {ChangeTimelock} from "../../src/lib/ChangeTimelock.sol";
-import {QueueRobinhoodAssets} from "../../script/QueueRobinhoodAssets.s.sol";
+import {QueueRobinhoodAssets} from "../../script/archive/QueueRobinhoodAssets.s.sol";
 
 interface IERC20F {
     function approve(address spender, uint256 value) external returns (bool);

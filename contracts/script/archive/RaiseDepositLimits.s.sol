@@ -31,13 +31,13 @@ interface IERC20Meta {
  * Step 1, now: queue every raise on each chain (each one is a public
  * ChangeQueued event). Read the key once, run the four chains, drop the key:
  *   read -s "OWNER_PK?Vault owner key: "; echo
- *   forge script script/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
+ *   forge script script/archive/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
  *     --rpc-url https://rpc.mainnet.chain.robinhood.com --private-key "$OWNER_PK" --broadcast
- *   forge script script/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
+ *   forge script script/archive/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
  *     --rpc-url https://mainnet.base.org --private-key "$OWNER_PK" --broadcast
- *   forge script script/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
+ *   forge script script/archive/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
  *     --rpc-url https://ethereum-rpc.publicnode.com --private-key "$OWNER_PK" --broadcast
- *   forge script script/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
+ *   forge script script/archive/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
  *     --rpc-url https://rpc.tempo.xyz --private-key "$OWNER_PK" --broadcast
  *   unset OWNER_PK
  *
@@ -46,7 +46,7 @@ interface IERC20Meta {
  * checks each limit landed as queued.
  *
  * Any time, no key, nothing sent (live limit, queued eta and target per asset):
- *   forge script script/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "status()" \
+ *   forge script script/archive/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "status()" \
  *     --rpc-url https://rpc.mainnet.chain.robinhood.com
  *   (and the same with each of the other three RPCs)
  *

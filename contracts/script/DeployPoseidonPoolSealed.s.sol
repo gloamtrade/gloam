@@ -11,7 +11,7 @@ import {SealedSwapGuard} from "./SealedSwapGuard.sol";
  * GUARDED (audit L-2 / ZK-1, 2026-10-11). Sealed swap must stay off until H1 and
  * ZK-1 are fixed and a new circuit + ceremony is done; see SealedSwapGuard.sol.
  * The script reverts unless GLOAM_ACK_SEALED_SWAP_H1_ZK1=1. To deploy a pool with
- * sealed swap off, use DeployTempoPool.s.sol (works on any chain).
+ * sealed swap off, use script/archive/DeployTempoPool.s.sol (works on any chain).
  *
  * There are no hardcoded addresses. The old defaults (DualProofVerifier
  * 0x4B0D…949C, Poseidon2 0xcc2d…0947, the old sealed swap adapter) are superseded

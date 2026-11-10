@@ -9,7 +9,7 @@ import {Script, console2} from "forge-std/Script.sol";
  *
  *   export DEPLOYER_PK=0x...
  *   export RH_TESTNET_RPC=https://rpc.testnet.chain.robinhood.com
- *   forge script script/SeedTestnetLiquidity.s.sol --rpc-url $RH_TESTNET_RPC --broadcast
+ *   forge script script/archive/SeedTestnetLiquidity.s.sol --rpc-url $RH_TESTNET_RPC --broadcast
  *
  * If getPair is zero, addLiquidityETH will create the pair.
  */

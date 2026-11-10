@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {ShieldPool} from "../src/ShieldPool.sol";
+import {ShieldPool} from "../../src/ShieldPool.sol";
 
 /**
  * @notice Live smoke: put dust ETH into the pool (shield only).
@@ -14,7 +14,7 @@ import {ShieldPool} from "../src/ShieldPool.sol";
  *   export SHIELD_POOL=0x2BD98196D90AB45D58843B4c8B8809aa34343d35
  *
  *   # 1) deposit
- *   forge script script/SmokeShield.s.sol \
+ *   forge script script/archive/SmokeShield.s.sol \
  *     --rpc-url https://rpc.testnet.chain.robinhood.com \
  *     --broadcast --gas-estimate-multiplier 200 -vvvv
  *

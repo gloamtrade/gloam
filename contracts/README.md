@@ -77,13 +77,11 @@ Ethereum Sepolia record (verifiers, assets, owner, fee recipient, and why its va
 cd contracts
 forge build
 forge test
-
-# Seed vault inventory (need faucet stocks + DEPLOYER_PK)
-export DEPLOYER_PK=0x...
-export RH_TESTNET_RPC=https://rpc.testnet.chain.robinhood.com
-forge script script/SeedVaultInventory.s.sol \
-  --rpc-url $RH_TESTNET_RPC --broadcast --gas-estimate-multiplier 200 -vvvv
 ```
+
+`script/archive/` keeps scripts whose job is done: changes already executed, one-off and
+testnet deploys, and the testnet vault inventory seed (`SeedVaultInventory.s.sol`, see
+[SEALED_TRADE.md](./SEALED_TRADE.md)). They still compile; nothing runs them.
 
 ## Docs
 

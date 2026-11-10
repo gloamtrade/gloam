@@ -33,10 +33,10 @@ interface IERC20Meta {
  * Step 1, now: queue the limit on each chain (a public ChangeQueued event).
  * --interactives 1 makes forge ask for the owner key; nothing is stored.
  *   cd contracts
- *   forge script script/QueueBDX.s.sol:QueueBDX --sig "queue()" \
+ *   forge script script/archive/QueueBDX.s.sol:QueueBDX --sig "queue()" \
  *     --rpc-url https://ethereum-rpc.publicnode.com \
  *     --sender 0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8 --interactives 1 --broadcast
- *   forge script script/QueueBDX.s.sol:QueueBDX --sig "queue()" \
+ *   forge script script/archive/QueueBDX.s.sol:QueueBDX --sig "queue()" \
  *     --rpc-url https://mainnet.base.org \
  *     --sender 0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8 --interactives 1 --broadcast
  *
@@ -45,9 +45,9 @@ interface IERC20Meta {
  * and checks the limit landed as queued.
  *
  * Any time, no key, nothing sent (live limit, target, queued eta, calldata):
- *   forge script script/QueueBDX.s.sol:QueueBDX --sig "status()" \
+ *   forge script script/archive/QueueBDX.s.sol:QueueBDX --sig "status()" \
  *     --rpc-url https://ethereum-rpc.publicnode.com
- *   forge script script/QueueBDX.s.sol:QueueBDX --sig "status()" \
+ *   forge script script/archive/QueueBDX.s.sol:QueueBDX --sig "status()" \
  *     --rpc-url https://mainnet.base.org
  *
  * Forge simulates the whole run on a fork first and sends nothing if any call

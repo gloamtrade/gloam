@@ -196,7 +196,7 @@ export const TEMPO_MAINNET_TOKENS: OnchainToken[] = [
  * contracts/MyOFT.sol:BELDEX). A plain OpenZeppelin ERC-20: no transfer fee, no
  * rebasing. Beldex's owner (a Safe) can mint, and pause, which stops only mint
  * and burn, never transfers. Its limit (100,000 per deposit / 2,000,000 in
- * total) goes through the vault timelock (contracts/script/QueueBDX.s.sol), so
+ * total) goes through the vault timelock (contracts/script/NoDepositLimits.s.sol), so
  * Add offers it only once that lands (opensWithLimit).
  */
 const BDX: OnchainToken = {
