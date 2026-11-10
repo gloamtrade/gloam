@@ -44,6 +44,16 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # The app's Content-Security-Policy (app/csp.config.mjs): the claim, request
+      # and verify pages enforce it, so a network RPC missing from connect-src
+      # would break them. Checked with Elysium off and on, as production runs it.
+      - name: App CSP self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-csp.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-claim-csp.mts
+          NEXT_PUBLIC_ELYSIUM_ENABLED=1 ../mcp/node_modules/.bin/tsx scripts/selftest-claim-csp.mts
+
       - name: SDK tests
         run: pnpm --filter @gloamtrade/sdk test
 
