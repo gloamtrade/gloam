@@ -141,7 +141,7 @@ Elysium mainnet (`99901`) is the fifth chain, live since 9 November 2026. Elysiu
 - **Assets.** USDC, 500 per deposit and 25,000 in total. HYPE, the gas coin, is not a pool asset.
 - **Bring money over.** Into Elysium USDC from other chains through Relay, or swap HYPE into USDC on Elysium.
 - **Not on Elysium yet.** Private swaps, and a Gloam testnet (Elysium testnet `99801` is known to the SDK and switched off until its vault is deployed).
-- **SDK and MCP.** The SDK and the local MCP server in this repo know Elysium mainnet as `elysium-mainnet`; on npm it arrives with the release after `@gloamtrade/sdk` 0.6.0 and `@gloamtrade/mcp` 0.8.0.
+- **SDK and MCP.** The SDK and the local MCP server in this repo know Elysium mainnet as `elysium-mainnet`; on npm from `@gloamtrade/sdk` 0.7.0 and `@gloamtrade/mcp` 0.9.0.
 
 Runbook: [`DEPLOY-ELYSIUM.md`](./DEPLOY-ELYSIUM.md).
 
@@ -188,7 +188,7 @@ await wallet.writeContract({
 });
 ```
 
-- Pass a mainnet network explicitly: for backward compatibility the SDK still defaults to the testnet. `getGloamNetwork(key)` takes `"robinhood-mainnet"`, `"tempo-mainnet"`, `"base-mainnet"`, `"ethereum-mainnet"` (the last two from SDK 0.4.1) or `"elysium-mainnet"` (after 0.6.0), and `circuitArtifactUrls` picks the final keys for a mainnet chain.
+- Pass a mainnet network explicitly: for backward compatibility the SDK still defaults to the testnet. `getGloamNetwork(key)` takes `"robinhood-mainnet"`, `"tempo-mainnet"`, `"base-mainnet"`, `"ethereum-mainnet"` (the last two from SDK 0.4.1) or `"elysium-mainnet"` (from 0.7.0), and `circuitArtifactUrls` picks the final keys for a mainnet chain.
 - To take payments, `scanIncomingPayments` reads the payment board for payments sealed to your Gloam address, and `sweepReceivedNote` moves each into a fresh note so the payer cannot spend it back. See [`packages/sdk/examples/receive-and-credit.ts`](./packages/sdk/examples/receive-and-credit.ts).
 - `cashOutFee(amount)` returns what the pool keeps on a mainnet cash out (`CASH_OUT_FEE_BPS = 50`, 0.5%). `readCashOutFeeBps(client, pool)` reads a vault's live rate.
 

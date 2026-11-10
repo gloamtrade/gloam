@@ -2,7 +2,7 @@
 
 **Private stablecoin payments for apps and agents on Robinhood Chain, Tempo, Base and Ethereum, as a package.**
 
-Add shielded balances, private payments, and selective disclosure to any app or agent on Robinhood Chain, Tempo, Base, Ethereum or Elysium. Live on all five mainnets, on the trusted setup's final keys (Elysium from the release after 0.6.0). Real zero-knowledge proofs, no proving stack to build from scratch.
+Add shielded balances, private payments, and selective disclosure to any app or agent on Robinhood Chain, Tempo, Base, Ethereum or Elysium. Live on all five mainnets, on the trusted setup's final keys (Elysium from 0.7.0). Real zero-knowledge proofs, no proving stack to build from scratch.
 
 [![npm version](https://img.shields.io/npm/v/@gloamtrade/sdk?color=0B0C0E&label=npm)](https://www.npmjs.com/package/@gloamtrade/sdk)
 [![license](https://img.shields.io/npm/l/@gloamtrade/sdk?color=0B0C0E)](https://github.com/gloamtrade/gloam/blob/main/packages/sdk/LICENSE)
@@ -75,7 +75,7 @@ That scaffolds a Next.js app already wired to the SDK. See [create-gloam-app](ht
 
 ## Networks: mainnet and testnet
 
-Gloam runs on five chains, each with a mainnet and, all but Elysium, a testnet. They are separate pools of the same design, not a bridge. Robinhood Chain and Tempo mainnet are live since 21 October 2026, Base and Ethereum mainnet since 26 October 2026 (from 0.4.1), Elysium mainnet since 9 November 2026 (from the release after 0.6.0, [Elysium](#elysium)).
+Gloam runs on five chains, each with a mainnet and, all but Elysium, a testnet. They are separate pools of the same design, not a bridge. Robinhood Chain and Tempo mainnet are live since 21 October 2026, Base and Ethereum mainnet since 26 October 2026 (from 0.4.1), Elysium mainnet since 9 November 2026 (from 0.7.0, [Elysium](#elysium)).
 
 | Network | Key | Chain id | Pool | Assets (deposit limit per deposit / total) | Keys |
 | --- | --- | --- | --- | --- | --- |
@@ -144,7 +144,7 @@ Ethereum mainnet is the fourth chain, live since 26 October 2026: from 0.4.1, `m
 
 ### Elysium
 
-Elysium mainnet is live since 9 November 2026. Elysium is Kinetiq's Hyperliquid L2, an Arbitrum Orbit chain with HYPE as its gas coin. The SDK knows it as `elysium-mainnet` (chain id `99901`), with its values in one file, `src/elysium.ts` (`ELYSIUM_MAINNET`, `elysiumMainnetConfig()`). They are in from the release after 0.6.0; 0.6.0 itself returns `null` for `mainnetNetwork("elysium")` and refuses its chain id.
+Elysium mainnet is live since 9 November 2026. Elysium is Kinetiq's Hyperliquid L2, an Arbitrum Orbit chain with HYPE as its gas coin. The SDK knows it as `elysium-mainnet` (chain id `99901`), with its values in one file, `src/elysium.ts` (`ELYSIUM_MAINNET`, `elysiumMainnetConfig()`). They are in from 0.7.0; 0.6.0 and older return `null` for `mainnetNetwork("elysium")` and refuse its chain id.
 
 - The vault is `ShieldPoolPayments` on the final keys, at its own address (`0x89d3042390204f57b8b4F8949D3c2203E4002164`, deploy block `3248495`), owned from its deploy by a `VaultOwnerGuard`. USDC only (500 per deposit, 25,000 in total), the 0.5% cash-out fee. Gas is paid in HYPE; HYPE itself is not listed as a deposit. There is no payment-message board there yet (`payMemo` is `null`).
 - Elysium testnet (`99801`, key `elysium`, `testnetNetwork("elysium")`, test USDC, final keys) stays `null` until its pool is in `ELYSIUM_TESTNET`.
@@ -408,7 +408,7 @@ Two rules keep the money safe:
 
 - **The payment note is sealed to the payee.** `payTo` must be the payee's receive tag (`gloamr1.…`). `buildGloamPayment` encrypts the payment note to it, so the agent, a proxy or a log that sees the `X-PAYMENT` header cannot open it. A `payTo` that is not a receive tag is refused.
 - **The payee sweeps before it serves.** The payer created the payment note, so it knows the secret too and could spend it back after being served. `settleGloamPayment` opens the note, verifies it, and moves it into a fresh note only the payee knows. Grant access only when it returns `grantAccess: true`. A `verifyGloamPayment` on its own always says `final: false`.
-- **The payment is bound to its payee.** `buildGloamPayment` adds `payload.binding`, an HMAC keyed by the payment note's secret over the chain, pool, receive tag and note. A sealed ticket can also be public (a payment made with the app or `buildPrivatePaymentWithReceipt` posts it on the payment board), and anyone could copy it into an X-PAYMENT header; it has no binding, so `settleGloamPayment` refuses it. A payer older than the binding sends none: pass `allowUnbound: true` to take such payments anyway. `checkGloamPaymentBinding` runs the check on its own.
+- **The payment is bound to its payee (from 0.7.0).** `buildGloamPayment` adds `payload.binding`, an HMAC keyed by the payment note's secret over the chain, pool, receive tag and note. A sealed ticket can also be public (a payment made with the app or `buildPrivatePaymentWithReceipt` posts it on the payment board), and anyone could copy it into an X-PAYMENT header; it has no binding, so `settleGloamPayment` refuses it. A payer older than the binding sends none: pass `allowUnbound: true` to take such payments anyway. `checkGloamPaymentBinding` runs the check on its own.
 
 ```ts
 import {
@@ -604,7 +604,7 @@ Everything exports from one barrel. The crypto and math core is pure and runs an
 ### Networks, keys and fees (new in 0.1.0)
 
 ```ts
-mainnetNetwork("robinhood" | "tempo" | "base" | "ethereum" | "elysium"): GloamNetwork | null  // null until this SDK version has the pool ("elysium": after 0.6.0)
+mainnetNetwork("robinhood" | "tempo" | "base" | "ethereum" | "elysium"): GloamNetwork | null  // null until this SDK version has the pool ("elysium": from 0.7.0)
 testnetNetwork("robinhood" | "tempo" | "base" | "ethereum" | "elysium"): GloamNetwork | null  // "base" (0.3.0) is Base Sepolia, "ethereum" (0.4.0) Ethereum Sepolia, "elysium" Elysium testnet (null until its pool is in)
 gloamNetworks(): GloamNetwork[]                             // mainnets with a pool first, then testnets
 getGloamNetwork(key): GloamNetwork | null                   // "robinhood-mainnet" | "tempo-mainnet" | "base-mainnet" | "ethereum-mainnet" | "elysium-mainnet" | "robinhood" | "tempo" | "base" | "ethereum" | "elysium"
