@@ -23,7 +23,7 @@ Every tool that touches a chain takes a `network`:
 
 On mainnet:
 
-- **Payments, swaps, deposit limits.** On the mainnet pools this server makes deposits, private payments and sweeps, and private swaps on the mainnets with a swap router (see [Private swaps](#private-swaps)). A deposit is at most 50,000 of a stablecoin (20 ETH on Base and Ethereum, 2,500,000 GLOAM), checked before anything is proved; private payments are never limited.
+- **Payments, swaps, deposit limits.** On the mainnet pools this server makes deposits, private payments and sweeps, and private swaps on the mainnets with a swap router (see [Private swaps](#private-swaps)). A deposit is at most 50,000 of a stablecoin (20 ETH on Base and Ethereum, 11 ETH on Robinhood Chain, 2,500,000 GLOAM, 500 USDC on Elysium), checked before anything is proved; private payments are never limited.
 - **Fees.** Deposits and private payments are free. Cashing out costs 0.5% (this server does not cash out; use the Gloam app or the SDK).
 - **Final keys.** Proofs for mainnet use the final keys of the 13-contributor trusted setup, downloaded from `https://www.gloam.trade/circuits/final` and checked against the SHA-256 the SDK pins. Testnet proofs use the dev keys. The two are cached apart.
 - **Review status.** The contracts and circuits were reviewed internally before launch with no Critical or High findings open, and an independent review on 23 October found no new exploitable contract flaw (fixes in the app areas it named were merged by 24 October). Kann Audits reviewed the vault contracts (report, 1 November 2026: [gloam.trade/security](https://gloam.trade/security)) and found no Critical, High or Medium issues; the routers, circuits, app, relay, this server and the SDK were not part of it. The mainnet pools are new, so the crowd of notes to hide among is small at first.
@@ -463,5 +463,5 @@ Then the agent can shield into a private balance, pay for x402 and MPP resources
 
 - **Mainnet:** Tempo, Robinhood Chain, Base, Ethereum and Elysium (from the release after 0.8.0), payments only, deposit limits, the trusted setup's final keys. Reviewed internally before launch and independently on 23 October; Kann Audits reviewed the vault contracts (report, 1 November 2026) and found no Critical, High or Medium issues.
 - **Testnet:** Tempo Moderato and Robinhood Chain testnet on dev keys; Base Sepolia and Ethereum Sepolia on the final keys.
-- **Circuit files** are fetched from `https://www.gloam.trade/circuits` (final keys under `/final`) on first use, checked against pinned SHA-256 and cached locally (`GLOAM_ARTIFACTS_DIR`).
+- **Circuit files** are fetched from `https://www.gloam.trade/circuits` (final keys under `/final`) on first use, checked against pinned SHA-256 and cached locally (`GLOAM_ARTIFACTS_DIR`); `GLOAM_ARTIFACTS_SOURCE` fetches them from another base URL with the same layout.
 - **Swaps.** Private swaps run here and in the Gloam app where the network has a swap router: who swapped stays private, the tokens and the amounts are public ([docs](https://gloam.trade/docs/private-swaps)). The old sealed trade is retired, and its planning tools are gone.

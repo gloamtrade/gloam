@@ -15,12 +15,13 @@ with options, one getter per `GameFunction`, and `getWorker()`.
 | `GLOAM_NETWORK` | Network | Assets |
 |---|---|---|
 | `base` (default) | Base Sepolia, testnet | USDC, EURC, ETH |
-| `robinhood-mainnet` | Robinhood Chain, mainnet | USDG, GLOAM, PONS, CASHCAT; ETH, AI, ORBIO and GRIFT once each limit lands |
-| `base-mainnet` | Base, mainnet, once Gloam's Base vault is live | USDC, EURC, USDT, ETH |
+| `robinhood-mainnet` | Robinhood Chain, mainnet | USDG, GLOAM, PONS, CASHCAT, ETH, AI, ORBIO; GRIFT once its limit lands |
+| `base-mainnet` | Base, mainnet | USDC, EURC, USDT, ETH |
 | `elysium-mainnet` | Elysium, mainnet, live since 9 November 2026, with an SDK newer than 0.6.0 (gas in HYPE) | USDC |
 | `elysium` | Elysium testnet (99801), once the SDK has its pool (gas in HYPE) | Test USDC |
 
 The same vault address on each, `0x39e28cde55cab798874746ac52cb4b5cc99a0194`, except Elysium mainnet (`0x89d3042390204f57b8b4F8949D3c2203E4002164`).
+Tempo (`tempo-mainnet`, `tempo`), Ethereum (`ethereum-mainnet`, `ethereum`) and the Robinhood Chain testnet (`robinhood`) work too.
 Mainnet has deposit limits (50,000 of a stablecoin per deposit).
 
 ## Install
@@ -65,6 +66,12 @@ GLOAM_LIMITS_FILE=./limits.example.json # or pass `limits` in code (not both: th
 # GLOAM_RPC_URL=...                     # your own RPC; an API key in it never reaches a message
 # GLOAM_NOTE_KEY=...                    # store key; derived from the agent key when unset
 # GLOAM_SUBMIT=wallet                   # default relay: the Gloam relay submits private sends
+# GLOAM_RPC_URL_<chainId>=...           # RPC for one network
+# GLOAM_DATA_DIR=~/.gloam               # spending log, leaf cache and circuit cache
+# GLOAM_NOTE_STORE=...                  # note store file (default ~/.gloam/game-notes.<agent>.json)
+# GLOAM_SPEND_LOG=...                   # spending log file
+# GLOAM_ARTIFACTS_DIR=...               # local circuit files instead of downloading them
+# GLOAM_RELAY_URL=...                   # another relay
 ```
 
 `limits.example.json` names USDC and ETH, which the Base Sepolia vault takes.

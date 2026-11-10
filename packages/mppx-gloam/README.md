@@ -59,7 +59,7 @@ const tree = createTreeSync(publicClient, {
   fromBlock: tempo.deployBlock,
   chunkSize: 99_000n,                     // Tempo's RPC caps eth_getLogs at 100,000 blocks
   seed: gloamLeafSeed("tempo-mainnet"),   // cold start: Gloam's public leaf list, checked against the pool's root
-  store: fileStore(".cache/tree.json"),   // optional: a restart reads only the blocks since
+  store: myTreeStore,                     // optional TreeStore (examples/e2b-private-mpp/common.ts has a file one): a restart reads only the blocks since
   reuseMs: 5_000,
 });
 const chain = gloamChargeChainFromClient(publicClient, { pool: tempo.pool, tree, pollingInterval: 250 });
@@ -95,7 +95,7 @@ const res = await mppx.fetch("https://api.example.com/answer");
 
 The client refuses, before proving anything, a pool that is not Gloam's for that chain, a recipient that is not a receive tag, and anything outside `policy`.
 
-Proofs must be made with the keys of the chain the payment settles on: the trusted setup's final keys on mainnet (Tempo `4217`, Robinhood Chain `4663`), the dev keys on testnet. `circuitArtifactUrls("transfer", chainId)` from the SDK returns the right files. A client that pays on more than one chain picks the prover per challenge. In Node, snarkjs reads local files only: download the files first, check them against `CIRCUIT_SHA256`, and pass their paths to `artifactProver`.
+Proofs must be made with the keys of the chain the payment settles on: the trusted setup's final keys on every mainnet and on Base Sepolia and Ethereum Sepolia, the dev keys on the Robinhood Chain and Tempo testnets. `circuitArtifactUrls("transfer", chainId)` from the SDK returns the right files. A client that pays on more than one chain picks the prover per challenge. In Node, snarkjs reads local files only: download the files first, check them against `CIRCUIT_SHA256`, and pass their paths to `artifactProver`.
 
 ## Without an MPP library
 

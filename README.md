@@ -28,7 +28,7 @@ Gloam is not new cryptography. It is a new building block for finance: private p
 
 Not new: the private pool design (Zcash lineage from 2016, Tornado, Railgun, Cloak) and selective disclosure as an idea (Zcash and Railgun viewing keys, Privacy Pools, Zama decryption rights). One honest limit: a reader can still forward a proof. It says who it was for and when it expires, and a designated-verifier mode is next.
 
-## Three surfaces, one private core
+## Four surfaces, one private core
 
 The vault app is the reference implementation, not the whole product.
 
@@ -41,7 +41,7 @@ The vault app is the reference implementation, not the whole product.
 
 ![The Gloam app: a private balance only you can see](https://raw.githubusercontent.com/gloamtrade/gloam/main/app/public/media/readme-app.jpg)
 
-All three share one core: a Poseidon note scheme, a depth-20 incremental Merkle tree, circom witness builders, real Groth16 verification, and one canonical intent shape.
+All of them share one core: a Poseidon note scheme, a depth-20 incremental Merkle tree, circom witness builders, real Groth16 verification, and one canonical intent shape.
 
 ## Mainnet
 
@@ -69,7 +69,7 @@ Everything here runs on the Robinhood Chain, Tempo, Base and Ethereum mainnets u
 
 | Path | Status | What you can do |
 | --- | --- | --- |
-| **Shield** | Live, proof-gated | Deposit USDG (Paxos Global Dollar) and $GLOAM on Robinhood Chain; USDC.e, pathUSD, USDT0 and OUSD on Tempo; USDC, EURC, USDT and ETH on Base; USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum, within the deposit limits. The pool enforces `shieldBound()` so a deposit proves `commitment == Poseidon(secret, amount, asset)` (audit C1) |
+| **Shield** | Live, proof-gated | Deposit USDG (Paxos Global Dollar), $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO on Robinhood Chain; USDC.e, pathUSD, USDT0 and OUSD on Tempo; USDC, EURC, USDT and ETH on Base; USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum, within the deposit limits. The pool enforces `shieldBound()` so a deposit proves `commitment == Poseidon(secret, amount, asset)` (audit C1) |
 | **Private send** | Live | Send inside the vault to a Gloam address. The recipient finds it through an encrypted heads-up on the payment board (`GloamPayMemo`) on each chain, which never logs who posted. The Gloam relay posts the heads-up, so your wallet is not the sender either |
 | **Private payroll** | Live | Upload a CSV and pay a whole team at once in any vault stablecoin. Gloam-address payees are paid directly and get an encrypted heads-up; everyone else gets a claim link. Crash-safe resume, results export. [Docs](https://gloam.trade/docs/payroll) |
 | **Scheduled payroll** | Live | Save a pay list as a schedule (monthly, every two weeks, weekly or one time) with a cap per run and an end date. A "Payroll due" reminder runs it in one click. Runs happen in your browser because only you hold the keys; schedules are encrypted at rest |
@@ -147,7 +147,7 @@ Runbook: [`DEPLOY-ELYSIUM.md`](./DEPLOY-ELYSIUM.md).
 
 ## Ethereum Sepolia: testnet live
 
-Ethereum Sepolia (`11155111`) runs the mainnet vault the same way as Base Sepolia: `ShieldPoolPayments` on the final keys, deposit limits, the 0.25% cash-out fee. It takes test USDC and EURC (Circle), test USDG and PYUSD (Paxos), and ETH, each stablecoin at 500 per deposit and 25,000 in total, ETH at 0.2 and 10. It is live since 25 October 2026: vault `0x465EbfcdE1e384C7B1e8388E1aFEA95438c7A0ef` (deploy block `11992914`) and payment-message board `0x8699D015087dE6D25d55d5ceB63b34b9d773f135` (block `11992942`), in the app now and in the SDK and the MCP server from their next release. Addresses: [`contracts/deployments/ethereum-sepolia.json`](./contracts/deployments/ethereum-sepolia.json). Runbook: [`DEPLOY-ETHEREUM-SEPOLIA.md`](./DEPLOY-ETHEREUM-SEPOLIA.md).
+Ethereum Sepolia (`11155111`) runs the mainnet vault the same way as Base Sepolia: `ShieldPoolPayments` on the final keys, deposit limits, the 0.25% cash-out fee. It takes test USDC and EURC (Circle), test USDG and PYUSD (Paxos), and ETH, each stablecoin at 500 per deposit and 25,000 in total, ETH at 0.2 and 10. It is live since 25 October 2026: vault `0x465EbfcdE1e384C7B1e8388E1aFEA95438c7A0ef` (deploy block `11992914`) and payment-message board `0x8699D015087dE6D25d55d5ceB63b34b9d773f135` (block `11992942`), in the app, the SDK (from 0.4.0) and the MCP server. Addresses: [`contracts/deployments/ethereum-sepolia.json`](./contracts/deployments/ethereum-sepolia.json). Runbook: [`DEPLOY-ETHEREUM-SEPOLIA.md`](./DEPLOY-ETHEREUM-SEPOLIA.md).
 
 ## Trust, verified
 
@@ -162,7 +162,7 @@ Privacy has to be checkable and correct before mainnet. This is where it stands 
 
 ## Using the SDK
 
-Deposit privately into the pool in a few lines. The SDK mints the note and generates the shield proof; you sign the resolved call. This deposits USDC.e on Tempo mainnet (`@gloamtrade/sdk` 0.4.6):
+Deposit privately into the pool in a few lines. The SDK mints the note and generates the shield proof; you sign the resolved call. This deposits USDC.e on Tempo mainnet:
 
 ```ts
 import { mainnetNetwork, buildShieldBoundIntent, artifactProver, circuitArtifactUrls, TEMPO_USDCE } from "@gloamtrade/sdk";
@@ -179,14 +179,20 @@ const intent = await buildShieldBoundIntent({
 // intent.exec is the resolved shieldBound(asset, amount, commitment, proof) call.
 // The wallet approves the pool for the amount first (the pool pulls the token with transferFrom).
 // Persist intent.note.secret to spend the balance later.
-await wallet.writeContract({ ...intent.exec, abi: shieldPoolAbi });
+await wallet.writeContract({
+  address: intent.exec.poolAddress,
+  abi: shieldBoundAbi,            // the one-function ABI in the SDK README quickstart
+  functionName: intent.exec.fn,   // "shieldBound"
+  args: intent.exec.args,
+  value: intent.exec.valueWei,    // 0n for tokens
+});
 ```
 
-- Pass a mainnet network explicitly: for backward compatibility the SDK still defaults to the testnet. `getGloamNetwork(key)` takes `"robinhood-mainnet"`, `"tempo-mainnet"`, `"base-mainnet"` or `"ethereum-mainnet"` (the last two from SDK 0.3.0 and 0.4.0), and `circuitArtifactUrls` picks the final keys for a mainnet chain.
+- Pass a mainnet network explicitly: for backward compatibility the SDK still defaults to the testnet. `getGloamNetwork(key)` takes `"robinhood-mainnet"`, `"tempo-mainnet"`, `"base-mainnet"`, `"ethereum-mainnet"` (the last two from SDK 0.4.1) or `"elysium-mainnet"` (after 0.6.0), and `circuitArtifactUrls` picks the final keys for a mainnet chain.
 - To take payments, `scanIncomingPayments` reads the payment board for payments sealed to your Gloam address, and `sweepReceivedNote` moves each into a fresh note so the payer cannot spend it back. See [`packages/sdk/examples/receive-and-credit.ts`](./packages/sdk/examples/receive-and-credit.ts).
 - `cashOutFee(amount)` returns what the pool keeps on a mainnet cash out (`CASH_OUT_FEE_BPS = 50`, 0.5%). `readCashOutFeeBps(client, pool)` reads a vault's live rate.
 
-Runnable examples are in [`examples/`](./examples): an agent that shields (`agent-shield`), a pay bot, private x402 and MPP payments, and a web shield. Start a new app with `npx create-gloam-app`.
+Runnable examples are in [`examples/`](./examples): an agent that shields (`agent-shield`), a pay bot, private x402 (`pay-x402`) and MPP payments (`mpp-gloam`, `e2b-private-mpp`), a web shield, agent-kit tools (`agent-kit-tools`), a Virtuals ACP provider (`virtuals-acp-provider`), commerce with checkable receipts (`san-verano`) and the VEYA receipt leaf (`veya-receipt`). Start a new app with `npx create-gloam-app`.
 
 ## Architecture
 
@@ -195,8 +201,10 @@ gloam/
   packages/sdk/          @gloamtrade/sdk  the private path as a reusable package
   packages/mppx-gloam/   private payment method for the Machine Payments Protocol
   packages/create-gloam-app/  starter for a new app on the SDK
+  packages/game-plugin-gloam/  @gloamtrade/game-plugin-gloam  plugin for Virtuals' GAME framework
   mcp/                   @gloamtrade/mcp  agent server (plan + signed execution)
-  examples/              agent-shield, pay-bot, pay-x402, mpp-gloam, web-shield
+  examples/              agent-shield, pay-bot, pay-x402, mpp-gloam, e2b-private-mpp, web-shield, agent-kit-tools, virtuals-acp-provider, san-verano, veya-receipt
+  integrations/          plugin marketplace (Claude Code, Codex, Cursor) and the MCP Registry listing
   app/                   Next.js reference app + docs → Vercel root: app
   contracts/             Foundry · ShieldPoolPayments (mainnet) and ShieldPoolPoseidon (testnet) vaults, verifiers, circuits, audit
 ```

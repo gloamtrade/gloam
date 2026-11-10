@@ -5,7 +5,7 @@
 Add shielded balances, private payments, and selective disclosure to any app or agent on Robinhood Chain, Tempo, Base, Ethereum or Elysium. Live on all five mainnets, on the trusted setup's final keys (Elysium from the release after 0.6.0). Real zero-knowledge proofs, no proving stack to build from scratch.
 
 [![npm version](https://img.shields.io/npm/v/@gloamtrade/sdk?color=0B0C0E&label=npm)](https://www.npmjs.com/package/@gloamtrade/sdk)
-[![license](https://img.shields.io/npm/l/@gloamtrade/sdk?color=0B0C0E)](https://github.com/gloamtrade/gloam/blob/main/LICENSE)
+[![license](https://img.shields.io/npm/l/@gloamtrade/sdk?color=0B0C0E)](https://github.com/gloamtrade/gloam/blob/main/packages/sdk/LICENSE)
 [![types](https://img.shields.io/npm/types/@gloamtrade/sdk?color=0B0C0E)](https://www.npmjs.com/package/@gloamtrade/sdk)
 [![Networks](https://img.shields.io/badge/mainnet-Robinhood%20Chain%204663%20%C2%B7%20Tempo%204217%20%C2%B7%20Base%208453%20%C2%B7%20Ethereum%201-2E7D53)](https://gloam.trade/docs/chain)
 
@@ -49,7 +49,7 @@ The Gloam vault app is the reference implementation, not a special case. The sam
 
 ## What you can build
 
-- **Shielded balances.** Deposit stablecoins (USDG on Robinhood Chain; USDC.e, pathUSD, USDT0 or OUSD on Tempo) or $GLOAM into a private balance only the holder can see or spend.
+- **Shielded balances.** Deposit stablecoins (USDG on Robinhood Chain; USDC.e, pathUSD, USDT0 or OUSD on Tempo; USDC, EURC or USDT on Base; USDC, USDT, USDG, PYUSD or EURC on Ethereum; USDC on Elysium), ETH, or $GLOAM into a private balance only the holder can see or spend.
 - **Private payments.** Send inside the vault to a receive tag, with on-chain encrypted discovery through the payment-message board on every network, mainnet included. No public transfer, no visible amount.
 - **Cash out.** Unshield back to a public balance with a browser- or node-generated Groth16 proof.
 - **Selective disclosure.** Let a holder prove one balance to a chosen party, an auditor or a counterparty, revealing nothing else. Provable, not a dark pool.
@@ -854,7 +854,7 @@ Runnable references, one for each shape a builder starts from:
 ```ts
 PUBLIC_INPUTS.unshield   // [root, nullifier, asset, amount, to]
 PUBLIC_INPUTS.transfer   // [root, nullifier, newCommitment0, newCommitment1]
-PUBLIC_INPUTS.sealedSwap // [root, nullifier, newCOut, newCChange, assetIn, assetOut, amountOutMin, rateIn, rateOut]
+PUBLIC_INPUTS.sealedSwap // [root, nullifier, newCommitmentOut, newCommitmentChange, assetIn, assetOut, amountOutMin, rateIn, rateOut]
 ```
 
 ## Guardrails and honesty

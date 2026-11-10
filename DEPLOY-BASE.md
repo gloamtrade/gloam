@@ -2,9 +2,9 @@
 
 The runbook for bringing the Gloam vault to Base. You run this with your own keys;
 no agent and no CI deploys it. Base Sepolia (`84532`), the testnet, went first and is
-live since 24 October 2026. Base mainnet (`8453`) follows on the same scripts: its
-step list is [Base mainnet](#base-mainnet) below, about ten minutes once the wallets
-are funded.
+live since 24 October 2026. Base mainnet (`8453`) followed on the same scripts and is
+live since 26 October 2026 (vault `0x39E2…0194`, deploy block `53109632`, memo board
+`0xfCa1…F2DC`); its step list, [Base mainnet](#base-mainnet) below, is the record of that deploy.
 
 Both chains get the mainnet contract, `ShieldPoolPayments`, through the shared
 `contracts/script/MainnetDeploy.sol`, the same deploy as Robinhood Chain and Tempo.
@@ -46,10 +46,13 @@ RPC for the server (`GLOAM_RPC_URL_84532`, `GLOAM_RPC_URL_8453`) once Base is on
 
 ## Assets and limits
 
-Checked on chain on 24 October 2026 (`symbol()`, `decimals()`). Deposit limits match the
-other chains: 500 per deposit and 25,000 in total for each stablecoin. ETH gets 0.2 per
+Checked on chain on 24 October 2026 (`symbol()`, `decimals()`). At deploy, deposit limits
+were 500 per deposit and 25,000 in total for each stablecoin. ETH got 0.2 per
 deposit and 10 in total: about $467 and $23,400 at Chainlink's ETH/USD on Base that day
-($2,337), round numbers just under the stablecoin caps.
+($2,337), round numbers just under the stablecoin caps. Since then the mainnet limits were raised through the timelock (50,000 per deposit and
+2,500,000 in total for each stablecoin, ETH 20 and 1,000), and the cash-out fee went from
+0.25% to 0.5% on 3 November 2026. Base Sepolia
+keeps 500 / 25,000 and 0.25%.
 
 | Asset | Base Sepolia | Base mainnet | Decimals | Per deposit (raw) | Total (raw) |
 | --- | --- | --- | --- | --- | --- |

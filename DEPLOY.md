@@ -23,8 +23,8 @@ If Root Directory is the repo root instead of `app`, Vercel looks for `.next` at
 | `/app` | The product: mainnet and testnet, switched in-app |
 | `/app/trade?path=sealed` | Private trade (switched off on every network) |
 | `/pitch` | Pitch deck |
-| `/docs` | Docs overview (Arrow-style) |
-| `/docs/*` | encryption, privacy-model, chain, product |
+| `/docs` | Docs overview |
+| `/docs/*` | Guides and reference (`app/src/app/docs`): quickstart, sdk, agents, chain, bridge, payroll, proofs, private-swaps, privacy-model, threat-model, compare, production, partners and more |
 | `/whitepaper` | Whitepaper |
 | `/terms` `/privacy` `/cookies` `/disclosures` | Legal |
 
@@ -47,8 +47,10 @@ Mainnet pools are not env vars. After each mainnet deploy (runbook: [`contracts/
 | --- | --- | --- |
 | Robinhood Chain mainnet `4663` | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` | `94194599` |
 | Tempo mainnet `4217` | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` | `45172561` |
-| Base mainnet `8453` | not deployed yet | |
-| Ethereum mainnet `1` | not deployed yet ([`DEPLOY-ETHEREUM.md`](./DEPLOY-ETHEREUM.md)) | |
+| Base mainnet `8453` | `0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194` | `53109632` |
+| Ethereum mainnet `1` | `0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194` | `26276183` |
+
+Elysium mainnet (`99901`) is not in `MAINNET_POOLS`: its values live in `packages/sdk/src/elysium.ts` and show only while `NEXT_PUBLIC_ELYSIUM_ENABLED=1` (vault `0x89d3042390204f57b8b4F8949D3c2203E4002164`, block `3248495`). Runbook: [`DEPLOY-ELYSIUM.md`](./DEPLOY-ELYSIUM.md).
 
 Base Sepolia (`84532`), Base's testnet, runs the mainnet pool too, so its pool is in `BASE_SEPOLIA_POOL` in the same file: `0x39e28cde55cab798874746ac52cb4b5cc99a0194` at block `49802958` (24 October 2026). Runbook: [`DEPLOY-BASE.md`](./DEPLOY-BASE.md).
 
@@ -58,10 +60,10 @@ Ethereum Sepolia (`11155111`) is the same: `ETHEREUM_SEPOLIA_POOL` in the same f
 | --- | --- |
 | `GLOAM_RPC_URL_4663` | A private Robinhood Chain mainnet RPC. The server tries it first, then the public `https://rpc.mainnet.chain.robinhood.com` |
 | `GLOAM_RPC_URL_4217` | A private Tempo mainnet RPC. The server tries it first, then the public `https://rpc.tempo.xyz` |
-| `GLOAM_RPC_URL_8453`, `GLOAM_RPC_URL_84532` | Private Base and Base Sepolia RPCs (Base mainnet's before its switch-on is merged). The fallback is publicnode (`https://base-rpc.publicnode.com`, `https://base-sepolia-rpc.publicnode.com`), since Base's own public RPCs refuse wide `eth_getLogs` reads |
-| `GLOAM_RPC_URL_1` | A private archive Ethereum RPC, **required** before Ethereum is switched on: the public ones serve only recent logs or a few blocks a read. The fallback is MEV Blocker (`https://rpc.mevblocker.io`) |
+| `GLOAM_RPC_URL_8453`, `GLOAM_RPC_URL_84532` | Private Base and Base Sepolia RPCs. The fallback is publicnode (`https://base-rpc.publicnode.com`, `https://base-sepolia-rpc.publicnode.com`), since Base's own public RPCs refuse wide `eth_getLogs` reads |
+| `GLOAM_RPC_URL_1` | A private archive Ethereum RPC, **required**: the public ones serve only recent logs or a few blocks a read. The fallback is MEV Blocker (`https://rpc.mevblocker.io`) |
 | `GLOAM_RELAY_MAX_GAS_GWEI_<chainId>` | The relay's gas ceiling on that chain, in gwei; `off` turns it off. Unset: 3 on Ethereum (`1`), none elsewhere. Over it the relay sends nothing (`gas_high`) and scheduled cash outs wait |
-| `GLOAM_RELAY_HOURLY_SPEND_<chainId>` | The most the relay spends on gas in an hour on that chain, in its gas coin; `off` turns it off. Unset: 0.05 on Ethereum, 0.02 on Robinhood Chain, 0.01 on Base, 1 on Tempo, none on the testnets. New sends stop at 80%, cash outs at 92%, and refunds and exits can use the rest |
+| `GLOAM_RELAY_HOURLY_SPEND_<chainId>` | The most the relay spends on gas in an hour on that chain, in its gas coin; `off` turns it off. Unset: 0.05 on Ethereum, 0.02 on Robinhood Chain, 0.01 on Base, 1 on Tempo, 1 HYPE on Elysium, none on the testnets. New sends stop at 80%, cash outs at 92%, and refunds and exits can use the rest |
 | `GLOAM_RELAY_SENDER_SHARE_<chainId>` | The share of that chain's hourly cap one sender (an IP, or a partner account) may hold, in percent; `off` for none. Unset: 40. A sender may hold 200 sends' worth at the network's gas price, if that is more, up to 60%, so a 200-payment payroll fits at ordinary gas. Refunds and exits don't count toward it: where there's no swap floor, an IP's refunds and exits have a budget of their own, 2% of the cap or five of them, whichever is more |
 | `GLOAM_RELAY_REVERT_SHARE_<chainId>` | The share of that chain's hourly cap one sender's reverted sends may burn, in percent; `off` for none. Unset: 10, or 20 sends' worth at the network's gas price if that is more, up to 60%. A send holds against it until its receipt shows it landed; one nobody saw land stays counted. Scheduled cash outs keep no IP, so they all hold as one sender against this share and the sender share |
 | `GLOAM_RELAY_INFLIGHT_TTL_<chainId>` | How long, in seconds, one spend's lock lives on that chain (60 to 86,400). Unset: 900 on Ethereum, 180 elsewhere. A spend's last send is also kept on record for a day, and the spend is not sent again while that send may still land |

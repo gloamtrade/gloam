@@ -22,7 +22,7 @@ Critical, High or Medium issues (report: gloam.trade/security).
   spending limits, note store key). Nothing secret is stored in the plugin's files.
 - **Contacts:** the public Tempo, Robinhood Chain, Base and Ethereum RPC nodes (mainnet and testnet, or your own
   with `GLOAM_RPC_URL_<chainId>`), Gloam's zero-knowledge circuit files at
-  `https://www.gloam.trade/circuits` (checked against pinned SHA-256), Gloam's relay only if you turn it on, and
+  `https://www.gloam.trade/circuits` (checked against pinned SHA-256), Gloam's relay when you turn it on (and always for private swaps), and
   the paid URLs you ask the agent to fetch. Private and local network addresses are refused by
   default.
 

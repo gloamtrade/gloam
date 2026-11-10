@@ -20,7 +20,7 @@ npm run dev
 
 Open http://localhost:3000, connect a wallet, and shield your first private USDG.
 
-- **Mainnet** (default once the SDK has the mainnet pool): Robinhood Chain,
+- **Mainnet** (the default): Robinhood Chain,
   chain id `4663`. You need USDG and a little ETH for gas. Gloam has
   deposit limits of 50,000 USDG per deposit and 2,500,000 USDG
   across the pool. Direct deposits and private payments are free; cashing out

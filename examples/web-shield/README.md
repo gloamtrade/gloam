@@ -19,7 +19,6 @@ npm run dev             # copies the shield circuit files, then starts Next
 Open http://localhost:3000 and connect a wallet. The app asks the wallet to
 switch to Robinhood Chain mainnet (chain id `4663`) and adds the chain if the
 wallet does not know it. You need USDG to shield and a little ETH for gas.
-Robinhood Chain mainnet takes no native ETH deposit (ETH is only gas).
 
 The network comes from `NEXT_PUBLIC_GLOAM_NETWORK`:
 
@@ -43,7 +42,7 @@ What to know before you use mainnet:
 - **Final keys.** Mainnet proofs use the final keys from the 13-contributor
   trusted setup (release `ceremony-final`). `circuitArtifactUrls("shield", chainId)`
   points at `final/` on mainnet and at the dev keys on testnet.
-- **Payments only.** The SDK does not swap. Private swaps are in the Gloam app on Robinhood Chain and Tempo mainnet.
+- **No swaps here.** This example does not swap. Private swaps are in the Gloam app and in the SDK (from 0.5.0), on Robinhood Chain and Tempo mainnet.
 - **The note secret is the money.** It stays in this browser's `localStorage`.
   Back it up; clearing site data without a backup loses the funds.
 

@@ -7,6 +7,9 @@ so it is the rehearsal for the shared code, and a local fork of Ethereum mainnet
 rehearsal for this chain (see [Rehearsal](#rehearsal-on-a-fork)). The step list is
 [Steps](#steps) below: about ten minutes once the wallets are funded.
 
+Done: Ethereum mainnet is live since 26 October 2026 (vault `0x39E2…0194`, deploy block
+`26276183`, memo board `0x8699…f135`). The steps below are the record of that deploy.
+
 Ethereum gets the mainnet contract, `ShieldPoolPayments`, through the shared
 `contracts/script/MainnetDeploy.sol`, the same deploy as Robinhood Chain, Tempo and
 Base, with native ETH listed.
@@ -57,10 +60,12 @@ first and MEV Blocker after it.
 
 ## Assets and limits
 
-Checked on chain on 25 October 2026 (`symbol()`, `name()`, `decimals()`). Deposit limits
-match the other chains: 500 per deposit and 25,000 in total for each stablecoin; ETH 0.2
+Checked on chain on 25 October 2026 (`symbol()`, `name()`, `decimals()`). At deploy, deposit limits
+were 500 per deposit and 25,000 in total for each stablecoin; ETH 0.2
 per deposit and 10 in total (about $471 and $23,550 at Chainlink's ETH/USD that day,
-$2,354.93).
+$2,354.93). Since then the mainnet limits were raised through the timelock (50,000 per deposit and
+2,500,000 in total for each stablecoin, ETH 20 and 1,000), and the cash-out fee went from
+0.25% to 0.5% on 3 November 2026.
 
 | Asset | Address | Name on chain | Decimals | Per deposit (raw) | Total (raw) |
 | --- | --- | --- | --- | --- | --- |

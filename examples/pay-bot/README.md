@@ -27,8 +27,7 @@ GLOAM_NETWORK=robinhood-mainnet GLOAM_PAY_KEY=0x... npx tsx pay-bot.ts
 ```
 
 - `GLOAM_NETWORK=robinhood-mainnet` shields 2 USDG on Robinhood Chain and pays 1
-  privately. The key needs the USDG plus a little ETH for gas. Robinhood Chain
-  mainnet takes no native ETH deposit (ETH is only gas).
+  privately. The key needs the USDG plus a little ETH for gas.
 - `GLOAM_NETWORK=tempo-mainnet` does the same with 2 USDC.e on Tempo. Tempo has
   no gas coin: fees are paid in the account's chosen fee token, else pathUSD, so
   hold a little of it.
@@ -45,7 +44,7 @@ What to know before you use mainnet:
 - **Final keys.** Mainnet proofs use the final keys from the 13-contributor
   trusted setup (release `ceremony-final`). The bot picks them with
   `circuitArtifactFiles` / `circuitArtifactUrls`.
-- **Payments only.** The SDK does not swap. Private swaps are in the Gloam app on Robinhood Chain and Tempo mainnet.
+- **No swaps here.** This example does not swap. Private swaps are in the Gloam app and in the SDK (from 0.5.0), on Robinhood Chain and Tempo mainnet.
 - **Secrets are money.** The bot prints the source note before it deposits, then
   the payment and change notes. Store them; losing a secret loses its funds.
 
@@ -71,7 +70,7 @@ Get test ETH from the [Robinhood Chain faucet](https://faucet.testnet.chain.robi
 | Variable | What it does |
 | --- | --- |
 | `GLOAM_PAY_KEY` | The bot's key (required). |
-| `GLOAM_NETWORK` | `robinhood-mainnet`, `tempo-mainnet`, `robinhood` or `tempo`. Default `robinhood` (testnet). |
+| `GLOAM_NETWORK` | `robinhood-mainnet`, `tempo-mainnet`, `base-mainnet`, `ethereum-mainnet`, `robinhood`, `tempo` or `base` (Base Sepolia). Default `robinhood` (testnet). |
 | `GLOAM_ASSET` | A symbol the pool lists. Default: the first stablecoin (test ETH on Robinhood Chain testnet). |
 | `GLOAM_RPC` | Your own RPC URL. Default: the network's public RPC. |
 | `GLOAM_CIRCUITS_CACHE` | Where downloaded circuit files go. Default `~/.cache/gloam/circuits`. |
