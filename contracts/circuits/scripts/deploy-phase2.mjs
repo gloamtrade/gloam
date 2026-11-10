@@ -52,6 +52,27 @@ if (pkHex.length !== 64) {
 }
 const pk = `0x${pkHex}`;
 
+// Testnet only. This script deploys the dev-key Poseidon stack and writes
+// deployments/poseidon-testnet.json; mainnet vaults go through the forge scripts
+// (DEPLOY*.md). It checks the chain id the RPC reports before anything is sent.
+const TESTNET_CHAINS = new Map([
+  [46630, "Robinhood Chain Testnet"],
+  [42431, "Tempo Testnet (Moderato)"],
+]);
+
+async function testnetOrExit(provider) {
+  const net = await provider.getNetwork();
+  const chainId = Number(net.chainId);
+  if (!TESTNET_CHAINS.has(chainId)) {
+    console.error(
+      `RPC_URL is on chain ${chainId}, which is not a testnet this script deploys to ` +
+        `(${[...TESTNET_CHAINS].map(([id, name]) => `${id} ${name}`).join(", ")}). Nothing was sent.`
+    );
+    process.exit(1);
+  }
+  return { chainId, name: TESTNET_CHAINS.get(chainId) };
+}
+
 // Audit L-2 / ZK-1 guard. Same flag as script/SealedSwapGuard.sol.
 const SEALED_SWAP_ACK = process.env.GLOAM_ACK_SEALED_SWAP_H1_ZK1 === "1";
 
@@ -74,7 +95,9 @@ async function main() {
     ? new ethers.JsonRpcProvider(RPC)
     : new ethers.providers.JsonRpcProvider(RPC);
 
+  const target = await testnetOrExit(provider);
   const wallet = new ethers.Wallet(pk, provider);
+  console.log("network", target.chainId, target.name);
   console.log("ethers", ethers.version || (v6 ? "v6" : "v5"));
   console.log("deployer", wallet.address);
 
@@ -264,8 +287,7 @@ async function main() {
     );
   }
 
-  const net = await provider.getNetwork();
-  const chainId = Number(net.chainId ?? net.chainId);
+  const chainId = target.chainId;
 
   // best-effort deploy block
   let deployBlock = null;
@@ -277,7 +299,7 @@ async function main() {
 
   const out = {
     chainId,
-    network: "Robinhood Chain Testnet",
+    network: target.name,
     rpc: RPC,
     hashScheme: "poseidon",
     proofLayout: 2,
