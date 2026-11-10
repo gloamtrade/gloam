@@ -108,7 +108,8 @@ type StoredNote = {
   /** Human amount, e.g. "1.5". */
   amount: string;
   symbol: string;
-  hash: Hex;
+  /** Unset until the wallet hands back the deposit's hash. */
+  hash?: Hex;
   live?: boolean;
 };
 
@@ -126,6 +127,15 @@ function loadNotes(): StoredNote[] {
 }
 function saveNotes(notes: StoredNote[]) {
   localStorage.setItem(STORE_KEY, JSON.stringify(notes));
+}
+
+/** The person turned the wallet prompt down. Anything else (a lost reply, a timeout) may come after the wallet sent it. */
+function walletDeclined(e: unknown): boolean {
+  let x = e as { code?: number; cause?: unknown } | undefined;
+  for (let i = 0; x && typeof x === "object" && i < 8; i++, x = x.cause as typeof x) {
+    if (x.code === 4001) return true;
+  }
+  return false;
 }
 
 type Eip1193 = { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> };
@@ -265,27 +275,39 @@ export default function Page() {
         if (approved.status !== "success") throw new Error("The approval reverted.");
       }
 
-      say("Confirm the deposit in your wallet");
-      const hash = await wallet.writeContract({
-        address: intent.exec.poolAddress,
-        abi: poolAbi,
-        functionName: "shieldBound",
-        args: intent.exec.args as readonly [Address, bigint, Hex, Hex],
-        value: intent.exec.valueWei,
-        account,
-      });
-
-      // Persist the note BEFORE waiting: losing the secret loses the funds.
+      // Keep the note BEFORE anything is sent: a tab closed or a reply lost after the
+      // wallet sends must not lose the secret, which is the only way to spend the deposit.
       const note: StoredNote = {
         commitment: intent.note.commitment,
         secret: intent.note.secret,
         amount: formatUnits(amountWei, USDG_DECIMALS),
         symbol: "USDG",
-        hash,
       };
       const next = [note, ...loadNotes()];
       saveNotes(next);
       setNotes(next);
+
+      say("Confirm the deposit in your wallet");
+      let hash: Hex;
+      try {
+        hash = await wallet.writeContract({
+          address: intent.exec.poolAddress,
+          abi: poolAbi,
+          functionName: "shieldBound",
+          args: intent.exec.args as readonly [Address, bigint, Hex, Hex],
+          value: intent.exec.valueWei,
+          account,
+        });
+      } catch (e) {
+        // Only a clear no drops the note. Otherwise it stays, and shows as live if the deposit lands.
+        if (walletDeclined(e)) {
+          const kept = loadNotes().filter((n) => n.commitment !== note.commitment);
+          saveNotes(kept);
+          setNotes(kept);
+        }
+        throw e;
+      }
+      saveNotes(loadNotes().map((n) => (n.commitment === note.commitment ? { ...n, hash } : n)));
 
       say("Submitted. Waiting for confirmation");
       const receipt = await pub.waitForTransactionReceipt({ hash });
