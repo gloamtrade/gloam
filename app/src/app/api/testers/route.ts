@@ -12,6 +12,7 @@ import {
   testersCap,
   testersCsv,
   testersGroupUrl,
+  type TesterApplication,
 } from "@/lib/testers";
 
 export const runtime = "nodejs";
@@ -90,7 +91,12 @@ export async function POST(req: Request) {
 export async function GET(req: Request) {
   if (!(await isAdminAuthenticated())) return fail(401, "Admin session required.");
   const backend = kvBackend();
-  const applications = backend === "none" ? [] : await listTesterApplications();
+  let applications: TesterApplication[];
+  try {
+    applications = backend === "none" ? [] : await listTesterApplications();
+  } catch {
+    return fail(503, "Could not read tester applications.");
+  }
 
   if (new URL(req.url).searchParams.get("format") === "csv") {
     return new Response(testersCsv(applications), {
