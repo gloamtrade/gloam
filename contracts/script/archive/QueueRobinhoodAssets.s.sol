@@ -31,9 +31,8 @@ interface IERC20Meta {
  * 1 Nov, no limit from 2 Nov, script NoDepositLimits). Queueing them again here
  * would be a third change for the same limit.
  *
- * The USER runs this, or signs the same calls in the browser on the local signing
- * page (gloam-tgbot/contracts/launch, /rh-assets). It is NOT executed by CI or by
- * any agent. --interactives 1 makes forge ask for the owner key; nothing is stored.
+ * The USER runs this. It is NOT executed by CI or by any agent. --interactives 1
+ * makes forge ask for the owner key; nothing is stored.
  *
  * Step 1, now: queue every limit (each one is a public ChangeQueued event).
  *   cd contracts
@@ -53,9 +52,9 @@ interface IERC20Meta {
  * total at the prices of 2026-10-31 (CoinGecko). A low total can be filled to
  * block deposits, swaps and swap refunds for that asset (audit L-03), so these sit
  * well above the first beta caps. To change one, change the two numbers on its
- * line here, in the signing page's ASSETS list and in RH_MAINNET_ASSETS (packages/
- * sdk/src/constants.ts). Lowering a limit later is instant (lowerDepositLimit), e.g.
- * to (0, 0) in an incident; raising one goes through this timelock again.
+ * line here and in RH_MAINNET_ASSETS (packages/sdk/src/constants.ts). Lowering a
+ * limit later is instant (lowerDepositLimit), e.g. to (0, 0) in an incident;
+ * raising one goes through this timelock again.
  */
 contract QueueRobinhoodAssets is Script {
     address constant VAULT = 0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194;

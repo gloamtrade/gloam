@@ -10,7 +10,7 @@
 //                   unless they match test/fixtures/router-next.json. The page takes
 //                   no address, code or RPC from a person or a link.
 //
-// Its own port, so it runs next to the other signing pages (serve.mjs 4730, serve-guard.mjs 4731).
+// Its own port, so it runs next to the owner guard page (serve-guard.mjs, 4731).
 // Uses `cast` for keccak256 and ABI encoding. ROUTER_RPC_<chainId> points a chain at
 // another RPC, for a rehearsal on a local fork; the page says so when one is set.
 import { createServer } from "node:http";
