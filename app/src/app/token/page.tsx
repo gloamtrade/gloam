@@ -85,7 +85,7 @@ const USES: Use[] = [
   {
     n: "02",
     title: "Buybacks",
-    body: `At mainnet, direct deposits and private payments are free and cash-outs carry ${fee}. The plan: half of Gloam's fees buy $GLOAM from the market, then half of that is burned and half goes to the Gloam treasury.`,
+    body: `At mainnet, direct deposits and private payments are free and cash-outs carry ${fee}. Half of Gloam's fees buy $GLOAM from the market. From the next round, half of what is bought is burned and half goes to the Gloam treasury.`,
     when: "Starts when fees go live",
   },
   {
@@ -119,7 +119,7 @@ const QUESTIONS: Question[] = [
   },
   {
     q: "Burned or kept?",
-    a: "The plan is half of every buyback burned and half to the Gloam treasury. So far every round was burned in full. Burned tokens sit at the burn address and can never move.",
+    a: "From the next round, half of every buyback is burned and half goes to the Gloam treasury. The first two rounds were burned in full because the founder topped them up. Burned tokens sit at the burn address and can never move.",
   },
   {
     q: "Can I check all this myself?",
@@ -177,7 +177,7 @@ const LIVE_USES: Use[] = [
   { ...USES[0], when: "First vote ran 29 Oct to 1 Nov", whenHref: "/vote" },
   {
     ...USES[1],
-    body: `On mainnet, direct deposits and private payments are free and cash-outs carry ${fee}. The plan: half of Gloam's fees buy $GLOAM from the market, then half of that is burned and half goes to the Gloam treasury.`,
+    body: `On mainnet, direct deposits and private payments are free and cash-outs carry ${fee}. Half of Gloam's fees buy $GLOAM from the market. From the next round, half of what is bought is burned and half goes to the Gloam treasury.`,
     when: "Fees live on mainnet",
   },
   RH_MAINNET
@@ -498,8 +498,8 @@ function BuybacksSection({ live }: { live: TokenLive }) {
       <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1fr_2fr]">
         <SectionHead label="Buybacks" title="Buybacks and burns">
           <p>
-            The plan: half of Gloam&apos;s fees buy $GLOAM from the market. Half of what is bought is burned, half goes to
-            the treasury.
+            Half of Gloam&apos;s fees buy $GLOAM from the market. From the next round, half of what is bought is burned
+            and half goes to the treasury.
           </p>
           <p>A buyback runs when the fees are worth a real one. There is no fixed schedule.</p>
         </SectionHead>
