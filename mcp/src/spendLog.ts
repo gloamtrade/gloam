@@ -8,7 +8,7 @@
  * moved). Pending, sent and unconfirmed count against the limit; refusals are
  * logged too, so the owner can see what an agent tried.
  */
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import type { Address } from "viem";
 import { withFileLock } from "./fileLock.js";
 import { DAY_MS, type CountedSpend, type SpendTool } from "./policy.js";
@@ -74,8 +74,10 @@ export class SpendLog {
     let drop = recent.length - KEEP_MAX;
     const counts = (e: SpendEntry) => COUNTED_STATUSES.includes(e.status) && Date.parse(e.at) > now - 2 * DAY_MS;
     const kept = drop > 0 ? recent.filter((e) => (drop > 0 && !counts(e) ? (drop--, false) : true)) : recent;
+    // Owner-only, like the note store: the log lists every payee, amount and hash the agent paid.
     const tmp = `${this.path}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ version: 1, entries: kept } satisfies LogFile, null, 2));
+    writeFileSync(tmp, JSON.stringify({ version: 1, entries: kept } satisfies LogFile, null, 2), { mode: 0o600 });
+    chmodSync(tmp, 0o600); // a leftover tmp file from a crash keeps its old mode otherwise
     renameSync(tmp, this.path);
   }
 
