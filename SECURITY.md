@@ -43,10 +43,21 @@ Thank you for looking. Please report privately; don't open a public issue or pos
 - **What to expect:** we aim to reply within 3 days, keep you updated, and credit you once it's fixed if you'd like that.
 - **Rewards:** Gloam does not run a paid bug bounty yet. We'll say so here when that changes.
 
+## Advisories
+
+### x402 payments not bound to their payee (10 November 2026, Medium)
+
+- **Affected:** `@gloamtrade/sdk <= 0.6.0` and `@gloamtrade/mcp <= 0.8.0`, for anyone who sells over x402 with them (`settleGloamPayment`, `verifyGloamPayment`, or the MCP server's `gloam_verify_payment`).
+- **What went wrong:** a payment made with the app or `buildPrivatePaymentWithReceipt` posts a sealed ticket on the public payment board so the payee can find it. That ticket has the same form as an x402 payment note, and these versions checked only the note, so anyone could copy a ticket into an `X-PAYMENT` header and be served without paying. A malformed binding was not refused either.
+- **Fixed in:** `@gloamtrade/sdk` **0.7.0** and `@gloamtrade/mcp` **0.9.0**. A payment now carries a binding, an HMAC keyed by the payment note's secret over the chain, the pool, the payee's receive tag and the commitment, that only the payer and the payee can make. Sellers refuse a payment with no binding or a wrong one.
+- **What to do:** sellers, upgrade (`npm i @gloamtrade/sdk@^0.7.0`, or run `@gloamtrade/mcp@0.9.0`) and serve only after `settleGloamPayment`. Payers, upgrade too (GAME agents: `@gloamtrade/game-plugin-gloam` 0.3.0): older payers send no binding, and their payments are refused by default. A seller that must still serve them can set `allowUnbound: true` (SDK) or `GLOAM_X402_ALLOW_UNBOUND=1` (MCP), accepting that a copied ticket passes then too.
+- **Credit:** an independent researcher.
+
 ## Acknowledgments
 
 With thanks to the researchers who have reported issues responsibly.
 
 - **[@mylifechangefa1](https://x.com/mylifechangefa1)** (GitHub [EFCCWEB3](https://github.com/EFCCWEB3)): SSRF in the MCP server's `gloam_fetch_paid`. The private-address guard classified an IPv4-in-IPv6 address by its text, so an IPv4-mapped address written in hex (e.g. `::ffff:7f00:1`), long form, NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`) slipped past it and could reach loopback or cloud-metadata services on a self-hosted server. Affected `@gloamtrade/mcp <= 0.3.0`; fixed in **0.3.1** (classify by the address bytes), with the resolved IP pinned in the connector against DNS rebinding in **0.3.2**, and credential and payment headers dropped on cross-origin redirects in **0.3.3**.
+- **An independent researcher:** x402 payments not bound to their payee, so a sealed ticket copied from the public payment board passed as a payment. Affected `@gloamtrade/sdk <= 0.6.0` and `@gloamtrade/mcp <= 0.8.0`; fixed in **0.7.0** and **0.9.0** ([advisory](#advisories)).
 
 The Kann Audits report and its scope: [gloam.trade/security](https://gloam.trade/security). Past reviews and their findings: [`contracts/audit/REMEDIATION.md`](./contracts/audit/REMEDIATION.md).

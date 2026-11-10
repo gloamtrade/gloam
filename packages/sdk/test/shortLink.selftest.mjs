@@ -38,8 +38,10 @@ const {
   buildTransferWitness,
   decodeNotePackage,
   decodeShortClaim,
+  decodeShortRequest,
   encodeNotePackage,
   encodeShortClaim,
+  encodeShortRequest,
   fieldToHex,
   fromBase62,
   generateReceiveKey,
@@ -128,8 +130,10 @@ for (const net of gloamNetworks()) {
   }
 }
 
-// Elysium is id 45 (mainnet) and 46 (testnet), at the end of the table; each reserved until its values are in.
-assert.equal(SHORT_LINK_WHERE.length, 46, "44 places, then Elysium mainnet's USDC as 45 and its testnet's as 46");
+// Elysium is id 45 (mainnet USDC), 46 (testnet USDC) and 47 (mainnet KNTQ), at the end of the table;
+// each reserved until its network's values are in.
+const KNTQ = "0xe45a355d9e9cAd2aD85F2d03E3eE3102A036acF0";
+assert.equal(SHORT_LINK_WHERE.length, 47, "44 places, then Elysium mainnet's USDC as 45, its testnet's as 46 and mainnet KNTQ as 47");
 {
   const usdg = encodeShortClaim({ pool: "0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194", asset: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", amountWei: "1000000", secret: fieldToHex(seedToSecret(new Uint8Array(16).fill(7))), seed: `0x${"07".repeat(16)}`, chainId: 4663 });
   const raw = fromBase62(usdg);
@@ -143,6 +147,7 @@ assert.equal(SHORT_LINK_WHERE.length, 46, "44 places, then Elysium mainnet's USD
   };
   const link45 = withId(45);
   const link46 = withId(46);
+  const link47 = withId(47);
   // As committed, Elysium mainnet's values are in and its testnet's pool is not, so each id is
   // checked against whatever src/elysium.ts holds; the "filled" child puts placeholders in both.
   const ely = elysium.elysiumMainnetConfig();
@@ -159,14 +164,38 @@ assert.equal(SHORT_LINK_WHERE.length, 46, "44 places, then Elysium mainnet's USD
     assert.ok(gloamNetworks().some((x) => x.key === "elysium-mainnet"), "Elysium was in the round trips above");
     if (MODE === "filled") assert.equal(ely.pool, ELY.pool, "the placeholder values were used");
     n += 5;
+    // id 47: KNTQ in the same vault, and a KNTQ claim there is written with it
+    const k = SHORT_LINK_WHERE[46];
+    assert.deepEqual({ chainId: k.chainId, pool: k.pool, asset: k.asset.toLowerCase() }, { chainId: ely.chainId, pool: ely.pool, asset: KNTQ.toLowerCase() }, "id 47 is Elysium's KNTQ");
+    const kBack = readShortClaim(link47);
+    assert.equal(kBack.chainId, ely.chainId);
+    assert.equal(kBack.pool, ely.pool);
+    assert.equal(kBack.asset.toLowerCase(), KNTQ.toLowerCase(), "id 47 reads as KNTQ");
+    const kntqSecret = fieldToHex(seedToSecret(new Uint8Array(16).fill(9)));
+    const kntqClaim = { pool: ely.pool, asset: KNTQ, amountWei: "25000000000000000000", secret: kntqSecret, seed: `0x${"09".repeat(16)}`, chainId: ely.chainId };
+    const kBody = encodeShortClaim(kntqClaim);
+    assert.equal(fromBase62(kBody)[1], 47, "a KNTQ claim on Elysium is written with id 47");
+    const kDecoded = await decodeShortClaim(kBody);
+    assert.equal(kDecoded.commitment, fieldToHex(await noteCommitmentPoseidon(seedToSecret(new Uint8Array(16).fill(9)), 25_000_000_000_000_000_000n, KNTQ)), "and opens to the same note");
+    // a KNTQ request on Elysium (18 decimals) is written with id 47 too and reads back the same
+    const kReq = encodeShortRequest({ to: tag, chainId: ely.chainId, asset: KNTQ, decimals: 18, amount: "12.5", note: "Invoice 042" });
+    assert.equal(fromBase62(kReq)[2], 47, "a KNTQ request on Elysium is written with id 47");
+    assert.deepEqual(
+      decodeShortRequest(kReq, (c, a) => (c === ely.chainId && a.toLowerCase() === KNTQ.toLowerCase() ? 18 : null)),
+      { to: tag, chainId: ely.chainId, asset: k.asset, amount: "12.5", note: "Invoice 042" },
+      "KNTQ request"
+    );
+    n += 9;
   } else {
     assert.deepEqual({ ...SHORT_LINK_WHERE[44] }, reserved, "id 45 is reserved");
+    assert.deepEqual({ ...SHORT_LINK_WHERE[46] }, reserved, "id 47 is reserved");
     assert.throws(() => readShortClaim(link45), /cut off or damaged/, "a reserved id is refused");
+    assert.throws(() => readShortClaim(link47), /cut off or damaged/, "id 47 too");
     assert.ok(!gloamNetworks().some((x) => x.key === "elysium-mainnet"), "no Elysium network");
     // A link to the reserved place's chain 0 is never given id 45.
     const zero = encodeShortClaim({ pool: "0x0000000000000000000000000000000000000000", asset: "0x0000000000000000000000000000000000000000", amountWei: "1", secret: fieldToHex(5n), chainId: 0 });
     assert.ok(zero === null || fromBase62(zero)[1] !== 45, "chain 0 never reads as id 45");
-    n += 4;
+    n += 6;
   }
   if (elyTest) {
     const t = SHORT_LINK_WHERE[45];

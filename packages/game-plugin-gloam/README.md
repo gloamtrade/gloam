@@ -17,7 +17,7 @@ with options, one getter per `GameFunction`, and `getWorker()`.
 | `base` (default) | Base Sepolia, testnet | USDC, EURC, ETH |
 | `robinhood-mainnet` | Robinhood Chain, mainnet | USDG, GLOAM, PONS, CASHCAT, ETH, AI, ORBIO; GRIFT once its limit lands |
 | `base-mainnet` | Base, mainnet | USDC, EURC, USDT, ETH |
-| `elysium-mainnet` | Elysium, mainnet, live since 9 November 2026, with an SDK newer than 0.6.0 (gas in HYPE) | USDC |
+| `elysium-mainnet` | Elysium, mainnet, live since 9 November 2026, with SDK 0.7.0 or later (gas in HYPE) | USDC |
 | `elysium` | Elysium testnet (99801), once the SDK has its pool (gas in HYPE) | Test USDC |
 
 The same vault address on each, `0x39e28cde55cab798874746ac52cb4b5cc99a0194`, except Elysium mainnet (`0x89d3042390204f57b8b4F8949D3c2203E4002164`).

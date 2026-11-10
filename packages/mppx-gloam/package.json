@@ -1,6 +1,6 @@
 {
   "name": "@gloamtrade/mppx-gloam",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": false,
   "type": "module",
   "description": "Private payments for the Machine Payments Protocol (MPP). The \"gloam\" payment method for mppx: a charge settles as a shielded transfer through the Gloam pool, sealed to the payee's receive tag and swept before access, so the public sees a shielded transfer and nothing else.",
@@ -75,7 +75,8 @@
     "dist",
     "src",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc",
@@ -84,7 +85,7 @@
     "test": "tsc --noEmit && tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "@gloamtrade/sdk": "workspace:*",
+    "@gloamtrade/sdk": "workspace:^",
     "viem": "^2.55.2"
   },
   "peerDependencies": {

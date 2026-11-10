@@ -2,7 +2,7 @@
 
 Private stablecoin payments for AI agents on Tempo, Robinhood Chain, Base and Ethereum, powered by [`@gloamtrade/sdk`](../packages/sdk). The agent pays x402 and MPP resources, holds a shielded balance and gets paid, within spending limits it cannot lift: off-chain limits this server checks, and on Tempo an access key whose cap the protocol enforces.
 
-Live on mainnet on Tempo (`4217`) and Robinhood Chain (`4663`) since 21 October 2026, and on Base (`8453`) and Ethereum (`1`) since 26 October 2026 (from 0.6.1), and on Elysium (`99901`) since 9 November 2026 (`elysium-mainnet`, USDC only, gas in HYPE; in the release after 0.8.0). Robinhood gives agents an MCP server for **public** trading. Gloam gives them one for **private** payments, so who an agent pays, and how much, stays off the public chain.
+Live on mainnet on Tempo (`4217`) and Robinhood Chain (`4663`) since 21 October 2026, and on Base (`8453`) and Ethereum (`1`) since 26 October 2026 (from 0.6.1), and on Elysium (`99901`) since 9 November 2026 (`elysium-mainnet`, USDC only, gas in HYPE; from 0.9.0). Robinhood gives agents an MCP server for **public** trading. Gloam gives them one for **private** payments, so who an agent pays, and how much, stays off the public chain.
 
 ## Mainnet or testnet
 
@@ -69,7 +69,7 @@ The server reads its environment, then `~/.gloam/agent.env` (or the file in `GLO
 
 | Setting | Meaning |
 | --- | --- |
-| `GLOAM_NETWORK` | Default network for tools: `tempo-mainnet`, `robinhood-mainnet`, `base-mainnet`, `ethereum-mainnet` or `elysium-mainnet` (mainnet; Elysium from the release after 0.8.0), `tempo`, `robinhood`, `base` or `ethereum` (testnet; `elysium`, Elysium testnet, once its pool is in). Default `robinhood`. A mainnet here also puts the Tempo access key on Tempo mainnet |
+| `GLOAM_NETWORK` | Default network for tools: `tempo-mainnet`, `robinhood-mainnet`, `base-mainnet`, `ethereum-mainnet` or `elysium-mainnet` (mainnet; Elysium from 0.9.0), `tempo`, `robinhood`, `base` or `ethereum` (testnet; `elysium`, Elysium testnet, once its pool is in). Default `robinhood`. A mainnet here also puts the Tempo access key on Tempo mainnet |
 | `GLOAM_AGENT_PRIVATE_KEY` | The agent's key. Without it the execute tools return plans |
 | `GLOAM_TEMPO_ACCOUNT` | The owner's Tempo account. With it, the key is a Tempo access key acting for that account |
 | `GLOAM_TEMPO_FEE_TOKEN` | Token to pay Tempo fees in, in access-key mode. Default: the protocol's choice |
@@ -138,7 +138,7 @@ A private balance is a note, and whoever knows a note's secret can spend it. So 
 | `GLOAM_NOTE_KEY` | 32 random bytes in hex (`openssl rand -hex 32`). The store key. Recommended, and required for a server with no signer |
 | (unset) | The store key is derived from `GLOAM_AGENT_PRIVATE_KEY` with HKDF-SHA256 under a Gloam note-store label, so it is never the signing key itself |
 | `GLOAM_NOTE_STORE` | Where the store lives. Default `~/.gloam/notes.<agent>.json` |
-| `GLOAM_X402_ALLOW_UNBOUND=1` | Seller side. Lets `gloam_verify_payment` take an x402 payment with no payment binding, from a payer older than it. Off by default: a sealed ticket copied from the payment board has no binding either, so leave it off unless you must serve such payers |
+| `GLOAM_X402_ALLOW_UNBOUND=1` | Seller side (from 0.9.0). Lets `gloam_verify_payment` take an x402 payment with no payment binding, from a payer older than it. Off by default: a sealed ticket copied from the payment board has no binding either, so leave it off unless you must serve such payers |
 | `GLOAM_EXPOSE_NOTE_SECRETS=1` | **Unsafe, legacy only.** Brings back the old behavior: shield and pay return note secrets, pay accepts `noteSecret`, and a `payTo` that is not a receive tag is paid with an unsealed note. Off by default. Read once at startup |
 
 The store is AES-256-GCM over the whole file (amounts and counts are hidden too), bound to the agent id, written with mode `0600` under the same kind of lock as the spending log. A store that does not decrypt is never overwritten, since it holds the only copy of the money: fix the key or move the file. Back it up together with its key. Changing `GLOAM_NOTE_KEY`, or the signer when the key is derived, makes an existing store unreadable until the old key is back.
@@ -461,7 +461,7 @@ Then the agent can shield into a private balance, pay for x402 and MPP resources
 
 ## Status
 
-- **Mainnet:** Tempo, Robinhood Chain, Base, Ethereum and Elysium (from the release after 0.8.0), payments only, deposit limits, the trusted setup's final keys. Reviewed internally before launch and independently on 23 October; Kann Audits reviewed the vault contracts (report, 1 November 2026) and found no Critical, High or Medium issues.
+- **Mainnet:** Tempo, Robinhood Chain, Base, Ethereum and Elysium (from 0.9.0), payments only, deposit limits, the trusted setup's final keys. Reviewed internally before launch and independently on 23 October; Kann Audits reviewed the vault contracts (report, 1 November 2026) and found no Critical, High or Medium issues.
 - **Testnet:** Tempo Moderato and Robinhood Chain testnet on dev keys; Base Sepolia and Ethereum Sepolia on the final keys.
 - **Circuit files** are fetched from `https://www.gloam.trade/circuits` (final keys under `/final`) on first use, checked against pinned SHA-256 and cached locally (`~/.gloam/circuits`, or `GLOAM_ARTIFACTS_DIR`); `GLOAM_ARTIFACTS_SOURCE` fetches them from another base URL with the same layout.
 - **Swaps.** Private swaps run here and in the Gloam app where the network has a swap router: who swapped stays private, the tokens and the amounts are public ([docs](https://gloam.trade/docs/private-swaps)). The old sealed trade is retired, and its planning tools are gone.

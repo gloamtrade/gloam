@@ -8,7 +8,7 @@
  * final keys), Base mainnet ("base-mainnet") and Robinhood Chain mainnet
  * ("robinhood-mainnet"). Tempo and the Robinhood Chain testnet work too, and
  * Ethereum. Elysium mainnet ("elysium-mainnet": USDC only, gas in HYPE) works
- * with an SDK that has its values (after 0.6.0), and its testnet ("elysium",
+ * with an SDK that has its values (0.7.0 or later), and its testnet ("elysium",
  * 99801) once its pool is in. A network whose pool
  * this SDK version does not have is refused, never guessed.
  */

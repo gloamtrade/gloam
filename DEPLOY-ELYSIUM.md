@@ -148,9 +148,9 @@ Setting the flag before step 8 (no values yet) shows Elysium as "coming" in Glim
 READMEs, npm and plugin manifests, SKILL.md files, server.json, AGENTS.md and the
 contracts docs said Elysium support is "coming". The repo READMEs, AGENTS.md and the
 package descriptions were switched to live on 10 November 2026. The plugin manifests, SKILL.md files,
-the plugins README and server.json pin `@gloamtrade/mcp@0.8.0`, which has no Elysium, so
-they keep "coming" until the next MCP release and its pin bump; the contracts docs are
-the contracts owner's. To find what is left:
+the plugins README and server.json followed with the release that carries Elysium's values
+(`@gloamtrade/sdk` 0.7.0, `@gloamtrade/mcp` 0.9.0), which pins `@gloamtrade/mcp@0.9.0`; the
+contracts docs are the contracts owner's. To find what is left:
 
 ```bash
 git grep -n Elysium -- ':!app/src' ':!videos' | grep coming

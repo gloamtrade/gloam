@@ -369,10 +369,10 @@ importers:
         version: 3.25.76
     devDependencies:
       '@gloamtrade/mppx-gloam':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../packages/mppx-gloam
       '@gloamtrade/sdk':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../packages/sdk
       '@types/node':
         specifier: ^20
@@ -417,7 +417,7 @@ importers:
   packages/mppx-gloam:
     dependencies:
       '@gloamtrade/sdk':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../sdk
       viem:
         specifier: ^2.55.2

@@ -1,6 +1,6 @@
 {
   "name": "@gloamtrade/game-plugin-gloam",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": false,
   "type": "module",
   "description": "Gloam plugin for the GAME framework: private stablecoin payments for Virtuals agents on Base and Robinhood Chain, under per-asset spending limits the agent cannot lift.",
@@ -63,6 +63,7 @@
     "src",
     "LICENSE",
     "README.md",
+    "CHANGELOG.md",
     "plugin_metadata.yml",
     "limits.example.json",
     "env.example"
