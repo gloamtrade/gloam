@@ -5,14 +5,14 @@ import { DocsLayout } from "@/components/DocsLayout";
 export const metadata: Metadata = {
   title: "Quickstart",
   description:
-    "Shield your first private balance on Robinhood Chain or Tempo in about ten minutes with @gloamtrade/sdk: install, prove, deposit, cash out. On mainnet, or on the free testnet.",
+    "Shield your first private balance on Robinhood Chain or Tempo in about ten minutes with @gloamtrade/sdk: install, prove, deposit, cash out. On mainnet, or on testnet.",
 };
 
 export default function DocsQuickstartPage() {
   return (
     <DocsLayout
       title="Quickstart"
-      lede="Go from an empty project to a real private balance in about ten minutes, on mainnet or on the free testnet. Every step below runs: no mocks, real Groth16 proofs."
+      lede="Go from an empty project to a real private balance in about ten minutes, on mainnet or on testnet. Every step below runs: no mocks, real Groth16 proofs."
       glance={[
         { label: "Time", value: "~10 minutes" },
         { label: "Runtime", value: "browser or node" },

@@ -14,7 +14,7 @@ const siteTitle = "Gloam · Private money on public chains";
 // Metadata is fixed at build time, so like the app's tab title it names
 // mainnet once a mainnet pool is filled in (lib/mainnet.ts), testnets before.
 const siteDescription = MAINNET_CONFIGURED
-  ? `Private stablecoin payments for people, teams and agents. Hold, pay and run payroll without putting amounts or balances on the public record, and prove only what someone needs to see. On ${liveMainnetNames()} mainnet, with free testnets to practice on.`
+  ? `Private stablecoin payments for people, teams and agents. Hold, pay and run payroll without putting amounts or balances on the public record, and prove only what someone needs to see. On ${liveMainnetNames()} mainnet, and on testnets to try it first.`
   : "Private stablecoin payments for people, teams and agents. Hold, pay and run payroll without putting amounts or balances on the public record, and prove only what someone needs to see. On Tempo and Robinhood Chain testnets.";
 
 /**

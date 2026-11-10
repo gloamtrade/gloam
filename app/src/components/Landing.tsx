@@ -147,7 +147,7 @@ const WHAT = [
     title: "Open vault contracts",
     body: (
       <MainnetCopy
-        live={`Private balances on ${liveMainnetNames()} mainnet, with a free testnet to practice on. Settlement stays public, the amounts and the people stay private.`}
+        live={`Private balances on ${liveMainnetNames()} mainnet, and on testnet to try it first. Settlement stays public, the amounts and the people stay private.`}
         before="Private balances on Tempo and Robinhood Chain testnet. Settlement stays public, the amounts and the people stay private."
       />
     ),

@@ -197,7 +197,7 @@ await wallet.writeContract({
 });`}</code>
       </pre>
       <p>
-        To practice on the free testnet, use <code>GLOAM_NETWORKS.tempo</code>{" "}
+        To test it on testnet first, use <code>GLOAM_NETWORKS.tempo</code>{" "}
         (or <code>GLOAM_NETWORKS.robinhood</code>, where you can also shield
         test ETH) as <code>net</code>; the same code proves with the dev keys
         there. A complete runnable agent is in{" "}

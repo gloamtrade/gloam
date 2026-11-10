@@ -510,7 +510,7 @@ export default function SdkPage() {
                 <h2 className="t-display-m mt-4 max-w-[14ch]">One command to a working app</h2>
                 <p className="mt-4 max-w-[44ch] text-[15px] leading-relaxed text-mute">
                   Scaffolds a Next.js app already wired to the SDK, with private
-                  balances and payments working on the free testnet from the
+                  balances and payments working on testnet from the
                   first run.
                 </p>
               </div>
