@@ -224,7 +224,7 @@ test("with a partner key, private payments and their messages go through the par
     assert.equal(out.status, "done", JSON.stringify(out));
     assert.ok(calls.length >= 1);
     for (const c of calls) {
-      assert.equal(c.url, "https://gloam.trade/api/v1/relay");
+      assert.equal(c.url, "https://www.gloam.trade/api/v1/relay");
       assert.equal(c.auth, `Bearer ${apiKey}`);
     }
     assert.equal(calls[0]!.body.action, "transfer");

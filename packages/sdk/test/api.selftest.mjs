@@ -58,7 +58,7 @@ for (const bad of [undefined, "", "sk_live_x", "gloam_test_short", "gloam_prod_"
 }
 assert(new GloamApiClient({ apiKey: KEY }).env === "test", "test env");
 assert(new GloamApiClient({ apiKey: "gloam_live_" + "b".repeat(43) }).env === "live", "live env");
-assert(new GloamApiClient({ apiKey: KEY }).baseUrl === "https://gloam.trade", "default base url");
+assert(new GloamApiClient({ apiKey: KEY }).baseUrl === "https://www.gloam.trade", "default base url (www: the bare host redirects and fetch drops the key)");
 
 // ── relay bodies ──
 const tb = relayBodyFor(transfer);
