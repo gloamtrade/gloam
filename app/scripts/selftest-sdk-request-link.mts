@@ -23,7 +23,7 @@ import {
   requestParamsFrom,
 } from "../src/lib/paymentRequest";
 import { decodeNotePackage as appDecode, encodeNotePackage as appEncode } from "../src/lib/notePackage";
-import type { NetworkKey } from "../src/lib/networks";
+import { isNetworkKey, type NetworkKey } from "../src/lib/networks";
 
 let n = 0;
 const { tag } = await generateReceiveKey();
@@ -31,7 +31,8 @@ assert.equal(SDK_NOTE_MAX, REQUEST_NOTE_MAX, "the same note cap");
 
 const amounts = ["25", "12.5", "0.000001", undefined];
 const notes = ["agent-42", "Invoice 042 · October", "a".repeat(80), undefined];
-for (const net of gloamNetworks()) {
+// Only the networks this build runs on: Elysium joins once NEXT_PUBLIC_ELYSIUM_ENABLED is on (lib/elysium.ts).
+for (const net of gloamNetworks().filter((x) => isNetworkKey(x.key))) {
   for (const asset of net.assets) {
     for (let i = 0; i < amounts.length; i++) {
       const amount = asset.decimals < 6 && amounts[i]?.includes(".") ? "7" : amounts[i];

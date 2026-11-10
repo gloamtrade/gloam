@@ -17,15 +17,6 @@ export function testnetForceOpen(): boolean {
   return true;
 }
 
-export function testnetEarlyKey(): string | null {
-  const k = process.env.NEXT_PUBLIC_TESTNET_EARLY_KEY?.trim();
-  return k || null;
-}
-
 export function isTestnetOpen(_nowMs: number = Date.now()): boolean {
   return true;
-}
-
-export function msUntilTestnetOpen(_nowMs: number = Date.now()): number {
-  return 0;
 }

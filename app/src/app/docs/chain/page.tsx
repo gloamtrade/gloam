@@ -63,7 +63,7 @@ export default function DocsNetworksPage() {
       title="Networks"
       lede={`One private core, ${liveMainnetCountWords()}. ${liveMainnetNames()}, ${ELYSIUM && !ELYSIUM_TESTNET ? "each but Elysium with a testnet" : "each with a testnet"}.`}
       glance={[
-        { label: "Robinhood mainnet", value: "4663" },
+        { label: "Robinhood Chain mainnet", value: "4663" },
         { label: "Tempo mainnet", value: "4217" },
         { label: "Base mainnet", value: "8453" },
         { label: "Ethereum mainnet", value: "1" },

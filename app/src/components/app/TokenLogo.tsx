@@ -47,11 +47,6 @@ const PNG_LOGO_IDS = new Set([
 /** Round marks (a full disc): shown as a circle with no plate, so no white corners. */
 const DISC_LOGO_IDS = new Set(["usdg", "usdce", "usdc", "eurc", "usdt", "pyusd", "eth", "weth", "avgo", "mstr", "sbux", "usde", "u", "cbbtc", "bdx"]);
 
-/** True when the mark is a disc, so a pill can keep it round instead of clipping a tile. */
-export function logoIsDisc(id: string): boolean {
-  return DISC_LOGO_IDS.has(id.toLowerCase());
-}
-
 /**
  * White marks on a clear ground. On the usual white plate they vanish and leave
  * an empty tile, so these sit on an ink plate instead.

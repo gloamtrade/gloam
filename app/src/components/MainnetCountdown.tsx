@@ -1,14 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   MAINNET_CONFIGURED,
   MAINNET_LAUNCH_MS,
-  MAINNET_LAUNCH_SHORT,
-  MAINNET_PAGE,
   calendarUrl,
-  compactRemaining,
   liveMainnetNames,
   remainingUntil,
   type Remaining,
@@ -93,13 +89,6 @@ export function CountdownDigits({ onDone, onLive }: { onDone?: React.ReactNode; 
   );
 }
 
-/** "1d 12h 5m" for inline use; empty until mounted. */
-export function CountdownCompact() {
-  const r = useMainnetRemaining();
-  if (!r || r.done) return null;
-  return <span className="tnum">{compactRemaining(r)}</span>;
-}
-
 const noopSubscribe = () => () => {};
 
 /** The launch time in the browser's time zone; null in UTC, on the server, or without Intl. */
@@ -181,29 +170,5 @@ export function MainnetTestnetLine() {
         ? "The testnet stays open for trying things first."
         : "Until then, everything works on testnet."}
     </p>
-  );
-}
-
-/** The homepage hero link: the launch time and countdown, then that mainnet is live. */
-export function MainnetPill() {
-  const live = useMainnetLive();
-  return (
-    <Link
-      href={MAINNET_PAGE}
-      className="gl-glass mb-6 inline-flex h-9 items-center gap-2 rounded-full px-4 text-[13.5px] text-foreground transition-colors hover:bg-panel/70"
-    >
-      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-sealed" />
-      {live ? (
-        "Mainnet is live"
-      ) : (
-        <>
-          Mainnet {MAINNET_LAUNCH_SHORT}
-          <span className="text-mute">
-            <CountdownCompact />
-          </span>
-        </>
-      )}
-      <span aria-hidden>→</span>
-    </Link>
   );
 }

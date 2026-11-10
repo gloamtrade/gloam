@@ -188,9 +188,6 @@ export const MAINNET_LAUNCH_MS = Date.parse(MAINNET_LAUNCH_ISO);
 
 /** How the launch time is written everywhere: in UTC. */
 export const MAINNET_LAUNCH_LABEL = "Wednesday 21 October, 13:00 UTC";
-export const MAINNET_LAUNCH_SHORT = "Wed 21 Oct, 13:00 UTC";
-
-export const MAINNET_PAGE = "/mainnet";
 
 export type Remaining = { days: number; hours: number; minutes: number; seconds: number; done: boolean };
 
@@ -203,13 +200,6 @@ export function remainingUntil(now: number, target = MAINNET_LAUNCH_MS): Remaini
     seconds: left % 60,
     done: left === 0,
   };
-}
-
-/** "1d 12h 5m", "3h 20m", "4m 10s": short enough for a banner. */
-export function compactRemaining(r: Remaining): string {
-  if (r.days > 0) return `${r.days}d ${r.hours}h ${r.minutes}m`;
-  if (r.hours > 0) return `${r.hours}h ${r.minutes}m`;
-  return `${r.minutes}m ${r.seconds}s`;
 }
 
 /** A Google Calendar link for the launch (one hour, in UTC). */

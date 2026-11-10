@@ -139,8 +139,11 @@ function load(file, rewrites) {
 writeFileSync(join(tmp, "viem-shim.mjs"),
   `export { parseEventLogs } from ${JSON.stringify(viemEsm)};\n` +
   `export const http = () => null;\nexport const createPublicClient = () => globalThis.__fakeClient;\n`);
+writeFileSync(join(tmp, "server-rpc-stub.mjs"), `export const serverTransport = () => null;\n`);
 writeFileSync(join(tmp, "networks-stub.mjs"),
   `export const NETWORK_KEYS = ["tempo"];\n` +
+  `export const ceremonyForChain = () => "dev";\n` +
+  `export const networkName = (n) => (n.testnet ? n.label + " testnet" : n.label);\n` +
   `export const getNetwork = () => ({ key: "tempo", label: "Tempo", chainId: ${CHAIN}, pool: "${POOL}", deployBlock: ${DEPLOY}n, logRange: 100000n, chain: { rpcUrls: { default: { http: ["memory://"] } } } });\n`);
 writeFileSync(join(tmp, "demo-stub.mjs"), `export const isDemoProof = () => false;\nexport const demoHolderChecks = async () => ({ paidAt: 0 });\n`);
 writeFileSync(join(tmp, "artifacts-stub.mjs"),
@@ -150,8 +153,8 @@ writeFileSync(join(tmp, "artifacts-stub.mjs"),
 load("label.ts", []);
 load("types.ts", []);
 load("payrollCheck.ts", [["@gloamtrade/sdk", sdkDist]]);
-load("chain.ts", [["viem", url("viem-shim.mjs")], ["@/lib/networks", url("networks-stub.mjs")], ["./payrollCheck", url("payrollCheck.mjs")]]);
-load("verify.ts", [["@gloamtrade/sdk", sdkDist], ["@/lib/demo/proof", url("demo-stub.mjs")], ["./artifacts", url("artifacts-stub.mjs")], ["./chain", url("chain.mjs")], ["./payrollCheck", url("payrollCheck.mjs")]]);
+load("chain.ts", [["viem", url("viem-shim.mjs")], ["@/lib/networks", url("networks-stub.mjs")], ["@/lib/serverRpc", url("server-rpc-stub.mjs")], ["./payrollCheck", url("payrollCheck.mjs")]]);
+load("verify.ts", [["@gloamtrade/sdk", sdkDist], ["@/lib/networks", url("networks-stub.mjs")], ["@/lib/demo/proof", url("demo-stub.mjs")], ["./artifacts", url("artifacts-stub.mjs")], ["./chain", url("chain.mjs")], ["./payrollCheck", url("payrollCheck.mjs")]]);
 const { verifyProof } = await import(url("verify.mjs"));
 
 // ── Alice's history (all her own money) ─────────────────────────────────────
