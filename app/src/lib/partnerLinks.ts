@@ -80,30 +80,39 @@ export async function getLinkCode(code: string): Promise<LinkCode | null> {
  * an expired code leaves the live set and starts its own expiry.
  */
 export async function listLinkCodes(partnerId: string, now = Date.now()): Promise<LinkCode[]> {
-  const [all, liveSet] = await kv([
-    ["SMEMBERS", k("links", partnerId)],
-    ["SMEMBERS", k("links-live", partnerId)],
-  ]);
-  const codes = (Array.isArray(all) ? all : []) as string[];
-  if (codes.length === 0) return [];
-  const live = new Set(Array.isArray(liveSet) ? (liveSet as string[]) : []);
-  const raw = await kv(codes.map((c) => ["GET", k("link", c)] as KvCommand));
+  return (await listLinkCodesFor([partnerId], now))[0]!;
+}
+
+/**
+ * listLinkCodes for many partners at once, in the same order: two round trips
+ * (every partner's sets, then every code's record) and one more to tidy,
+ * whatever the number of partners. For the admin list.
+ */
+export async function listLinkCodesFor(partnerIds: string[], now = Date.now()): Promise<LinkCode[][]> {
+  if (partnerIds.length === 0) return [];
+  const sets = await kv(partnerIds.flatMap((pid) => [["SMEMBERS", k("links", pid)], ["SMEMBERS", k("links-live", pid)]] as KvCommand[]));
+  const owned = partnerIds.flatMap((pid, i) => {
+    const all = sets[2 * i];
+    return (Array.isArray(all) ? (all as string[]) : []).map((code) => ({ pid, i, code }));
+  });
+  const raw = await kv(owned.map(({ code }) => ["GET", k("link", code)] as KvCommand));
   const tidy: KvCommand[] = [];
-  const out: LinkCode[] = [];
-  codes.forEach((code, i) => {
-    const c = jsonOf<LinkCode>(raw[i]);
-    if (!c || c.partnerId !== partnerId) {
-      tidy.push(["SREM", k("links", partnerId), code], ["SREM", k("links-live", partnerId), code]);
+  const out: LinkCode[][] = partnerIds.map(() => []);
+  owned.forEach(({ pid, i, code }, j) => {
+    const c = jsonOf<LinkCode>(raw[j]);
+    if (!c || c.partnerId !== pid) {
+      tidy.push(["SREM", k("links", pid), code], ["SREM", k("links-live", pid), code]);
       return;
     }
+    const liveSet = sets[2 * i + 1];
     // an expired code leaves the live set once, and its record's 30 days start then, not on every read
-    if (linkCodeState(c, now) === "expired" && live.has(code)) {
-      tidy.push(["SREM", k("links-live", partnerId), code], ["EXPIRE", k("link", code), REVOKED_TTL_SEC]);
+    if (linkCodeState(c, now) === "expired" && Array.isArray(liveSet) && (liveSet as string[]).includes(code)) {
+      tidy.push(["SREM", k("links-live", pid), code], ["EXPIRE", k("link", code), REVOKED_TTL_SEC]);
     }
-    out.push(c);
+    out[i]!.push(c);
   });
   if (tidy.length) await kv(tidy).catch(() => undefined);
-  return out.sort((a, b) => b.createdAt - a.createdAt);
+  return out.map((codes) => codes.sort((a, b) => b.createdAt - a.createdAt));
 }
 
 /** Issues a new code for a partner. `expiresInDays`: whole days, 1 to MAX_EXPIRY_DAYS, or none. */

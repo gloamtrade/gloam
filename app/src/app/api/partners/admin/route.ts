@@ -3,10 +3,10 @@ import { isAdminAuthenticated } from "@/lib/adminAuth";
 import { activeKeyCounts } from "@/lib/apiKeys";
 import { ApiError, jsonBody, portal } from "@/lib/partnersApi";
 import { sameSiteJson } from "@/lib/partnersAuth";
-import { isTier, listPartners, migrationNote, partnerView, readAllPartnerTotals, setApprovedName, setRelayApproved } from "@/lib/partners";
+import { isTier, listPartners, migrationNotes, partnerView, readAllPartnerTotals, setApprovedName, setRelayApproved } from "@/lib/partners";
 import { kvBackend } from "@/lib/partnersKv";
-import { linkCodeState, listLinkCodes } from "@/lib/partnerLinks";
-import { countAddresses, getPartnerAddresses } from "@/lib/partnerAddresses";
+import { linkCodeState, listLinkCodesFor } from "@/lib/partnerLinks";
+import { countAddresses, getPartnerAddressesFor } from "@/lib/partnerAddresses";
 import { removePartner } from "@/lib/partnerRemove";
 
 export const runtime = "nodejs";
@@ -15,7 +15,8 @@ export const dynamic = "force-dynamic";
 /**
  * Admin only, GET ?tier=mainnet|testnet: every partner, their keys, link codes and
  * receiving addresses, and what they brought in on that tier by source, plus the
- * program's totals. Mainnet and testnet are never added together.
+ * program's totals. Mainnet and testnet are never added together. The store is
+ * read in batches, a fixed number of round trips however many partners there are.
  */
 export async function GET(req: NextRequest) {
   return portal(async () => {
@@ -32,10 +33,11 @@ export async function GET(req: NextRequest) {
     const [totals, keys, codes, addrs] = await Promise.all([
       readAllPartnerTotals(ids, tier),
       activeKeyCounts(ids),
-      Promise.all(ids.map((id) => listLinkCodes(id))),
-      Promise.all(ids.map((id) => getPartnerAddresses(id))),
+      listLinkCodesFor(ids, now),
+      getPartnerAddressesFor(ids),
     ]);
-    const notes = await Promise.all(ids.map((id) => migrationNote(id)));
+    // after the totals, which may have just migrated a partner and written its note
+    const notes = await migrationNotes(ids);
     return {
       data: {
         backend,

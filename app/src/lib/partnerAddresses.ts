@@ -145,6 +145,12 @@ export async function getPartnerAddresses(partnerId: string): Promise<AddressLis
   return jsonOf<AddressList>(await kv1(["GET", k("addrs", partnerId)])) ?? {};
 }
 
+/** getPartnerAddresses for many partners, in the same order and one round trip. */
+export async function getPartnerAddressesFor(partnerIds: string[]): Promise<AddressList[]> {
+  const raw = await kv(partnerIds.map((id) => ["GET", k("addrs", id)] as KvCommand));
+  return partnerIds.map((_, i) => jsonOf<AddressList>(raw[i]) ?? {});
+}
+
 export function countAddresses(list: AddressList): { total: number; verified: number } {
   let total = 0;
   let verified = 0;
