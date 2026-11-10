@@ -1431,6 +1431,78 @@ html[data-theme="dark"],
   
 }
 
+/* ---------- Admin (components/admin) ---------- */
+/* Chart parts ease between rest and lit; still under reduced motion. */
+.adm-t {
+  transition:
+    stroke 0.22s var(--ease-out),
+    fill 0.22s var(--ease-out),
+    opacity 0.22s var(--ease-out),
+    stroke-width 0.22s var(--ease-out),
+    fill-opacity 0.22s var(--ease-out),
+    left 0.18s var(--ease-out),
+    top 0.18s var(--ease-out),
+    y1 0.22s var(--ease-out),
+    y2 0.22s var(--ease-out),
+    cy 0.22s var(--ease-out),
+    r 0.22s var(--ease-out);
+}
+/* A run card's row: label, marks, figure in one line; a phone stacks the label
+   and figure over the marks. */
+.adm-tickrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "label right" "marks marks";
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 6px;
+}
+.adm-tickrow-label {
+  grid-area: label;
+}
+.adm-tickrow-marks {
+  grid-area: marks;
+}
+.adm-tickrow-right {
+  grid-area: right;
+}
+@media (min-width: 640px) {
+  .adm-tickrow {
+    grid-template-columns: minmax(0, 10.5rem) minmax(0, 1fr) 5.5rem;
+    grid-template-areas: "label marks right";
+    column-gap: 16px;
+  }
+}
+/* The section list: a column on the left from 1024px, a row of tabs above. */
+.adm-side {
+  display: none;
+}
+.adm-tabs {
+  display: block;
+}
+.adm-shell {
+  display: block;
+}
+@media (min-width: 1024px) {
+  .adm-shell {
+    display: grid;
+    grid-template-columns: 224px minmax(0, 1fr);
+    column-gap: 40px;
+  }
+  .adm-side {
+    display: block;
+  }
+  .adm-tabs {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .adm-t {
+    transition: none !important;
+    transition-delay: 0s !important;
+  }
+}
+
 /* Phones: iOS zooms the page into any text field under 16px when it is
    focused, and leaves it zoomed. App fields are 16px there. Unlayered, so it
    beats the smaller text-[..] sizes some fields keep on desktop. */
