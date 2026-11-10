@@ -1193,14 +1193,22 @@ const MAINNET_DATE = new RegExp(
   "i",
 );
 const DATE_WORDS = new RegExp(String.raw`\b${DATE_WORD}\b`, "gi");
-/** The announced launch: 21 October (2026), at 13:00 UTC or 14:00 WAT when a time is given. */
-const LAUNCH_DAY = /\b(?:21(?:st)?\s+oct(?:ober)?|oct(?:ober)?\s+21(?:st)?)\b/i;
+/**
+ * The mainnet launch days: 21 October 2026 (Robinhood Chain and Tempo, at 13:00 UTC or 14:00 WAT
+ * when a time is given), 26 October (Base and Ethereum) and 9 November (Elysium).
+ */
+const LAUNCH_DAY =
+  /\b(?:(?:21|26)(?:st|th)?\s+oct(?:ober)?|oct(?:ober)?\s+(?:21|26)(?:st|th)?|9(?:th)?\s+nov(?:ember)?|nov(?:ember)?\s+9(?:th)?)\b/i;
 const CLOCK = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(utc|gmt|wat)\b/gi;
 
-/** A mainnet date that is the announced one, and nothing else. */
+/** A mainnet date that is one of the real launch days, and nothing else. */
 function officialLaunch(s: string): boolean {
   if (!LAUNCH_DAY.test(s)) return false;
-  if ([...s.matchAll(DATE_WORDS)].some((m) => !/^(?:oct(?:ober)?|2026)$/i.test(m[0]))) return false;
+  // only the months of the launch days named here: "21 October, or maybe November" is a hedge
+  const months = new Set([...s.matchAll(new RegExp(LAUNCH_DAY.source, "gi"))].map((m) => (/nov/i.test(m[0]) ? "nov" : "oct")));
+  const monthOk = (w: string) =>
+    w === "2026" || (/^oct(?:ober)?$/i.test(w) && months.has("oct")) || (/^nov(?:ember)?$/i.test(w) && months.has("nov"));
+  if ([...s.matchAll(DATE_WORDS)].some((m) => !monthOk(m[0]))) return false;
   for (const m of s.matchAll(CLOCK)) {
     const ampm = m[3]?.toLowerCase();
     const h = ampm ? (Number(m[1]) % 12) + (ampm === "pm" ? 12 : 0) : Number(m[1]);
