@@ -50,12 +50,15 @@ function fail(status: number, message: string, headers?: HeadersInit) {
  * and a refund goes back to it on the source chain.
  */
 export async function POST(req: Request) {
-  let body: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    body = (await req.json()) as Record<string, unknown>;
+    parsed = await req.json();
   } catch {
     return fail(400, "Send the details as JSON.");
   }
+  // `null`, a number or an array is valid JSON but not the details
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return fail(400, "Send the details as JSON.");
+  const body = parsed as Record<string, unknown>;
 
   const swapAsk = SWAP_CHAIN_IDS.has(Number(body.chainId));
   const rate = await hitRateLimit(

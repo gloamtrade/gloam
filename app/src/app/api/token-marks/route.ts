@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logSafe } from "@/lib/logSafe";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { loadTokenMarks } from "@/lib/tokenMarksServer";
 
@@ -29,7 +30,7 @@ export async function GET(req: Request) {
       }
     );
   } catch (e) {
-    console.error("gloam_token_marks", e instanceof Error ? e.message : "unknown");
+    console.error("gloam_token_marks", logSafe(e));
     return NextResponse.json({ marks: {}, error: "unavailable" }, { status: 502, headers: { "Cache-Control": "no-store" } });
   }
 }

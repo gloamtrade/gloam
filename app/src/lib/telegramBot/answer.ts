@@ -15,7 +15,7 @@
  */
 import { hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { isMainnetLive, liveMainnetCountWords } from "@/lib/mainnet";
-import { knowledgeBlock, laterMainnets, laterMainnetsSince, launchNames } from "./knowledge";
+import { knowledgeBlock, liveMainnetsSinceRule } from "./knowledge";
 import { PERSONALITY, TEAM_TONE_RULES, TONE_RULES, honestyRule } from "./persona";
 import { parseSpamCheck, type SpamCheck } from "./moderation";
 import { markAddresses, secretLeak, tidyReply, type ChatLine } from "./rules";
@@ -80,10 +80,8 @@ function mainnetRule(live: boolean, drafts: boolean): string {
       ? "The Gloam app is on testnet until mainnet launches. Never say or hint that the app is live on mainnet. The one timing you may use, drafts included, is the announced launch: Wednesday 21 October, 13:00 UTC, with the countdown at gloam.trade/mainnet. Never give or guess any other date or time."
       : "The Gloam app is on testnet until mainnet launches. Never say or hint that the app is live on mainnet. The one timing you may give is the announced launch: Wednesday 21 October, 13:00 UTC, with the countdown at gloam.trade/mainnet. Never give or guess any other date or time.";
   }
-  // Base and Ethereum joined after the 21 October launch: never date them to it.
-  const later = laterMainnets();
-  const laterSince = laterMainnetsSince();
-  const since = `on ${launchNames()} since Wednesday 21 October, 13:00 UTC${later.length ? `, and on ${later.join(" and ")} since ${laterSince ? laterSince.replace(/ \d{4}$/, "") : "then"}` : ""}`;
+  // Base and Ethereum (26 October) and Elysium (9 November) joined after the 21 October launch: each keeps its own day.
+  const since = liveMainnetsSinceRule();
   return `Gloam is live on ${liveMainnetCountWords()}, ${since}, with deposit limits. Say so plainly when asked${drafts ? ", drafts included" : ""}, and keep mainnet and testnet apart. Call them mainnet and testnet, and never gloss them as real money or play money. Never give or guess any other date or time. Never call Gloam beta: it is live on mainnet with deposit limits. Never call Gloam audited (Kann Audits reviewed the vault contracts only; the swap routers, circuits, app and relay were not part of it), and never say private trading is live.`;
 }
 

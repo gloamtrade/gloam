@@ -36,9 +36,10 @@ assert.ok(line.includes("HTTP request failed"), "still says what went wrong");
 assert.equal(logSafe(new Error("to 0x1234")), "Error", "a plain error keeps its name only");
 assert.equal(logSafe("text"), "unknown");
 
-// no server route logs a raw error
+// no server route logs a raw error, or its raw message (logSafe(e) instead)
 const root = fileURLToPath(new URL("../src/app/api", import.meta.url));
 const raw = /console\.(?:log|info|warn|error)\([^)]*,\s*(?:e|err|error)\s*\)/;
+const rawMessage = /console\.(?:log|info|warn|error)\([^;]*\b(?:e|err|error)\.message\b/;
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((f) => {
     const p = join(dir, f);
@@ -46,6 +47,10 @@ function walk(dir: string): string[] {
   });
 }
 const files = [...walk(root), fileURLToPath(new URL("../src/lib/partnersApi.ts", import.meta.url))];
-for (const f of files) assert.ok(!raw.test(readFileSync(f, "utf8")), `${f} logs a raw error`);
+for (const f of files) {
+  const text = readFileSync(f, "utf8");
+  assert.ok(!raw.test(text), `${f} logs a raw error`);
+  assert.ok(!rawMessage.test(text), `${f} logs a raw error message`);
+}
 
 console.log(`log safe: ${files.length} files checked, all passed`);

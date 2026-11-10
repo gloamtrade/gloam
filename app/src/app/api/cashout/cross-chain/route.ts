@@ -40,12 +40,15 @@ export async function POST(req: Request) {
   const rate = await hitRateLimit(clientIp(req), "xchain-cashout-quote", RATE_LIMIT);
   if (!rate.allowed) return fail(429, "Too many tries. Wait a minute.", { "Retry-After": String(rate.retryAfterSec) });
 
-  let body: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    body = (await req.json()) as Record<string, unknown>;
+    parsed = await req.json();
   } catch {
     return fail(400, "Send the details as JSON.");
   }
+  // `null`, a number or an array is valid JSON but not the details
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return fail(400, "Send the details as JSON.");
+  const body = parsed as Record<string, unknown>;
 
   if (typeof body.network !== "string" || !isNetworkKey(body.network)) return fail(400, "Pick a Gloam network.");
   const network = getNetwork(body.network);

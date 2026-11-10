@@ -10,7 +10,7 @@ import { normalizeEmail, type UpdatesSource } from "./updatesEmail";
 
 export type UpdatesResult = { ok: true } | { ok: false; message: string };
 
-async function send(method: "POST" | "DELETE", body: Record<string, string>): Promise<UpdatesResult> {
+async function send(method: "POST", body: Record<string, string>): Promise<UpdatesResult> {
   try {
     const res = await fetch("/api/updates", {
       method,
@@ -34,9 +34,7 @@ export function subscribeToUpdates(email: string, source: UpdatesSource, hp?: st
   return send("POST", hp ? { email: clean, source, hp } : { email: clean, source });
 }
 
-/** Takes an email off the updates list. */
-export function unsubscribeFromUpdates(email: string): Promise<UpdatesResult> {
-  const clean = normalizeEmail(email);
-  if (!clean) return Promise.resolve({ ok: false, message: "That email doesn't look right. Check it and try again." });
-  return send("DELETE", { email: clean });
-}
+/**
+ * There is no unsubscribe by email here: anyone can type anyone's email. People
+ * leave with the link at the bottom of every update (/unsubscribe?token=).
+ */

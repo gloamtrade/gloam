@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/adminAuth";
+import { logSafe } from "@/lib/logSafe";
 import { bridgeFeeSetting } from "@/lib/bridge";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
 import { fetchRelayVolume } from "@/lib/relayVolume";
@@ -32,7 +33,7 @@ export async function GET(req: Request) {
 
   const force = new URL(req.url).searchParams.get("fresh") === "1";
   const chainRead = fetchOnchainMetrics({ force }).catch((e) => {
-    console.error("gloam_admin_metrics", e instanceof Error ? e.message : "unknown");
+    console.error("gloam_admin_metrics", logSafe(e));
     return { error: "Could not read the chains. The details are in the server logs." };
   });
   const [onchain, product, claimLinks, relay, people] = await Promise.all([
@@ -47,7 +48,7 @@ export async function GET(req: Request) {
     })),
     readFunnel(14).catch(() => []),
     fetchRelayVolume().catch((e) => {
-      console.error("gloam_admin_relay", e instanceof Error ? e.message : "unknown");
+      console.error("gloam_admin_relay", logSafe(e));
       return { error: "Could not read Relay. The details are in the server logs." };
     }),
     // after the chain read, so the public wallets it just added are in the counts

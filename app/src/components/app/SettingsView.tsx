@@ -43,7 +43,7 @@ import { VaultHealth } from "./VaultHealth";
 import { RecoverySettingsCard } from "./RecoveryPanel";
 import { restoreMessage } from "@/lib/restoreMessage";
 import { embeddedSignInEmail, onEmbeddedSignInEmail } from "@/lib/turnkeyBridge";
-import { subscribeToUpdates, unsubscribeFromUpdates } from "@/lib/updatesClient";
+import { subscribeToUpdates } from "@/lib/updatesClient";
 import { BusyLabel } from "@/components/ui/Spinner";
 
 /* ------------------------------------------------------------ primitives */
@@ -191,30 +191,26 @@ function Status({ children }: { children: ReactNode }) {
 /* ------------------------------------------------------------ updates */
 
 /**
- * Email updates: subscribe or unsubscribe with an email. Filled in only with the
- * email a Gloam wallet signed in with, when this page already has it in memory.
- * Only the email is sent (lib/updatesClient); the wallet never goes with it.
+ * Email updates: subscribe with an email. Filled in only with the email a Gloam
+ * wallet signed in with, when this page already has it in memory. Only the email
+ * is sent (lib/updatesClient); the wallet never goes with it. Leaving is by the
+ * link in every update, never by typing an email, so nobody can take someone
+ * else off the list.
  */
 function UpdatesCard() {
   const signInEmail = useSyncExternalStore(onEmbeddedSignInEmail, embeddedSignInEmail, () => null);
   const [typed, setTyped] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"in" | "out" | null>(null);
+  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const email = typed ?? signInEmail ?? "";
 
-  async function run(kind: "in" | "out") {
+  async function run() {
     if (busy) return;
-    setBusy(kind);
+    setBusy(true);
     setMsg(null);
-    const res = kind === "in" ? await subscribeToUpdates(email, "settings") : await unsubscribeFromUpdates(email);
-    setBusy(null);
-    setMsg(
-      res.ok
-        ? kind === "in"
-          ? "You're on the list. Every update has an unsubscribe link."
-          : "That email is off the list."
-        : res.message,
-    );
+    const res = await subscribeToUpdates(email, "settings");
+    setBusy(false);
+    setMsg(res.ok ? "You're on the list. Every update has an unsubscribe link." : res.message);
   }
 
   return (
@@ -226,7 +222,7 @@ function UpdatesCard() {
         className="flex flex-wrap items-center gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          void run("in");
+          void run();
         }}
       >
         <label htmlFor="updates-email" className="sr-only">
@@ -245,20 +241,14 @@ function UpdatesCard() {
           value={email}
           onChange={(e) => setTyped(e.target.value)}
         />
-        <button type="submit" disabled={busy !== null || !email.trim()} aria-busy={busy === "in"} className="btn btn-ink btn-sm h-10">
-          <BusyLabel busy={busy === "in"}>Subscribe</BusyLabel>
-        </button>
-        <button
-          type="button"
-          disabled={busy !== null || !email.trim()}
-          onClick={() => void run("out")}
-          aria-busy={busy === "out"}
-          className="btn btn-quiet btn-sm h-10 text-mute"
-        >
-          <BusyLabel busy={busy === "out"}>Unsubscribe</BusyLabel>
+        <button type="submit" disabled={busy || !email.trim()} aria-busy={busy} className="btn btn-ink btn-sm h-10">
+          <BusyLabel busy={busy}>Subscribe</BusyLabel>
         </button>
       </form>
       {msg && <Status>{msg}</Status>}
+      <p className="mt-3 text-[13px] leading-relaxed text-mute">
+        To leave, open the unsubscribe link at the bottom of any update.
+      </p>
     </Card>
   );
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/adminAuth";
-import { contestCsv, listContestEntries } from "@/lib/contestEntries";
+import { contestCsv, listContestEntries, type ContestEntry } from "@/lib/contestEntries";
 import { kvBackend } from "@/lib/partnersKv";
 
 export const runtime = "nodejs";
@@ -12,7 +12,12 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: { field: null, message: "Admin session required." } }, { status: 401 });
   }
   const backend = kvBackend();
-  const entries = backend === "none" ? [] : await listContestEntries();
+  let entries: ContestEntry[];
+  try {
+    entries = backend === "none" ? [] : await listContestEntries();
+  } catch {
+    return NextResponse.json({ ok: false, error: { field: null, message: "Could not read contest entries." } }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
 
   if (new URL(req.url).searchParams.get("format") === "csv") {
     return new Response(contestCsv(entries), {
