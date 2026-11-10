@@ -37,14 +37,14 @@ import { Sparkline } from "./Sparkline";
 import { StatusPill } from "./StatusPill";
 import { SuccessModal } from "./SuccessModal";
 import { VaultTradePanel } from "./VaultTradePanel";
-import { SealedTradePanel } from "./SealedTradePanel";
 import { TokenLogo } from "./TokenLogo";
 import { walletErrorForPeople } from "@/lib/walletErrors";
 
 type Side = "buy" | "sell";
 type InputMode = "token" | "usd";
 type TxKind = "transfer" | "approve" | "buy" | "sell" | null;
-type PathMode = "public" | "vault" | "sealed";
+/** vault: from the private balance through a public pool; public: from the open wallet. */
+type PathMode = "public" | "vault";
 
 function LockGlyph({ size = 14 }: { size?: number }) {
   return (
@@ -83,13 +83,13 @@ export function TradeView() {
 
   const searchMarket = search.get("market");
   const pathParam = search.get("path");
-  const sideParam = search.get("side"); // sealed trade: buy | sell
+  const sideParam = search.get("side"); // a link may pick the side: buy | sell
   // Settings load after the first render, so the saved default side is read
   // on every render until the person picks one here; frozen into state, it was
   // always "buy".
   const [pickedSide, setSide] = useState<Side | null>(null);
   const side: Side = pickedSide ?? settings.defaultSide;
-  const sealedSide: Side = sideParam === "buy" || sideParam === "sell" ? sideParam : settings.defaultSide;
+  const linkSide: Side = sideParam === "buy" || sideParam === "sell" ? sideParam : settings.defaultSide;
   const [marketId, setMarketId] = useState(searchMarket ?? "tsla");
   const [amount, setAmount] = useState("");
   const [inputMode, setInputMode] = useState<InputMode>("token");
@@ -98,14 +98,11 @@ export function TradeView() {
   );
   const [to, setTo] = useState("");
   const [mode, setMode] = useState<"swap" | "transfer">("transfer");
-  const [pathMode, setPathMode] = useState<PathMode>(() => {
-    // path=private is an alias for sealed private trade
-    if (pathParam === "sealed" || pathParam === "private") return "sealed";
-    if (pathParam === "vault" && shieldLive) return "vault";
-    if (pathParam === "public") return "public";
-    // Private-first: default to sealed when the vault is live.
-    return shieldLive ? "sealed" : "public";
-  });
+  // Opens on the vault path when the vault is live. Older links with
+  // path=sealed or path=private (the retired sealed trade) land there too.
+  const [pathMode, setPathMode] = useState<PathMode>(() =>
+    pathParam === "public" || !shieldLive ? "public" : "vault"
+  );
   const [error, setError] = useState<string | null>(null);
   const [successOpen, setSuccessOpen] = useState(false);
   const [successTitle, setSuccessTitle] = useState("Done");
@@ -121,27 +118,12 @@ export function TradeView() {
     }
   }, [searchMarket, markets]);
 
-  // Sync path tab from URL; default private-ready markets to sealed
+  // Sync path tab from URL
   useEffect(() => {
-    if (pathParam === "sealed" || pathParam === "private") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- follows a ?path= link, or opens sealed for a market that can trade privately
-      setPathMode("sealed");
-      return;
-    }
-    if (pathParam === "vault" && shieldLive) {
-      setPathMode("vault");
-      return;
-    }
-    if (pathParam === "public") {
-      setPathMode("public");
-      return;
-    }
-    // No path param: open sealed when this market can private-trade
-    const m = markets.find((x) => x.id === (searchMarket ?? marketId));
-    if (m?.privateReady && shieldLive) {
-      setPathMode("sealed");
-    }
-  }, [pathParam, searchMarket, marketId, markets, shieldLive]);
+    if (!pathParam) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- follows a ?path= link
+    setPathMode(pathParam === "public" || !shieldLive ? "public" : "vault");
+  }, [pathParam, shieldLive]);
 
   const resolvedId = markets.some((m) => m.id === marketId)
     ? marketId
@@ -526,11 +508,10 @@ export function TradeView() {
     hint: string;
     icon: React.ReactNode;
   }[] = [
-    { id: "sealed", label: "Private", hint: "Amount hidden. No public market.", icon: <LockGlyph /> },
-    { id: "public", label: "Wallet", hint: "Public on the explorer", icon: <EyeGlyph /> },
     ...(shieldLive
-      ? [{ id: "vault" as const, label: "Via market", hint: "Public. Needs a pool.", icon: <EyeGlyph /> }]
+      ? [{ id: "vault" as const, label: "Via market", hint: "From your vault. The swap is public.", icon: <EyeGlyph /> }]
       : []),
+    { id: "public", label: "Wallet", hint: "Public on the explorer", icon: <EyeGlyph /> },
   ];
 
   const marketHeader = (
@@ -557,25 +538,15 @@ export function TradeView() {
       <dl className="grid grid-cols-2 gap-px bg-line @xl:grid-cols-4">
         {(
           [
-            [
-              "Visibility",
-              pathMode === "sealed" ? "Private, only you" : "Public",
-              pathMode === "sealed",
-            ],
-            ["Network", `${network.label}`, false],
-            ["Pool", hasPool ? "Yes" : "None", false],
-            ["Action", hasPool ? "Swap" : hasToken ? "Transfer" : "Watch", false],
+            ["Visibility", "Public"],
+            ["Network", `${network.label}`],
+            ["Pool", hasPool ? "Yes" : "None"],
+            ["Action", hasPool ? "Swap" : hasToken ? "Transfer" : "Watch"],
           ] as const
-        ).map(([k, val, sealed]) => (
+        ).map(([k, val]) => (
           <div key={k} className="min-w-0 bg-panel px-5 py-3.5">
             <dt className="t-label">{k}</dt>
-            <dd
-              className={`mt-1 truncate text-[14px] ${
-                sealed ? "font-medium text-sealed" : "text-foreground"
-              }`}
-            >
-              {val}
-            </dd>
+            <dd className="mt-1 truncate text-[14px] text-foreground">{val}</dd>
           </div>
         ))}
       </dl>
@@ -613,20 +584,19 @@ export function TradeView() {
         </span>
       </div>
 
-      {/* How you trade: the public / private choice is the product's core.
-          Private active carries the sealed tint; public options stay ink. */}
+      {/* How you trade: from the vault or from the open wallet. The swap is
+          public either way, so neither carries the sealed tint. */}
       <div>
         <p className="t-label">How you trade</p>
         <div
           role="group"
           aria-label="How you trade"
           className={`mt-2.5 grid grid-cols-1 gap-1 rounded-[18px] bg-surface p-1 ${
-            paths.length === 3 ? "@xl:grid-cols-3" : "@xl:grid-cols-2"
+            paths.length > 1 ? "@xl:grid-cols-2" : ""
           }`}
         >
           {paths.map((p) => {
             const active = pathMode === p.id;
-            const sealed = p.id === "sealed";
             return (
               <button
                 key={p.id}
@@ -641,11 +611,7 @@ export function TradeView() {
               >
                 <span
                   className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${
-                    active
-                      ? sealed
-                        ? "bg-sealed-soft text-sealed"
-                        : "bg-ink text-on-ink"
-                      : "bg-surface-2 text-mute"
+                    active ? "bg-ink text-on-ink" : "bg-surface-2 text-mute"
                   }`}
                 >
                   {p.icon}
@@ -675,15 +641,7 @@ export function TradeView() {
           <p className="mt-3 max-w-[64ch] text-[13px] leading-relaxed text-mute">
             Takes money out of your vault, swaps on a public market, then puts the
             result back. It needs a live pool for this stock, and many testnet
-            pairs are empty. For TSLA and the other faucet stocks, use{" "}
-            <button
-              type="button"
-              onClick={() => setPathMode("sealed")}
-              className="font-medium text-foreground underline decoration-line-strong underline-offset-4 hover:decoration-foreground"
-            >
-              Private
-            </button>
-            .
+            pairs are empty.
           </p>
         )}
       </div>
@@ -827,15 +785,7 @@ export function TradeView() {
               marketSymbol={market.symbol}
               tokenAddress={token}
               hasPool={hasPool}
-              initialSide={settings.defaultSide}
-              onUsePrivate={() => setPathMode("sealed")}
-            />
-          ) : pathMode === "sealed" ? (
-            <SealedTradePanel
-              marketId={resolvedId}
-              marketSymbol={market.symbol}
-              tokenAddress={token}
-              initialDir={sealedSide}
+              initialSide={linkSide}
             />
           ) : (
             <div className="gl-card overflow-hidden">

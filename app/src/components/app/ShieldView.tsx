@@ -1033,9 +1033,6 @@ export function ShieldView() {
 
   const hasActiveShield = openNotes.length > 0;
   const connectedOk = isConnected && onProduct;
-  // Private stock trade only exists on Robinhood Chain testnet.
-  const stocks = network.stocks;
-
   const maxDisplay =
     selectedToken && walletBalance !== undefined
       ? formatAssetAmount(walletBalance, selectedToken.address)
@@ -1441,19 +1438,6 @@ export function ShieldView() {
         body={
           <>
             {successBody}
-            {/* Private trade is not live yet, so a recording never points at it. */}
-            {successTitle === "Added privately" && stocks && !demo && (
-              <p className="mt-2">
-                For a private stock trade, add ETH, then open{" "}
-                <a
-                  href="/app/trade?market=tsla&path=sealed"
-                  className="font-medium text-foreground underline underline-offset-4"
-                >
-                  Trade, Private trade
-                </a>
-                .
-              </p>
-            )}
           </>
         }
         primaryHref={hash ? network.explorerTx(hash) : undefined}

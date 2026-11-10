@@ -785,8 +785,8 @@ export function PortfolioView() {
                         <Link
                           href={
                             isNativeAsset(n.asset)
-                              ? "/app/trade?path=sealed"
-                              : `/app/trade?path=sealed&side=sell&market=${
+                              ? "/app/trade"
+                              : `/app/trade?side=sell&market=${
                                   tokenSet.find(
                                     (t) =>
                                       t.address.toLowerCase() ===
