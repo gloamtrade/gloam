@@ -3,12 +3,14 @@
  * settles to HyperEVM, gas paid in HYPE, blocks about every 100 ms. Mainnet is
  * chain 99901, its testnet 99801 (Kinetiq's docs).
  *
- * Off unless NEXT_PUBLIC_ELYSIUM_ENABLED is "1" (or "true") AND every value is
- * in. The values come from the SDK's one config (packages/sdk/src/elysium.ts),
- * and each can be set or replaced at build time by its NEXT_PUBLIC_ELYSIUM_*
- * variable below, so launch day can run from Vercel's settings with no commit:
+ * On by default: mainnet has been live since 9 November 2026 and holds people's
+ * money, so a preview build or a missing variable must not hide it. It is off
+ * only when NEXT_PUBLIC_ELYSIUM_ENABLED is set to "0", "false", "off" or "no"
+ * (elysiumFlagFrom), and while any value is missing. The values come from the
+ * SDK's one config (packages/sdk/src/elysium.ts), and each can be set or
+ * replaced at build time by its NEXT_PUBLIC_ELYSIUM_* variable below:
  *
- *   NEXT_PUBLIC_ELYSIUM_ENABLED=1
+ *   NEXT_PUBLIC_ELYSIUM_ENABLED          unset (or anything but the off words): on; "0" turns it off
  *   NEXT_PUBLIC_ELYSIUM_CHAIN_ID         99901, already in the SDK file; anything else fails the build
  *   NEXT_PUBLIC_ELYSIUM_RPC_URL          an RPC that answers eth_getLogs. It may carry an API key
  *                                        (Kinetiq recommends https://elysium-mainnet.g.alchemy.com/v2/{API_KEY}):
@@ -29,8 +31,8 @@
  *
  *
  * Elysium's testnet (network key "elysium", like Base Sepolia: the mainnet vault
- * born guarded, the final keys, test USDC) has its own switch,
- * NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED, and needs its pool in
+ * born guarded, the final keys, test USDC) has its own switch, off unless set,
+ * NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED="1", and needs its pool in
  * (packages/sdk/src/elysium.ts ELYSIUM_TESTNET, written by
  * contracts/elysium-testnet-after-deploy.sh, or NEXT_PUBLIC_ELYSIUM_TESTNET_POOL
  * and NEXT_PUBLIC_ELYSIUM_TESTNET_DEPLOY_BLOCK, plus the optional
@@ -58,8 +60,17 @@ import {
   type ElysiumTestnet,
 } from "@gloamtrade/sdk";
 
+/**
+ * NEXT_PUBLIC_ELYSIUM_ENABLED read as the mainnet switch: on unless it says
+ * off ("0", "false", "off" or "no", any case). Unset, empty or anything else
+ * is on. csp.config.mjs reads the variable by the same rule.
+ */
+export function elysiumFlagFrom(raw: string | undefined): boolean {
+  return !/^(0|false|off|no)$/i.test((raw ?? "").trim());
+}
+
 /** The flag on its own, values or not. */
-export const ELYSIUM_FLAG = /^(1|true|on|yes)$/i.test((process.env.NEXT_PUBLIC_ELYSIUM_ENABLED ?? "").trim());
+export const ELYSIUM_FLAG = elysiumFlagFrom(process.env.NEXT_PUBLIC_ELYSIUM_ENABLED);
 
 const text = (v: string | undefined) => (v && v.trim() ? v.trim() : null);
 
@@ -130,7 +141,7 @@ export const ELYSIUM_LOG_RANGE: bigint = (() => {
 /** Elysium mainnet's RPC as pages, Glim and the MCP may show it: an API key in it is replaced by {API_KEY}. */
 export const ELYSIUM_RPC_DISPLAY: string | null = ELYSIUM ? redactRpcUrl(ELYSIUM.rpcUrl) : null;
 
-/** The testnet switch on its own, values or not. */
+/** The testnet switch on its own, values or not. Opt-in: off unless "1" (or "true", "on", "yes"). */
 export const ELYSIUM_TESTNET_FLAG = /^(1|true|on|yes)$/i.test((process.env.NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED ?? "").trim());
 
 /** The SDK's testnet values with any NEXT_PUBLIC_ELYSIUM_TESTNET_* set on top. */

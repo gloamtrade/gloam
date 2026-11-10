@@ -1,5 +1,11 @@
 # Packages, the MCP server and the examples. The app builds on Vercel and the
 # contracts with forge, so neither runs here.
+#
+# No NEXT_PUBLIC_ELYSIUM_* is set here, so the package tests that read the app's
+# own source see Elysium mainnet on, as production builds it: it is on unless
+# NEXT_PUBLIC_ELYSIUM_ENABLED is "0", "false", "off" or "no". The app's own
+# self-tests (app/scripts/selftest-*.mts) run locally, with the variable unset,
+# "1" and "0"; selftest-elysium covers every state itself.
 name: CI
 
 on:

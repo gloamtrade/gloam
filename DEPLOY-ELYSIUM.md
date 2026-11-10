@@ -18,9 +18,10 @@ controller is `GUARD_CONTROLLER` (on Elysium mainnet the owner wallet `0x76b7…
 `transferController` moves it to a Safe later), who can only change limits and the fee,
 with the vault's 3-day notice for any raise.
 
-Every value below is in, and the app shows Elysium while `NEXT_PUBLIC_ELYSIUM_ENABLED=1` is
-set (on in production since 9 November 2026). Without the flag, or with a value missing,
-Elysium appears nowhere.
+Every value below is in, and the app shows Elysium unless `NEXT_PUBLIC_ELYSIUM_ENABLED` is
+set to `0`, `false`, `off` or `no` (live since 9 November 2026; on by default since
+10 November 2026, so a preview build or a missing variable can't hide a chain holding
+people's money). With it off, or with a value missing, Elysium appears nowhere.
 
 ## Deployed on 9 November 2026
 
@@ -123,9 +124,10 @@ From `contracts/` in a fresh worktree of `main`.
    verifier, with the same loop as DEPLOY-ETHEREUM.md step 8 over
    `broadcast/DeployElysiumMainnet.s.sol/$CHAIN/run-latest.json`. The guard is
    `src/VaultOwnerGuard.sol:VaultOwnerGuard`, constructor `(vault, deployer)`.
-10. **Flip the flag.** On Vercel set `NEXT_PUBLIC_ELYSIUM_ENABLED=1` (and
-    `NEXT_PUBLIC_ELYSIUM_RPC_URL`, so the CSP allows it even if you override the
-    file), optionally `GLOAM_RELAY_HOURLY_SPEND_<chainId>` (default 1 HYPE an hour)
+10. **Flip the flag.** At launch this was `NEXT_PUBLIC_ELYSIUM_ENABLED=1` on Vercel; it
+    is now on unless set to `0`, `false`, `off` or `no`, so only set it to turn Elysium
+    off. Set `NEXT_PUBLIC_ELYSIUM_RPC_URL` if you override the file's RPC (the CSP
+    allows whichever is used), optionally `GLOAM_RELAY_HOURLY_SPEND_<chainId>` (default 1 HYPE an hour)
     and `GLOAM_RPC_URL_<chainId>` (a private RPC for the server). Redeploy. Then
     Elysium everywhere the app lists its chains: the network selector, the
     chain counts and lists in the copy ("five mainnets"), /docs (chain, SDK,

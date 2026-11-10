@@ -50,7 +50,7 @@ Mainnet pools are not env vars. After each mainnet deploy (runbook: [`contracts/
 | Base mainnet `8453` | `0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194` | `53109632` |
 | Ethereum mainnet `1` | `0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194` | `26276183` |
 
-Elysium mainnet (`99901`) is not in `MAINNET_POOLS`: its values live in `packages/sdk/src/elysium.ts` and show only while `NEXT_PUBLIC_ELYSIUM_ENABLED=1` (vault `0x89d3042390204f57b8b4F8949D3c2203E4002164`, block `3248495`). Runbook: [`DEPLOY-ELYSIUM.md`](./DEPLOY-ELYSIUM.md).
+Elysium mainnet (`99901`) is not in `MAINNET_POOLS`: its values live in `packages/sdk/src/elysium.ts` and show unless `NEXT_PUBLIC_ELYSIUM_ENABLED` is `0`, `false`, `off` or `no` (vault `0x89d3042390204f57b8b4F8949D3c2203E4002164`, block `3248495`). Runbook: [`DEPLOY-ELYSIUM.md`](./DEPLOY-ELYSIUM.md).
 
 Base Sepolia (`84532`), Base's testnet, runs the mainnet pool too, so its pool is in `BASE_SEPOLIA_POOL` in the same file: `0x39e28cde55cab798874746ac52cb4b5cc99a0194` at block `49802958` (24 October 2026). Runbook: [`DEPLOY-BASE.md`](./DEPLOY-BASE.md).
 

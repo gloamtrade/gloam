@@ -94,13 +94,14 @@ const SERVICES = [
 ];
 
 /**
- * Elysium mainnet's RPC, only while NEXT_PUBLIC_ELYSIUM_ENABLED is on: from
- * NEXT_PUBLIC_ELYSIUM_RPC_URL, else the rpcUrl written in the SDK's config
+ * Elysium mainnet's RPC, while NEXT_PUBLIC_ELYSIUM_ENABLED is on, which it is
+ * unless set to "0", "false", "off" or "no" (lib/elysium.ts elysiumFlagFrom):
+ * from NEXT_PUBLIC_ELYSIUM_RPC_URL, else the rpcUrl written in the SDK's config
  * (packages/sdk/src/elysium.ts), the same order lib/elysium.ts reads them in.
  * Its origin only. Empty while the flag is off or no RPC is set.
  */
 export function elysiumConnectSources(env = process.env) {
-  if (!/^(1|true|on|yes)$/i.test((env.NEXT_PUBLIC_ELYSIUM_ENABLED ?? "").trim())) return [];
+  if (/^(0|false|off|no)$/i.test((env.NEXT_PUBLIC_ELYSIUM_ENABLED ?? "").trim())) return [];
   let url = env.NEXT_PUBLIC_ELYSIUM_RPC_URL?.trim() || null;
   if (!url) {
     try {
