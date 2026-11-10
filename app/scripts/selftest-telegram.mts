@@ -600,6 +600,10 @@ await test("mainnet live: Glim says so, still never another date, and its facts 
   assert.ok(cleanReply("Mainnet is live now. Pick it in the network selector.", live));
   assert.ok(cleanReply("Mainnet went live on Wednesday 21 October at 13:00 UTC.", live), "the launch date goes out");
   assert.equal(cleanReply("Mainnet goes live on Oct 22.", live), null, "any other date still does not");
+  assert.ok(cleanReply("Base and Ethereum mainnet went live on 26 October.", live), "Base and Ethereum's launch day goes out");
+  assert.ok(cleanReply("Elysium mainnet went live on 9 November 2026.", live), "Elysium's launch day goes out");
+  assert.equal(cleanReply("Elysium mainnet went live on 10 November.", live), null, "a wrong Elysium day does not");
+  assert.equal(cleanReply("Mainnet went live on 26 October, or maybe December.", live), null, "nor a hedge after the Base day");
   assert.equal(cleanReply("Mainnet should land in Q1 2027.", live), null);
 
   const before = knowledgeBlock(false, false);
