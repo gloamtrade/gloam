@@ -31,13 +31,13 @@ interface IERC20Meta {
  * Step 1, now: queue every raise on each chain (each one is a public
  * ChangeQueued event). Read the key once, run the four chains, drop the key:
  *   read -s "OWNER_PK?Vault owner key: "; echo
- *   forge script script/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
+ *   forge script script/archive/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
  *     --rpc-url https://rpc.mainnet.chain.robinhood.com --private-key "$OWNER_PK" --broadcast
- *   forge script script/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
+ *   forge script script/archive/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
  *     --rpc-url https://mainnet.base.org --private-key "$OWNER_PK" --broadcast
- *   forge script script/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
+ *   forge script script/archive/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
  *     --rpc-url https://ethereum-rpc.publicnode.com --private-key "$OWNER_PK" --broadcast
- *   forge script script/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
+ *   forge script script/archive/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "queue()" \
  *     --rpc-url https://rpc.tempo.xyz --private-key "$OWNER_PK" --broadcast
  *   unset OWNER_PK
  *
@@ -46,7 +46,7 @@ interface IERC20Meta {
  * checks each limit landed as queued.
  *
  * Any time, no key, nothing sent (live limit, queued eta and target per asset):
- *   forge script script/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "status()" \
+ *   forge script script/archive/RaiseDepositLimits.s.sol:RaiseDepositLimits --sig "status()" \
  *     --rpc-url https://rpc.mainnet.chain.robinhood.com
  *   (and the same with each of the other three RPCs)
  *
@@ -115,15 +115,23 @@ contract RaiseDepositLimits is Script {
         // Paxos Global Dollar, 6 decimals
         a[0] = Asset("USDG", 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168, 6, 500e6, 25_000e6, 50_000e6, 2_500_000e6); // 500 / 25,000 -> 50,000 / 2,500,000 ($50k / $2.5M)
         // $GLOAM
-        a[1] = Asset("GLOAM", 0xDcD885F5c60b3aD49F6D58718696417314e8724d, 18, 25_000e18, 250_000e18, 2_500_000e18, 25_000_000e18); // 25,000 / 250,000 -> 2,500,000 / 25,000,000 (~$4.25M / ~$42.5M at $1.70)
+        a[1] = Asset(
+            "GLOAM", 0xDcD885F5c60b3aD49F6D58718696417314e8724d, 18, 25_000e18, 250_000e18, 2_500_000e18, 25_000_000e18
+        ); // 25,000 / 250,000 -> 2,500,000 / 25,000,000 (~$4.25M / ~$42.5M at $1.70)
         // Swap assets (QueueSwapAssets, sized 2026-10-23 at about $1,000 / $25,000)
         a[2] = Asset("WETH", 0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73, 18, 0.42e18, 10e18, 42e18, 1_000e18); // 0.42 / 10 -> 42 / 1,000 (~$101k / ~$2.40M at $2,400)
         a[3] = Asset("USDe", 0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34, 18, 500e18, 25_000e18, 50_000e18, 2_500_000e18); // 500 / 25,000 -> 50,000 / 2,500,000 (~$50k / ~$2.50M at $0.9998)
         a[4] = Asset("U", 0xcE24439F2D9C6a2289F741120FE202248B666666, 18, 500e18, 25_000e18, 50_000e18, 2_500_000e18); // 500 / 25,000 -> 50,000 / 2,500,000 (~$50k / ~$2.50M at $0.9991)
         a[5] = Asset("cbBTC", 0xCEC185eB182c47d1bA1EFc84e6959e18cd620Be4, 8, 0.012e8, 0.31e8, 1.2e8, 31e8); // 0.012 / 0.31 -> 1.2 / 31 (~$98k / ~$2.53M at $81,700)
-        a[6] = Asset("PONS", 0x39dBED3a2bd333467115dE45665cC57F813C4571, 18, 3_900e18, 98_000e18, 390_000e18, 9_800_000e18); // 3,900 / 98,000 -> 390,000 / 9,800,000 (~$100k / ~$2.50M at $0.2554)
-        a[7] = Asset("CASHCAT", 0x020bfC650A365f8BB26819deAAbF3E21291018b4, 18, 9_600e18, 240_000e18, 960_000e18, 24_000_000e18); // 9,600 / 240,000 -> 960,000 / 24,000,000 (~$100k / ~$2.49M at $0.1039)
-        a[8] = Asset("VIRTUAL", 0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31, 18, 1_500e18, 38_000e18, 150_000e18, 3_800_000e18); // 1,500 / 38,000 -> 150,000 / 3,800,000 (~$100k / ~$2.53M at $0.6666)
+        a[6] = Asset(
+            "PONS", 0x39dBED3a2bd333467115dE45665cC57F813C4571, 18, 3_900e18, 98_000e18, 390_000e18, 9_800_000e18
+        ); // 3,900 / 98,000 -> 390,000 / 9,800,000 (~$100k / ~$2.50M at $0.2554)
+        a[7] = Asset(
+            "CASHCAT", 0x020bfC650A365f8BB26819deAAbF3E21291018b4, 18, 9_600e18, 240_000e18, 960_000e18, 24_000_000e18
+        ); // 9,600 / 240,000 -> 960,000 / 24,000,000 (~$100k / ~$2.49M at $0.1039)
+        a[8] = Asset(
+            "VIRTUAL", 0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31, 18, 1_500e18, 38_000e18, 150_000e18, 3_800_000e18
+        ); // 1,500 / 38,000 -> 150,000 / 3,800,000 (~$100k / ~$2.53M at $0.6666)
         a[9] = Asset("SPY", 0x117cc2133c37B721F49dE2A7a74833232B3B4C0C, 18, 1.3e18, 33e18, 130e18, 3_300e18); // 1.3 / 33 -> 130 / 3,300 (~$99k / ~$2.52M at $764.2)
         a[10] = Asset("NVDA", 0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC, 18, 4.7e18, 120e18, 470e18, 12_000e18); // 4.7 / 120 -> 470 / 12,000 (~$100k / ~$2.56M at $213.7)
         a[11] = Asset("TSLA", 0x322F0929c4625eD5bAd873c95208D54E1c003b2d, 18, 2.6e18, 66e18, 260e18, 6_600e18); // 2.6 / 66 -> 260 / 6,600 (~$98k / ~$2.49M at $377.5)

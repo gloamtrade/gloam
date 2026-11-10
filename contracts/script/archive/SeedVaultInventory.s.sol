@@ -13,7 +13,7 @@ import {Script, console2} from "forge-std/Script.sol";
  *   export RH_TESTNET_RPC=https://rpc.testnet.chain.robinhood.com
  *   # optional: SHIELD_POOL=0xaEbB…  TOKEN_AMT=1000000000000000000  ETH_AMT=0
  *
- *   forge script script/SeedVaultInventory.s.sol \
+ *   forge script script/archive/SeedVaultInventory.s.sol \
  *     --rpc-url $RH_TESTNET_RPC --broadcast --gas-estimate-multiplier 200 -vvvv
  */
 interface IShieldPool {
@@ -53,10 +53,7 @@ contract SeedVaultInventory is Script {
         // shieldVerifier == 0, anyone can shield() an over-valued commitment for
         // ~1 wei and unshield it against this seeded inventory. Harden the pool
         // (setShieldVerifier) before seeding.
-        require(
-            pool.shieldVerifier() != address(0),
-            "unsafe: shieldVerifier unset (C1) - harden pool before seeding"
-        );
+        require(pool.shieldVerifier() != address(0), "unsafe: shieldVerifier unset (C1) - harden pool before seeding");
 
         address[5] memory tokens = [TSLA, AMZN, PLTR, NFLX, AMD];
 
@@ -90,11 +87,7 @@ contract SeedVaultInventory is Script {
         console2.log("done");
     }
 
-    function _throwawayCommitment(
-        address asset,
-        uint256 amount,
-        uint256 salt
-    ) internal view returns (bytes32) {
+    function _throwawayCommitment(address asset, uint256 amount, uint256 salt) internal view returns (bytes32) {
         // Not a real note secret — inventory only. Leaf is unspendable by design.
         return keccak256(abi.encodePacked("gloam-inventory-seed", asset, amount, salt, block.timestamp, msg.sender));
     }

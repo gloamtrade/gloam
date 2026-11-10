@@ -2,14 +2,14 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {RejectVerifier} from "../src/verifiers/RejectVerifier.sol";
+import {RejectVerifier} from "../../src/verifiers/RejectVerifier.sol";
 
 /**
  * @notice Deploy a verifier that always rejects (safe wiring test).
  *         Does NOT call setVerifier on the pool — do that manually only if needed.
  *
  *   export DEPLOYER_PK=0x...
- *   forge script script/DeployRejectVerifier.s.sol \
+ *   forge script script/archive/DeployRejectVerifier.s.sol \
  *     --rpc-url https://rpc.testnet.chain.robinhood.com \
  *     --broadcast
  */

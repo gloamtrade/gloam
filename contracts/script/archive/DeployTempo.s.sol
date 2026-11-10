@@ -2,14 +2,14 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {ShieldPoolPoseidon} from "../src/ShieldPoolPoseidon.sol";
-import {ShieldVerifier} from "../src/verifiers/ShieldVerifier.sol";
-import {ShieldIVerifier} from "../src/verifiers/ShieldIVerifier.sol";
-import {UnshieldVerifier} from "../src/verifiers/UnshieldVerifier.sol";
-import {UnshieldIVerifier} from "../src/verifiers/UnshieldIVerifier.sol";
-import {TransferVerifier} from "../src/verifiers/TransferVerifier.sol";
-import {TransferIVerifier} from "../src/verifiers/TransferIVerifier.sol";
-import {DualProofVerifier} from "../src/verifiers/DualProofVerifier.sol";
+import {ShieldPoolPoseidon} from "../../src/ShieldPoolPoseidon.sol";
+import {ShieldVerifier} from "../../src/verifiers/ShieldVerifier.sol";
+import {ShieldIVerifier} from "../../src/verifiers/ShieldIVerifier.sol";
+import {UnshieldVerifier} from "../../src/verifiers/UnshieldVerifier.sol";
+import {UnshieldIVerifier} from "../../src/verifiers/UnshieldIVerifier.sol";
+import {TransferVerifier} from "../../src/verifiers/TransferVerifier.sol";
+import {TransferIVerifier} from "../../src/verifiers/TransferIVerifier.sol";
+import {DualProofVerifier} from "../../src/verifiers/DualProofVerifier.sol";
 
 /**
  * Full-stack Gloam deploy for a fresh EVM chain (Tempo Moderato, chainId 42431).
@@ -31,7 +31,7 @@ import {DualProofVerifier} from "../src/verifiers/DualProofVerifier.sol";
  *   4. export RPC_URL=https://rpc.moderato.tempo.xyz
  *
  * Run:
- *   forge script script/DeployTempo.s.sol:DeployTempo --rpc-url $RPC_URL --broadcast
+ *   forge script script/archive/DeployTempo.s.sol:DeployTempo --rpc-url $RPC_URL --broadcast
  *
  * After: record the pool address + its deploy block, set them in the `tempo`
  * entry of app/src/lib/networks.ts, and flip its status from "planned" to "live".

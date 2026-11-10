@@ -37,12 +37,13 @@ interface IVaultRead {
  *     --sig "status()" --rpc-url <RPC>
  *
  * Deploy. --interactives 1 makes forge ask for the key once; nothing is stored,
- * and no key belongs in a file or an env var. Any funded account can send it;
- * use the deployer, 0x891E74a11abC5D0eC2EE855B2BD521fF9D18F411. Forge simulates
- * the run first and sends nothing if a check fails. Without --broadcast this is
- * a dry run that needs no key.
+ * and no key belongs in a file or an env var. Who sends it does not move the
+ * address (CREATE2: only the salt and the init code count), so any funded
+ * account can; use the owner wallet, CONTROLLER below, which owns the vault on
+ * all four chains. Forge simulates the run first and sends nothing if a check
+ * fails. Without --broadcast this is a dry run that needs no key.
  *   forge script script/DeployVaultOwnerGuard.s.sol:DeployVaultOwnerGuard \
- *     --rpc-url <RPC> --sender 0x891E74a11abC5D0eC2EE855B2BD521fF9D18F411 \
+ *     --rpc-url <RPC> --sender 0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8 \
  *     --interactives 1 --broadcast --slow
  *
  * After the owner's handover on that chain, this fails unless it landed right:
@@ -55,8 +56,9 @@ interface IVaultRead {
 contract DeployVaultOwnerGuard is Script {
     /// @notice The vault, the same address on all four chains.
     address public constant VAULT = 0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194;
-    /// @notice The vault's owner today, and the guard's first controller. It can
-    ///         move to a multisig later with transferController.
+    /// @notice The vault's owner today, and the guard's first controller. It is
+    ///         part of the init code, so it fixes the address; the controller
+    ///         then moves to the Safe with transferController (DEPLOY.md).
     address public constant CONTROLLER = 0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8;
     address public constant VERIFIER = 0x1421353d471dF6C847713aee391Db38978fE714a;
     address public constant SHIELD_VERIFIER = 0x69Fa6d2De0A66dA718DF022cEe98485AfDb03465;
@@ -89,7 +91,7 @@ contract DeployVaultOwnerGuard is Script {
         if (at.code.length == 0) {
             vm.startBroadcast();
             // The factory's interface: 32 bytes of salt, then the init code.
-            (bool ok, ) = CREATE2_FACTORY.call(abi.encodePacked(SALT, _initCode()));
+            (bool ok,) = CREATE2_FACTORY.call(abi.encodePacked(SALT, _initCode()));
             vm.stopBroadcast();
             require(ok && at.code.length > 0, "the factory did not deploy the guard");
         } else {

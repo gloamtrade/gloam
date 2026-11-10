@@ -89,7 +89,6 @@ Moves each mainnet vault's owner from the wallet `0x76b7E410a227c888aBD2Bdc24Ee3
 GUARD=<the address status() prints>
 VAULT=0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194
 OWNER=0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8
-DEPLOYER=0x891E74a11abC5D0eC2EE855B2BD521fF9D18F411
 S=script/DeployVaultOwnerGuard.s.sol:DeployVaultOwnerGuard
 # Tempo https://rpc.tempo.xyz   Ethereum https://ethereum-rpc.publicnode.com
 # Base https://base-rpc.publicnode.com   Robinhood Chain https://rpc.mainnet.chain.robinhood.com
@@ -98,10 +97,10 @@ S=script/DeployVaultOwnerGuard.s.sol:DeployVaultOwnerGuard
 1. **Freeze.** Check out the reviewed commit and `forge build`. Any change to the source, even a comment, moves the address. Set `GLOAM_OWNER_GUARD` in `app/src/lib/contractDirectory.ts` to the address and ship that first, so `/verify` reads a vault the guard holds as listed.
 2. **Read the queue.** `node launch/queue-check.mjs` must exit 0. It rebuilds every chain's queue from its logs. If it flags a change, stop, work out who queued it, and cancel it with the owner wallet: once the guard holds the vault, nobody can.
 3. **Read each chain.** `forge script $S --sig "status()" --rpc-url <RPC>` must give one address on all four, with the vault and factory code as expected, the owner wallet as owner, nobody offered, setup over.
-4. **Deploy on each chain.** This moves nothing. Any funded account works; forge asks for the key once.
+4. **Deploy on each chain.** This moves nothing. The address does not depend on who sends it: the script deploys through the canonical CREATE2 factory, so only the salt and the init code decide it, and the init code is this build of `VaultOwnerGuard` with `$VAULT` and `$OWNER` (its first controller) as constructor arguments. Send it from the owner wallet, which owns the vault on all four chains; the old deployer `0x891E…F411` is retired and not needed. Forge asks for the key once.
 
    ```bash
-   forge script $S --rpc-url <RPC> --sender $DEPLOYER --interactives 1 --broadcast --slow
+   forge script $S --rpc-url <RPC> --sender $OWNER --interactives 1 --broadcast --slow
    ```
 
 5. **Publish the source.** The constructor arguments go by hand: the creation transaction is the factory's, so forge cannot guess them.
@@ -122,7 +121,16 @@ S=script/DeployVaultOwnerGuard.s.sol:DeployVaultOwnerGuard
    cast call $VAULT 'transferOwnership(address)' $OWNER --from $OWNER --rpc-url <RPC>   # reverts: NotOwner
    ```
 
-9. **After the last chain.** Record the guard and the four handover transactions in `contracts/deployments/`. Update what names the wallet as owner: `contracts/README.md`, `contracts/ARCHITECTURE.md`, the root `README.md`, `/verify`, `/docs/chain`, `/docs/threat-model`, `/docs/production`, `/docs/compare`, `/whitepaper` and Glim's `telegramBot/knowledge.ts`. Those are written to stay true until then, and the claim "nobody can replace a proof checker" is safe to make only from this point, per chain.
+9. **Hand the guard to the Safe, chain by chain.** The guard's controller is meant to be the Safe multisig, which is deployed and in the Safe app on Robinhood Chain (4663), Tempo (4217), Base (8453) and Ethereum (1). The owner wallet is its first controller: that is in the init code, so it fixes the address, and it is what signs step 7. Once `check()` passes on a chain, the wallet offers the guard to that chain's Safe, and the Safe claims it from the Safe app (`acceptController()` on `$GUARD`). Until the Safe claims it the wallet is still the controller, and `check()` fails while the handover is pending. Run `check()` again after, and read `controller()`:
+
+   ```bash
+   SAFE=<that chain's Safe, as the Safe app shows it>
+   cast send $GUARD 'transferController(address)' $SAFE --interactive --rpc-url <RPC>   # the owner wallet's key
+   cast call $GUARD 'controller()(address)' --rpc-url <RPC>   # $SAFE once it has accepted
+   ```
+
+   Elysium (99901) has no Safe yet. Its vault was born guarded (`deployments/elysium-mainnet.json`) and its guard stays with the owner wallet until a Safe exists there.
+10. **After the last chain.** Record the guard, the four handover transactions and each chain's Safe as controller in `contracts/deployments/`. Update what names the wallet as owner: `contracts/README.md`, `contracts/ARCHITECTURE.md`, the root `README.md`, `/verify`, `/docs/chain`, `/docs/threat-model`, `/docs/production`, `/docs/compare`, `/whitepaper` and Glim's `telegramBot/knowledge.ts`. Those are written to stay true until then, and the claim "nobody can replace a proof checker" is safe to make only from this point, per chain.
 
 **Read the source yourself.** The verified source is one file with no imports and no inheritance, so it can be read in one sitting. Check that:
 
@@ -132,7 +140,7 @@ S=script/DeployVaultOwnerGuard.s.sol:DeployVaultOwnerGuard
 - Every function that writes is `onlyController`, except `acceptController`, which only the pending controller can call.
 - The ABI on the explorer has 15 functions and nothing beyond those in the source.
 
-**After it.** Owner actions go to the guard, with the same function names, so `cast send` and the signing pages only change their target: `/guard`'s last card does the three the controller needs. `QueueSwapAssets`, `QueueBDX`, `NoDepositLimits` and the `/treasury` and `/swap-assets` pages call the vault directly, and the scripts stop at their owner check. The controller can move to a multisig with `transferController` and `acceptController`. The swap router's owner (`GloamVaultSwapV4b` on Robinhood Chain) is separate and stays the wallet: it can only queue and remove pools.
+**After it.** Owner actions go to the guard, with the same function names, so a call only changes its target, and once the Safe holds the guard they are signed in the Safe app. `/guard`'s last card does the three the controller needs while that is still the wallet. `script/NoDepositLimits.s.sol` and the finished queue scripts in `script/archive/` call the vault directly, so they stop at their owner check. The swap router's owner (`GloamVaultSwapV4b` on Robinhood Chain) is separate and stays the wallet: it can only queue and remove pools.
 
 **The trade-off.** After this a bug in a proof checker can never be patched in place. The response is to leave the vault:
 

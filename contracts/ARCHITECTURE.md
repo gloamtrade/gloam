@@ -258,5 +258,5 @@ app/.../VaultTradePanel.tsx    → via-market adapter
 ```bash
 # Inventory seed (faucet stocks into vault for cash-out solvency).
 # Only relevant once private trade is re-enabled.
-forge script script/SeedVaultInventory.s.sol --rpc-url $RH_TESTNET_RPC --broadcast
+forge script script/archive/SeedVaultInventory.s.sol --rpc-url $RH_TESTNET_RPC --broadcast
 ```

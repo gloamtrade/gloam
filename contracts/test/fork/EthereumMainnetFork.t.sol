@@ -66,8 +66,16 @@ contract EthereumMainnetForkTest is Test {
         vm.setEnv(
             "LIMIT_ASSETS",
             string.concat(
-                vm.toString(USDC), ",", vm.toString(USDT), ",", vm.toString(USDG), ",", vm.toString(PYUSD), ",",
-                vm.toString(EURC), ",0x0000000000000000000000000000000000000000"
+                vm.toString(USDC),
+                ",",
+                vm.toString(USDT),
+                ",",
+                vm.toString(USDG),
+                ",",
+                vm.toString(PYUSD),
+                ",",
+                vm.toString(EURC),
+                ",0x0000000000000000000000000000000000000000"
             )
         );
         vm.setEnv("LIMIT_PER_DEPOSIT", "500000000,500000000,500000000,500000000,500000000,200000000000000000");
@@ -76,6 +84,9 @@ contract EthereumMainnetForkTest is Test {
         vm.setEnv("FEE_RECIPIENT", vm.toString(TREASURY));
         vm.setEnv("NEW_OWNER", vm.toString(OWNER));
         vm.setEnv("NEW_OWNER_EOA", "1");
+        // The vault is live on this fork, so the deploy's redeploy check would stop
+        // this rehearsal (script/RedeployGuard.sol): a second vault here is the point.
+        vm.setEnv("GLOAM_ALLOW_REDEPLOY", "1");
 
         uint256 n = vm.getNonce(vm.addr(PK));
         new DeployEthereumMainnet().run();
@@ -129,7 +140,12 @@ contract EthereumMainnetForkTest is Test {
 
         uint256 g = gasleft();
         vm.prank(payer);
-        pool.shieldBound(USDT, fx.readUint(".shieldUsdt.amount"), fx.readBytes32(".shieldUsdt.commitment"), fx.readBytes(".shieldUsdt.proof"));
+        pool.shieldBound(
+            USDT,
+            fx.readUint(".shieldUsdt.amount"),
+            fx.readBytes32(".shieldUsdt.commitment"),
+            fx.readBytes(".shieldUsdt.proof")
+        );
         console2.log("gas: deposit USDT", g - gasleft());
         assertEq(pool.deposited(USDT), 100e6);
         assertEq(usdt.balanceOf(address(pool)), 100e6);
@@ -138,7 +154,10 @@ contract EthereumMainnetForkTest is Test {
         g = gasleft();
         vm.prank(payer);
         pool.shieldBound{value: 0.01 ether}(
-            address(0), fx.readUint(".shieldEth.amount"), fx.readBytes32(".shieldEth.commitment"), fx.readBytes(".shieldEth.proof")
+            address(0),
+            fx.readUint(".shieldEth.amount"),
+            fx.readBytes32(".shieldEth.commitment"),
+            fx.readBytes(".shieldEth.proof")
         );
         console2.log("gas: deposit ETH", g - gasleft());
         assertEq(pool.deposited(address(0)), 0.01 ether);
@@ -156,14 +175,23 @@ contract EthereumMainnetForkTest is Test {
         bytes32 root = fx.readBytes32(".cashOutUsdt.root");
         g = gasleft();
         vm.prank(relayer);
-        pool.unshield(fx.readBytes(".cashOutUsdt.proof"), root, fx.readBytes32(".cashOutUsdt.nullifier"), USDT, recipient, 60e6);
+        pool.unshield(
+            fx.readBytes(".cashOutUsdt.proof"), root, fx.readBytes32(".cashOutUsdt.nullifier"), USDT, recipient, 60e6
+        );
         console2.log("gas: cash out USDT", g - gasleft());
         assertEq(usdt.balanceOf(recipient), 60e6 - 150_000, "60 USDT less the 0.25% fee");
         assertEq(pool.deposited(USDT), 40e6, "the change stays in the vault");
 
         g = gasleft();
         vm.prank(relayer);
-        pool.unshield(fx.readBytes(".cashOutEth.proof"), root, fx.readBytes32(".cashOutEth.nullifier"), address(0), recipient, 0.01 ether);
+        pool.unshield(
+            fx.readBytes(".cashOutEth.proof"),
+            root,
+            fx.readBytes32(".cashOutEth.nullifier"),
+            address(0),
+            recipient,
+            0.01 ether
+        );
         console2.log("gas: cash out ETH", g - gasleft());
         assertEq(recipient.balance, 0.01 ether - 0.000025 ether);
 
@@ -179,7 +207,9 @@ contract EthereumMainnetForkTest is Test {
         // A spent note is refused before the proof check.
         vm.prank(relayer);
         vm.expectRevert();
-        pool.unshield(fx.readBytes(".cashOutUsdt.proof"), root, fx.readBytes32(".cashOutUsdt.nullifier"), USDT, recipient, 60e6);
+        pool.unshield(
+            fx.readBytes(".cashOutUsdt.proof"), root, fx.readBytes32(".cashOutUsdt.nullifier"), USDT, recipient, 60e6
+        );
     }
 
     function _deployPoseidon() internal returns (address addr) {

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {GloamVaultSwapTempo} from "../src/GloamVaultSwapTempo.sol";
+import {GloamVaultSwapTempo} from "../../src/GloamVaultSwapTempo.sol";
 
 /**
  * Private stablecoin swaps through the Tempo mainnet vault, on Tempo's
@@ -12,7 +12,7 @@ import {GloamVaultSwapTempo} from "../src/GloamVaultSwapTempo.sol";
  *
  *   export DEPLOYER_PK=0x...      # any funded mainnet account (gas is paid in USD); it gets no powers
  *   export TREASURY=0x...         # where each swap's unused input goes (the treasury)
- *   forge script script/DeployVaultSwapTempo.s.sol:DeployVaultSwapTempo \
+ *   forge script script/archive/DeployVaultSwapTempo.s.sol:DeployVaultSwapTempo \
  *     --rpc-url https://rpc.tempo.xyz --broadcast --gas-estimate-multiplier 115
  *
  * After: put the router address in VAULT_SWAP_ROUTERS[4217] (app/src/lib/vaultSwap.ts).

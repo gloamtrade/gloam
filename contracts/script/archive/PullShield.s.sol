@@ -21,7 +21,7 @@ interface ILegacyShieldPool {
  *   export SHIELD_POOL=0x2BD98196D90AB45D58843B4c8B8809aa34343d35
  *   # optional: AMOUNT_WEI=...  (default = full deposited ETH balance)
  *
- *   forge script script/PullShield.s.sol \
+ *   forge script script/archive/PullShield.s.sol \
  *     --rpc-url https://rpc.testnet.chain.robinhood.com \
  *     --broadcast --gas-estimate-multiplier 300 -vvvv
  *

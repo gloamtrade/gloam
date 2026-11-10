@@ -9,7 +9,7 @@
 //                  link: runtime code alone proves little, since init code can
 //                  preset storage and then return the real runtime.
 //
-// Its own port, so it runs next to the other signing pages (serve.mjs, 4730).
+// Its own port, so it runs next to the router deploy page (serve-router.mjs, 4732).
 // Uses `cast` for keccak256 (node:crypto only has NIST sha3).
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";

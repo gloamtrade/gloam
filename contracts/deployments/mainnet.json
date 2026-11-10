@@ -6,7 +6,7 @@
   "feeRecipientNote": "The treasury since 2026-10-24 on both chains (setWithdrawFee(25, treasury) through the 3-day timelock). At deploy it was the owner, 0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8. The fee went from 25 to 50 bps on 2026-11-03, also through the timelock.",
   "withdrawFeeBps": 50,
   "withdrawFeeNote": "25 bps at deploy; 50 bps since 2026-11-03, through the 3-day timelock.",
-  "limitsNote": "Live values, read back on chain 2026-11-10 (depositLimit(asset)). Launch limits were 500 / 25,000 per stablecoin and 25,000 / 250,000 GLOAM; every limit was raised 100x through the 3-day timelock on 2026-11-01 (script/RaiseDepositLimits.s.sol). Robinhood Chain listed 28 swap assets on 2026-10-27 (script/QueueSwapAssets.s.sol) and native ETH, AI and ORBIO on 2026-11-03 (script/QueueRobinhoodAssets.s.sol).",
+  "limitsNote": "Live values, read back on chain 2026-11-10 (depositLimit(asset)). Launch limits were 500 / 25,000 per stablecoin and 25,000 / 250,000 GLOAM; every limit was raised 100x through the 3-day timelock on 2026-11-01 (script/archive/RaiseDepositLimits.s.sol). Robinhood Chain listed 28 swap assets on 2026-10-27 (script/archive/QueueSwapAssets.s.sol) and native ETH, AI and ORBIO on 2026-11-03 (script/archive/QueueRobinhoodAssets.s.sol).",
   "deployer": "0x891E74a11abC5D0eC2EE855B2BD521fF9D18F411",
   "chains": {
     "4663": {

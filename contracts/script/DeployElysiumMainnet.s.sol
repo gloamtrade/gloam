@@ -19,6 +19,10 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  *
  * The USER runs this. It is NOT executed by CI or by any agent. Runbook: DEPLOY-ELYSIUM.md.
  *
+ * Deployed already (contracts/deployments/elysium-mainnet.json): a rerun stops before it reads
+ * a key or sends anything (script/RedeployGuard.sol). GLOAM_ALLOW_REDEPLOY=1 is
+ * only for a second vault on purpose.
+ *
  * Before running:
  *   1. Keys: the script deploys the ceremony-final verifiers (src/verifiers/final)
  *      and refuses to create the pool unless they accept final-key proofs and
@@ -83,7 +87,10 @@ contract DeployElysiumMainnet is MainnetDeploy {
             "ELYSIUM_CHAIN_ID is the Elysium testnet: set ELYSIUM_ALLOW_TESTNET=1 for a rehearsal there"
         );
         require(!_isOtherGloamChain(chainId), "ELYSIUM_CHAIN_ID is another Gloam chain, not Elysium");
-        require(chainId == ELYSIUM_MAINNET || chainId == ELYSIUM_TESTNET, "ELYSIUM_CHAIN_ID must be 99901, Elysium mainnet's");
+        require(
+            chainId == ELYSIUM_MAINNET || chainId == ELYSIUM_TESTNET,
+            "ELYSIUM_CHAIN_ID must be 99901, Elysium mainnet's"
+        );
         _deployMainnetGuarded(chainId, true);
     }
 

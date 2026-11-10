@@ -256,7 +256,7 @@ for (const [family, chainId, key, assets, native, memo] of [
   }
   const g = RH_MAINNET_ASSETS[1];
   assert(g.symbol === "GLOAM" && g.decimals === 18 && g.depositLimit.perDeposit === 2_500_000n * 10n ** 18n && g.depositLimit.total === 25_000_000n * 10n ** 18n, "GLOAM: 2,500,000 per deposit, 25,000,000 total");
-  // The limit queued for each of ETH, AI and ORBIO (contracts/script/QueueRobinhoodAssets.s.sol, 0 on chain
+  // The limit queued for each of ETH, AI and ORBIO (contracts/script/archive/QueueRobinhoodAssets.s.sol, 0 on chain
   // until it lands), and the limit live on PONS and CASHCAT, as read on chain on 2026-11-02.
   const whole = (n) => BigInt(n) * 10n ** 18n;
   const rhLimits = {

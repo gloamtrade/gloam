@@ -152,7 +152,7 @@ const ORYNTH_HOOK: Address = "0x953391a2DDf7E8437FeB878FDF2C6f325Fbf00CC";
 export type PoolKey = { currency0: Address; currency1: Address; fee: number; tickSpacing: number; hooks: Address };
 
 /**
- * v1's pools, fixed when it was deployed (DeployVaultSwapRobinhood.s.sol).
+ * v1's pools, fixed when it was deployed (contracts/script/archive/DeployVaultSwapRobinhood.s.sol).
  * Any other pool is refused on chain.
  */
 export const RH_SWAP_POOLS: readonly PoolKey[] = [

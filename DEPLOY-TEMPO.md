@@ -6,7 +6,8 @@ and no CI deploys it, and the proving keys are the dev ceremony, so this is a
 `0x39e28cde55cab798874746ac52cb4b5cc99a0194` (deploy block `45172561`), deployed with
 `contracts/script/DeployTempoMainnet.s.sol` on the ceremony's final keys; see
 [Tempo mainnet](#tempo-mainnet) below and `contracts/PRODUCTION.md`. Sealed swaps stay disabled (audit H1). Design and
-rationale: [`TEMPO_EXPANSION.md`](./TEMPO_EXPANSION.md).
+rationale: [`TEMPO_EXPANSION.md`](./TEMPO_EXPANSION.md). The Moderato deploy below is done, so its script now lives in
+`contracts/script/archive/`.
 
 ## What this deploys
 
@@ -54,7 +55,7 @@ export POSEIDON2=0x...          # PoseidonT3 address from the output
 ## Step 2: deploy the verifier stack and the pool
 
 ```bash
-forge script script/DeployTempo.s.sol:DeployTempo --rpc-url $RPC_URL --broadcast --gas-estimate-multiplier 105
+forge script script/archive/DeployTempo.s.sol:DeployTempo --rpc-url $RPC_URL --broadcast --gas-estimate-multiplier 105
 ```
 
 The script logs `ShieldPoolPoseidon`, `DualProofVerifier`, `ShieldIVerifier`, and
@@ -132,7 +133,7 @@ and its deploy block in `MAINNET_POOLS` in `app/src/lib/mainnet.ts` (the app's
 
 ## Do not
 
-- Run this testnet runbook (`DeployTempo.s.sol`) against Tempo mainnet (chainId 4217).
+- Run this testnet runbook (`script/archive/DeployTempo.s.sol`) against Tempo mainnet (chainId 4217).
   Mainnet uses `DeployTempoMainnet.s.sol` above, on the final keys.
 - Enable sealedSwap. It stays off until the H1 confidential-reserve work lands.
 - Ship a compliance-enforcing stablecoin without the issuer-viewing-key path.

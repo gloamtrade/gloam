@@ -30,7 +30,7 @@ interface IERC20Meta {
  *
  * Step 1, now: queue every limit (each one is a public ChangeQueued event).
  *   read -s "OWNER_PK?Vault owner key: "; echo
- *   forge script script/QueueSwapAssets.s.sol:QueueSwapAssets --sig "queue()" \
+ *   forge script script/archive/QueueSwapAssets.s.sol:QueueSwapAssets --sig "queue()" \
  *     --rpc-url https://rpc.mainnet.chain.robinhood.com --private-key "$OWNER_PK" --broadcast
  *   unset OWNER_PK
  *
@@ -39,7 +39,7 @@ interface IERC20Meta {
  * checks each limit landed as queued.
  *
  * Any time, no key, nothing sent:
- *   forge script script/QueueSwapAssets.s.sol:QueueSwapAssets --sig "status()" \
+ *   forge script script/archive/QueueSwapAssets.s.sol:QueueSwapAssets --sig "status()" \
  *     --rpc-url https://rpc.mainnet.chain.robinhood.com
  *
  * Forge simulates the whole run on a fork first and sends nothing if any call

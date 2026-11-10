@@ -32,7 +32,7 @@
     "GloamPayMemoDeployBlock": 53109729,
     "GloamPayMemoDeployTx": "0xd452e764f9c3ef6e1391659882f40109e588a5776eb38c44c310cd4ce5a52290"
   },
-  "limitsNote": "Live values, read back on chain 2026-11-10 (depositLimit(asset)). Launch limits were 500 / 25,000 per stablecoin and 0.2 / 10 ETH; every limit was raised 100x through the 3-day timelock on 2026-11-01 (script/RaiseDepositLimits.s.sol).",
+  "limitsNote": "Live values, read back on chain 2026-11-10 (depositLimit(asset)). Launch limits were 500 / 25,000 per stablecoin and 0.2 / 10 ETH; every limit was raised 100x through the 3-day timelock on 2026-11-01 (script/archive/RaiseDepositLimits.s.sol).",
   "assets": {
     "USDC": {
       "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",

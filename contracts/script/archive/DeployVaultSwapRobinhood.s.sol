@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {GloamVaultSwapV4, PoolKey} from "../src/GloamVaultSwapV4.sol";
+import {GloamVaultSwapV4, PoolKey} from "../../src/GloamVaultSwapV4.sol";
 
 /**
  * Private swaps through the Robinhood Chain mainnet vault (GloamVaultSwapV4).
@@ -13,7 +13,7 @@ import {GloamVaultSwapV4, PoolKey} from "../src/GloamVaultSwapV4.sol";
  *
  *   export DEPLOYER_PK=0x...      # any funded mainnet account; it gets no powers
  *   export TREASURY=0x...         # where each swap's unused input goes (the treasury)
- *   forge script script/DeployVaultSwapRobinhood.s.sol:DeployVaultSwapRobinhood \
+ *   forge script script/archive/DeployVaultSwapRobinhood.s.sol:DeployVaultSwapRobinhood \
  *     --rpc-url https://rpc.mainnet.chain.robinhood.com --broadcast
  *
  * After: put the router address in VAULT_SWAP_ROUTERS[4663] (app/src/lib/vaultSwap.ts).

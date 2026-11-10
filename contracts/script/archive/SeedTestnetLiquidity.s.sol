@@ -9,7 +9,7 @@ import {Script, console2} from "forge-std/Script.sol";
  *
  *   export DEPLOYER_PK=0x...
  *   export RH_TESTNET_RPC=https://rpc.testnet.chain.robinhood.com
- *   forge script script/SeedTestnetLiquidity.s.sol --rpc-url $RH_TESTNET_RPC --broadcast
+ *   forge script script/archive/SeedTestnetLiquidity.s.sol --rpc-url $RH_TESTNET_RPC --broadcast
  *
  * If getPair is zero, addLiquidityETH will create the pair.
  */
@@ -19,15 +19,12 @@ interface IRouter02 {
 
     function addLiquidityETH(
         address token,
-        uint amountTokenDesired,
-        uint amountTokenMin,
-        uint amountETHMin,
+        uint256 amountTokenDesired,
+        uint256 amountTokenMin,
+        uint256 amountETHMin,
         address to,
-        uint deadline
-    )
-        external
-        payable
-        returns (uint amountToken, uint amountETH, uint liquidity);
+        uint256 deadline
+    ) external payable returns (uint256 amountToken, uint256 amountETH, uint256 liquidity);
 }
 
 interface IERC20 {
@@ -63,16 +60,9 @@ contract SeedTestnetLiquidity is Script {
                 continue;
             }
             IERC20(t).approve(ROUTER, tokenAmt);
-            try
-                router.addLiquidityETH{value: ethAmt}(
-                    t,
-                    tokenAmt,
-                    0,
-                    0,
-                    me,
-                    block.timestamp + 600
-                )
-            returns (uint a, uint b, uint liq) {
+            try router.addLiquidityETH{value: ethAmt}(t, tokenAmt, 0, 0, me, block.timestamp + 600) returns (
+                uint256 a, uint256 b, uint256 liq
+            ) {
                 console2.log("seeded", t);
                 console2.log(" token", a);
                 console2.log(" eth", b);

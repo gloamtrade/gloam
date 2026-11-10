@@ -16,7 +16,7 @@
  *  - ETH for a depositor account, which wraps it into WETH (an account balance).
  * Everything else runs the real way, in the order Duke would at go-live:
  *  block 1 (now): the vault owner queues the vault's deposit limits for WETH,
- *    SPY and AMZN (the values QueueSwapAssets.s.sol proposes) through its 3-day
+ *    SPY and AMZN (the values script/archive/QueueSwapAssets.s.sol proposes) through its 3-day
  *    timelock, and the router owner queues one more pool, v1's 0.0087% ETH/USDG
  *    pool; a swap through it is refused (PoolNotAllowed);
  *  block 2 (3 days and a minute later): the vault owner executes the limits, a
@@ -385,7 +385,7 @@ const bal = (token: Address, who: Address) => read(token, encodeFunctionData({ a
 const seen = (c: Hex) => read(VAULT, encodeFunctionData({ abi: shieldPoolAbi, functionName: "commitmentSeen", args: [c] }));
 const dep = (a: Address) => read(VAULT, encodeFunctionData({ abi: vaultGov, functionName: "deposited", args: [a] }));
 const owed = (a: Address) => read(VAULT, encodeFunctionData({ abi: vaultGov, functionName: "feesOwed", args: [a] }));
-// the deposit limits PR #13 (QueueSwapAssets.s.sol) proposes for these three
+// the deposit limits PR #13 (script/archive/QueueSwapAssets.s.sol) proposes for these three
 const limitCalls = (
   [
     [WETH, 420000000000000000n, 10000000000000000000n],
