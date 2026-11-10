@@ -85,6 +85,11 @@ export default function BuildWithGloamAtTheNearHackathonPost() {
       }
     >
       <p>
+        <strong>Update, 10 November 2026.</strong> Elysium went live on 9
+        November 2026, so Gloam now runs on five mainnets: Robinhood Chain,
+        Tempo, Base, Ethereum and Elysium.
+      </p>
+      <p>
         Most of what ships onchain still puts everything on display. Every
         balance, every salary, everything an agent paid for, open to anyone with
         an explorer. Privacy usually gets dropped because circuits are hard and

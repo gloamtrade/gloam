@@ -69,6 +69,13 @@ export default function LiveOnMainnetPost() {
       }
     >
       <p>
+        <strong>Update, 10 November 2026.</strong> The cash-out fee is now
+        0.5%, up from 0.25% on 3 November 2026. Kann Audits has since reviewed
+        the vault contracts (<Link href="/security">report, 1 November 2026</Link>)
+        and found no Critical, High or Medium issues. The review covered the
+        vault contracts only.
+      </p>
+      <p>
         At 13:00 UTC today, Gloam went live on Robinhood Chain and Tempo
         mainnet. It has a simple job. It lets people and AI agents pay each
         other in stablecoins without publishing the details to everyone else.
