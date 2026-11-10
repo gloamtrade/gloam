@@ -229,8 +229,8 @@ async function redisIncr(key: string, windowSec: number): Promise<number> {
  * Counts one hit for `bucket` from this IP and says whether it is allowed.
  * `windowSec` is the window length (default one minute; 3600 for an hour,
  * 86400 for a UTC day). When Redis fails, the in-memory count decides, and
- * this never throws; with `failClosed` (the relay's sends) it throws
- * SharedCountUnavailable instead, and also in a production build with no Redis.
+ * this never throws; with `failClosed` (the relay's sends, admin sign-in) it
+ * throws SharedCountUnavailable instead, and also in a production build with no Redis.
  * `v6Bits` widens what one IPv6 client counts as, for this limit only.
  * `scope` counts this IP separately per value (see ipKey); pass it rather than
  * writing it into `ip`.
