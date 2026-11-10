@@ -39,6 +39,7 @@ import { authorizeSpend, settleSpend } from "./spendGuard.js";
 import { isHeld, noteView, type NoteStore, type StoredNote } from "./noteStore.js";
 import { networkByChainId } from "./networks.js";
 import { sendToSelf, swapRelayUrl, type SwapToolContext } from "./swaps.js";
+import { poolTreeParams } from "./poolTree.js";
 
 export type CashoutPaid = { ok: true; header: string; result: Record<string, unknown> } | { ok: false; result: Record<string, unknown> };
 
@@ -210,7 +211,7 @@ export async function payGloamCashoutQuote(
     let sending = false;
     try {
       const commitment = fieldToHex(await noteCommitmentPoseidon(hexToField(note.secret), gross, GLOAM_CASHOUT_ASSET)) as Hex;
-      const synced = await ctx.syncTree(client, { pool: net!.pool, fromBlock: net!.deployBlock });
+      const synced = await ctx.syncTree(client, poolTreeParams(net!));
       const path = await synced.pathForCommitment(commitment);
       if (!path) throw new Error(`Note ${note.handle} is not in the vault's tree yet. Wait for it to confirm.`);
       const intent = await buildGloamCashoutIntent({

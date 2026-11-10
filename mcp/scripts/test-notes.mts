@@ -20,7 +20,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { TransactionNotFoundError, type Hex } from "viem";
+import { TransactionNotFoundError, encodeAbiParameters, encodeEventTopics, parseAbi, type Address, type Hex } from "viem";
 import {
   IncrementalMerkleTreePoseidon,
   buildPrivateSendIntent,
@@ -43,6 +43,7 @@ import { createGloamServer, type ServerDeps } from "../src/server.js";
 import type { Signer } from "../src/signer.js";
 import { NoteStore, noteStoreKey, openNoteStore, type NewNote } from "../src/noteStore.js";
 import { noteBroadcast } from "../src/walletSend.js";
+import { keptPoolTrees, poolTreeParams } from "../src/poolTree.js";
 
 type Env = Record<string, string | undefined>;
 const TEMPO = GLOAM_NETWORKS.tempo;
@@ -2036,5 +2037,89 @@ if (process.argv.includes("--add-notes") || process.argv.includes("--reserve")) 
     assert.equal(paid.sealedToPayee, true, "the header is still sealed to a receive tag");
     // The scan used above is not vacuous: legacy mode leaks on purpose, and it is caught.
     assert.throws(() => assertNoSecrets(secretsOf([legacyEnv])), /leaked a secret/);
+  });
+
+  test("the pool tree is kept per chain and pool: one leaf-list load, then only new blocks; an RPC error is an error", async () => {
+    const pool = "0x39e28cde55cab798874746ac52cb4b5cc99a0194" as Address;
+    const abi = parseAbi(["event Shielded(bytes32 indexed commitment, address indexed asset, uint256 amount, uint256 leafIndex, address indexed from)"]);
+    const word = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}` as Hex;
+    /** A Robinhood Chain RPC (raw logs, address-only reads) whose pool root follows its logs. */
+    const chain = (chainId: number) => {
+      const logs: { blockNumber: bigint; c: Hex }[] = [];
+      const state = { head: 1_000n, reads: [] as [bigint, bigint][], fail: null as Error | null };
+      const rootAt = async (block: bigint) => {
+        const tree = new IncrementalMerkleTreePoseidon();
+        await tree.init();
+        for (const l of logs.filter((x) => x.blockNumber <= block).sort((x, y) => (x.blockNumber < y.blockNumber ? -1 : 1))) await tree.insert(hexToField(l.c));
+        return fieldToHex(tree.currentRoot);
+      };
+      const client = {
+        chain: { id: chainId },
+        getBlockNumber: async () => state.head,
+        getLogs: async ({ address, fromBlock, toBlock, ...rest }: { address: Address; fromBlock: bigint; toBlock: bigint }) => {
+          assert.equal(Object.keys(rest).length, 0, "read by address only");
+          if (state.fail) throw state.fail;
+          state.reads.push([fromBlock, toBlock]);
+          return logs
+            .filter((l) => l.blockNumber >= fromBlock && l.blockNumber <= toBlock && address.toLowerCase() === pool)
+            .map((l) => ({
+              address: pool,
+              topics: encodeEventTopics({ abi, eventName: "Shielded", args: { commitment: l.c, asset: TEMPO_PATHUSD, from: TEMPO_PATHUSD } }),
+              data: encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], [1n, 0n]),
+              blockNumber: l.blockNumber,
+              logIndex: 0,
+              transactionHash: word(l.blockNumber),
+              removed: false,
+            }));
+        },
+        readContract: async ({ functionName, blockNumber }: { functionName: string; blockNumber?: bigint }) => {
+          if (functionName === "currentRoot") return rootAt(blockNumber ?? state.head);
+          throw new Error(`unexpected ${functionName}`);
+        },
+      };
+      return { client: client as never, logs, state };
+    };
+
+    const rh = chain(4663);
+    const c1 = word(11n);
+    rh.logs.push({ blockNumber: 500n, c: c1 });
+    const seeded: string[] = [];
+    const trees = keptPoolTrees({
+      seed: (network) => async () => {
+        seeded.push(network);
+        return { v: 1, pool, deployBlock: "100", toBlock: "900", leafCount: 1, items: [{ k: "s", c: [c1], bn: "500", li: 0 }] };
+      },
+    });
+    const net = { key: "robinhood-mainnet", chainId: 4663, pool, deployBlock: 100n };
+
+    const p1 = await (await trees(rh.client, poolTreeParams(net))).pathForCommitment(c1);
+    assert.equal(p1?.leafIndex, 0, "the path, from the leaf list");
+    assert.deepEqual(seeded, ["robinhood-mainnet"], "a cold start loads the leaf list for the network");
+    assert.deepEqual(rh.state.reads, [[885n, 1_000n]], "and reads only the blocks after it (less 16 re-read)");
+
+    // The next spend, through a new client for the same network: the same tree, only the new blocks.
+    rh.state.head = 1_200n;
+    const c2 = word(22n);
+    rh.logs.push({ blockNumber: 1_150n, c: c2 });
+    rh.state.reads = [];
+    const p2 = await (await trees(chain(4663).client, poolTreeParams(net))).pathForCommitment(c2);
+    assert.equal(p2?.leafIndex, 1, "the new leaf's path");
+    assert.deepEqual(rh.state.reads, [[985n, 1_200n]], "one read of the blocks since the last spend, on the first client");
+    assert.equal(seeded.length, 1, "no second leaf-list load");
+
+    // The same pool address on another chain is another tree.
+    const tempo = chain(4217);
+    tempo.logs.push({ blockNumber: 950n, c: word(33n) });
+    const other = await (await trees(tempo.client, poolTreeParams({ ...net, key: "tempo-mainnet", chainId: 4217 }))).pathForCommitment(word(33n));
+    assert.equal(other?.leafIndex, 0, "its own tree");
+    assert.deepEqual(seeded, ["robinhood-mainnet", "tempo-mainnet"], "with its own leaf list");
+    assert.ok(tempo.state.reads.some(([from]) => from === 100n), "which does not match this pool's root here, so the chain is walked from the deploy block");
+
+    // An RPC that fails is an error, never "not in the tree yet".
+    rh.state.head = 1_300n;
+    rh.state.fail = Object.assign(new Error("RPC error"), { code: -32601, details: "the method eth_getLogs does not exist/is not available" });
+    await assert.rejects((await trees(rh.client, poolTreeParams(net))).pathForCommitment(c2), /chain 4663: eth_getLogs .* failed/);
+    rh.state.fail = null;
+    assert.equal((await (await trees(rh.client, poolTreeParams(net))).pathForCommitment(c2))?.leafIndex, 1, "and the next try goes through");
   });
 }

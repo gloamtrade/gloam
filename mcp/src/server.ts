@@ -57,7 +57,6 @@ import {
   generateReceiveKey,
   isReceiveTag,
   isSealedTicket,
-  syncTree,
   noteCommitmentPoseidon,
   noteNullifierPoseidon,
   fieldToHex,
@@ -124,6 +123,7 @@ import {
   type StoredNote,
 } from "./noteStore.js";
 import { guardedFetch } from "./safeFetch.js";
+import { keptPoolTrees, poolTreeParams, type PoolTree } from "./poolTree.js";
 import { WalletSendUnclear, walletSend } from "./walletSend.js";
 import { checkBeforePay } from "./wormholeGuard.js";
 import { checkVeyaBudget } from "./veyaGuard.js";
@@ -177,7 +177,11 @@ export interface ServerDeps {
   receiptProver(net?: McpNetwork): Promise<ReceiptProver>;
   /** The unshield prover for `net`'s key set: a private swap's note leaves the vault by an unshield to its escrow. */
   unshieldProver(net?: McpNetwork): Promise<Prover>;
-  syncTree: typeof syncTree;
+  /**
+   * The pool's tree, for membership paths. The default keeps one tree per chain and pool for the life of the
+   * server, so a spend reads only the blocks since the last one (keptPoolTrees).
+   */
+  syncTree: PoolTree;
   relay(intent: GloamIntent, opts: RelayOptions): Promise<Hex>;
   /** A private swap, its refund or its exit, through the relay. */
   relaySwap(call: SwapRelayCall, opts: RelayOptions): Promise<Hex>;
@@ -200,7 +204,7 @@ function defaultDeps(env: Env): ServerDeps {
       return (input) => proveGroth16(input, wasm, zkey);
     },
     unshieldProver: async (net) => artifactProver(await unshieldArtifacts(net?.ceremony ?? "dev")),
-    syncTree,
+    syncTree: keptPoolTrees(),
     relay: relayIntent,
     relaySwap: relaySwapCall,
     relayStatus: readRelayStatus,
@@ -447,7 +451,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
       isCommitmentSeen: (commitment) =>
         client.readContract({ address: net.pool, abi: POOL_STATE_ABI, functionName: "commitmentSeen", args: [commitment] }),
       pathForCommitment: async (commitment) =>
-        (await deps.syncTree(client, { pool: net.pool, fromBlock: net.deployBlock })).pathForCommitment(commitment),
+        (await deps.syncTree(client, poolTreeParams(net))).pathForCommitment(commitment),
       waitForReceipt: async (hash) => ({ status: (await client.waitForTransactionReceipt({ hash })).status }),
     };
   }
@@ -1350,7 +1354,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
     try {
       const asset = spend.asset;
       const commitment = fieldToHex(await noteCommitmentPoseidon(hexToField(input.secret), input.amountWei, asset));
-      const synced = await deps.syncTree(signer.publicClient, { pool: req.poolAddress as Address, fromBlock: net.deployBlock });
+      const synced = await deps.syncTree(signer.publicClient, { ...poolTreeParams(net), pool: req.poolAddress as Address });
       const path = await synced.pathForCommitment(commitment);
       if (!path) {
         settleSpend(gate, "failed", { reason: "note not in the pool tree" });
