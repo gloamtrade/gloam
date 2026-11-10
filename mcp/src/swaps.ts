@@ -57,12 +57,12 @@ import {
   type SwapOutcome,
   type SwapQuote,
   type SwapRelayCall,
-  type syncTree,
 } from "@gloamtrade/sdk";
 import { KNOWN_ASSETS, type Spend } from "./policy.js";
 import { authorizeSpend, settleSpend } from "./spendGuard.js";
 import { deadCheckDue, heldMessage, isHeld, noteView, type NoteStore, type StoredNote } from "./noteStore.js";
 import { describeNetwork, networkByChainId, networkByKey, type McpNetwork, type NetworkKey } from "./networks.js";
+import { poolTreeParams, type PoolTree } from "./poolTree.js";
 
 type Env = Record<string, string | undefined>;
 type ToolAnswer = { content: { type: "text"; text: string }[] };
@@ -81,7 +81,8 @@ export interface SwapToolContext {
   shieldProver: (net: McpNetwork) => Promise<Prover>;
   unshieldProver: (net: McpNetwork) => Promise<Prover>;
   transferProver: (net: McpNetwork) => Promise<Prover>;
-  syncTree: typeof syncTree;
+  /** The pool's tree, for membership paths (kept per chain and pool by the server). */
+  syncTree: PoolTree;
   /** A private send through the relay (the split before a swap). */
   relay: (intent: GloamIntent, opts: RelayOptions) => Promise<Hex>;
   /** A swap, a refund or an exit through the relay. */
@@ -634,7 +635,7 @@ export function registerSwapTools(server: McpServer, ctx: SwapToolContext): void
       // Prove: everything the relay will check, then the three proofs. Nothing is sent here.
       let built: Awaited<ReturnType<typeof buildSwapIntent>>;
       try {
-        const synced = await ctx.syncTree(client, { pool: net.pool, fromBlock: net.deployBlock });
+        const synced = await ctx.syncTree(client, poolTreeParams(net));
         const commitment = fieldToHex(await noteCommitmentPoseidon(hexToField(input.secret), amountIn, inRef.address)) as Hex;
         const path = await synced.pathForCommitment(commitment);
         if (!path) throw new Error(`Note ${input.handle} is not in the vault's tree yet. Wait for it to confirm.`);
@@ -943,7 +944,7 @@ export async function sendToSelf(
   try {
     const value = BigInt(note.amountWei);
     const commitment = fieldToHex(await noteCommitmentPoseidon(hexToField(note.secret), value, note.asset)) as Hex;
-    const synced = await ctx.syncTree(client, { pool: net.pool, fromBlock: net.deployBlock });
+    const synced = await ctx.syncTree(client, poolTreeParams(net));
     const path = await synced.pathForCommitment(commitment);
     if (!path) {
       release();

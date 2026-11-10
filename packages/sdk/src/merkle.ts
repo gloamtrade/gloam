@@ -96,6 +96,19 @@ export class IncrementalMerkleTreePoseidon {
 
     return { leafIndex, leaf: this.leaves[leafIndex]!, pathElements, pathIndices, root };
   }
+
+  /** A copy that later inserts into this tree do not touch (a few array copies, no hashing). */
+  clone(): IncrementalMerkleTreePoseidon {
+    const t = new IncrementalMerkleTreePoseidon();
+    t.zeros = this.zeros;
+    t.filledSubtrees = this.filledSubtrees.slice();
+    t.nextIndex = this.nextIndex;
+    t.currentRoot = this.currentRoot;
+    t.leaves = this.leaves.slice();
+    t.levels = this.levels.map((level) => level.slice());
+    t.ready = this.ready;
+    return t;
+  }
 }
 
 export function pathToCircomInput(path: PoseidonMerklePath) {

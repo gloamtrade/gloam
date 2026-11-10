@@ -23,6 +23,7 @@
  * first. Across processes the store decides: see `advance`.
  */
 import { buildPaymentReceipt, cleanReceiptLabel, proofContext, type PaymentReceiptPlan, type ReceiptProver, type syncTree } from "@gloamtrade/sdk";
+import { poolTreeParams, type PoolTree } from "./poolTree.js";
 import type { Hex } from "viem";
 import { guardTimeoutMs } from "./guardCall.js";
 import type { McpNetwork } from "./networks.js";
@@ -42,7 +43,8 @@ const SYNC_WAIT_MS = 1_500;
 export interface ReceiptContext {
   net: McpNetwork;
   client: Parameters<typeof syncTree>[0];
-  syncTree: typeof syncTree;
+  /** The pool's tree, for membership paths (kept per chain and pool by the server). */
+  syncTree: PoolTree;
   prover(): Promise<ReceiptProver>;
   notes: NoteStore;
   env: Env;
@@ -102,7 +104,7 @@ function receiptPlan(note: StoredNote, receipt: NoteReceipt): PaymentReceiptPlan
 async function pathAfterLanding(note: StoredNote, ctx: ReceiptContext) {
   for (let tries = 0; tries < SYNC_TRIES; tries++) {
     if (tries) await new Promise((r) => setTimeout(r, SYNC_WAIT_MS));
-    const tree = await ctx.syncTree(ctx.client, { pool: note.pool, fromBlock: ctx.net.deployBlock });
+    const tree = await ctx.syncTree(ctx.client, { ...poolTreeParams(ctx.net), pool: note.pool });
     const path = await tree.pathForCommitment(note.commitment);
     if (path) return path;
   }

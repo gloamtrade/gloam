@@ -15,8 +15,10 @@ import {
   parseTreeSnapshot,
   sweepChainFromClient,
   syncTree,
+  treeLogRange,
   SEALED_VAULT,
 } from "../dist/index.js";
+import { hex, poolChain } from "./poolChain.mjs";
 
 let checks = 0;
 function assert(cond, msg) {
@@ -27,57 +29,16 @@ function assert(cond, msg) {
   checks++;
 }
 
-const hex = (n) => "0x" + n.toString(16).padStart(64, "0");
-let nextC = 1;
-const c = () => hex(nextC++);
-
+/** The shared mock chain (raw pool logs, address-only reads). `truth()`: a fresh full rebuild, which must be the pool's root. */
 function chain() {
-  const logs = { Shielded: [], Transferred: [], SealedSwapped: [] };
-  const state = { head: 100n, known: new Set(), seen: new Set(), reads: [], rootReads: 0, knownAnswer: null };
-  const client = {
-    async getBlockNumber() {
-      return state.head;
-    },
-    async getLogs({ event, fromBlock, toBlock }) {
-      state.reads.push([event.name, fromBlock, toBlock]);
-      return logs[event.name].filter((l) => l.blockNumber >= fromBlock && l.blockNumber <= toBlock);
-    },
-    async readContract({ functionName, args }) {
-      if (functionName === "isKnownRoot") {
-        state.rootReads++;
-        if (state.knownAnswer) return state.knownAnswer(args[0]);
-        return state.known.has(args[0].toLowerCase());
-      }
-      if (functionName === "commitmentSeen") return state.seen.has(args[0].toLowerCase());
-      if (functionName === "isSpent") return false;
-      throw new Error(`unexpected ${functionName}`);
-    },
-    async getChainId() {
-      return 46630;
-    },
-  };
-  const shield = (bn, li, commitment = c()) => {
-    logs.Shielded.push({ args: { commitment, asset: "0x0000000000000000000000000000000000000001", amount: 5n, from: "0x0000000000000000000000000000000000000002" }, blockNumber: bn, logIndex: li, transactionHash: hex(1000 + li) });
-    return commitment;
-  };
-  const transfer = (bn, li) => {
-    const pair = [c(), c()];
-    logs.Transferred.push({ args: { newCommitments: pair }, blockNumber: bn, logIndex: li, transactionHash: hex(2000 + li) });
-    return pair;
-  };
-  const swap = (bn, li) => {
-    const pair = [c(), c()];
-    logs.SealedSwapped.push({ args: { newCommitmentOut: pair[0], newCommitmentChange: pair[1], assetOut: "0x0000000000000000000000000000000000000003" }, blockNumber: bn, logIndex: li });
-    return pair;
-  };
-  /** The root a full rebuild gives now; the pool "knows" it. */
+  const m = poolChain(SEALED_VAULT);
   const truth = async () => {
-    const t = await syncTree(client, { pool: SEALED_VAULT, fromBlock: 0n });
-    state.known.add(t.root.toLowerCase());
-    for (const l of t.leaves) state.seen.add(l.commitment.toLowerCase());
+    const t = await syncTree(m.client, { pool: SEALED_VAULT, fromBlock: 0n });
+    const root = await m.rootAt(m.state.head);
+    if (t.root !== root) throw new Error(`mock: a full rebuild (${t.root}) is not the pool's root (${root})`);
     return t;
   };
-  return { client, state, shield, transfer, swap, truth };
+  return { ...m, truth };
 }
 
 // ── 1. incremental: later syncs read only new blocks, and match a full rebuild ──
@@ -109,7 +70,7 @@ function chain() {
   m.state.reads = [];
   const second = await ts.sync();
   assert(second.root === want.root, "second sync matches a full rebuild");
-  assert(m.state.reads.length === 3 && m.state.reads.every(([, f, t]) => f === 97n && t === 150n), `tail read from 97 (overlap 4), got ${JSON.stringify(m.state.reads.map((r) => r.map(String)))}`);
+  assert(m.state.reads.length === 1 && m.state.reads.every(([f, t]) => f === 97n && t === 150n), `one tail read from 97 (overlap 4), got ${JSON.stringify(m.state.reads.map((r) => r.map(String)))}`);
   const p = await ts.pathForCommitment(late);
   assert(p && p.leafIndex === 7, "path for the newest leaf");
   assert(p.root === BigInt(want.root), "the path's root is the current root");
@@ -144,7 +105,7 @@ function chain() {
   const b = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, chunkSize: 1000n, store });
   const t = await b.sync();
   assert(t.root === want.root, "restart from the store matches a full rebuild");
-  assert(m.state.reads.every(([, f]) => f === 85n), "restart reads only from the stored block (minus the default overlap of 16)");
+  assert(m.state.reads.every(([f]) => f === 85n), "restart reads only from the stored block (minus the default overlap of 16)");
   assert(saved.toBlock === "200" && saved.leafCount === 11, "the store is updated");
 
   // A store that throws or holds junk: the sync goes on without it.
@@ -178,7 +139,7 @@ function chain() {
   m.state.reads = [];
   const good = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, chunkSize: 1000n, seed: async () => hosted });
   assert((await good.sync()).root === want.root, "a matching seed is used");
-  assert(m.state.reads.every(([, f]) => f === 35n), "only the blocks after the seed are read");
+  assert(m.state.reads.every(([f]) => f === 35n), "only the blocks after the seed are read");
 
   // A seed with a leaf left out: its root is not the pool's, so the chain is walked.
   const bad = { ...hosted, toBlock: "100", leafCount: 3, items: hosted.items.slice(1).map((r, i) => ({ ...r, i: i === 0 ? 0 : 1 })) };
@@ -188,7 +149,7 @@ function chain() {
   const t = await fallback.sync();
   assert(t.root === want.root, "a wrong seed is dropped and the chain walked");
   assert(t.leafCount === 4, "every leaf after the walk");
-  assert(m.state.reads.some(([, f]) => f === 0n), "the walk starts at fromBlock");
+  assert(m.state.reads.some(([f]) => f === 0n), "the walk starts at fromBlock");
   assert(Date.now() - t0 < 5_000, "the fallback does not hang");
 
   // A seed for another pool never parses.
@@ -199,33 +160,67 @@ function chain() {
   assert(parseTreeSnapshot({ ...hosted, items: [{ ...hosted.items[0], bn: "51" }] }, SEALED_VAULT) === null, "an item past toBlock is refused");
 }
 
-// ── 4. a chain walk whose root the pool does not know is an error, and the next sync starts over ──
+// ── 4. a chain walk that does not build the pool's root is an error, and the next sync starts over ──
 {
   const m = chain();
   m.shield(10n, 0);
   const want = await m.truth();
-  m.state.knownAnswer = () => false;
+  m.state.rootAnswer = () => hex(31337);
   const ts = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n });
   let threw = false;
   try {
     await ts.sync();
   } catch (e) {
-    threw = /not one the pool knows/.test(e.message);
+    threw = e.name === "TreeSyncError" && /does not match the pool's root/.test(e.message);
   }
-  assert(threw, "an unknown root after a chain walk throws");
+  assert(threw, "a root that is not the pool's after a chain walk throws");
   assert(ts.toBlock === null, "and the kept tree is dropped");
-  m.state.knownAnswer = null;
+  m.state.rootAnswer = null;
   assert((await ts.sync()).root === want.root, "the next sync rebuilds");
 
-  // A pool without isKnownRoot: taken as it is.
+  // The node no longer keeps that block's state: the pool is asked whether it knows the root at all.
+  m.state.rootAnswer = () => {
+    throw new Error("missing trie node 0xabc (path ) state is not available");
+  };
+  m.state.rootReads = 0;
+  const pruned = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, retryDelayMs: 1 });
+  assert((await pruned.sync()).root === want.root, "a known root is taken when the root at the block can't be read");
+  assert(m.state.rootReads === 2, `one currentRoot (not retried: pruned state) and one isKnownRoot, got ${m.state.rootReads}`);
+  m.state.knownAnswer = () => false;
+  let refused = false;
+  try {
+    await createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, retryDelayMs: 1 }).sync();
+  } catch (e) {
+    refused = /does not match the pool's root/.test(e.message);
+  }
+  assert(refused, "and an unknown one is refused");
+
+  // A pool with neither currentRoot nor isKnownRoot: taken as it is.
+  m.state.rootAnswer = () => {
+    throw new Error("execution reverted");
+  };
   m.state.knownAnswer = () => {
     throw new Error("execution reverted");
   };
   const noCheck = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n });
-  assert((await noCheck.sync()).root === want.root, "no isKnownRoot: the walked tree is used");
+  assert((await noCheck.sync()).root === want.root, "no root functions: the walked tree is used");
+  // An RPC that can't answer the root check at all: an error, not an unchecked tree.
+  m.state.rootAnswer = () => {
+    throw Object.assign(new Error("HTTP request failed. Status: 503"), { status: 503 });
+  };
+  m.state.knownAnswer = m.state.rootAnswer;
+  let down = false;
+  try {
+    await createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, retries: 1, retryDelayMs: 1 }).sync();
+  } catch (e) {
+    down = e.name === "TreeSyncError" && /could not read the pool's root/.test(e.message);
+  }
+  assert(down, "a root check the RPC can't answer throws");
+  m.state.rootAnswer = null;
   // verifyRoot: false never asks.
   m.state.rootReads = 0;
   m.state.knownAnswer = null;
+  m.state.rootAnswer = null;
   await createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, verifyRoot: false }).sync();
   assert(m.state.rootReads === 0, "verifyRoot: false skips the check");
 }
@@ -298,7 +293,7 @@ function chain() {
   const p = await ts.knownPath(mine);
   assert(p && p.leafIndex === 0, "knownPath gives the stored leaf's path");
   assert(m.state.reads.length === 0 && m.state.rootReads === 0, "a confirmed stored copy: no log reads, no root check");
-  assert(m.state.known.has("0x" + p.root.toString(16).padStart(64, "0")), "at a root the pool knows (an older one)");
+  assert((await m.client.readContract({ functionName: "isKnownRoot", args: [hex(p.root)] })) === true, "at a root the pool knows (an older one)");
   assert((await ts.knownPath(hex(777777))) === null, "a leaf not in the copy: null");
 
   // A stored copy without a confirmed root (or one that does not match its items) is checked once.
@@ -328,7 +323,7 @@ function chain() {
   assert((await other.pathForCommitment(leaf1))?.leafIndex === 1, "and pathForCommitment walks the chain to the right index");
 
   // atBlock: read up to the receipt's block without asking for the head.
-  const hinted = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n });
+  const hinted = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, retryDelayMs: 1 });
   await hinted.sync();
   m.state.head = 400n;
   const [pay] = m.transfer(380n, 0);
@@ -391,7 +386,7 @@ function chain() {
   m.state.reads = [];
   const p = await sc.pathForCommitment(payment);
   assert(p && p.leafIndex === 1, "the path is found once the node catches up");
-  assert(m.state.reads.every(([, f]) => f >= 85n), "the shared tree reads only the tail");
+  assert(m.state.reads.every(([f]) => f >= 85n), "the shared tree reads only the tail");
   // A commitment the pool has never seen: null, no waiting.
   const t0 = Date.now();
   assert((await sc.pathForCommitment(hex(424242))) === null, "an unknown note is null");
@@ -410,6 +405,338 @@ function chain() {
   m.client.getBlockNumber = async () => (heads++, realHead());
   const pp = await sc.pathForCommitment(paid);
   assert(pp && pp.leafIndex === 3 && heads === 0, "the receipt's block is the hint");
+}
+
+// ── 8. two incremental syncs give the same tree as one full sync; a view handed out never changes ──
+{
+  const m = chain();
+  const mine = [];
+  let bn = 0n;
+  for (let i = 0; i < 60; i++) {
+    bn += BigInt(1 + ((i * 37) % 50));
+    const k = i % 5;
+    if (k === 0 || k === 3) mine.push(m.shield(bn, i % 3));
+    else if (k === 1) mine.push(...m.transfer(bn, 0));
+    else if (k === 2) mine.push(...m.swap(bn, 1));
+    else m.unshield(bn, 2);
+  }
+  const last = bn;
+  const mid = last / 2n;
+  const params = { pool: SEALED_VAULT, fromBlock: 0n, chunkSize: 97n, concurrency: 3 };
+
+  m.state.head = last + 5n;
+  const full = await syncTree(m.client, params);
+  assert(full.root === (await m.rootAt(m.state.head)), "a full sync builds the pool's root");
+  const ranges = Math.ceil(Number(m.state.head + 1n) / 97);
+  assert(m.state.reads.length === ranges, `one eth_getLogs per range for all three events (${ranges}), got ${m.state.reads.length}`);
+
+  m.state.head = mid;
+  m.state.reads = [];
+  const ts = createTreeSync(m.client, params);
+  const first = await ts.sync();
+  const firstRoot = first.root;
+  const firstCount = first.leafCount;
+  assert(firstRoot === (await m.rootAt(mid)), "step one: the pool's root at its block");
+  const early = first.leaves[1].commitment;
+
+  m.state.head = last + 5n;
+  m.state.reads = [];
+  const second = await ts.sync();
+  assert(second.root === full.root, "step two: the same root as one full sync");
+  assert(second.leafCount === full.leafCount && second.leafCount === mine.length, `the same leaves (${second.leafCount} / ${full.leafCount} / ${mine.length})`);
+  assert(second.leaves.every((l, i) => l.commitment === full.leaves[i].commitment), "in the same order");
+  assert(m.state.reads.every(([f]) => f >= mid + 1n - 16n), "step two read only the blocks since step one (less the overlap)");
+  assert(first.root === firstRoot && first.leafCount === firstCount && first.tree.nextIndex === firstCount, "the first view did not change");
+  const oldPath = await first.pathForCommitment(early);
+  assert(oldPath && oldPath.root === BigInt(firstRoot), "a path from the first view is at the first root");
+  assert((await second.pathForCommitment(early)).root === BigInt(full.root), "and from the second at the new one");
+}
+
+// ── 9. an RPC error is an error, never an empty answer; transient ones are retried, wide ranges split ──
+{
+  const m = chain();
+  m.shield(10n, 0);
+  m.transfer(500n, 0);
+  m.swap(900n, 0);
+  m.state.head = 1000n;
+  const want = await m.truth();
+  const fast = { pool: SEALED_VAULT, fromBlock: 0n, chunkSize: 100n, retries: 2, retryDelayMs: 1 };
+
+  // A range the node keeps failing: syncTree throws, naming the chain and the blocks.
+  let tries = 0;
+  m.state.onGetLogs = (args) => {
+    if (args.fromBlock <= 500n && args.toBlock >= 500n) {
+      tries++;
+      throw Object.assign(new Error("HTTP request failed. Status: 502"), { status: 502 });
+    }
+  };
+  let err = null;
+  try {
+    await syncTree(m.client, fast);
+  } catch (e) {
+    err = e;
+  }
+  assert(err && err.name === "TreeSyncError", `a failing range throws a TreeSyncError, got ${err}`);
+  assert(/chain 46630/.test(err.message) && /blocks 500-599/.test(err.message) && /3 tries/.test(err.message), `the message names chain, blocks and tries: ${err.message}`);
+  assert(err.fromBlock === 500n && err.toBlock === 599n && err.chainId === 46630, "and carries them");
+  assert(tries === 3, `tried 1 + 2 more times, got ${tries}`);
+
+  // createTreeSync: the failed sync throws and keeps the last good block; the next one finishes.
+  m.state.onGetLogs = null;
+  m.state.head = 400n;
+  const ts = createTreeSync(m.client, fast);
+  await ts.sync();
+  assert(ts.toBlock === 400n, "synced to 400");
+  m.state.head = 1000n;
+  m.state.onGetLogs = (args) => {
+    if (args.toBlock >= 500n) throw new Error("internal error");
+  };
+  let failed = false;
+  try {
+    await ts.sync();
+  } catch (e) {
+    failed = e.name === "TreeSyncError";
+  }
+  assert(failed, "the sync over a failing node throws");
+  assert(ts.toBlock === 400n, `and does not move past what it read, got ${ts.toBlock}`);
+  m.state.onGetLogs = null;
+  assert((await ts.sync()).root === want.root, "the next sync finishes the job");
+
+  // A rate limit, twice: waited out, and the answer is complete.
+  let limited = 2;
+  m.state.onGetLogs = () => {
+    if (limited-- > 0) throw Object.assign(new Error("RPC Request failed."), { code: 429, details: "Too Many Requests" });
+  };
+  assert((await syncTree(m.client, fast)).root === want.root, "a 429 is retried");
+
+  // A request the node will never take (bad params): not retried.
+  tries = 0;
+  m.state.onGetLogs = () => {
+    tries++;
+    throw Object.assign(new Error("Invalid parameters were provided to the RPC method."), { code: -32602, details: "invalid argument 0: hex string of odd length" });
+  };
+  try {
+    await syncTree(m.client, fast);
+  } catch {
+    // expected
+  }
+  assert(tries === 1, `a bad request is sent once, got ${tries}`);
+
+  // A range the node calls too wide: split to the size it names, kept for the rest of the read.
+  m.state.onGetLogs = (args) => {
+    const span = args.toBlock - args.fromBlock + 1n;
+    if (span > 150n) throw Object.assign(new Error("RPC error"), { code: -32602, details: `query spans ${span} blocks (${args.fromBlock} to ${args.toBlock}), but only 150 are allowed for this request; narrow the block range` });
+  };
+  m.state.reads = [];
+  const split = await syncTree(m.client, { ...fast, chunkSize: 600n, concurrency: 2 });
+  assert(split.root === want.root, "a refused range is split and read");
+  const after = m.state.reads.filter(([f, t]) => t - f + 1n <= 150n);
+  assert(after.length >= 7 && m.state.reads.filter(([f, t]) => t - f + 1n > 150n).length <= 2, `the named size is used from then on (${m.state.reads.map(([f, t]) => `${f}-${t}`).join(" ")})`);
+  // Tempo's wording, no size named: halved until it fits.
+  m.state.onGetLogs = (args) => {
+    if (args.toBlock - args.fromBlock + 1n > 300n) throw Object.assign(new Error("RPC error"), { code: -32602, details: "query exceeds max block range" });
+  };
+  assert((await syncTree(m.client, { ...fast, chunkSize: 1001n })).root === want.root, "halved when no size is named");
+  m.state.onGetLogs = null;
+
+  // A node a block behind: "beyond current head" is waited out.
+  let behind = 1;
+  m.state.onGetLogs = () => {
+    if (behind-- > 0) throw new Error("block range extends beyond current head block");
+  };
+  assert((await syncTree(m.client, fast)).root === want.root, "a node behind is waited for");
+  m.state.onGetLogs = null;
+}
+
+// ── 10. the range per chain: Robinhood Chain and Elysium take wide ranges, others the default ──
+{
+  assert(treeLogRange(4663) === 10_000_000n && treeLogRange(46630) === 10_000_000n, "Robinhood Chain: 10,000,000 blocks per read");
+  assert(treeLogRange(99901) === 1_000_000n && treeLogRange(99801) === 1_000_000n, "Elysium: 1,000,000");
+  assert(treeLogRange(4217) === 100_000n && treeLogRange(8453) === 50_000n && treeLogRange(1) === 10_000n, "Tempo, Base, Ethereum");
+  assert(treeLogRange(12345) === 40_000n && treeLogRange(undefined) === 40_000n, "anything else: 40,000");
+  for (const [chainId, head, reads] of [
+    [99901, 2_500_000n, 3],
+    [4663, 25_000_000n, 3],
+    [777, 100_000n, 3],
+  ]) {
+    const m = poolChain(SEALED_VAULT, { chainId, head });
+    m.shield(head - 5n, 0);
+    const t = await syncTree(m.client, { pool: SEALED_VAULT, fromBlock: 0n });
+    assert(t.leafCount === 1, `chain ${chainId}: the leaf`);
+    assert(m.state.reads.length === reads, `chain ${chainId}: ${reads} reads from block 0 to ${head}, got ${m.state.reads.length}`);
+  }
+}
+
+// ── 11. a reorg that takes a held leaf out is caught, even with nothing new after it ──
+{
+  const m = chain();
+  m.shield(10n, 0);
+  const late = m.shield(95n, 0);
+  m.state.head = 100n;
+  await m.truth();
+  const ts = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n });
+  assert((await ts.sync()).leafCount === 2, "two leaves before the reorg");
+  m.drop(late);
+  m.state.head = 101n;
+  const want = await m.truth();
+  const t = await ts.sync();
+  assert(t.root === want.root && t.leafCount === 1, "the leaf the chain dropped is dropped");
+  assert((await ts.pathForCommitment(late)) === null, "and has no path");
+  // The same deposit mined again in a later block: once, at its new place.
+  m.shield(101n, 0, late);
+  m.state.head = 102n;
+  const again = await m.truth();
+  const t2 = await ts.sync();
+  assert(t2.root === again.root && t2.leafCount === 2, "taken again once");
+  assert((await ts.pathForCommitment(late))?.leafIndex === 1, "with its path");
+}
+
+// ── 12. a node that leaves a log out is caught by the root check: an error, not a wrong tree ──
+{
+  const m = chain();
+  const gone = m.shield(10n, 0);
+  m.transfer(20n, 0);
+  await m.truth();
+  m.state.onGetLogs = (_args, answer) => answer.filter((l) => !l.topics.includes(gone));
+  const ts = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n });
+  let caught = false;
+  try {
+    await ts.sync();
+  } catch (e) {
+    caught = e.name === "TreeSyncError" && /does not match the pool's root/.test(e.message);
+  }
+  assert(caught, "a tree with a log left out is refused");
+  assert(ts.toBlock === null, "and not kept");
+  m.state.onGetLogs = null;
+  assert((await ts.sync()).leafCount === 3, "an honest answer then syncs");
+
+  // A node with the newest block but not yet its logs: nothing looks changed, the root check reads again.
+  m.state.head = 120n;
+  m.shield(118n, 0);
+  const want = await m.truth();
+  let lagging = 1;
+  m.state.onGetLogs = (_args, answer) => (lagging-- > 0 ? answer.filter((l) => l.blockNumber < 118n) : null);
+  const t = await ts.sync();
+  assert(t.root === want.root && t.leafCount === 4, `a sync that read a lagging node still ends at the pool's root (${t.leafCount} leaves)`);
+  m.state.onGetLogs = null;
+}
+
+// ── 13. a stored copy the pool confirmed, then a deep reorg while the process was down: walked again, not refused ──
+{
+  const m = chain();
+  m.shield(10n, 0);
+  const orphan = m.shield(20n, 0);
+  let saved = null;
+  const store = { load: async () => saved && JSON.parse(JSON.stringify(saved)), save: async (x) => void (saved = x) };
+  await createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, store }).sync();
+  assert(saved.root && saved.leafCount === 2, "saved with its confirmed root");
+  m.drop(orphan);
+  m.shield(60n, 0);
+  m.state.head = 200n;
+  const want = await m.truth();
+  m.state.reads = [];
+  const ts = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, store });
+  const t = await ts.sync();
+  assert(t.root === want.root && t.leafCount === 2, "the chain is walked and the tree matches");
+  assert(m.state.reads.some(([f]) => f === 0n), "from the deploy block");
+  assert(saved.leafCount === 2 && saved.items.every((r) => r.c[0] !== orphan), "and the store no longer holds the orphan");
+
+  // logRange: the chain's default, then what the RPC named.
+  const r = poolChain(SEALED_VAULT, { chainId: 8453, head: 60_000n });
+  const narrow = createTreeSync(r.client, { pool: SEALED_VAULT, fromBlock: 0n, retryDelayMs: 1 });
+  assert(narrow.logRange === 50_000n, "Base starts at 50,000");
+  r.state.onGetLogs = (args) => {
+    if (args.toBlock - args.fromBlock + 1n > 200n) throw Object.assign(new Error("RPC error"), { code: -32614, details: "eth_getLogs is limited to a 200 range" });
+  };
+  r.shield(59_950n, 0);
+  await narrow.sync();
+  assert(narrow.logRange === 200n, `then the 200 the RPC named, got ${narrow.logRange}`);
+}
+
+// ── 14. a root check that could not run is run on the next sync; a node behind on a re-read drops nothing ──
+{
+  const m = chain();
+  m.shield(10n, 0);
+  m.state.head = 150n;
+  const ts = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, retries: 0 });
+  await ts.sync();
+  m.shield(155n, 0);
+  m.state.head = 160n;
+  const want = await m.truth();
+  const down = () => {
+    throw Object.assign(new Error("HTTP request failed. Status: 503"), { status: 503 });
+  };
+  m.state.rootAnswer = down;
+  m.state.knownAnswer = down;
+  let failed = false;
+  try {
+    await ts.sync();
+  } catch (e) {
+    failed = /could not read the pool's root/.test(e.message);
+  }
+  assert(failed, "the sync whose root check could not run throws");
+  m.state.rootAnswer = null;
+  m.state.knownAnswer = null;
+  m.state.rootReads = 0;
+  const t = await ts.sync();
+  assert(m.state.rootReads === 1 && t.root === want.root, "the next one checks the root before handing the tree out, though no block is new");
+
+  // The head this node gives is behind the blocks already read: the leaves past it stay.
+  const realHead = m.client.getBlockNumber;
+  m.client.getBlockNumber = async () => 152n;
+  const p = await ts.pathForCommitment(hex(424242));
+  assert(p === null && ts.toBlock === 160n, "an unknown leaf, nothing dropped");
+  assert((await ts.sync()).leafCount === want.leafCount, "the leaf at 155 is still there");
+  m.client.getBlockNumber = realHead;
+}
+
+// ── 15. a leaf list read further than this node has got: only what the node can confirm is kept ──
+{
+  // A node behind the one gloam.trade read from: the list is the same chain, just ahead.
+  const m = chain();
+  const early = m.shield(10n, 0);
+  const late = m.shield(140n, 0);
+  m.state.head = 150n;
+  const ahead = await m.truth();
+  const list = {
+    v: 1,
+    pool: SEALED_VAULT,
+    deployBlock: "0",
+    toBlock: "150",
+    leafCount: 2,
+    items: [
+      { k: "s", c: [early], bn: "10", li: 0 },
+      { k: "s", c: [late], bn: "140", li: 0 },
+    ],
+  };
+  m.state.head = 120n;
+  const ts = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, seed: async () => list, retryDelayMs: 1 });
+  const t = await ts.sync();
+  assert(t.leafCount === 1 && t.root === (await m.rootAt(120n)) && ts.toBlock === 120n, `only the leaves up to this node's head (${t.leafCount}, to ${ts.toBlock})`);
+  m.state.head = 150n;
+  assert((await ts.sync()).root === ahead.root, "and the rest once it catches up");
+
+  // A fork of the chain (a test fork): the list's later blocks never happened here, and the fork has its own.
+  const f = chain();
+  const shared = f.shield(10n, 0);
+  f.state.head = 100n;
+  const mine = f.shield(101n, 0); // made on the fork only
+  f.state.head = 102n;
+  const forkList = {
+    v: 1,
+    pool: SEALED_VAULT,
+    deployBlock: "0",
+    toBlock: "180",
+    leafCount: 2,
+    items: [
+      { k: "s", c: [shared], bn: "10", li: 0 },
+      { k: "s", c: [hex(777)], bn: "160", li: 0 }, // on the live chain only
+    ],
+  };
+  const onFork = createTreeSync(f.client, { pool: SEALED_VAULT, fromBlock: 0n, seed: async () => forkList, retryDelayMs: 1 });
+  const p = await onFork.pathForCommitment(mine);
+  assert(p && p.leafIndex === 1, "the fork's own deposit is found");
+  assert((await onFork.sync()).root === (await f.rootAt(102n)), "and the tree is the fork's");
 }
 
 console.log(`treeSync.selftest: ok (${checks} assertions)`);
