@@ -3,13 +3,14 @@
   "network": "Ethereum",
   "chainId": 1,
   "testnet": false,
-  "note": "Ethereum mainnet: ShieldPoolPayments on the ceremony's final keys, with the beta deposit limits and the 0.25% cash-out fee. Deployed with script/DeployEthereumMainnet.s.sol (DEPLOY-ETHEREUM.md) and read back by ethereum-mainnet-after-deploy.sh. USDT returns nothing from transfer and approve; the vault pulls and pays it with calls that accept no return data.",
+  "note": "Ethereum mainnet: ShieldPoolPayments on the ceremony's final keys, with deposit limits and a cash-out fee (0.25% at deploy, 0.5% since 2026-11-03). Deployed with script/DeployEthereumMainnet.s.sol (DEPLOY-ETHEREUM.md) and read back by ethereum-mainnet-after-deploy.sh. USDT returns nothing from transfer and approve; the vault pulls and pays it with calls that accept no return data.",
   "ceremony": "final (13 contributors, drand 6561386, release ceremony-final)",
   "deployer": "0x891E74a11abC5D0eC2EE855B2BD521fF9D18F411",
   "owner": "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8",
   "ownershipAcceptedTx": "0xf3053a700cc44ea465424817af0ec056dbd38ce6f36ab9f66abc6ddc36f49d7d",
   "feeRecipient": "0xB3900ac9350903218e4c7597bAb0f008F01B30B8",
-  "withdrawFeeBps": 25,
+  "withdrawFeeBps": 50,
+  "withdrawFeeNote": "25 bps at deploy; 50 bps since 2026-11-03, through the 3-day timelock.",
   "relayer": "0xb1E994586E62994648a0b866BF33F2EDd942512e",
   "rpc": "https://ethereum-rpc.publicnode.com",
   "logRpc": "https://rpc.mevblocker.io",
@@ -31,42 +32,43 @@
     "GloamPayMemoDeployBlock": 26276234,
     "GloamPayMemoDeployTx": "0x0f49bff8d1855726f21a2dbd6c5fa49089081f70460f3adfdf59d733c2e3db58"
   },
+  "limitsNote": "Live values, read back on chain 2026-11-10 (depositLimit(asset)). Launch limits were 500 / 25,000 per stablecoin and 0.2 / 10 ETH; every limit was raised 100x through the 3-day timelock on 2026-11-01 (script/RaiseDepositLimits.s.sol).",
   "assets": {
     "USDC": {
       "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       "decimals": 6,
-      "perDeposit": "500000000",
-      "total": "25000000000"
+      "perDeposit": "50000000000",
+      "total": "2500000000000"
     },
     "USDT": {
       "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
       "decimals": 6,
-      "perDeposit": "500000000",
-      "total": "25000000000"
+      "perDeposit": "50000000000",
+      "total": "2500000000000"
     },
     "USDG": {
       "address": "0xe343167631d89B6Ffc58B88d6b7fB0228795491D",
       "decimals": 6,
-      "perDeposit": "500000000",
-      "total": "25000000000"
+      "perDeposit": "50000000000",
+      "total": "2500000000000"
     },
     "PYUSD": {
       "address": "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8",
       "decimals": 6,
-      "perDeposit": "500000000",
-      "total": "25000000000"
+      "perDeposit": "50000000000",
+      "total": "2500000000000"
     },
     "EURC": {
       "address": "0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c",
       "decimals": 6,
-      "perDeposit": "500000000",
-      "total": "25000000000"
+      "perDeposit": "50000000000",
+      "total": "2500000000000"
     },
     "ETH": {
       "address": "0x0000000000000000000000000000000000000000",
       "decimals": 18,
-      "perDeposit": "200000000000000000",
-      "total": "10000000000000000000"
+      "perDeposit": "20000000000000000000",
+      "total": "1000000000000000000000"
     }
   }
 }

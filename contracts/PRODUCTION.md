@@ -2,8 +2,9 @@
 
 Testnet Poseidon pools are live with **dev ceremony** keys.
 The mainnet deploy uses the multi-party ceremony's final keys and checks them
-on chain. Mainnet launches Wednesday 21 October 2026, 13:00 UTC, as a beta with
-deposit limits, on Robinhood Chain (`4663`) and Tempo (`4217`).
+on chain. Mainnet launched Wednesday 21 October 2026, 13:00 UTC, with deposit
+limits, on Robinhood Chain (`4663`) and Tempo (`4217`). Base (`8453`) and Ethereum
+(`1`) followed on 26 October 2026 and Elysium (`99901`) on 9 November 2026.
 
 ## 1. Ceremony
 
@@ -31,11 +32,13 @@ deposit limits, on Robinhood Chain (`4663`) and Tempo (`4217`).
       Chain has no special cap. USDG on Robinhood Chain is `0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168`
 - [x] The pool can't take a plain `shield()` (deposits need `shieldBound()`), and
       `endSetup()` reverts until both verifiers are set and deposit limits are on
-- [x] Beta deposit limits on: each listed asset gets a per-deposit and a
+- [x] Deposit limits on: each listed asset gets a per-deposit and a
       total limit; an unlisted asset cannot be deposited. Robinhood Chain lists
       USDG and GLOAM (`0xDcD885F5c60b3aD49F6D58718696417314e8724d`, 18 decimals,
       25,000 per deposit, 250,000 total) so holders can vote privately; Tempo lists
-      USDC.e, pathUSD, USDT0 and OUSD. Each stablecoin: 500 per deposit, 25,000 total
+      USDC.e, pathUSD, USDT0 and OUSD. Each stablecoin: 500 per deposit, 25,000 total at
+      launch, raised 100x through the timelock on 1 November 2026 on all four chains.
+      Robinhood Chain has since listed native ETH and 30 more tokens (deployments/mainnet.json)
 - [x] Emergency path: `lowerDepositLimit(asset, 0, 0)` closes deposits at once
       (no timelock); withdrawals and private transfers keep working. Raising a
       limit or listing an asset takes the 3-day timelock
@@ -61,7 +64,7 @@ deposit limits, on Robinhood Chain (`4663`) and Tempo (`4217`).
       `GLOAM_RPC_URL_4217` to a private RPC for the server (the RPC env is still to do; the public
       RPCs are the fallback)
 
-## 2b. Base (Base Sepolia live, Base mainnet not deployed)
+## 2b. Base (Base Sepolia and Base mainnet live)
 
 - [x] `script/DeployBaseSepolia.s.sol` (`84532`) and `script/DeployBaseMainnet.s.sol` (`8453`) on
       the shared `script/MainnetDeploy.sol`, native ETH allowed, final keys on both (Base Sepolia
@@ -75,11 +78,12 @@ deposit limits, on Robinhood Chain (`4663`) and Tempo (`4217`).
 - [x] Base Sepolia deployed (24 Oct 2026, block `49802958`) and ownership accepted; record in
       [`deployments/base-sepolia.json`](./deployments/base-sepolia.json)
 - [ ] Base Sepolia relayer funded and tested end to end in the app
-- [ ] Base mainnet deployed (only after Base Sepolia), pool and block in `MAINNET_POOLS[8453]`
+- [x] Base mainnet deployed (26 Oct 2026, block `53109632`), ownership accepted, pool and block in
+      `MAINNET_POOLS[8453]`; record in [`deployments/base-mainnet.json`](./deployments/base-mainnet.json)
 
 Runbook: [`DEPLOY-BASE.md`](../DEPLOY-BASE.md).
 
-## 2c. Ethereum (Ethereum Sepolia live, Ethereum mainnet not deployed)
+## 2c. Ethereum (Ethereum Sepolia and Ethereum mainnet live)
 
 - [x] `script/DeployEthereumMainnet.s.sol` (`1`) on the shared `script/MainnetDeploy.sol`, native
       ETH allowed, final keys; its testnet is Ethereum Sepolia (`script/DeployEthereumSepolia.s.sol`,
@@ -92,9 +96,20 @@ Runbook: [`DEPLOY-BASE.md`](../DEPLOY-BASE.md).
 - [x] Ethereum Sepolia deployed (25 Oct 2026, vault `0x465EbfcdE1e384C7B1e8388E1aFEA95438c7A0ef` at
       block `11992914`, memo board `0x8699D015087dE6D25d55d5ceB63b34b9d773f135`) and ownership
       accepted; record in [`deployments/ethereum-sepolia.json`](./deployments/ethereum-sepolia.json)
-- [ ] Ethereum deployed, ownership accepted, relayer funded, pool and block in `MAINNET_POOLS[1]`
+- [x] Ethereum deployed (26 Oct 2026, block `26276183`), ownership accepted, relayer funded, pool and
+      block in `MAINNET_POOLS[1]`; record in [`deployments/ethereum-mainnet.json`](./deployments/ethereum-mainnet.json)
 
 Runbook: [`DEPLOY-ETHEREUM.md`](../DEPLOY-ETHEREUM.md).
+
+## 2d. Elysium (mainnet live)
+
+- [x] `script/DeployElysiumMainnet.s.sol` (`99901`) on `MainnetDeploy._deployMainnetGuarded`: the same
+      vault, final keys, born owned by a `VaultOwnerGuard` so no proof checker can be replaced
+- [x] Deployed 9 Nov 2026 (vault `0x89d3042390204f57b8b4F8949D3c2203E4002164` at block `3248495`,
+      guard `0x268D7CAd645282D1e77461b5B2dd997bd54eFAf5`, controller accepted); USDC only at 500 / 25,000,
+      0.5% cash-out fee; record in [`deployments/elysium-mainnet.json`](./deployments/elysium-mainnet.json)
+
+Runbook: [`DEPLOY-ELYSIUM.md`](../DEPLOY-ELYSIUM.md).
 
 ## 3. Review
 
@@ -106,7 +121,8 @@ Runbook: [`DEPLOY-ETHEREUM.md`](../DEPLOY-ETHEREUM.md).
 - [x] Fix critical/high findings from the internal review
 - [ ] Threat model sign-off (anonymity set, owner keys, note custody)
 - [ ] Outside review of `src/VaultOwnerGuard.sol`, then the handover on all four
-      chains (the owner guard section of [`DEPLOY.md`](../DEPLOY.md)). It is one-way
+      chains (the owner guard section of [`DEPLOY.md`](../DEPLOY.md)). It is one-way.
+      The Elysium vault was born guarded on 9 Nov 2026, before that review
 
 ## 4. Ops
 
@@ -117,7 +133,8 @@ Runbook: [`DEPLOY-ETHEREUM.md`](../DEPLOY-ETHEREUM.md).
 ## Explicit non-claims
 
 - No full external audit: Kann Audits reviewed the vault contracts only (report, 1 November 2026). The swap routers, circuits, app and relay were not part of it
-- Mainnet is beta software: deposit limits on, one owner wallet until the multisig
+- Mainnet runs with deposit limits on and one owner wallet until the multisig (on Elysium the
+  wallet is the guard's controller)
 - Until the owner guard holds a vault, its owner can replace a proof checker through
   the 3-day timelock: read `owner()`. After that a proof checker cannot be patched,
   only left behind for a new vault

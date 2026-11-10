@@ -1,5 +1,7 @@
 # Contract audit notes (Phase 1)
 
+> **Historical (July 2026).** These notes cover the Phase-1 keccak `ShieldPool` (`0x2BD9…`, superseded). They do not describe the live vaults: for those see [`audit/REMEDIATION.md`](./audit/REMEDIATION.md), [`PRODUCTION.md`](./PRODUCTION.md) and the Kann Audits report (gloam.trade/security). The "Owner emergency withdraw" line below was later removed from source (2026-09-29); no live vault has it.
+
 Date: 2026-07-14 · Scope: `ShieldPool` + `IncrementalMerkleTree` · Not a formal third-party audit.
 
 ## Intentional limitations (Phase 2)

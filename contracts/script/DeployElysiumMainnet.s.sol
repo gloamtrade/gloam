@@ -28,6 +28,10 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  *      0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4 and this script's pool at
  *      0x39e28cde55cab798874746ac52cb4b5cc99a0194, the same as on the other chains.
  *      The guard is created after the pool, so it does not move the pool.
+ *      The 9 November 2026 deploy used its own deployer (0xec9993765e249e8e9DC677B7BCB61F78b31c6b60),
+ *      so it landed elsewhere: PoseidonT3 0x62c435CE6886fa91e3b0e91500c6dC9219723457, vault
+ *      0x89d3042390204f57b8b4F8949D3c2203E4002164, guard 0x268D7CAd645282D1e77461b5B2dd997bd54eFAf5
+ *      (deployments/elysium-mainnet.json).
  *
  *   source elysium-mainnet-env.sh       # sets everything below from four values, reads the key hidden
  *

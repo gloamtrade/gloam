@@ -85,6 +85,11 @@ interface IERC20Meta {
  * that way): native ETH (address(0)) on Robinhood Chain, and address(0) on
  * Tempo, which has no native coin.
  *
+ * Since then (3 Nov 2026) QueueRobinhoodAssets listed native ETH, AI and ORBIO on
+ * Robinhood Chain at 11 / 110 ETH, 400,000 / 4,000,000 AI and 1,000,000 /
+ * 10,000,000 ORBIO. They are not in this script's queue (queued 30 Oct), so after
+ * execute() those three keep their limits while the other 31 have none.
+ *
  * Lowering a limit later stays instant (lowerDepositLimit), e.g. to (0, 0) in
  * an incident; raising again goes through this timelock.
  *
