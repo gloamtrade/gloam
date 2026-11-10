@@ -2,3 +2,23 @@
 */renders
 */snapshots
 */.hyperframes
+
+# Working files each film makes locally: scratch renders, audio builds, raw footage
+*/work/
+*/audio-build/
+*/footage/
+*/assets/footage/
+
+# Raw media (renders and masters are shared outside the repo)
+*.mov
+*.wav
+
+# Python helpers and their environments
+__pycache__/
+.venv/
+venv/
+*-venv/
+*_venv/
+
+# Dependencies at any depth
+node_modules/
