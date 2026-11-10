@@ -57,11 +57,14 @@ test("networks: older testnets always; a mainnet or Base Sepolia only once the S
   const ethLive = mainnetPoolFor(1) !== null;
   const baseTestLive = baseSepoliaPool() !== null;
   const sepoliaLive = ethereumSepoliaPool() !== null;
-  assert.equal(MCP_MAINNETS.length, Number(rhLive) + Number(tempoLive) + Number(baseLive) + Number(ethLive));
+  // Elysium (both networks) is checked in test-elysium.mts; here it only counts.
+  const elysiumLive = NETWORK_KEYS.includes("elysium-mainnet");
+  const elysiumTestLive = NETWORK_KEYS.includes("elysium");
+  assert.equal(MCP_MAINNETS.length, Number(rhLive) + Number(tempoLive) + Number(baseLive) + Number(ethLive) + Number(elysiumLive));
   const firstTest = NETWORK_KEYS.indexOf("robinhood");
   assert.deepEqual(
     NETWORK_KEYS.slice(firstTest),
-    ["robinhood", "tempo", ...(baseTestLive ? ["base"] : []), ...(sepoliaLive ? ["ethereum"] : [])],
+    ["robinhood", "tempo", ...(baseTestLive ? ["base"] : []), ...(sepoliaLive ? ["ethereum"] : []), ...(elysiumTestLive ? ["elysium"] : [])],
     "testnets last"
   );
   assert.equal(NETWORK_KEYS.includes("robinhood-mainnet"), rhLive);
@@ -75,7 +78,8 @@ test("networks: older testnets always; a mainnet or Base Sepolia only once the S
     const older = n.family === "robinhood" || n.family === "tempo";
     assert.equal(n.ceremony, n.testnet && older ? "dev" : "production", `${n.key} proves with the right keys`);
     if (!n.testnet) {
-      assert.equal(n.nativeShield, n.family !== "tempo", `${n.key}: native deposits everywhere but Tempo`);
+      // Elysium opened with USDC only; HYPE joins once its deposit limit lands through the guard.
+      assert.equal(n.nativeShield, n.family !== "tempo" && n.family !== "elysium", `${n.key}: native deposits everywhere but Tempo and Elysium`);
       assert.notEqual(n.defaultAsset, "0x0000000000000000000000000000000000000000");
     }
   }

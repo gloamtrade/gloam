@@ -13,9 +13,9 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { keccak256 } from "viem";
 
-// Elysium: the empty config as shipped, then again in a child with placeholder
+// Elysium: the config as committed, then again in a child with placeholder
 // values put in before the SDK loads (the same way test/elysium.selftest does).
-const MODE = process.env.GLOAM_SELFTEST_SHORTLINK ?? "empty";
+const MODE = process.env.GLOAM_SELFTEST_SHORTLINK ?? "committed";
 const ELY = { chainId: 99901, pool: "0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194", usdc: "0x00000000000000000000000000000000000E1a5c" };
 const ELY_TEST = { chainId: 99801, pool: "0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194", usdc: "0x7D29d8047B905000459c0E80c34a26CeedcB47b2" };
 const elysium = await import("../dist/elysium.js");
@@ -143,38 +143,47 @@ assert.equal(SHORT_LINK_WHERE.length, 46, "44 places, then Elysium mainnet's USD
   };
   const link45 = withId(45);
   const link46 = withId(46);
-  if (MODE === "empty") {
-    assert.equal(elysium.elysiumMainnetConfig(), null, "Elysium's values are not in");
-    assert.equal(elysium.elysiumTestnetConfig(), null, "Elysium testnet's pool is not in");
-    const reserved = { chainId: 0, pool: "0x0000000000000000000000000000000000000000", asset: "0x0000000000000000000000000000000000000000" };
+  // As committed, Elysium mainnet's values are in and its testnet's pool is not, so each id is
+  // checked against whatever src/elysium.ts holds; the "filled" child puts placeholders in both.
+  const ely = elysium.elysiumMainnetConfig();
+  const elyTest = elysium.elysiumTestnetConfig();
+  const reserved = { chainId: 0, pool: "0x0000000000000000000000000000000000000000", asset: "0x0000000000000000000000000000000000000000" };
+  if (ely) {
+    const w = SHORT_LINK_WHERE[44];
+    assert.equal(w.chainId, ely.chainId, "id 45 is Elysium");
+    assert.equal(w.pool, ely.pool);
+    assert.equal(w.asset.toLowerCase(), ely.usdc.toLowerCase(), "id 45 is Elysium's USDC");
+    const back = readShortClaim(link45);
+    assert.equal(back.chainId, ely.chainId);
+    assert.equal(back.asset.toLowerCase(), ely.usdc.toLowerCase(), "id 45 reads as Elysium's USDC");
+    assert.ok(gloamNetworks().some((x) => x.key === "elysium-mainnet"), "Elysium was in the round trips above");
+    if (MODE === "filled") assert.equal(ely.pool, ELY.pool, "the placeholder values were used");
+    n += 5;
+  } else {
     assert.deepEqual({ ...SHORT_LINK_WHERE[44] }, reserved, "id 45 is reserved");
-    assert.deepEqual({ ...SHORT_LINK_WHERE[45] }, reserved, "id 46 is reserved");
     assert.throws(() => readShortClaim(link45), /cut off or damaged/, "a reserved id is refused");
-    assert.throws(() => readShortClaim(link46), /cut off or damaged/, "id 46 too");
     assert.ok(!gloamNetworks().some((x) => x.key === "elysium-mainnet"), "no Elysium network");
     // A link to the reserved place's chain 0 is never given id 45.
     const zero = encodeShortClaim({ pool: "0x0000000000000000000000000000000000000000", asset: "0x0000000000000000000000000000000000000000", amountWei: "1", secret: fieldToHex(5n), chainId: 0 });
     assert.ok(zero === null || fromBase62(zero)[1] !== 45, "chain 0 never reads as id 45");
-    n += 8;
-  } else {
-    const w = SHORT_LINK_WHERE[44];
-    assert.equal(w.chainId, ELY.chainId, "id 45 is Elysium");
-    assert.equal(w.pool, ELY.pool);
-    assert.equal(w.asset.toLowerCase(), ELY.usdc.toLowerCase(), "id 45 is Elysium's USDC");
-    const back = readShortClaim(link45);
-    assert.equal(back.chainId, ELY.chainId);
-    assert.equal(back.asset.toLowerCase(), ELY.usdc.toLowerCase(), "id 45 reads as Elysium's USDC");
-    assert.ok(gloamNetworks().some((x) => x.key === "elysium-mainnet"), "Elysium was in the round trips above");
+    n += 4;
+  }
+  if (elyTest) {
     const t = SHORT_LINK_WHERE[45];
     assert.equal(t.chainId, ELY_TEST.chainId, "id 46 is Elysium testnet");
     assert.equal(t.asset.toLowerCase(), ELY_TEST.usdc.toLowerCase(), "id 46 is its test USDC");
     assert.equal(readShortClaim(link46).chainId, ELY_TEST.chainId, "id 46 reads as Elysium testnet");
     assert.ok(gloamNetworks().some((x) => x.key === "elysium"), "Elysium testnet was in the round trips above");
-    n += 10;
+    n += 4;
+  } else {
+    assert.deepEqual({ ...SHORT_LINK_WHERE[45] }, reserved, "id 46 is reserved");
+    assert.throws(() => readShortClaim(link46), /cut off or damaged/, "id 46 too");
+    n += 2;
   }
+  if (MODE === "filled") assert.ok(ely && elyTest, "the filled run has both");
 }
 
-if (MODE === "empty") {
+if (MODE === "committed") {
   const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], { env: { ...process.env, GLOAM_SELFTEST_SHORTLINK: "filled" }, encoding: "utf8" });
   if (child.status !== 0) {
     console.error(child.stdout, child.stderr);

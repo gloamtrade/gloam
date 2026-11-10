@@ -58,6 +58,9 @@ const BOARDS = {
   base: deployed("base-sepolia.json").contracts.GloamPayMemo,
   ethereum: deployed("ethereum-sepolia.json").contracts.GloamPayMemo,
 };
+// Elysium mainnet has no message board deployed (payMemo null in src/elysium.ts), so it has
+// nothing to refuse there; it joins the list only once the SDK has its values.
+if (getGloamNetwork("elysium-mainnet")) BOARDS["elysium-mainnet"] = deployed("elysium-mainnet.json").contracts.GloamPayMemo ?? null;
 const ROUTERS = { "robinhood-mainnet": [RH_V1, RH_V2], "tempo-mainnet": [TEMPO_ROUTER] };
 
 const nets = gloamNetworks();
@@ -70,7 +73,7 @@ for (const net of nets) {
     for (const to of spellings(a)) is(cashOutTargetProblem(to, net), message, `${what} on ${net.key} (${to})`);
   };
   refuses(net.pool, CASH_OUT_TO_VAULT_MESSAGE, "the vault");
-  refuses(BOARDS[net.key], CASH_OUT_TO_BOARD_MESSAGE, "the board");
+  if (BOARDS[net.key]) refuses(BOARDS[net.key], CASH_OUT_TO_BOARD_MESSAGE, "the board");
   refuses(ZERO, CASH_OUT_TO_ZERO_MESSAGE, "the zero address");
   for (const r of ROUTERS[net.key] ?? []) refuses(r, CASH_OUT_TO_ROUTER_MESSAGE, "a router");
   const tokens = net.assets.filter((a) => a.address !== NATIVE_ASSET);
