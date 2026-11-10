@@ -9,7 +9,8 @@
     "prebuild": "npm run artifacts",
     "dev": "next dev --webpack",
     "build": "next build --webpack",
-    "start": "next start"
+    "start": "next start",
+    "typecheck": "tsc --noEmit --incremental false"
   },
   "dependencies": {
     "@gloamtrade/sdk": "workspace:*",

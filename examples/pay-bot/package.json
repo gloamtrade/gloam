@@ -4,7 +4,8 @@
   "type": "module",
   "description": "Reference wrapper: a payments bot that sends a private payment on Gloam (mainnet or testnet) via @gloamtrade/sdk.",
   "scripts": {
-    "start": "tsx pay-bot.ts"
+    "start": "tsx pay-bot.ts",
+    "typecheck": "tsc --noEmit --strict --target es2022 --module nodenext --moduleResolution nodenext --skipLibCheck --types node pay-bot.ts ../../packages/sdk/src/snarkjs.d.ts ../../packages/sdk/src/circomlibjs.d.ts"
   },
   "dependencies": {
     "@gloamtrade/sdk": "workspace:*",
@@ -12,6 +13,8 @@
     "viem": "^2.55.2"
   },
   "devDependencies": {
-    "tsx": "^4"
+    "@types/node": "^20",
+    "tsx": "^4",
+    "typescript": "^5"
   }
 }

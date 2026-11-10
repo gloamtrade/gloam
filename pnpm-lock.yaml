@@ -140,9 +140,15 @@ importers:
         specifier: ^2.55.2
         version: 2.55.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.6.7)
     devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.43
       tsx:
         specifier: ^4
         version: 4.23.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
 
   examples/e2b-private-mpp:
     dependencies:
@@ -215,9 +221,15 @@ importers:
         specifier: ^2.55.2
         version: 2.55.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.6.7)
     devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.43
       tsx:
         specifier: ^4
         version: 4.23.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
 
   examples/pay-x402:
     dependencies:
