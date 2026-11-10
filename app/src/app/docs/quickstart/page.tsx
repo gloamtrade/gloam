@@ -16,7 +16,7 @@ export default function DocsQuickstartPage() {
       glance={[
         { label: "Time", value: "~10 minutes" },
         { label: "Runtime", value: "browser or node" },
-        { label: "Chain", value: "RH mainnet 4663, or testnet 46630" },
+        { label: "Chain", value: "Robinhood Chain 4663, or testnet 46630" },
         { label: "You end with", value: "a spendable private note" },
       ]}
       quickLinks={[

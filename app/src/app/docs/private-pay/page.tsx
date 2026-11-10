@@ -132,7 +132,7 @@ export default function DocsPrivatePayPage() {
         </li>
         <li>
           <strong>Gloam</strong> = private rails for{" "}
-          <em>stablecoins, $GLOAM and other listed tokens on RH mainnet</em> (and
+          <em>stablecoins, $GLOAM and other listed tokens on Robinhood Chain mainnet</em> (and
           stock tokens on testnet): hold and pay privately next to open settlement
           on the same chain. On mainnet you can also swap them from the
           private balance. A private swap keeps who swapped private; its

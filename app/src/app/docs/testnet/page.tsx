@@ -31,7 +31,7 @@ export default function DocsTestnetPage() {
       glance={[
         { label: "App", value: "/app" },
         { label: "Chain ID", value: "46630" },
-        { label: "Network", value: "RH testnet" },
+        { label: "Network", value: "Robinhood Chain testnet" },
         { label: "Vault", value: "Live, dev keys" },
         { label: "Keys", value: "Dev ceremony" },
         { label: "Value", value: "Test funds only" },
@@ -331,7 +331,7 @@ export default function DocsTestnetPage() {
       </p>
       <ul>
         <li>
-          <strong>Open wallet</strong>, public balances on RH testnet.
+          <strong>Open wallet</strong>, public balances on Robinhood Chain testnet.
         </li>
         <li>
           <strong>Vault (private)</strong>, notes you control locally after
@@ -405,7 +405,7 @@ export default function DocsTestnetPage() {
         <li>Select a note and confirm.</li>
         <li>Wait for the browser proof, then confirm the wallet tx.</li>
         <li>
-          Funds return to your open wallet on RH testnet. That edge is{" "}
+          Funds return to your open wallet on Robinhood Chain testnet. That edge is{" "}
           <strong>public</strong> (amount and destination appear on explorers).
         </li>
       </ol>
