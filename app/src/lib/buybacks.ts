@@ -42,7 +42,7 @@ export type BuybackEntry = {
   note: string;
 };
 
-const ALL_BURNED = "This round was 100% burned. The plan is half burned, half to the treasury.";
+const ALL_BURNED = "This round was 100% burned, topped up by the founder. From the next round, half is burned and half goes to the treasury.";
 
 export const BUYBACKS: BuybackEntry[] = [
   {
