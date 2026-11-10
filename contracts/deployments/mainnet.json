@@ -3,8 +3,10 @@
   "ceremony": "final (13 contributors, drand 6561386, release ceremony-final)",
   "owner": "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8",
   "feeRecipient": "0xB3900ac9350903218e4c7597bAb0f008F01B30B8",
-  "feeRecipientNote": "The treasury since 2026-10-24 on both chains (setWithdrawFee(25, treasury) through the 3-day timelock). At deploy it was the owner, 0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8.",
+  "feeRecipientNote": "The treasury since 2026-10-24 on both chains (setWithdrawFee(25, treasury) through the 3-day timelock). At deploy it was the owner, 0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8. The fee went from 25 to 50 bps on 2026-11-03, also through the timelock.",
   "withdrawFeeBps": 50,
+  "withdrawFeeNote": "25 bps at deploy; 50 bps since 2026-11-03, through the 3-day timelock.",
+  "limitsNote": "Live values, read back on chain 2026-11-10 (depositLimit(asset)). Launch limits were 500 / 25,000 per stablecoin and 25,000 / 250,000 GLOAM; every limit was raised 100x through the 3-day timelock on 2026-11-01 (script/RaiseDepositLimits.s.sol). Robinhood Chain listed 28 swap assets on 2026-10-27 (script/QueueSwapAssets.s.sol) and native ETH, AI and ORBIO on 2026-11-03 (script/QueueRobinhoodAssets.s.sol).",
   "deployer": "0x891E74a11abC5D0eC2EE855B2BD521fF9D18F411",
   "chains": {
     "4663": {
@@ -22,8 +24,39 @@
       "GloamVaultSwapV4": "0x34AB06208586A737Bf1607fa996Bc9162271c52d",
       "GloamVaultSwapV4b": "0xfCa1887e77f738ef9C5751974b3f3873d029F2DC",
       "assets": {
-        "USDG": { "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", "perDeposit": "500000000", "total": "25000000000" },
-        "GLOAM": { "address": "0xDcD885F5c60b3aD49F6D58718696417314e8724d", "perDeposit": "25000000000000000000000", "total": "250000000000000000000000" }
+        "USDG": { "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", "decimals": 6, "perDeposit": "50000000000", "total": "2500000000000" },
+        "GLOAM": { "address": "0xDcD885F5c60b3aD49F6D58718696417314e8724d", "decimals": 18, "perDeposit": "2500000000000000000000000", "total": "25000000000000000000000000" },
+        "WETH": { "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", "decimals": 18, "perDeposit": "42000000000000000000", "total": "1000000000000000000000" },
+        "USDe": { "address": "0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34", "decimals": 18, "perDeposit": "50000000000000000000000", "total": "2500000000000000000000000" },
+        "U": { "address": "0xcE24439F2D9C6a2289F741120FE202248B666666", "decimals": 18, "perDeposit": "50000000000000000000000", "total": "2500000000000000000000000" },
+        "cbBTC": { "address": "0xCEC185eB182c47d1bA1EFc84e6959e18cd620Be4", "decimals": 8, "perDeposit": "120000000", "total": "3100000000" },
+        "PONS": { "address": "0x39dBED3a2bd333467115dE45665cC57F813C4571", "decimals": 18, "perDeposit": "390000000000000000000000", "total": "9800000000000000000000000" },
+        "CASHCAT": { "address": "0x020bfC650A365f8BB26819deAAbF3E21291018b4", "decimals": 18, "perDeposit": "960000000000000000000000", "total": "24000000000000000000000000" },
+        "VIRTUAL": { "address": "0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31", "decimals": 18, "perDeposit": "150000000000000000000000", "total": "3800000000000000000000000" },
+        "SPY": { "address": "0x117cc2133c37B721F49dE2A7a74833232B3B4C0C", "decimals": 18, "perDeposit": "130000000000000000000", "total": "3300000000000000000000" },
+        "NVDA": { "address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC", "decimals": 18, "perDeposit": "470000000000000000000", "total": "12000000000000000000000" },
+        "TSLA": { "address": "0x322F0929c4625eD5bAd873c95208D54E1c003b2d", "decimals": 18, "perDeposit": "260000000000000000000", "total": "6600000000000000000000" },
+        "AMZN": { "address": "0x12f190a9F9d7D37a250758b26824B97CE941bF54", "decimals": 18, "perDeposit": "400000000000000000000", "total": "10000000000000000000000" },
+        "SPCX": { "address": "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa", "decimals": 18, "perDeposit": "680000000000000000000", "total": "17000000000000000000000" },
+        "CRCL": { "address": "0xdF0992E440dD0be65BD8439b609d6D4366bf1CB5", "decimals": 18, "perDeposit": "1200000000000000000000", "total": "29000000000000000000000" },
+        "META": { "address": "0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35", "decimals": 18, "perDeposit": "150000000000000000000", "total": "3900000000000000000000" },
+        "MSTR": { "address": "0xec262a75e413fAfD0dF80480274532C79D42da09", "decimals": 18, "perDeposit": "680000000000000000000", "total": "17000000000000000000000" },
+        "GOOGL": { "address": "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3", "decimals": 18, "perDeposit": "310000000000000000000", "total": "7700000000000000000000" },
+        "AAPL": { "address": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9", "decimals": 18, "perDeposit": "290000000000000000000", "total": "7200000000000000000000" },
+        "MSFT": { "address": "0xe93237C50D904957Cf27E7B1133b510C669c2e74", "decimals": 18, "perDeposit": "190000000000000000000", "total": "4800000000000000000000" },
+        "PLTR": { "address": "0x894E1EC2D74FFE5AEF8Dc8A9e84686acCB964F2A", "decimals": 18, "perDeposit": "510000000000000000000", "total": "13000000000000000000000" },
+        "AMD": { "address": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC", "decimals": 18, "perDeposit": "190000000000000000000", "total": "4900000000000000000000" },
+        "COIN": { "address": "0x6330D8C3178a418788dF01a47479c0ce7CCF450b", "decimals": 18, "perDeposit": "590000000000000000000", "total": "15000000000000000000000" },
+        "AMC": { "address": "0x05a3d1Cd21d0C88145E82600E62e7E496e0F222B", "decimals": 18, "perDeposit": "34000000000000000000000", "total": "850000000000000000000000" },
+        "HIMS": { "address": "0xCceE82fE024c36fA15E1005edE3E9e4787e23D09", "decimals": 18, "perDeposit": "3400000000000000000000", "total": "86000000000000000000000" },
+        "INTC": { "address": "0xc72b96e0E48ecd4DC75E1e45396e26300BC39681", "decimals": 18, "perDeposit": "1100000000000000000000", "total": "29000000000000000000000" },
+        "TSM": { "address": "0x58FfE4a942d3885bAa22D7520691F611EF09e7AA", "decimals": 18, "perDeposit": "240000000000000000000", "total": "6000000000000000000000" },
+        "GLD": { "address": "0xC9a981FEE1F9DEc688bb123ccDeCc63D0deBFC4e", "decimals": 18, "perDeposit": "270000000000000000000", "total": "6800000000000000000000" },
+        "QQQ": { "address": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68", "decimals": 18, "perDeposit": "140000000000000000000", "total": "3500000000000000000000" },
+        "MU": { "address": "0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD", "decimals": 18, "perDeposit": "110000000000000000000", "total": "2800000000000000000000" },
+        "ETH": { "address": "0x0000000000000000000000000000000000000000", "decimals": 18, "perDeposit": "11000000000000000000", "total": "110000000000000000000" },
+        "AI": { "address": "0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18", "decimals": 18, "perDeposit": "400000000000000000000000", "total": "4000000000000000000000000" },
+        "ORBIO": { "address": "0xAa07A0e9209e16aC99708C3EC70159c6eF3128A3", "decimals": 18, "perDeposit": "1000000000000000000000000", "total": "10000000000000000000000000" }
       }
     },
     "4217": {
@@ -40,10 +73,10 @@
       "GloamPayMemoDeployBlock": 45417629,
       "GloamVaultSwapTempo": "0xfCa1887e77f738ef9C5751974b3f3873d029F2DC",
       "assets": {
-        "USDC.e": { "address": "0x20c000000000000000000000b9537d11c60e8b50", "perDeposit": "500000000", "total": "25000000000" },
-        "pathUSD": { "address": "0x20c0000000000000000000000000000000000000", "perDeposit": "500000000", "total": "25000000000" },
-        "USDT0": { "address": "0x20c00000000000000000000014f22ca97301eb73", "perDeposit": "500000000", "total": "25000000000" },
-        "OUSD": { "address": "0x20c0000000000000000000006a37da5c996874be", "perDeposit": "500000000", "total": "25000000000" }
+        "USDC.e": { "address": "0x20c000000000000000000000b9537d11c60e8b50", "perDeposit": "50000000000", "total": "2500000000000" },
+        "pathUSD": { "address": "0x20c0000000000000000000000000000000000000", "perDeposit": "50000000000", "total": "2500000000000" },
+        "USDT0": { "address": "0x20c00000000000000000000014f22ca97301eb73", "perDeposit": "50000000000", "total": "2500000000000" },
+        "OUSD": { "address": "0x20c0000000000000000000006a37da5c996874be", "perDeposit": "50000000000", "total": "2500000000000" }
       }
     }
   }

@@ -19,6 +19,14 @@ pragma solidity ^0.8.24;
 // name, so the vetting report says what each one really does, not just the ones
 // that made it. Off by default (it reads mainnet over RPC). From contracts/:
 //   RH_FORK=1 forge test --evm-version cancun --match-path test/fork/RobinhoodAssetsFork.t.sol -vv
+//
+// Written while the ETH, AI and ORBIO limits and the 0.50% fee were still queued.
+// Both landed on 3 Nov 2026, so at the head the four tests that expect "no limit
+// yet" fail (before_the_limit_lands, listed_assets_at_todays_fee,
+// every_listed_asset_at_the_queued_fee, sweep_cannot_touch_eth_notes); the other
+// seven pass. Robinhood Chain's public RPC keeps no old state, so replaying them
+// needs an archive RPC in RH_FORK_URL and the fork pinned to a block from before
+// (e.g. 102717200, 31 Oct 2026), which setUp does not do today.
 
 import {Test, console2} from "forge-std/Test.sol";
 import {stdJson} from "forge-std/StdJson.sol";
