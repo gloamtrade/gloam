@@ -27,6 +27,12 @@
  * spent, so the note is spent by moving it. Every sync tries until it has moved.
  * A prepaid top-up's note moves the same way once no cash out waits on it
  * (shield proofLoose): its proof left the browser and is just as valid.
+ *
+ * On a weak connection, the reads and the proving files are tried again before
+ * a secure gives up (withSecureRetries, lib/secureRetry), and a claim still open
+ * to its payer is secured again with no one asking (secureClaimsInBackground).
+ * A send to the relay is never repeated on its own: a lost reply can still mean
+ * it went out, so the chain is asked instead (settleEarlier).
  */
 import {
   sweepReceivedNote,
@@ -42,10 +48,29 @@ import { NETWORK_KEYS, getActiveNetwork, getNetwork, type GloamNetwork } from ".
 import { noteNullifierPoseidon } from "./notePoseidon";
 import { fieldToHex, hexToField } from "./poseidon";
 import { proveTransferInBrowser } from "./proveClient";
-import { RelaySubmitError, relayFor, relayTransfer, waitForTx } from "./relay/client";
+import {
+  RELAY_UNREACHABLE_MESSAGE,
+  RelaySubmitError,
+  relayFor,
+  relayPreferred,
+  relayTransfer,
+  waitForTx,
+} from "./relay/client";
 import { publicClientFor } from "./rhClient";
 import { dataKeyLocked, getAllNotes, syncFromDisk, unlockNoteVault } from "./noteVault";
+import { readDemo } from "./demoFlag";
 import {
+  FILES_RETRY,
+  READ_RETRY,
+  RECEIPT_RETRY,
+  SecureStepError,
+  isTransientNetError,
+  retryStep,
+  retryTransient,
+  type RetryHooks,
+} from "./secureRetry";
+import {
+  activeSpendableNotes,
   dropUnsentNote,
   isNativeAsset,
   notesToMove,
@@ -122,6 +147,11 @@ export type ClaimEnv = {
   txOutcome?: (hash: Hex) => Promise<"success" | "reverted" | null>;
   /** Whether the relay can send on this network now. Left out: it is simply tried. */
   relayReady?: () => Promise<boolean>;
+  /**
+   * After a send whose reply was lost, the waits before each look on the chain
+   * for it (secureClaim). Left out: LOST_REPLY_CHECKS_MS.
+   */
+  landChecksMs?: readonly number[];
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -147,14 +177,27 @@ async function readStateAt(client: PublicClient, pool: Address, nullifier: Hex |
   return { spent, seen, block };
 }
 
-/** The vault tree, waiting a little for a commitment that only just landed. */
+/**
+ * The vault tree, waiting a little for a commitment that only just landed.
+ * Null when the tree was read and the commitment is not in it. A tree that
+ * could not be read at all, on the connection, throws (SecureStepError
+ * "chain"): that is not "not in the vault yet".
+ */
 async function findLeaf(client: PublicClient, net: GloamNetwork, commitment: Hex) {
+  let read = false;
+  let failed: unknown = null;
   for (let i = 0; i < 4; i++) {
-    const tree = await syncShieldTree(client, net).catch(() => null);
+    const tree = await syncShieldTree(client, net).catch((e: unknown) => {
+      failed = e;
+      return null;
+    });
+    if (tree) read = true;
     const idx = tree?.indexByCommitment.get(commitment.toLowerCase());
     if (tree && idx != null) return { tree, idx };
-    if (i < 3) await sleep(1_250);
+    // a read that failed waits longer each time, for a connection to come back
+    if (i < 3) await sleep(tree ? 1_250 : 1_500 * 2 ** i);
   }
+  if (!read && failed && isTransientNetError(failed)) throw new SecureStepError("chain", failed);
   return null;
 }
 
@@ -185,7 +228,7 @@ export function appClaimEnv(onStage?: (text: string) => void, net: GloamNetwork 
       return { proofBytes, publicSignals };
     },
     relay: relayTransfer,
-    leafIndexOf: async (commitment) => (await findLeaf(client, net, commitment))?.idx,
+    leafIndexOf: async (commitment) => (await findLeaf(client, net, commitment).catch(() => null))?.idx,
     stateAt: (nullifier, commitment) => readStateAt(client, pool!, nullifier, commitment),
     escrowWaiting: async (n, block) => {
       if (!n.vaultSwap || !n.sweptFrom) return false;
@@ -206,6 +249,28 @@ export function appClaimEnv(onStage?: (text: string) => void, net: GloamNetwork 
       const relay = await relayFor(net.chainId);
       return Boolean(relay?.enabled) && !relay?.gasHigh;
     },
+  };
+}
+
+/**
+ * `env` with its chain reads, its receipt waits and its proving files tried
+ * again on a connection failure (lib/secureRetry) before a secure gives up. A
+ * read or download that keeps failing comes out as a SecureStepError naming
+ * the chain or the files. The relay is never tried again here: a send whose
+ * reply was lost may have gone out (secureClaim looks for it on the chain).
+ */
+export function withSecureRetries(env: ClaimEnv, hooks: RetryHooks = {}): ClaimEnv {
+  const read = <T>(fn: () => Promise<T>) => retryStep("chain", fn, READ_RETRY, hooks);
+  return {
+    ...env,
+    chain: {
+      ...env.chain,
+      isSpent: (nullifier) => read(() => env.chain.isSpent(nullifier)),
+      isCommitmentSeen: (commitment) => read(() => env.chain.isCommitmentSeen(commitment)),
+      // the same hash read again: nothing is sent
+      waitForReceipt: (hash) => retryTransient(() => env.chain.waitForReceipt(hash), RECEIPT_RETRY, hooks),
+    },
+    prove: (input) => retryStep("files", () => env.prove(input), FILES_RETRY, hooks),
   };
 }
 
@@ -281,6 +346,15 @@ async function settleEarlier(env: ClaimEnv, claimId: string): Promise<LocalNote 
   return null;
 }
 
+/** A move of this note that landed already (another try, in this tab or another), or null. */
+function landedMoveOf(id: string): LocalNote | null {
+  return (
+    getAllNotes().find(
+      (n) => n.id.startsWith(SECURED_PREFIX) && n.sweptFrom?.id === id && !n.sweepPending && n.status !== "recovered"
+    ) ?? null
+  );
+}
+
 function securedResult(fresh: LocalNote, hash: Hex | null): SweepResult {
   const { secret, commitment, nullifier, amountWei, asset } = fresh;
   return {
@@ -317,6 +391,29 @@ function sendTurnedAway(e: unknown): boolean {
   return e instanceof RelaySubmitError && (e.code === "in_flight" || !splitMaybeSent(e, true));
 }
 
+/** After a send whose reply was lost: how long to wait before each look on the chain for it. */
+export const LOST_REPLY_CHECKS_MS: readonly number[] = [2_000, 4_000, 8_000];
+
+/**
+ * Why the relay did not take a secure, for the person: its code, whether it
+ * answered at all (`reached`: false when the request never got a reply), and
+ * whether the move may still land.
+ */
+export type RelayFailure = { code: string; reached: boolean; maybeSent: boolean };
+
+export type SecureResult = SweepResult & {
+  /** Set when the Gloam relay is why it did not go through (not when it landed anyway). */
+  relayFailure?: RelayFailure;
+};
+
+/** Secures running in this tab, by note id. */
+const securing = new Map<string, Promise<unknown>>();
+
+/** Whether a secure of this note is running in this tab now. */
+export function securingNow(id: string): boolean {
+  return securing.has(id);
+}
+
 /**
  * Move a claimed note into a fresh note only this browser knows. `final` is
  * true once the move has landed. Statuses (SDK SweepStatus):
@@ -324,23 +421,53 @@ function sendTurnedAway(e: unknown): boolean {
  *  - already_spent: someone spent it first (the payer); the claim is dropped.
  *  - not_settled: the payment is not in the vault yet; try again later.
  *  - failed / unconfirmed: still the claimed note; secure it again later.
+ *    `relayFailure` says when the relay is why.
  *  - bad_note: the amount does not match the note's record in the vault.
+ * Throws when the chain or the proving files could not be reached even after
+ * retries (SecureStepError), with nothing sent.
+ *
+ * One secure of a note at a time in a tab: a second waits for the first, then
+ * finds it secured if the first landed.
  */
-export async function secureClaim(
-  p: SecureParams,
-  env: ClaimEnv = appClaimEnv(p.onStage)
-): Promise<SweepResult> {
+export function secureClaim(p: SecureParams, env?: ClaimEnv): Promise<SecureResult> {
+  const id = p.note.id;
+  let e: ClaimEnv;
+  try {
+    // read now: one network for the whole secure, even if the page switches while it waits
+    e = env ?? withSecureRetries(appClaimEnv(p.onStage));
+  } catch (err) {
+    return Promise.reject(err);
+  }
+  // a try someone asked for counts as one: the background waits its turn after it (moveDue)
+  if (!p.background) countTry(id, Date.now());
+  const before = securing.get(id);
+  const run = (async () => {
+    if (before) await before.catch(() => {});
+    return secureOnce(p, e);
+  })();
+  securing.set(id, run);
+  const done = () => {
+    if (securing.get(id) === run) securing.delete(id);
+  };
+  run.then(done, done);
+  return run;
+}
+
+async function secureOnce(p: SecureParams, env: ClaimEnv): Promise<SecureResult> {
   const { note } = p;
   const pool = env.pool;
   if (!pool || note.chainId !== env.chainId || note.pool.toLowerCase() !== pool.toLowerCase()) {
     throw new Error("Switch to the network this payment is on to secure it.");
   }
+  // Secured already, by another try that landed: nothing to send.
+  const moved = landedMoveOf(note.id);
+  if (moved) return securedResult(moved, null);
   const nullifier = await nullifierOf(note);
   // A move sent before (a lost reply, a closed tab) may have landed already.
   const landed = await settleEarlier(env, note.id);
   if (landed) return securedResult(landed, null);
   let fresh: LocalNote | null = null;
-  const send = { turnedAway: false };
+  const send: { turnedAway: boolean; error: unknown } = { turnedAway: false, error: null };
 
   p.onStage?.("Proving privately…");
   const result = await sweepReceivedNote({
@@ -394,6 +521,7 @@ export async function secureClaim(
           })
           .catch((e: unknown) => {
             send.turnedAway = sendTurnedAway(e);
+            send.error = e;
             throw e;
           });
       }
@@ -411,15 +539,36 @@ export async function secureClaim(
   } else if (result.status === "already_spent") {
     updateLocalNote(note.id, { status: "recovered" });
     // Spent by someone else, unless one of our own moves landed: ask the chain.
-    const ours = await settleEarlier(env, note.id);
+    const ours = (await settleEarlier(env, note.id)) ?? landedMoveOf(note.id);
     if (ours) return securedResult(ours, ours.id === out?.id ? result.hash : null);
+  }
+  const relayFailure = result.status !== "swept" ? relayFailureOf(send) : null;
+  // The relay's reply was lost, so the move may be on its way: look for it on
+  // the chain a few times before saying anything. Never sent again from here.
+  if (relayFailure?.maybeSent && out && !p.background && (result.status === "failed" || result.status === "unconfirmed")) {
+    p.onStage?.("Checking whether it went through…");
+    for (const ms of env.landChecksMs ?? LOST_REPLY_CHECKS_MS) {
+      await sleep(ms);
+      const ours = await settleEarlier(env, note.id).catch(() => null);
+      if (ours) return securedResult(ours, ours.id === out.id ? result.hash : null);
+    }
   }
   // failed / unconfirmed: the fresh note stays pending until the chain says
   // what happened (reconcileClaims). A relay that lost its reply may still
   // have sent it. One the relay turned away never went out, and a background
   // try makes its own note next time.
   if (p.background && send.turnedAway && out) dropUnsentNote(out.id);
-  return result;
+  return relayFailure ? { ...result, relayFailure } : result;
+}
+
+/** What the relay said about a send that threw, or null when it was not the relay. */
+function relayFailureOf(send: { turnedAway: boolean; error: unknown }): RelayFailure | null {
+  const e = send.error;
+  if (!e) return null;
+  const code = e instanceof RelaySubmitError ? e.code : "error";
+  const reached = !(e instanceof RelaySubmitError && e.message === RELAY_UNREACHABLE_MESSAGE);
+  // in_flight: this send was turned away because another send of the note is out, which may land
+  return { code, reached, maybeSent: code === "in_flight" || (!send.turnedAway && splitMaybeSent(e, true)) };
 }
 
 /** The first retry of a move, doubling up to the most: each try is a proof. */
@@ -463,19 +612,30 @@ function moveOnItsWay(id: string, now: number): boolean {
   );
 }
 
-/** One try at moving a note whose swap reverted, if one is due. */
-async function moveReverted(id: string, env: ClaimEnv): Promise<void> {
+/** A try at a move of this note now: the next one in the background waits for moveDue. */
+function countTry(id: string, now: number): void {
+  moveTries.set(id, { at: now, count: Math.max(1, moveTries.get(id)?.count ?? 0) });
+}
+
+/**
+ * One try at moving a note through the relay, with no one asking, if one is
+ * due and `due` still says so of the note on disk: a note whose swap reverted
+ * (moveRevertedNotes) or a claim still open to its payer (secureClaimsInBackground).
+ */
+async function moveInBackground(id: string, env: ClaimEnv, due: (n: LocalNote) => boolean): Promise<void> {
   const now = Date.now();
-  if (moveRunning.has(id) || !moveDue(id, now) || moveOnItsWay(id, now)) return;
-  if (env.relayReady && !(await env.relayReady().catch(() => false))) return;
+  if (moveRunning.has(id) || securing.has(id) || !moveDue(id, now) || moveOnItsWay(id, now)) return;
+  // held from here, so two calls a moment apart can't both pass the check above
   moveRunning.add(id);
-  moveTries.set(id, { at: now, count: (moveTries.get(id)?.count ?? 0) + 1 });
   try {
+    if (env.relayReady && !(await env.relayReady().catch(() => false))) return;
+    moveTries.set(id, { at: now, count: (moveTries.get(id)?.count ?? 0) + 1 });
     await inOneTab(id, async () => {
       // what is on disk now: another tab may have moved it or sent a move
       await syncFromDisk();
       const note = getAllNotes().find((n) => n.id === id);
-      if (!note || notesToMove([note]).length === 0 || moveOnItsWay(id, Date.now())) return;
+      // a secure someone asked for in this tab goes first, and this one stands aside
+      if (!note || !due(note) || moveOnItsWay(id, Date.now()) || securing.has(id)) return;
       await secureClaim(
         {
           note,
@@ -507,9 +667,37 @@ export async function moveRevertedNotes(env?: ClaimEnv): Promise<void> {
   const due = notesToMove(getAllNotes());
   for (const n of due) {
     const net = env ? null : networkOfNote(n);
-    const e = env ?? (net ? appClaimEnv(undefined, net) : null);
+    const e = env ?? (net ? withSecureRetries(appClaimEnv(undefined, net)) : null);
     if (!e?.pool || n.chainId !== e.chainId || n.pool.toLowerCase() !== e.pool.toLowerCase()) continue;
-    await moveReverted(n.id, e).catch(() => {});
+    await moveInBackground(n.id, e, (m) => notesToMove([m]).length > 0).catch(() => {});
+  }
+}
+
+/** Claimed payments the payer can still take back, counted in the balance, with nothing else waiting on them. */
+export function claimsToSecure(notes: LocalNote[]): LocalNote[] {
+  return activeSpendableNotes(notes).filter(isUnsecuredClaim);
+}
+
+/**
+ * Secures each claimed payment still open to its payer, through the relay,
+ * with no one asking: a secure that failed on the connection, or a claim
+ * saved while it was down, goes again here (hooks/useLocalShieldNotes runs this
+ * on a timer, when the page is shown again and when the connection is back).
+ * Paced like moveRevertedNotes (moveDue: a minute after the last try, doubling
+ * to 15), never while a move of the note may still land (moveOnItsWay: a lost
+ * reply is looked for on the chain, not sent again), one note at a time, and
+ * only with the relay on: the wallet is never asked in the background.
+ * `now`: the connection just came back, so the pacing starts over. `env` is a
+ * test's, and limits this to its network.
+ */
+export async function secureClaimsInBackground(env?: ClaimEnv, opts: { now?: boolean } = {}): Promise<void> {
+  if (typeof window === "undefined" || readDemo() || dataKeyLocked() || !relayPreferred()) return;
+  for (const n of claimsToSecure(getAllNotes())) {
+    const net = env ? null : networkOfNote(n);
+    const e = env ?? (net ? withSecureRetries(appClaimEnv(undefined, net)) : null);
+    if (!e?.pool || n.chainId !== e.chainId || n.pool.toLowerCase() !== e.pool.toLowerCase()) continue;
+    if (opts.now && !moveRunning.has(n.id)) moveTries.delete(n.id);
+    await moveInBackground(n.id, e, (m) => claimsToSecure([m]).length > 0).catch(() => {});
   }
 }
 

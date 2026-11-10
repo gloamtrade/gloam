@@ -25,6 +25,7 @@ import {
   isUnsecuredClaim,
   secureClaim,
 } from "@/lib/claimSweep";
+import { secureFailureOf, secureFailureReason, secureNextStep } from "@/lib/secureRetry";
 import { readDemo } from "@/lib/demoFlag";
 import { syncShieldTree } from "@/lib/treeSync";
 import { buildTransferWitness } from "@/lib/proverTransfer";
@@ -298,6 +299,8 @@ export function MoveView() {
     /** A claim just secured: what it can do next (AfterClaimNext), full the first time in this browser. */
     next?: { id: string; full: boolean; amount: string; asset: Address };
     tone?: "warn" | "danger";
+    /** A claim this says is not secured yet: the message changes once it is (secured with no one asking). */
+    pending?: { id: string; label: string };
   } | null>(null);
   /** The claimed payment being secured right now (lib/claimSweep). */
   const [securingId, setSecuringId] = useState<string | null>(null);
@@ -820,6 +823,17 @@ export function MoveView() {
 
   // Claimed payments the payer could still spend back (lib/claimSweep).
   const unsecured = useMemo(() => open.filter(isUnsecuredClaim), [open]);
+  // A claim the message says is not secured yet, secured since with no one asking
+  // (lib/claimSweep secureClaimsInBackground): the message says so instead.
+  const importShown = useMemo(() => {
+    const p = importOk?.pending;
+    if (!importOk || !p || !allLocal.some((n) => n.id === p.id && n.secured)) return importOk;
+    return {
+      text: `Secured ${p.label}. Only you can spend it now, and the person who sent it can no longer take it back.`,
+      note: importOk.note,
+      tone: undefined,
+    };
+  }, [importOk, allLocal]);
 
   // For a request, default to a balance in the requested token: the smallest
   // one that covers the amount, else the largest. A manual pick still wins.
@@ -1884,6 +1898,9 @@ export function MoveView() {
     const label = formatAssetLabel(note.amountWei, note.asset);
     const did = claim ? `Claimed ${label}` : `${label} is claimed`;
     const stillOpen = "Until it is secured, the person who sent it can still take it back.";
+    // tried again with no one asking while the relay is on (lib/claimSweep secureClaimsInBackground)
+    const next = secureNextStep(relayOn);
+    const pending = { id: note.id, label };
     if (report) {
       setError(null);
       setImportOk(null);
@@ -1942,17 +1959,27 @@ export function MoveView() {
           text: `${did}, but the payment has not reached the vault yet, so it is not in your balance and cannot be secured. It shows up once it lands; secure it then. ${stillOpen}`,
           note: claim?.note,
           tone: "warn",
+          pending,
         });
-      } else if (r.status === "unconfirmed") {
+      } else if (r.status === "unconfirmed" && !r.relayFailure) {
         setImportOk({
           text: `${did}. Securing it was sent and has not confirmed yet. It counts in your balance once it lands.`,
           note: claim?.note,
           tone: "warn",
+          pending,
         });
       } else if (r.status === "bad_note") {
         setImportOk({
           text: "The amount in this payment does not match what it holds in the vault, so it cannot be secured.",
           tone: "danger",
+        });
+      } else if (r.relayFailure) {
+        // the relay, not the chain: unreachable, turned it away, or its reply was lost (looked for on the chain first)
+        setImportOk({
+          text: `${did}, but it is not secured yet: ${secureFailureReason({ step: "relay", ...r.relayFailure }, network.label)}. ${next} ${stillOpen}`,
+          note: claim?.note,
+          tone: "warn",
+          pending,
         });
       } else {
         const why = /reject|denied|cancel/i.test(r.reason ?? "")
@@ -1962,24 +1989,23 @@ export function MoveView() {
           text: `${did}, but it is not secured yet: ${why}. ${stillOpen}`,
           note: claim?.note,
           tone: "warn",
+          pending,
         });
       }
     } catch (e) {
-      // viem's message carries the whole RPC request (URL, body, call args): show its first line only,
-      // and say plainly when the network itself could not be reached.
+      // Said in terms of the part that failed, after its retries (lib/secureRetry): the chain, the
+      // proving files or the connection. Anything else shows its first line only: viem's message
+      // carries the whole RPC request (URL, body, call args).
+      const failure = secureFailureOf(e);
       const short =
         (e as { shortMessage?: string } | null)?.shortMessage ??
         (e instanceof Error ? e.message.split("\n")[0] : "something went wrong");
-      const offline =
-        (e as { name?: string } | null)?.name === "HttpRequestError" ||
-        /HTTP request failed|Failed to fetch|fetch failed|timed? ?out|network/i.test(short);
-      const msg = offline
-        ? `${network.label} could not be reached just now. Tap Secure it now to try again`
-        : short.replace(/\.$/, "");
+      const msg = failure ? `${secureFailureReason(failure, network.label)}. ${next}` : `${short.replace(/\.$/, "")}.`;
       if (report) setImportOk({
-        text: `${did}, but it is not secured yet: ${msg}. ${stillOpen}`,
+        text: `${did}, but it is not secured yet: ${msg} ${stillOpen}`,
         note: claim?.note,
         tone: "warn",
+        pending,
       });
     }
     refreshNotes();
@@ -2516,35 +2542,35 @@ export function MoveView() {
               onGetPaid={() => afterClaimGo("receive")}
               onCashOut={() => afterClaimGo("cashout")}
             />
-          ) : importOk && (
+          ) : importShown && (
             <div
               className={`mt-5 flex items-start gap-3 rounded-xl px-4 py-3 text-[13.5px] leading-relaxed text-foreground ${
-                importOk.tone === "danger"
+                importShown.tone === "danger"
                   ? "bg-danger-soft"
-                  : importOk.tone === "warn"
+                  : importShown.tone === "warn"
                     ? "bg-warn-soft"
                     : "bg-sealed-soft"
               }`}
-              role={importOk.tone === "danger" ? "alert" : undefined}
+              role={importShown.tone === "danger" ? "alert" : undefined}
               aria-live="polite"
             >
               <span
                 className={`mt-0.5 ${
-                  importOk.tone === "danger"
+                  importShown.tone === "danger"
                     ? "text-danger"
-                    : importOk.tone === "warn"
+                    : importShown.tone === "warn"
                       ? "text-warn"
                       : "text-sealed"
                 }`}
                 aria-hidden
               >
-                {importOk.tone ? <LockIcon size={14} /> : <CheckIcon />}
+                {importShown.tone ? <LockIcon size={14} /> : <CheckIcon />}
               </span>
               <span className="min-w-0">
-                <span className="block">{importOk.text}</span>
-                {importOk.note && (
+                <span className="block">{importShown.text}</span>
+                {importShown.note && (
                   <PaymentNoteLine
-                    note={importOk.note}
+                    note={importShown.note}
                     label="Their note"
                     className="mt-1 text-soft"
                   />

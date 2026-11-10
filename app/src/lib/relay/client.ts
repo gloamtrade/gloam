@@ -79,6 +79,9 @@ export class RelaySubmitError extends Error {
   }
 }
 
+/** A send that never got an answer from the relay (the fetch itself failed): it may or may not have arrived. */
+export const RELAY_UNREACHABLE_MESSAGE = "Could not reach the relay. Check your connection.";
+
 /** What the relay answers a send: the hash, and for a transfer the payment's memo ticket. */
 type RelayReply = { hash: Hex; memoTicket?: string | null };
 
@@ -92,7 +95,7 @@ async function post(body: Record<string, unknown>): Promise<RelayReply> {
       body: JSON.stringify(body, (_k, v) => (typeof v === "bigint" ? v.toString() : v)),
     });
   } catch {
-    throw new RelaySubmitError("Could not reach the relay. Check your connection.", "network");
+    throw new RelaySubmitError(RELAY_UNREACHABLE_MESSAGE, "network");
   }
   const json = (await res.json().catch(() => ({}))) as {
     ok?: boolean;
