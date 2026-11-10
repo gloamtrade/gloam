@@ -699,7 +699,7 @@ syncTree(client, { pool, fromBlock?, chunkSize?, concurrency? }): Promise<Synced
 assertTreeMatchesChain(client, pool, synced): Promise<boolean>
 // SyncedTree.pathForCommitment(commitment) feeds straight into the spend builders.
 
-// keep the tree instead of rebuilding it (next release)
+// keep the tree instead of rebuilding it (from 0.7.0)
 createTreeSync(client, { pool, fromBlock?, chunkSize?, concurrency?, store?, seed?, overlap?, verifyRoot?, reuseMs? }): TreeSync
   .sync(): Promise<SyncedTree>                                // reads only the blocks since the last sync
   .pathForCommitment(commitment, { atBlock? }?)               // sync, then the path (atBlock: skip the head read)
@@ -722,7 +722,7 @@ const tree = createTreeSync(publicClient, {
 const path = await tree.pathForCommitment(note.commitment);
 ```
 
-Nothing from the seed is trusted, nor a stored copy the pool has not confirmed: the rebuilt root has to be one the pool knows (`isKnownRoot`, one call), and a list that does not match is dropped for a walk of the chain. Gloam pools keep every root they have had, so a store saves the root the pool confirmed with its copy, and `knownPath` answers from that copy on the next run with no chain reads at all (a copy whose items do not build that root is checked again). The seed request names only the network and is the same for everyone.
+Nothing from the seed is trusted, nor a stored copy the pool has not confirmed. After each sync that reads new blocks, the rebuilt root has to be the pool's root at the last block read (`currentRoot()` at that block, one call). Where the node can't answer for that block (its state is pruned, or it is behind), the root has to be one the pool knows instead (`isKnownRoot`, one call). A seeded or stored list that does not match is dropped for a walk of the chain. Gloam pools keep every root they have had, so a store saves the root the pool confirmed with its copy, and `knownPath` answers from that copy on the next run with no chain reads at all (the seed's list, or a copy whose items do not build that root, takes one `isKnownRoot` call). The seed request names only the network and is the same for everyone.
 
 ### x402 payments
 

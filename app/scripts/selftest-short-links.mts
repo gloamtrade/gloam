@@ -117,15 +117,6 @@ const seedBytes = (h: Hex) => Uint8Array.from(h.slice(2).match(/../g)!.map((b) =
 
 // ---------------------------------------------------------------- every network and token
 
-/**
- * Tokens a network lists that have no short id yet. Their short links write the
- * vault and token out in full, so they open the same (checked below) but run
- * longer, until an id is appended to SHORT_LINK_WHERE in
- * packages/sdk/src/shortLink.ts. Elysium's KNTQ was listed (opening once its
- * queued limit lands) without one; the tests only saw it once Elysium was on by default.
- */
-const NO_SHORT_ID_YET = new Set(["elysium-mainnet KNTQ"]);
-
 const lengths: { kind: string; long: number; short: number }[] = [];
 for (const key of NETWORK_KEYS) {
   const net = getNetwork(key);
@@ -134,11 +125,8 @@ for (const key of NETWORK_KEYS) {
     const inTable = SHORT_LINK_WHERE.some(
       (w) => w.chainId === net.chainId && w.pool.toLowerCase() === net.pool!.toLowerCase() && w.asset.toLowerCase() === asset.address.toLowerCase()
     );
-    // Written out only until the SDK release that gives it an id (SDK 0.7.0 gives KNTQ id 47);
-    // from then on it is checked like every other token.
-    const writtenOut = NO_SHORT_ID_YET.has(where) && !inTable;
     // Every token a network takes has a short id (a new one fails here until it is added).
-    if (!writtenOut) assert.ok(inTable, `${where} has a short id`);
+    assert.ok(inTable, `${where} has a short id`);
     n++;
     for (const withSeed of [true, false]) {
       const { seed, secret } = withSeed ? { seed: seedHex(i), secret: seedToSecret(seedBytes(seedHex(i))) } : { seed: undefined, secret: hexToField(`0x${(i + 3).toString(16).repeat(62)}`) };
@@ -164,8 +152,7 @@ for (const key of NETWORK_KEYS) {
       assert.equal((await decodeNotePackage(inApp!)).commitment, a.commitment, `${tag}: the in-app claim path opens it`);
       assert.equal(readShortClaim(c.slice("gloam3.".length)).amountWei, a.amountWei, `${tag}: the landing page reads it without Poseidon`);
       n += 15;
-      // the lengths below are for links with a short id
-      if (!note && !writtenOut) lengths.push({ kind: `${key} ${asset.symbol} ${withSeed ? "seed" : "secret"}`, long: long.length, short: short.length });
+      if (!note) lengths.push({ kind: `${key} ${asset.symbol} ${withSeed ? "seed" : "secret"}`, long: long.length, short: short.length });
     }
   }
 }
