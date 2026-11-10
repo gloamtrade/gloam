@@ -493,7 +493,7 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     status: "live",
     // GloamPayMemo, deployed 2026-10-23 (no owner, holds nothing, never logs the poster)
     payMemo: { address: "0x01B3172d9900Cb26d57E986429b9b23854c74598", deployBlock: 95_494_392n, emitsPoster: false },
-    note: "Mainnet: private USDG payments, and $GLOAM, PONS and CASHCAT held privately.",
+    note: "Mainnet: private USDG and ETH payments, and $GLOAM, other tokens and stock tokens held privately.",
     explorerTx: (hash) => `${robinhood.blockExplorers.default.url}/tx/${hash}`,
     explorerAddress: (addr) => `${robinhood.blockExplorers.default.url}/address/${addr}`,
   },
@@ -521,7 +521,7 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     explorerTx: (hash) => `${tempoMainnet.blockExplorers.default.url}/tx/${hash}`,
     explorerAddress: (addr) => `${tempoMainnet.blockExplorers.default.url}/address/${addr}`,
   },
-  // Not deployed yet (DEPLOY-BASE.md): hidden until MAINNET_POOLS[8453] is filled in.
+  // Live since 26 Oct 2026 (DEPLOY-BASE.md); the pool is MAINNET_POOLS[8453].
   "base-mainnet": {
     key: "base-mainnet",
     label: "Base",
@@ -546,7 +546,7 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     explorerTx: (hash) => `${baseMainnet.blockExplorers.default.url}/tx/${hash}`,
     explorerAddress: (addr) => `${baseMainnet.blockExplorers.default.url}/address/${addr}`,
   },
-  // Not deployed yet (DEPLOY-ETHEREUM.md): hidden until MAINNET_POOLS[1] is filled in.
+  // Live since 26 Oct 2026 (DEPLOY-ETHEREUM.md); the pool is MAINNET_POOLS[1].
   // Its testnet is Ethereum Sepolia (the "ethereum" entry). Gas is
   // expensive here, so the relay stops while it is over its ceiling (lib/relay/gasCeiling).
   "ethereum-mainnet": {

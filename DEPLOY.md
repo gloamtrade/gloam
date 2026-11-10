@@ -169,9 +169,9 @@ Defaults are hard-coded for the current Robinhood Chain testnet vault. You do no
 
 | Variable | Correct value | Do not set |
 | --- | --- | --- |
-| `NEXT_PUBLIC_POSEIDON_SHIELD_POOL` | `0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740` | `0x4F38…12D8F` (drained, audit H-P1; the app does NOT remap it). `0xAc25…`, `0xaEbB…`, `0xA488…` (superseded; the app remaps them, but a clean env is better) |
-| `NEXT_PUBLIC_SHIELD_DEPLOY_BLOCK` | `126185021` | `90260331`, `110840714`, `120461692` (superseded pool history) |
-| `NEXT_PUBLIC_HASH_SCHEME` | `poseidon` | `keccak` unless debugging Phase-1 |
+| `NEXT_PUBLIC_POSEIDON_SHIELD_POOL` | `0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740` | `0x4F38…12D8F` (drainable, audit H-P1), `0xAc25…`, `0xaEbB…`, `0xA488…` (superseded). The app remaps all four to the current vault (`SUPERSEDED_POOLS` in `app/src/lib/config.ts`), but a clean env is better |
+| `NEXT_PUBLIC_SHIELD_DEPLOY_BLOCK` | `126185021` | `90260331`, `90436718`, `110840714`, `120461692` (superseded pool history) |
+| `NEXT_PUBLIC_HASH_SCHEME` | Legacy: leave it unset (`poseidon` is the default) | `keccak` (the Phase-1 pool, history only) |
 
 **Hygiene:** omit these envs entirely if the hard-coded defaults are fine. A superseded pool address or deploy block is remapped at runtime; for the pre-sealed `0xA488…` and block `90260331`, Settings → vault health also shows a remapped warning.
 
