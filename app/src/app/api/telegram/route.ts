@@ -1,4 +1,5 @@
 import { NextResponse, after } from "next/server";
+import { logSafe } from "@/lib/logSafe";
 import { botConfig, handleUpdate } from "@/lib/telegramBot/bot";
 import { pollBuys } from "@/lib/telegramBot/buys";
 import { webhookSecretOk } from "@/lib/telegramBot/rules";
@@ -66,7 +67,7 @@ export async function POST(req: Request) {
       // Side by side, not one after the other: a slow answer never leaves a buy check cut off at 60 seconds.
       await Promise.all([
         handleUpdate(u).catch((e) => {
-          console.error("telegram: update failed", e instanceof Error ? e.message : "unknown");
+          console.error("telegram: update failed", logSafe(e));
         }),
         pollBuys(botConfig().groupId),
       ]);

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadEthUsd, loadHypeUsd, loadLiveMarkets } from "@/lib/live-quotes";
+import { logSafe } from "@/lib/logSafe";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 
 export const dynamic = "force-dynamic";
@@ -57,7 +58,7 @@ export async function GET(req: Request) {
       },
     });
   } catch (e) {
-    console.error("gloam_markets", e instanceof Error ? e.message : "unknown");
+    console.error("gloam_markets", logSafe(e));
     return NextResponse.json(
       { markets: [], ethUsd: null, hypeUsd: null, error: "quote_failed" },
       { status: 502, headers: { "Cache-Control": "no-store" } },
