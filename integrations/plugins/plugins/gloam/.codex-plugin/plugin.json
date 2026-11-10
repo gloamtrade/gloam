@@ -1,7 +1,7 @@
 {
   "name": "gloam",
-  "version": "0.8.0",
-  "description": "Private stablecoin payments for agents on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet (Elysium support coming): pay x402 and MPP resources, shield, get paid, with onchain spending limits.",
+  "version": "0.9.0",
+  "description": "Private stablecoin payments for agents on Tempo, Robinhood Chain, Base, Ethereum and Elysium, live on mainnet: pay x402 and MPP resources, shield, get paid, with onchain spending limits.",
   "homepage": "https://gloam.trade/docs/agents",
   "repository": "https://github.com/gloamtrade/gloam",
   "license": "MIT",
@@ -21,7 +21,7 @@
   "interface": {
     "displayName": "Gloam",
     "shortDescription": "Private stablecoin payments for agents, live on mainnet",
-    "longDescription": "Pay for x402 and MPP resources, hold a shielded balance and get paid, privately, on Tempo, Robinhood Chain, Base and Ethereum mainnet and their testnets (Elysium mainnet support is coming). The owner's wallet authorizes a Tempo access key with a spending limit, an expiry and call scopes that the protocol enforces, so the caps hold even if the agent is tricked or its host is compromised.",
+    "longDescription": "Pay for x402 and MPP resources, hold a shielded balance and get paid, privately, on Tempo, Robinhood Chain, Base and Ethereum mainnet and their testnets, and on Elysium mainnet. The owner's wallet authorizes a Tempo access key with a spending limit, an expiry and call scopes that the protocol enforces, so the caps hold even if the agent is tricked or its host is compromised.",
     "developerName": "Gloam",
     "category": "Finance",
     "capabilities": ["Interactive", "Read", "Write"],

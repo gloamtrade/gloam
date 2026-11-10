@@ -3,7 +3,7 @@
   "name": "io.github.cryptoduke01/gloam",
   "title": "Gloam",
   "description": "Private stablecoin payments for people and AI agents on mainnet, hosted or local with limits.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "websiteUrl": "https://gloam.trade/docs/agents",
   "repository": {
     "url": "https://github.com/gloamtrade/gloam",
@@ -20,14 +20,14 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@gloamtrade/mcp",
-      "version": "0.8.0",
+      "version": "0.9.0",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "GLOAM_NETWORK",
-          "description": "Default network for tools: tempo-mainnet, robinhood-mainnet, base-mainnet or ethereum-mainnet (mainnet; elysium-mainnet for Elysium is coming); tempo, robinhood, base or ethereum (testnet; elysium for Elysium testnet is coming; robinhood is the default when unset).",
+          "description": "Default network for tools: tempo-mainnet, robinhood-mainnet, base-mainnet, ethereum-mainnet or elysium-mainnet (mainnet); tempo, robinhood, base or ethereum (testnet; elysium for Elysium testnet once its pool is in; robinhood is the default when unset).",
           "isRequired": false,
           "isSecret": false,
           "format": "string"
