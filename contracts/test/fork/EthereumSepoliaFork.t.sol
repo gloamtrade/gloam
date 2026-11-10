@@ -22,7 +22,12 @@ pragma solidity ^0.8.24;
 // only; https://sepolia.gateway.tenderly.co keeps all of it); SEPOLIA_FORK_BLOCK
 // pins a block (it needs an RPC that keeps old state, like Tenderly's).
 // Once the vault is deployed, the nonce check fails at the head: pin a block
-// from before the deploy to rehearse again.
+// from before the deploy to rehearse again. The vault is deployed (25 Oct 2026),
+// so at the head setUp fails on the nonce check. This passes:
+//   SEPOLIA_FORK=1 SEPOLIA_FORK_URL=https://sepolia.gateway.tenderly.co \
+//     SEPOLIA_FORK_BLOCK=11992000 forge test --match-path test/fork/EthereumSepoliaFork.t.sol -vv
+// It rehearses the planned addresses; the real deploy landed one nonce later
+// (vault 0x465EbfcdE1e384C7B1e8388E1aFEA95438c7A0ef, DEPLOY-ETHEREUM-SEPOLIA.md).
 
 import {Test, console2} from "forge-std/Test.sol";
 import {stdJson} from "forge-std/StdJson.sol";
