@@ -34,8 +34,7 @@ GLOAM_NETWORK=tempo-mainnet GLOAM_PAY_KEY=0x... npx tsx examples/pay-x402/pay-x4
   fee token, else pathUSD, so hold a little of it. `GLOAM_ASSET` can also be
   `pathUSD`, `USDT0` or `OUSD`.
 - `GLOAM_NETWORK=robinhood-mainnet` does the same with USDG on Robinhood Chain.
-  The key needs a little ETH for gas. Robinhood Chain mainnet takes no native ETH
-  deposit (ETH is only gas).
+  The key needs a little ETH for gas.
 - The one key plays both sides here: it funds the buyer and signs the seller's
   sweep. Set `GLOAM_RELAY_URL` to sweep through the Gloam relay instead.
 
@@ -50,7 +49,7 @@ What to know before you use mainnet:
 - **Final keys.** Mainnet proofs use the final keys from the 13-contributor
   trusted setup (release `ceremony-final`), picked with `circuitArtifactFiles` /
   `circuitArtifactUrls`.
-- **Payments only.** The SDK does not swap. Private swaps are in the Gloam app on Robinhood Chain and Tempo mainnet.
+- **No swaps here.** This example does not swap. Private swaps are in the Gloam app and in the SDK (from 0.5.0), on Robinhood Chain and Tempo mainnet.
 - **Secrets are money.** The script prints the buyer's funding note, the buyer's
   change note and the seller's fresh note. Store them; losing a secret loses its
   funds.
@@ -78,7 +77,7 @@ Get test ETH from the [Robinhood Chain faucet](https://faucet.testnet.chain.robi
 | Variable | What it does |
 | --- | --- |
 | `GLOAM_PAY_KEY` | The key that funds the buyer and signs the seller's sweep (required). |
-| `GLOAM_NETWORK` | `robinhood-mainnet`, `tempo-mainnet`, `robinhood` or `tempo`. Default `robinhood` (testnet). |
+| `GLOAM_NETWORK` | `robinhood-mainnet`, `tempo-mainnet`, `base-mainnet`, `ethereum-mainnet`, `robinhood`, `tempo` or `base` (Base Sepolia). Default `robinhood` (testnet). |
 | `GLOAM_ASSET` | A symbol or address the pool lists. Default: the first stablecoin (test ETH on Robinhood Chain testnet). |
 | `GLOAM_RPC` | Your own RPC URL. Default: the network's public RPC. |
 | `GLOAM_RELAY_URL` | Sweep through the Gloam relay instead of the seller's wallet. |

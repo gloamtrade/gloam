@@ -2,7 +2,7 @@
 name: gloam
 description: >
   Use when the user wants an agent to pay for an x402 or MPP resource privately, fetch a paid URL,
-  hold or check a private (shielded) stablecoin balance on Tempo or Robinhood Chain, charge for a
+  hold or check a private (shielded) stablecoin balance on Tempo, Robinhood Chain, Base or Ethereum, charge for a
   resource and verify a private payment, or see the agent's spending limits and spending report.
   For installing Gloam, keys, access keys and limits, use gloam-setup.
 license: MIT
@@ -16,7 +16,7 @@ through the `gloam` MCP server: the public chain sees a shielded transfer, not w
 Each chain has a mainnet and a testnet, and tools take a `network`:
 
 - `tempo-mainnet`, `robinhood-mainnet`, `base-mainnet` and `ethereum-mainnet` are **mainnet**.
-  Deposits are capped at 50,000 of a stablecoin (20 ETH, 2,500,000 GLOAM) per deposit.
+  Deposits are capped at 50,000 of a stablecoin (20 ETH on Base and Ethereum, 11 ETH on Robinhood Chain, 2,500,000 GLOAM) per deposit.
   Direct deposits and private payments are free;
   cashing out costs 0.5%.
 - `elysium-mainnet` (Elysium, USDC only, gas in HYPE) and `elysium` (Elysium testnet) are coming: use them only if `gloam_info` lists them.

@@ -5,7 +5,7 @@ seller side of private x402.
 
 An agent kit adds these tools and its agents get a private balance, private
 payments, claim links, cash outs and proofs of funds on Robinhood Chain, Tempo,
-Base and Ethereum (Elysium mainnet support is coming). An x402 marketplace adds the seller helper and its sellers
+Base, Ethereum and Elysium. An x402 marketplace adds the seller helper and its sellers
 take Gloam private payments next to the standard x402 ones they take today.
 
 - **Framework-agnostic.** Tools are plain data (name, description, JSON schema)
@@ -365,8 +365,8 @@ Cash the swept notes out with the pack's `gloam_preview_cash_out`, or in the
 
 ## What is public, and what was reviewed
 
-Robinhood Chain, Tempo, Base and Ethereum mainnets are live with
-deposit limits (Elysium mainnet support is coming, with gas in HYPE). A deposit and a cash out are public (wallet or recipient, asset,
+Robinhood Chain, Tempo, Base, Ethereum and Elysium mainnets are live with
+deposit limits (Elysium with gas in HYPE). A deposit and a cash out are public (wallet or recipient, asset,
 amount); a private payment shows only that a shielded transfer happened.
 Privacy grows with the number of notes in a vault, so a quick deposit and cash
 out of the same amount can be linked. Kann Audits reviewed the vault contracts

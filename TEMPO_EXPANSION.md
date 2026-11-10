@@ -12,7 +12,7 @@ stays up as the testnet: current pool
 37411195, no admin withdraw, timelocked rule changes) and memo board
 `0x3ca88712e9219b5EE4c82D31cAfEaB64C9E9b4E3`, on dev keys with test funds. Shield
 PathUSD and other test stablecoins, private send, cash out, payroll, proofs and
-the relay all run there. Private trade is off on both, as on Robinhood Chain. The
+the relay all run there. The sealed trade is off on both, as on Robinhood Chain; private swaps from the private balance are live on Tempo mainnet (`GloamVaultSwapTempo`). The
 sections below are the original design, annotated with what shipped (re-checked
 2026-10-10).
 
@@ -152,7 +152,8 @@ selective disclosure it lacks:
   auditor.
 - Say "live on Tempo mainnet", with Moderato as the
   testnet. Never say "fully audited": it was reviewed internally, and Kann
-  Audits reviewed the vault contracts only. Never claim private trading is live.
+  Audits reviewed the vault contracts only. Never claim the sealed trade is live; private
+  swaps are live on Tempo mainnet (who swapped stays private, the pair and the amounts are public).
 
 ## 7. Open questions and risks
 
@@ -166,12 +167,7 @@ selective disclosure it lacks:
   choice.
 - **Native USD decimals on Tempo.** Resolved: native `msg.value` is blocked, so
   the pool shields ERC-20 stablecoins only (PathUSD is 6 decimals).
-- **World's Fair timing (Sep 14 to Oct 12).** Colosseum explicitly permits
-  building up to two months before the start, so building and deploying Tempo
-  before Sep 14 is allowed and is not a disqualification risk. Judging weighs
-  work shown during the window, so the goal is demoable in-window progress, not
-  gating the build to those dates. (Confirmed against Colosseum's official
-  guidance, 2026-09-09.)
+- **World's Fair timing (Sep 14 to Oct 12).** Past: the window closed on 12 October 2026.
 - **Do Zones make a public-Mainnet shielded pool redundant in judges' eyes?**
   Mitigate by leading with the self-custodial + permissionless + agent lane and
   the compliance-compatible disclosure, which Zones does not offer.
@@ -184,7 +180,7 @@ selective disclosure it lacks:
 3. Phase 1 (done): pool + verifiers on Tempo Moderato, PathUSD, `tempo` live,
    consumers on `useNetwork()`. Redeployed 2026-09-16 (hardening) and
    2026-09-29 (no admin withdraw, timelocked rule changes).
-4. Phase 2 (done on testnet): x402 + MCP private-pay surface.
+4. Phase 2 (done, on Tempo mainnet since 21 October 2026): x402 + MCP private-pay surface.
 5. Phase 3 (open): issuer-viewing-key selective disclosure as a headline feature.
 6. Mainnet (21 October 2026): `ShieldPoolPayments` on Tempo mainnet, final keys,
    deposit limits, payments only.

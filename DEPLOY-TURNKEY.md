@@ -5,8 +5,9 @@ a wallet in one step, then add funds. The wallet's key is made and kept by Turnk
 secure hardware; the page never sees it and there is no seed phrase. Signing in on any
 device opens the same wallet.
 
-Everything is in the code and off. Nothing changes on gloam.trade until
-`NEXT_PUBLIC_TURNKEY_ENABLED=true` is set and the app is rebuilt. You set up the Turnkey
+Gloam wallets are live on gloam.trade since 5 November 2026 (`NEXT_PUBLIC_TURNKEY_ENABLED=true`
+on Vercel). This runbook is the record of that switch-on and the reference for its settings;
+[Rolling back](#rolling-back) is at the end. You set up the Turnkey
 dashboard yourself; no agent creates accounts or enters credentials there. Gloam's
 servers hold no Turnkey secret: the app talks to Turnkey only through its auth proxy,
 with public ids.

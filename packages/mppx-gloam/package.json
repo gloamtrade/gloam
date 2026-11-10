@@ -79,7 +79,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "node scripts/publish-guard.mjs && npm run build",
     "typecheck": "tsc --noEmit",
     "test": "tsc --noEmit && tsx --test test/*.test.ts"
   },

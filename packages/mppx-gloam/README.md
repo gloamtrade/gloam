@@ -4,7 +4,7 @@ Private payments for the [Machine Payments Protocol](https://mpp.dev) (MPP).
 
 MPP is HTTP 402 done properly: a server answers `WWW-Authenticate: Payment …`, the client pays and retries with `Authorization: Payment …`, and gets a `Payment-Receipt`. Every method so far (tempo, evm, stripe, solana) settles in public, so the ledger shows which agent paid which service, how much, how often.
 
-This package adds the **`gloam`** method. A charge is paid with a private transfer inside a Gloam shielded pool on Tempo, Robinhood Chain, Base or Ethereum, on mainnet or testnet (Elysium mainnet support is coming):
+This package adds the **`gloam`** method. A charge is paid with a private transfer inside a Gloam shielded pool on Tempo, Robinhood Chain, Base, Ethereum or Elysium, on mainnet or testnet (Elysium mainnet with an SDK newer than 0.6.0):
 
 - the payment note is sealed to the payee's receive tag, so only the payee can open it;
 - the server checks it binds the price, that it is the payment output of a `Transferred` event in the official pool, and that the credential is bound to this exact challenge;
@@ -59,7 +59,7 @@ const tree = createTreeSync(publicClient, {
   fromBlock: tempo.deployBlock,
   chunkSize: 99_000n,                     // Tempo's RPC caps eth_getLogs at 100,000 blocks
   seed: gloamLeafSeed("tempo-mainnet"),   // cold start: Gloam's public leaf list, checked against the pool's root
-  store: fileStore(".cache/tree.json"),   // optional: a restart reads only the blocks since
+  store: myTreeStore,                     // optional TreeStore (examples/e2b-private-mpp/common.ts has a file one): a restart reads only the blocks since
   reuseMs: 5_000,
 });
 const chain = gloamChargeChainFromClient(publicClient, { pool: tempo.pool, tree, pollingInterval: 250 });
@@ -95,7 +95,7 @@ const res = await mppx.fetch("https://api.example.com/answer");
 
 The client refuses, before proving anything, a pool that is not Gloam's for that chain, a recipient that is not a receive tag, and anything outside `policy`.
 
-Proofs must be made with the keys of the chain the payment settles on: the trusted setup's final keys on mainnet (Tempo `4217`, Robinhood Chain `4663`), the dev keys on testnet. `circuitArtifactUrls("transfer", chainId)` from the SDK returns the right files. A client that pays on more than one chain picks the prover per challenge. In Node, snarkjs reads local files only: download the files first, check them against `CIRCUIT_SHA256`, and pass their paths to `artifactProver`.
+Proofs must be made with the keys of the chain the payment settles on: the trusted setup's final keys on every mainnet and on Base Sepolia and Ethereum Sepolia, the dev keys on the Robinhood Chain and Tempo testnets. `circuitArtifactUrls("transfer", chainId)` from the SDK returns the right files. A client that pays on more than one chain picks the prover per challenge. In Node, snarkjs reads local files only: download the files first, check them against `CIRCUIT_SHA256`, and pass their paths to `artifactProver`.
 
 ## Without an MPP library
 
@@ -142,7 +142,7 @@ Base: `"base"` (Base Sepolia `84532`, test USDC by default, also EURC and ETH, o
 
 Ethereum too (0.3.0): `"ethereum-mainnet"` (Ethereum `1`, USDC by default, also USDT, USDG, PYUSD, EURC and ETH), live since 26 October 2026, works the same way with SDK 0.4.1 or later. Its testnet is Ethereum Sepolia, below.
 
-Elysium is coming: `"elysium-mainnet"` (Elysium mainnet, USDC only, gas in HYPE, final keys) and `"elysium"` (Elysium testnet `99801`, test USDC) are known to this package, and are coming in a build whose SDK has Elysium's values. Until then each is refused with a plain error.
+Elysium: `"elysium-mainnet"` (Elysium mainnet, live since 9 November 2026, USDC only, gas in HYPE, final keys) works with an SDK that has Elysium's values (the release after 0.6.0). `"elysium"` (Elysium testnet `99801`, test USDC) works once its pool is in the SDK. Without them each is refused with a plain error.
 
 Ethereum Sepolia: `"ethereum"` (`11155111`, test USDC by default, also USDG, PYUSD, EURC and ETH, on the final keys) is known to 0.3.0 and works with SDK 0.4.0, which has its pool (deployed 25 October 2026). Built with an older SDK it is refused with a plain error.
 
@@ -156,7 +156,7 @@ Gloam's vault has one address on every chain, and ETH is `0x0` on all of them. A
 
 ## Status
 
-Mainnet on Tempo, Robinhood Chain, Base and Ethereum (Base and Ethereum need a build with SDK 0.4.1 or later; Elysium support is coming), payments only, with the trusted setup's final keys and deposit limits on the pools; reviewed internally before launch, and Kann Audits reviewed the vault contracts (report, 1 November 2026: gloam.trade/security) and found no Critical, High or Medium issues. The testnets stay up.
+Mainnet on Tempo, Robinhood Chain, Base and Ethereum (Base and Ethereum need a build with SDK 0.4.1 or later), and Elysium (an SDK newer than 0.6.0), payments only, with the trusted setup's final keys and deposit limits on the pools; reviewed internally before launch, and Kann Audits reviewed the vault contracts (report, 1 November 2026: gloam.trade/security) and found no Critical, High or Medium issues. The testnets stay up.
 
 ## Tests
 

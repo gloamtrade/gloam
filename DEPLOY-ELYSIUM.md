@@ -3,20 +3,37 @@
 Launch-day runbook for Elysium mainnet, Kinetiq's Hyperliquid L2 (Arbitrum Orbit,
 settles to HyperEVM 999, gas in HYPE, blocks about every 100 ms, one sequencer at
 launch). Mainnet is chain id **99901** (0x1863d), already in the SDK file; its public
-RPC, explorer and USDC are published at launch. The testnet (99801) has its own
+RPC (`https://rpc.elysium.kinetiq.xyz`), explorer (`https://elysium.kinetiq.xyz/explorer`) and USDC
+(`0xb47c4C8F73F009CC0C0d3f92B388d13E293F0B65`) are in `packages/sdk/src/elysium.ts` too. The testnet (99801) has its own
 section at the end and can be deployed now. You run it with your own
-keys; no agent and no CI deploys it. Elysium mainnet launches Sunday 9 November 2026.
+keys; no agent and no CI deploys it. Elysium mainnet launched on Sunday 9 November 2026, and
+the vault was deployed the same day ([below](#deployed-on-9-november-2026)).
 
 Same vault as every other mainnet (`ShieldPoolPayments`, the ceremony's final keys,
 deposit limits, 0.5% cash-out fee to the treasury), through the shared
 `contracts/script/MainnetDeploy.sol`. One difference: **the vault is born guarded.**
 In the same run the deploy hands ownership to a `VaultOwnerGuard` (Kann I-02 fix), so
 its proof checkers can never be swapped and its ownership can never move. The guard's
-controller is `GUARD_CONTROLLER` (a multisig), who can only change limits and the fee,
+controller is `GUARD_CONTROLLER` (on Elysium mainnet the owner wallet `0x76b7…D4D8` for now;
+`transferController` moves it to a Safe later), who can only change limits and the fee,
 with the vault's 3-day notice for any raise.
 
-Everything in the repo is ready and off. Elysium appears nowhere until
-`NEXT_PUBLIC_ELYSIUM_ENABLED=1` **and** every value below is in.
+Every value below is in, and the app shows Elysium while `NEXT_PUBLIC_ELYSIUM_ENABLED=1` is
+set (on in production since 9 November 2026). Without the flag, or with a value missing,
+Elysium appears nowhere.
+
+## Deployed on 9 November 2026
+
+The record is `contracts/deployments/elysium-mainnet.json`.
+
+| Item | Value |
+| --- | --- |
+| Vault (`ShieldPoolPayments`) | `0x89d3042390204f57b8b4F8949D3c2203E4002164`, block `3248495` |
+| `VaultOwnerGuard` (the owner) | `0x268D7CAd645282D1e77461b5B2dd997bd54eFAf5`, controller the owner wallet `0x76b7…D4D8` |
+| PoseidonT3 | `0x62c435CE6886fa91e3b0e91500c6dC9219723457` (not `0x1a32…`: a new deployer) |
+| Deployer | `0xec9993765e249e8e9DC677B7BCB61F78b31c6b60` |
+| Memo board | Not deployed yet (step 5) |
+| Assets | USDC, 500 per deposit and 25,000 in total; 0.5% cash-out fee |
 
 ## The values
 
@@ -127,8 +144,11 @@ Setting the flag before step 8 (no values yet) shows Elysium as "coming" in Glim
 ### Static copy (it can't read the flag)
 
 READMEs, npm and plugin manifests, SKILL.md files, server.json, AGENTS.md and the
-contracts docs say Elysium support is "coming". Every such line says "coming" on
-the same line, so after the flag is on:
+contracts docs said Elysium support is "coming". The repo READMEs, AGENTS.md and the
+package descriptions were switched to live on 10 November 2026. The plugin manifests, SKILL.md files,
+the plugins README and server.json pin `@gloamtrade/mcp@0.8.0`, which has no Elysium, so
+they keep "coming" until the next MCP release and its pin bump; the contracts docs are
+the contracts owner's. To find what is left:
 
 ```bash
 git grep -n Elysium -- ':!app/src' ':!videos' | grep coming
@@ -141,10 +161,9 @@ shows match what npm installs.
 
 ### Not on Elysium yet (on purpose)
 
-- **Bring money over (Relay):** `BRIDGE_DESTINATIONS` in `app/src/lib/bridge.ts` has no
-  Elysium entry ("not yet"): no live Relay quote into Elysium USDC has been checked.
-  Add one there once it has, and drop the "not on Elysium yet" lines in Glim,
-  /docs/chain, /docs/bridge and the README.
+- **Bring money over (Relay):** live since 9 November 2026. `BRIDGE_DESTINATIONS` in
+  `app/src/lib/bridge.ts` has an Elysium entry (USDC in, HYPE to USDC), and a private
+  landing in the Elysium vault was proven end to end the same day (#243).
 - **Private swaps:** no router on Elysium (`VAULT_SWAP_ROUTERS`, "not yet"). The SDK,
   MCP and app refuse a swap there by name.
 - **Partner links:** Elysium is in `PUBLIC_MEMPOOL_CHAINS` (`app/src/lib/partnerCode.ts`),

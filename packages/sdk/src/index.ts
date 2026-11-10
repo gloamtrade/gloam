@@ -1,12 +1,12 @@
 /**
- * @gloamtrade/sdk — Gloam's private path as a reusable package.
+ * @gloamtrade/sdk: Gloam's private path as a reusable package.
  *
  * Shielded balances, private transfers, and private payments that any app or
- * agent can plug into. It runs on the chains Gloam deploys to, Robinhood Chain
- * and Tempo, on mainnet (the ceremony's final keys) and on testnet (dev keys),
- * and Base: Base Sepolia, its testnet, runs the mainnet pool and keys, and
- * Base mainnet appears once its
- * pool is filled in. Each is a separate
+ * agent can plug into. It runs on the chains Gloam deploys to: Robinhood Chain,
+ * Tempo, Base, Ethereum and Elysium on mainnet (the ceremony's final keys), and
+ * their testnets (dev keys on the Robinhood Chain and Tempo testnets; Base
+ * Sepolia and Ethereum Sepolia run the mainnet pool and keys; Elysium's testnet
+ * appears once its pool is filled in). Each is a separate
  * deployment of the same shielded-pool design: pick a network
  * (mainnetNetwork("tempo"), gloamNetworks(), or GLOAM_NETWORKS for the
  * testnets), pass its `chainId` and `poolAddress`, and prove with

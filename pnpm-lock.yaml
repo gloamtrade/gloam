@@ -385,9 +385,6 @@ importers:
       '@virtuals-protocol/game':
         specifier: ^0.1.14
         version: 0.1.14
-      circomlibjs:
-        specifier: 0.1.7
-        version: 0.1.7(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       snarkjs:
         specifier: ^0.7.5
         version: 0.7.5

@@ -111,6 +111,8 @@ runs on chainId 4217:
 4. It sets the 0.25% cash-out fee (`WITHDRAW_FEE_BPS=25`) when `FEE_RECIPIENT` is set,
    starts the ownership handoff to `NEW_OWNER` if one is given (it must call
    `acceptOwnership()`), and ends setup in the same run.
+   At deploy: these limits and the 0.25% fee. Since then the stablecoin limits are 50,000
+   and 2,500,000 and the fee is 0.5% (from 3 November 2026), raised through the timelock.
 5. It reads every setting back and fails on a mismatch. If it fails, do not announce
    the pool; deploy a fresh one.
 

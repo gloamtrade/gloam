@@ -21,7 +21,7 @@ http://localhost:3000.
 
 | Network | How | Chain id | What you need |
 | --- | --- | --- | --- |
-| Robinhood Chain mainnet | default once the SDK has the mainnet pool, or `NEXT_PUBLIC_GLOAM_NETWORK=robinhood-mainnet` | `4663` | USDG, and a little ETH for gas |
+| Robinhood Chain mainnet | the default, or `NEXT_PUBLIC_GLOAM_NETWORK=robinhood-mainnet` | `4663` | USDG, and a little ETH for gas |
 | Robinhood Chain testnet | `NEXT_PUBLIC_GLOAM_NETWORK=robinhood npm run dev` | `46630` | Test ETH from the [Robinhood faucet](https://faucet.testnet.chain.robinhood.com/), test USDG from the [Paxos faucet](https://faucet.paxos.com/) |
 
 On mainnet, deposit limits apply: at most 50,000 USDG per deposit and 2,500,000 USDG

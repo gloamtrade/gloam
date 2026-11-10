@@ -2,7 +2,8 @@
  * @gloamtrade/mppx-gloam: private payments for the Machine Payments Protocol.
  *
  * The "gloam" payment method settles an MPP charge as a shielded transfer
- * through the Gloam pool on Tempo or Robinhood Chain. The payment note is
+ * through a Gloam pool (Tempo, Robinhood Chain, Base, Ethereum or Elysium,
+ * whichever networks the installed SDK has). The payment note is
  * sealed to the payee's receive tag and swept into a fresh note before the
  * server serves, so the public sees a shielded transfer and nothing else, and
  * the payer cannot take the payment back.

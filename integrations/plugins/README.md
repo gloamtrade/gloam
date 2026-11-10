@@ -34,7 +34,7 @@ Cursor reads `.cursor-plugin/marketplace.json` once the repository is submitted 
 
 ### Just the MCP server
 
-Any MCP client can run the server directly once `@gloamtrade/mcp` is on npm:
+Any MCP client can run the server directly from npm:
 
 ```sh
 claude mcp add gloam -- npx -y @gloamtrade/mcp          # Claude Code

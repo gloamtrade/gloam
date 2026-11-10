@@ -8,7 +8,7 @@ out
 build
 dist
 
-# env / secrets — never commit real keys
+# env / secrets: never commit real keys
 .env
 .env.*
 !.env.example
@@ -48,4 +48,7 @@ next-env.d.ts
 CLAUDE.md
 CLAUDE.local.md
 **/CLAUDE.md
-AUDITS/CLAUDE_GRAND_AUDIT_PROMPT.md
+
+# Private audit reports and findings stay off this public repo
+# (published reviews live in app/public/audits)
+/AUDITS/
