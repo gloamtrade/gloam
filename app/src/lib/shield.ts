@@ -193,38 +193,6 @@ export const shieldPoolAbi = [
   },
   {
     type: "function",
-    name: "sealedSwap",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "proof", type: "bytes" },
-      { name: "root", type: "bytes32" },
-      { name: "nullifier", type: "bytes32" },
-      { name: "newCommitmentOut", type: "bytes32" },
-      { name: "newCommitmentChange", type: "bytes32" },
-      { name: "assetIn", type: "address" },
-      { name: "assetOut", type: "address" },
-      { name: "amountOutMin", type: "uint256" },
-      { name: "rateIn", type: "uint256" },
-      { name: "rateOut", type: "uint256" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    name: "sealedSwapVerifier",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "address" }],
-  },
-  {
-    type: "function",
-    name: "setSealedSwapVerifier",
-    stateMutability: "nonpayable",
-    inputs: [{ name: "verifier_", type: "address" }],
-    outputs: [],
-  },
-  {
-    type: "function",
     name: "PROOF_LAYOUT_VERSION",
     stateMutability: "view",
     inputs: [],
@@ -289,8 +257,6 @@ export const SHIELD_GAS_LIMIT = 1_500_000n;
 export const TRANSFER_GAS_LIMIT = 2_400_000n;
 // shieldBound also verifies a Groth16 proof on-chain (~250k extra).
 export const SHIELD_BOUND_GAS_LIMIT = 1_900_000n;
-/** Sealed swap proof verify is heavier */
-export const SEALED_SWAP_GAS_LIMIT = 2_500_000n;
 export const APPROVE_GAS_LIMIT = 120_000n;
 
 /**
