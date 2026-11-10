@@ -37,8 +37,6 @@ export const TRACK_EVENTS = [
   "proof_verified",
   "schedule_created",
   "schedule_run",
-  "sealed_swap_submit",
-  "sealed_swap_success",
   "shield_success",
   "swap_review",
   "swap_submit",

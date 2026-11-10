@@ -677,30 +677,6 @@ export function ExportsArt() {
   );
 }
 
-/** Sealed trade, retired: a sealed envelope, set aside. */
-export function RetiredArt() {
-  return (
-    <div style={{ ...col, alignItems: "center", gap: 22 }}>
-      <svg width={210} height={140} viewBox="0 0 210 140" style={{ opacity: 0.55 }}>
-        <rect x={4} y={4} width={202} height={132} rx={16} fill={C.surface} stroke={C.mute} strokeWidth={3} />
-        <path d="M8 12 L105 82 L202 12" fill="none" stroke={C.mute} strokeWidth={3} strokeLinejoin="round" />
-        <circle cx={105} cy={82} r={20} fill={C.raised} stroke={C.mute} strokeWidth={3} />
-      </svg>
-      <div
-        style={{
-          ...row,
-          height: 40,
-          padding: "0 18px",
-          borderRadius: 20,
-          border: `1.5px solid ${C.line}`,
-        }}
-      >
-        <Text size={20} color={C.mute}>Retired</Text>
-      </div>
-    </div>
-  );
-}
-
 /** Testnet: a drop from the faucet. */
 export function DropArt() {
   return (

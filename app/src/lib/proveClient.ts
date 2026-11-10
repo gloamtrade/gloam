@@ -1,14 +1,13 @@
 /**
- * Browser snarkjs fullProve for the Poseidon circuits (unshield, transfer,
- * sealedSwap). Artifacts under /public/circuits (dev ceremony, replace for
- * production). Proof packing and field helpers come from @gloamtrade/sdk; this file
+ * Browser snarkjs fullProve for the Poseidon circuits (shield, unshield,
+ * transfer). Artifacts under /public/circuits, with the trusted setup's final
+ * keys under /public/circuits/final for mainnet. Proof packing and field helpers come from @gloamtrade/sdk; this file
  * is the browser-specific proving glue.
  */
 
 import type { Hex } from "viem";
 import { packGroth16Proof, type Groth16Proof } from "@gloamtrade/sdk";
 import {
-  assertSealedSwapArtifacts,
   assertShieldArtifacts,
   assertTransferArtifacts,
   assertUnshieldArtifacts,
@@ -66,15 +65,6 @@ export async function proveTransferInBrowser(
   if (readDemo()) return demoProve(circomInput);
   await assertTransferArtifacts();
   return fullProve(circomInput, files().transferWasm.path, files().transferZkey.path);
-}
-
-/** Prove sealed swap (dev keys). Settlement live on the RH testnet Poseidon vault. */
-export async function proveSealedSwapInBrowser(
-  circomInput: Record<string, string | string[]>
-) {
-  if (readDemo()) return demoProve(circomInput);
-  await assertSealedSwapArtifacts();
-  return fullProve(circomInput, files().sealedSwapWasm.path, files().sealedSwapZkey.path);
 }
 
 /**

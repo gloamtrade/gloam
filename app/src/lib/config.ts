@@ -1,8 +1,9 @@
 /**
  * Product config: keccak Phase-1 pool vs Poseidon Phase-2 pool.
- * Default product path = sealed Poseidon vault on RH testnet.
+ * Default product path = the Poseidon vault on RH testnet.
  *
- * Stale Vercel envs that still point at pre-sealed pool 0xA488… are ignored, * that vault has no sealedSwap and breaks Private trade.
+ * Stale Vercel envs that still point at an older pool (SUPERSEDED_POOLS) are
+ * remapped to the current one.
  */
 
 import type { Address } from "viem";
@@ -39,12 +40,6 @@ const SUPERSEDED_BLOCKS = [120_461_692n, 110_840_714n, 90_260_331n, 90_436_718n]
 function isSupersededPool(a: string): boolean {
   return SUPERSEDED_POOLS.some((p) => sameAddr(a, p));
 }
-
-/** Prior Poseidon pool (pre-sealedSwap), history only, never product default */
-export const LEGACY_POSEIDON_POOL =
-  "0xA488809a089F003A2B6E69daa65B0db79823c93B" as const satisfies Address;
-
-export const LEGACY_POSEIDON_DEPLOY_BLOCK = 90_260_331n;
 
 function isAddressLike(e: string | undefined): e is Address {
   return Boolean(e && e.startsWith("0x") && e.length === 42);

@@ -81,15 +81,13 @@ export function VaultTradePanel({
   tokenAddress,
   hasPool,
   initialSide = "buy",
-  onUsePrivate,
 }: {
   marketId?: string;
   marketSymbol: string;
   tokenAddress?: Address;
   hasPool: boolean;
-  /** The saved default side (Settings), until a side is picked here. */
+  /** The side a link asked for, else the saved default (Settings), until a side is picked here. */
   initialSide?: Side;
-  onUsePrivate?: () => void;
 }) {
   const router = useRouter();
   const shieldLive = isShieldDeployed();
@@ -680,25 +678,13 @@ export function VaultTradePanel({
               No public pool for {marketSymbol}
             </p>
             <p className="mt-2 text-[14px] leading-relaxed text-mute">
-              This tab needs an open market. Testnet doesn&apos;t have one for{" "}
-              {marketSymbol} yet. Use{" "}
-              <strong className="font-medium text-foreground">Private</strong>{" "}
-              instead. It works without one.
+              This path needs an open market, and testnet doesn&apos;t have one
+              for {marketSymbol} yet. You can still hold {marketSymbol} in your
+              vault and pay with it privately.
             </p>
-            <button
-              type="button"
-              onClick={() => {
-                if (onUsePrivate) onUsePrivate();
-                else {
-                  const u = new URL(window.location.href);
-                  u.searchParams.set("path", "sealed");
-                  window.location.href = u.toString();
-                }
-              }}
-              className="btn btn-ink btn-block mt-5"
-            >
-              Go to Private trade
-            </button>
+            <Link href="/app/vault?tab=move" className="btn btn-ink btn-block mt-5">
+              Pay privately
+            </Link>
           </div>
         )}
 

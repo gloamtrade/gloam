@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { shortAddress } from "@/lib/chain";
 import { useNetwork } from "./NetworkProvider";
 import { vaultEnvDiagnostics } from "@/lib/config";
 import { HASH_SCHEME, isShieldDeployed } from "@/lib/shield";
-import { readVaultSealedReadiness } from "@/lib/vaultStatus";
 import { vaultSwapRouter } from "@/lib/vaultSwap";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import { StatusPill } from "./StatusPill";
@@ -31,35 +30,14 @@ export function VaultHealth({ compact = false }: { compact?: boolean }) {
   const { network } = useNetwork();
   const { leafCount, loading: treeLoading, refresh, error: treeError } =
     useShieldTree();
-  const [sealed, setSealed] = useState<"checking" | "ready" | "off">("checking");
   const env = useMemo(() => vaultEnvDiagnostics(), []);
-  // A payments vault (every mainnet, and Base Sepolia) has no private trade,
-  // so its status never hangs on the private-trade verifier.
+  // A payments vault: every mainnet, and Base Sepolia.
   const paymentsOnly = network.paymentsPool;
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      if (!isShieldDeployed()) {
-        if (!cancelled) setSealed("off");
-        return;
-      }
-      const r = await readVaultSealedReadiness();
-      if (!cancelled) setSealed(r.status === "ready" ? "ready" : "off");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   if (!isShieldDeployed()) return null;
 
   const recheck = () => {
-    void (async () => {
-      const r = await readVaultSealedReadiness();
-      setSealed(r.status === "ready" ? "ready" : "off");
-      await refresh();
-    })();
+    void refresh();
   };
 
   const syncText = treeLoading
@@ -78,8 +56,8 @@ export function VaultHealth({ compact = false }: { compact?: boolean }) {
           {syncText}
         </span>
         <span className="flex items-center gap-1">
-          <StatusPill tone={paymentsOnly || sealed === "ready" ? "lime" : "mute"} dot>
-            {paymentsOnly ? "Payments" : sealed === "ready" ? "Private trade on" : "Vault"}
+          <StatusPill tone="lime" dot>
+            {paymentsOnly ? "Payments" : "Vault"}
           </StatusPill>
           <button
             type="button"
@@ -107,8 +85,8 @@ export function VaultHealth({ compact = false }: { compact?: boolean }) {
           </p>
         </div>
         <div className="flex items-center gap-1">
-          <StatusPill tone={paymentsOnly || sealed === "ready" ? "lime" : sealed === "checking" ? "mute" : "warn"} dot>
-            {paymentsOnly ? "Ready" : sealed === "ready" ? "Ready" : sealed === "checking" ? "Checking" : "Limited"}
+          <StatusPill tone="lime" dot>
+            Ready
           </StatusPill>
           <button
             type="button"

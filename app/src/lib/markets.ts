@@ -34,7 +34,7 @@ export type Market = MarketDef & LiveQuote;
  * - ETH for gas / USD conversion
  */
 export const MARKET_DEFS: MarketDef[] = [
-  // Onchain faucet tokens (sealed private trade on RH testnet vault)
+  // Onchain faucet tokens (RH testnet: can be held in the vault)
   {
     id: "tsla",
     symbol: "TSLA",

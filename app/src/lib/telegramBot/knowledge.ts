@@ -609,7 +609,7 @@ function liveSwaps(): [string, string][] {
     ["Markets (Robinhood Chain only)", "Markets (only on Robinhood Chain testnet)"],
     [
       "Trade (Robinhood Chain only, switched off while the new engine is built)",
-      "Swap (mainnet only: swap inside your private balance, see PRIVATE SWAPS), Trade (only on Robinhood Chain testnet, for the sample stock tokens; its Private path is the old private trade, retired and off)",
+      "Swap (mainnet only: swap inside your private balance, see PRIVATE SWAPS), Trade (only on Robinhood Chain testnet, for the sample stock tokens; a trade there is public on the explorer)",
     ],
     ["the test funds button (\"Get testnet funds\"", "the test funds button on a testnet (\"Get testnet funds\""],
     ["2. Claim test funds from Get test funds on Portfolio.", "2. On a testnet, claim test funds from Get test funds on Portfolio (mainnet has none: you add your own money)."],

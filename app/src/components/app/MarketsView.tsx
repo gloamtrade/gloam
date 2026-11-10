@@ -14,7 +14,7 @@ import { MarketChart } from "./MarketChart";
 type Filter = "all" | "onchain" | "private" | "stocks";
 
 const FILTERS: { id: Filter; label: string; hint: string }[] = [
-  { id: "private", label: "Private-ready", hint: "Can be held and traded privately" },
+  { id: "private", label: "Private-ready", hint: "Can be held in your private balance" },
   { id: "onchain", label: "Onchain", hint: "Live as a token on Robinhood Chain" },
   { id: "stocks", label: "Stocks", hint: "Tokenized equities" },
   { id: "all", label: "All markets", hint: "Everything on the watchlist" },
@@ -202,9 +202,7 @@ export function MarketsView() {
                 : m.mark > 0
                   ? [m.mark * 0.98, m.mark * 1.01, m.mark]
                   : [];
-            const tradeHref = m.privateReady
-              ? `/app/trade?market=${m.id}&path=sealed`
-              : `/app/trade?market=${m.id}`;
+            const tradeHref = `/app/trade?market=${m.id}`;
             return (
               <li key={m.id} className="border-b border-line last:border-0">
                 {/* whole row is the trade action; the chart toggle sits above it */}
@@ -333,7 +331,7 @@ export function MarketsView() {
   );
 }
 
-/** Marks a market that can be held and traded privately: the sealed tint. */
+/** Marks a market that can be held in the private balance: the sealed tint. */
 function PrivateChip() {
   return (
     <span className="inline-flex h-5 items-center gap-1 rounded-full bg-sealed-soft px-2 text-[11px] font-medium text-sealed">
