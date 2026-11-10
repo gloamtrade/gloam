@@ -14,6 +14,7 @@ interface IVaultLimits {
     function queueChange(bytes calldata call) external returns (bytes32 id, uint256 eta);
     function executeChange(bytes calldata call) external;
     function cancelChange(bytes calldata call) external;
+    function lowerDepositLimit(address asset, uint128 perDeposit, uint128 total) external;
 }
 
 interface IERC20Meta {
@@ -61,7 +62,11 @@ interface IERC20Meta {
  *
  * Step 3, 3 days after step 1 (and within the 14-day grace window): the same
  * four lines with --sig "execute()". It runs every max change whose delay has
- * passed and checks each limit is now max.
+ * passed and checks each limit is now max. BDX is the exception: on Base and
+ * Ethereum its max change runs and the very next transaction lowers it to
+ * 100,000 per deposit and 2,000,000 in total (lowerDepositLimit, no timelock),
+ * and the run checks that cap landed. Forge sends the two back to back with
+ * consecutive nonces, so they land in the same block or the next one.
  *
  * Any time, no key, nothing sent (live limit, max-queued eta, stale queued
  * change per asset):
@@ -114,6 +119,13 @@ contract NoDepositLimits is Script {
 
     /// @notice Beldex's BDX (LayerZero OFT), the same address on Ethereum and Base.
     address constant BDX = 0x6ad12E761b438beA3EA09F6C6266556Bb24C2181;
+
+    /// @notice BDX stays capped: 100,000 per deposit, 2,000,000 in total (9 decimals),
+    ///         the values QueueBDX and the app describe. Its queued change can only set
+    ///         max, so execute() runs it and lowers BDX to this cap in the next
+    ///         transaction of the same run (lowerDepositLimit is instant, no timelock).
+    uint128 constant BDX_PER_DEPOSIT = 100_000e9;
+    uint128 constant BDX_TOTAL = 2_000_000e9;
 
     struct Asset {
         string symbol;
@@ -281,10 +293,20 @@ contract NoDepositLimits is Script {
             v.executeChange(call_);
             ran[i] = true;
             console2.log("executed", a[i].symbol);
+            if (a[i].token == BDX) {
+                // Next transaction, same run: BDX is never left without a limit.
+                v.lowerDepositLimit(BDX, BDX_PER_DEPOSIT, BDX_TOTAL);
+                console2.log("capped BDX at 100,000 per deposit, 2,000,000 total");
+            }
         }
         vm.stopBroadcast();
         for (uint256 i = 0; i < a.length; i++) {
-            if (ran[i]) require(_isMax(v, a[i].token), "limit did not land as max");
+            if (ran[i] && a[i].token == BDX) {
+                (uint128 per, uint128 total) = v.depositLimit(BDX);
+                require(per == BDX_PER_DEPOSIT && total == BDX_TOTAL, "BDX cap did not land");
+            } else if (ran[i]) {
+                require(_isMax(v, a[i].token), "limit did not land as max");
+            }
             if (v.changeEta(keccak256(staleCall(a[i]))) != 0) {
                 console2.log("stale lower change still queued (run cancelStale()):", a[i].symbol);
             }
