@@ -15,6 +15,7 @@ import {
   BASE_SEPOLIA_USDC,
   IncrementalMerkleTreePoseidon,
   buildGloamPaymentRequirements,
+  checkGloamPaymentBinding,
   decodePaymentHeader,
   generateReceiveKey,
   hexToField,
@@ -167,6 +168,15 @@ test("an x402 price is paid privately, and the header it hands back is what the 
   assert.equal(note.amountWei, "250000");
   assert.ok(await verifyPaymentNoteBinding(note));
   assert.equal(verifyGloamPayment({ requirements, payload, note }).ok, true);
+  // Sellers refuse a payment with no binding to its payee (settleGloamPayment, the MCP server): it must carry one.
+  assert.match(String(payload.payload.binding), /^[A-Za-z0-9_-]{43}$/, "the payment carries its payee binding");
+  assert.equal(await checkGloamPaymentBinding({ requirements, payload, note }), null, "the binding checks out for this payee");
+  const otherSeller = await generateReceiveKey();
+  assert.notEqual(
+    await checkGloamPaymentBinding({ requirements: { ...requirements, payTo: otherSeller.tag }, payload, note }),
+    null,
+    "and not for another payee"
+  );
   assert.ok(!JSON.stringify(out).includes("SECRET123"), "a token in the resource URL never reaches the outcome");
   assert.ok(!JSON.stringify(out).includes(note.secret.slice(2)), "nor the payment note's secret");
   // Change came back, and the payment counts against the day.
@@ -202,6 +212,8 @@ test("an x402 payment whose answer was lost is never paid twice, and the same he
   const a = decodePaymentHeader(firstHeader);
   const b = decodePaymentHeader(String(again.paymentHeader));
   assert.equal(b.payload.paymentNote, a.payload.paymentNote, "the same sealed payment");
+  assert.ok(a.payload.binding, "the header made before the send carries the payee binding");
+  assert.equal(b.payload.binding, a.payload.binding, "and the repeat hands back the same binding");
 });
 
 test("with a partner key, private payments and their messages go through the partner relay", { timeout: 60_000 }, async () => {
