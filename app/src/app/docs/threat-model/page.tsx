@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { VAULT_SWAP_V2_ROUTER, swapV3Live } from "@/lib/vaultSwap";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 /** Private swaps v2 on Robinhood Chain (lib/vaultSwap VAULT_SWAP_V2_ROUTER): the page follows the switch. */
 const V2 = Boolean(VAULT_SWAP_V2_ROUTER[4663]);
@@ -223,7 +224,7 @@ export default function DocsThreatModelPage() {
         Once a swap is broadcast, its unshield proof is public. Anyone can send that step alone. The money then waits at the
         swap&apos;s escrow, which only the router can open, and only into the refund note
         the owner made with the swap. That refund holds 99% of the note: the vault keeps
-        its 0.5% cash-out fee and the rest of the 1% goes to the treasury. The
+        its {CASH_OUT_FEE_PERCENT} cash-out fee and the rest of the 1% goes to the treasury. The
         owner&apos;s app finishes the refund through the relay on its next sync. The
         attacker pays gas and gains nothing.
       </p>

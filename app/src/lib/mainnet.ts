@@ -1,7 +1,7 @@
 import { ELYSIUM, ELYSIUM_LIVE_SINCE } from "./elysium";
 
 /**
- * Mainnet: the pools, the launch time, and whether mainnet is live.
+ * Mainnet: the pools and the launch time.
  *
  * MAINNET_POOLS is FILLED IN ON DEPLOY DAY: paste each pool address and the
  * block its deploy transaction landed in (the deploy script prints both). Until
@@ -112,17 +112,6 @@ function chainPool(chainId: number): MainnetPool | null {
   return chainId in MAINNET_POOLS ? mainnetPool(chainId as MainnetChainId) : null;
 }
 
-/** At least one mainnet pool is filled in. */
-export const MAINNET_CONFIGURED = MAINNET_CHAINS.some((c) => chainPool(c.chainId) !== null);
-
-/**
- * Mainnet is live once the launch time has passed and at least one pool is in.
- * Before that every page, banner and Glim answer counts down exactly as before.
- */
-export function isMainnetLive(now: number = Date.now()): boolean {
-  return MAINNET_CONFIGURED && now >= MAINNET_LAUNCH_MS;
-}
-
 /**
  * The chains whose mainnet pool is in, as words: "Robinhood Chain and Tempo",
  * "Robinhood Chain, Tempo, Base and Ethereum" once those are in, or one of
@@ -180,37 +169,12 @@ export function liveMainnetsSinceText(): string {
 }
 
 /**
- * Launch time, shared by the countdown page, the site banner, the homepage
- * link and Glim. Wednesday 21 October 2026, 13:00 UTC (14:00 WAT).
+ * Launch time: Wednesday 21 October 2026, 13:00 UTC (14:00 WAT), when Robinhood
+ * Chain and Tempo went live. Stats count mainnet from it, and /mainnet and Glim
+ * write it as MAINNET_LAUNCH_LABEL.
  */
 export const MAINNET_LAUNCH_ISO = "2026-10-21T13:00:00Z";
 export const MAINNET_LAUNCH_MS = Date.parse(MAINNET_LAUNCH_ISO);
 
 /** How the launch time is written everywhere: in UTC. */
 export const MAINNET_LAUNCH_LABEL = "Wednesday 21 October, 13:00 UTC";
-
-export type Remaining = { days: number; hours: number; minutes: number; seconds: number; done: boolean };
-
-export function remainingUntil(now: number, target = MAINNET_LAUNCH_MS): Remaining {
-  const left = Math.max(0, Math.floor((target - now) / 1000));
-  return {
-    days: Math.floor(left / 86_400),
-    hours: Math.floor((left % 86_400) / 3_600),
-    minutes: Math.floor((left % 3_600) / 60),
-    seconds: left % 60,
-    done: left === 0,
-  };
-}
-
-/** A Google Calendar link for the launch (one hour, in UTC). */
-export function calendarUrl(): string {
-  const stamp = (ms: number) => new Date(ms).toISOString().replace(/[-:]|\.\d{3}/g, "");
-  const q = new URLSearchParams({
-    action: "TEMPLATE",
-    text: "Gloam mainnet goes live",
-    dates: `${stamp(MAINNET_LAUNCH_MS)}/${stamp(MAINNET_LAUNCH_MS + 3_600_000)}`,
-    details: "Private payments go live on Robinhood Chain and Tempo mainnet. https://gloam.trade/mainnet",
-    location: "https://gloam.trade/mainnet",
-  });
-  return `https://calendar.google.com/calendar/render?${q.toString()}`;
-}

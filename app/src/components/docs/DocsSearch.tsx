@@ -31,7 +31,7 @@ const PAGE_META: Record<string, PageMeta> = {
     headings: ["What is Gloam?", "Try it (2 minutes)", "What works today", "What does not work yet", "Read next"],
   },
   "/docs/quickstart": {
-    description: "From an empty project to a private balance on mainnet or the free testnet in about ten minutes.",
+    description: "From an empty project to a private balance on mainnet or testnet in about ten minutes.",
     keywords: ["install", "create gloam app", "first app", "hello world", "start building", "npm", "mainnet", "approve", "usdg", "circuit artifacts", "final keys"],
     headings: [
       "Fastest start",
@@ -46,7 +46,7 @@ const PAGE_META: Record<string, PageMeta> = {
     ],
   },
   "/docs/testnet": {
-    description: "Practice for free with test funds: wallet setup, faucet, adding funds privately, paying and cashing out.",
+    description: "Test it with test funds first: wallet setup, faucet, adding funds privately, paying and cashing out.",
     keywords: ["testnet", "practice", "faucet", "test funds", "wallet", "metamask", "usdg", "pathusd", "troubleshooting", "demo", "46630", "base sepolia", "84532", "circle faucet", "eurc", "ethereum sepolia", "sepolia", "11155111", "paxos faucet", "pyusd"],
     headings: [
       "Demo video",

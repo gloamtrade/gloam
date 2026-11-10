@@ -19,7 +19,7 @@ import type { TgUpdate } from "@/lib/telegramBot/telegram";
  *     random string), ANTHROPIC_API_KEY, and optionally TELEGRAM_GROUP_ID,
  *     TELEGRAM_ADMIN_HANDLES, TELEGRAM_OWNER_HANDLES (default dukedotsol),
  *     TELEGRAM_OWNER_IDS (wins over handles), TELEGRAM_BOT_MODEL,
- *     TELEGRAM_BOT_PERSONA, GLOAM_TESTING_OPEN, TELEGRAM_ADMIN_IDS,
+ *     TELEGRAM_BOT_PERSONA, TELEGRAM_ADMIN_IDS,
  *     TELEGRAM_BOT_DAILY_ANSWERS / _CHECKS / _DMS (model calls a day; DMs
  *     default 200), and for the daily report
  *     TELEGRAM_DAILY_REPORT=true plus CRON_SECRET. Memory, counters, welcomes

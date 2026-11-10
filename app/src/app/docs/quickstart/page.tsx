@@ -1,18 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = {
   title: "Quickstart",
   description:
-    "Shield your first private balance on Robinhood Chain or Tempo in about ten minutes with @gloamtrade/sdk: install, prove, deposit, cash out. On mainnet, or on the free testnet.",
+    "Shield your first private balance on Robinhood Chain or Tempo in about ten minutes with @gloamtrade/sdk: install, prove, deposit, cash out. On mainnet, or on testnet.",
 };
 
 export default function DocsQuickstartPage() {
   return (
     <DocsLayout
       title="Quickstart"
-      lede="Go from an empty project to a real private balance in about ten minutes, on mainnet or on the free testnet. Every step below runs: no mocks, real Groth16 proofs."
+      lede="Go from an empty project to a real private balance in about ten minutes, on mainnet or on testnet. Every step below runs: no mocks, real Groth16 proofs."
       glance={[
         { label: "Time", value: "~10 minutes" },
         { label: "Runtime", value: "browser or node" },
@@ -219,7 +220,7 @@ saveSecret(intent.note.commitment, intent.note.secret);`}</code>
         root matches even after transfers); <code>buildUnshieldIntent</code>{" "}
         builds the witness and proof. The amount, asset, and recipient become
         public on exit; the source note stays unlinkable via the nullifier. On
-        mainnet a cash out costs 0.5%: <code>cashOutFee(amount)</code> is what
+        mainnet a cash out costs {CASH_OUT_FEE_PERCENT}: <code>cashOutFee(amount)</code> is what
         the pool keeps.
       </p>
       <pre>
@@ -243,7 +244,7 @@ const exit = await buildUnshieldIntent({
   prove: artifactProver(circuitArtifactUrls("unshield", net.chainId)),
 });
 
-// mainnet: the pool keeps cashOutFee(amount), 0.5%, and pays the rest to "to"
+// mainnet: the pool keeps cashOutFee(amount), ${CASH_OUT_FEE_PERCENT}, and pays the rest to "to"
 console.log("fee", cashOutFee(amount));
 
 await wallet.writeContract({

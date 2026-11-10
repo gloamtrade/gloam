@@ -5,6 +5,7 @@ import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { VAULT_SWAP_ROUTERS, VAULT_SWAP_V2_ROUTER, VAULT_SWAP_V3_ADDRESS, swapV3Live } from "@/lib/vaultSwap";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 /** Private swaps v3 (lib/vaultSwap VAULT_SWAP_V3_LIVE), chain by chain: the page follows each switch. */
 const V3_RH = swapV3Live(4663);
@@ -215,7 +216,7 @@ export default function DocsPrivateSwapsPage() {
       <h2 id="costs">What it costs</h2>
       <ul>
         <li>
-          <strong>Vault fee, 0.5% of the amount you swap.</strong> A swap takes
+          <strong>Vault fee, {CASH_OUT_FEE_PERCENT} of the amount you swap.</strong> A swap takes
           the note out of the vault the same way a cash out does, so the vault
           keeps its usual cash-out fee.
         </li>
@@ -302,7 +303,7 @@ export default function DocsPrivateSwapsPage() {
       <p>
         So the money comes back to your private balance as a refund note, made
         in advance with the swap. You get back 99% of the note. The other 1%
-        covers the vault&apos;s cash-out fee (0.5% today), and what is left of
+        covers the vault&apos;s cash-out fee ({CASH_OUT_FEE_PERCENT} today), and what is left of
         it goes to the Gloam treasury. The app finishes the refund by itself,
         through the relay, the next time it syncs your balance.
         {V3 && " Through the newest routers the refund is the note less the vault's fee and 0.1%."}

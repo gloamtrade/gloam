@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArticleLayout } from "@/components/blog/ArticleLayout";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { CodeBlock } from "@/components/ui/CodeBlock";
+import { ELYSIUM } from "@/lib/elysium";
 
 const title = "Come build with Gloam at the NEAR hackathon";
 const description =
@@ -84,6 +85,13 @@ export default function BuildWithGloamAtTheNearHackathonPost() {
         </>
       }
     >
+      {ELYSIUM && (
+        <p>
+          <strong>Update, 10 November 2026.</strong> Elysium went live on 9
+          November 2026, so Gloam now runs on five mainnets: Robinhood Chain,
+          Tempo, Base, Ethereum and Elysium.
+        </p>
+      )}
       <p>
         Most of what ships onchain still puts everything on display. Every
         balance, every salary, everything an agent paid for, open to anyone with

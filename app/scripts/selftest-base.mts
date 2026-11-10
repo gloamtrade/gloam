@@ -234,13 +234,13 @@ check("Base Sepolia: payment requests and claim codes", () => {
 });
 
 check("Base Sepolia: Glim knows it, with its faucet guide and chain details", () => {
-  const k = knowledgeBlock(false, true);
+  const k = knowledgeBlock();
   assert.match(k, /Base Sepolia \(chain ID 84532\)/);
   assert.match(k, /https:\/\/sepolia\.basescan\.org/);
   const baseSection = k.slice(k.indexOf("\nBASE"), k.indexOf("\n\n", k.indexOf("\nBASE") + 1));
   assert.ok(baseSection.length > 100);
   assert.doesNotMatch(baseSection, /\u2014/);
-  const fix = chainFix("Ada", { wallet: 8453, want: 84532 }, true);
+  const fix = chainFix("Ada", { wallet: 8453, want: 84532 });
   assert.match(fix, /Switch to Base/);
   assert.match(fix, /chain ID 84532/);
 });
@@ -279,7 +279,7 @@ if (!CONFIGURED) {
   });
 
   check("as shipped: Glim never names Base mainnet", () => {
-    const k = knowledgeBlock(false, true);
+    const k = knowledgeBlock();
     assert.doesNotMatch(k, /Base mainnet \(chain ID 8453\)/);
     assert.match(k, /went live on mainnet on Wednesday 21 October 2026 at 13:00 UTC, on Robinhood Chain and Tempo\.( Ethereum mainnet joined after that, on 26 October 2026 \(see ETHEREUM\)\.)? The vault has the same address/);
   });
@@ -325,7 +325,7 @@ if (CONFIGURED) {
   });
 
   check("configured: Glim knows Base mainnet, never as part of the 21 October launch", () => {
-    const k = knowledgeBlock(false, true);
+    const k = knowledgeBlock();
     assert.match(k, /Base mainnet \(chain ID 8453\)/);
     assert.match(k, /went live on mainnet on Wednesday 21 October 2026 at 13:00 UTC, on Robinhood Chain and Tempo\. Base( and Ethereum)? mainnet joined after that/);
     assert.doesNotMatch(k, /21 October[^.\n]*Tempo and Base/);

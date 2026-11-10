@@ -194,11 +194,9 @@ if (!CONFIGURED) {
   });
 
   check("unconfigured: Glim says nothing about Ethereum as a Gloam network", () => {
-    for (const live of [false, true]) {
-      const k = knowledgeBlock(false, live);
-      // "ETHEREUM SEPOLIA" is the testnet's own section (selftest-ethereum-sepolia.mts)
-      assert.doesNotMatch(k, /\nETHEREUM \(|Ethereum mainnet \(chain ID 1\)|Ethereum gas is high/);
-    }
+    const k = knowledgeBlock();
+    // "ETHEREUM SEPOLIA" is the testnet's own section (selftest-ethereum-sepolia.mts)
+    assert.doesNotMatch(k, /\nETHEREUM \(|Ethereum mainnet \(chain ID 1\)|Ethereum gas is high/);
   });
 
   await checkAsync("unconfigured: the remote MCP neither lists nor takes Ethereum", async () => {
@@ -237,7 +235,7 @@ if (CONFIGURED) {
     assert.equal(nets.isNetworkWritable(n), true);
     assert.equal(nets.networkName(n), "Ethereum");
     assert.match(mainnet.liveMainnetNames(), ELYSIUM ? /^Robinhood Chain, Tempo(, Base)?, Ethereum and Elysium$/ : /^Robinhood Chain, Tempo(, Base)? and Ethereum$/);
-    assert.ok(mainnet.MAINNET_CONFIGURED);
+    assert.ok(mainnet.mainnetChainPool(1));
   });
 
   check("configured: the relay serves chain 1 with the same relay key", () => {
@@ -263,7 +261,7 @@ if (CONFIGURED) {
   });
 
   check("configured: Glim knows Ethereum and its gas ceiling, never as part of the 21 October launch", () => {
-    const k = knowledgeBlock(false, true);
+    const k = knowledgeBlock();
     assert.match(k, /Ethereum mainnet \(chain ID 1\)/);
     assert.match(k, /USDC, USDT, USDG, PYUSD, EURC and ETH/);
     assert.match(k, /Ethereum gas is high right now; try again shortly/);
@@ -273,7 +271,7 @@ if (CONFIGURED) {
     const section = k.slice(k.indexOf("\nETHEREUM ("), k.indexOf("\n\n", k.indexOf("\nETHEREUM (") + 1));
     assert.ok(section.length > 200);
     assert.doesNotMatch(section, /\u2014|real money|play money|happy to/);
-    const fix = chainFix("Ada", { wallet: 4663, want: 1 }, true);
+    const fix = chainFix("Ada", { wallet: 4663, want: 1 });
     assert.match(fix, /Switch to Ethereum/);
   });
 

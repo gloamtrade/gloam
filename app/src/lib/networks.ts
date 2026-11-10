@@ -38,7 +38,7 @@ import {
   TESTNET_POSEIDON_DEPLOY_BLOCK,
   type HashScheme,
 } from "./config";
-import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, isMainnetLive, mainnetPool } from "./mainnet";
+import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, mainnetPool } from "./mainnet";
 import { ELYSIUM, ELYSIUM_CHAIN_ID, ELYSIUM_LOG_RANGE, ELYSIUM_TESTNET } from "./elysium";
 
 export type NetworkKey =
@@ -493,7 +493,7 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     status: "live",
     // GloamPayMemo, deployed 2026-10-23 (no owner, holds nothing, never logs the poster)
     payMemo: { address: "0x01B3172d9900Cb26d57E986429b9b23854c74598", deployBlock: 95_494_392n, emitsPoster: false },
-    note: "Mainnet: private USDG payments, and $GLOAM, PONS and CASHCAT held privately.",
+    note: "Mainnet: private USDG and ETH payments, and $GLOAM, other tokens and stock tokens held privately.",
     explorerTx: (hash) => `${robinhood.blockExplorers.default.url}/tx/${hash}`,
     explorerAddress: (addr) => `${robinhood.blockExplorers.default.url}/address/${addr}`,
   },
@@ -521,7 +521,7 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     explorerTx: (hash) => `${tempoMainnet.blockExplorers.default.url}/tx/${hash}`,
     explorerAddress: (addr) => `${tempoMainnet.blockExplorers.default.url}/address/${addr}`,
   },
-  // Not deployed yet (DEPLOY-BASE.md): hidden until MAINNET_POOLS[8453] is filled in.
+  // Live since 26 Oct 2026 (DEPLOY-BASE.md); the pool is MAINNET_POOLS[8453].
   "base-mainnet": {
     key: "base-mainnet",
     label: "Base",
@@ -546,7 +546,7 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     explorerTx: (hash) => `${baseMainnet.blockExplorers.default.url}/tx/${hash}`,
     explorerAddress: (addr) => `${baseMainnet.blockExplorers.default.url}/address/${addr}`,
   },
-  // Not deployed yet (DEPLOY-ETHEREUM.md): hidden until MAINNET_POOLS[1] is filled in.
+  // Live since 26 Oct 2026 (DEPLOY-ETHEREUM.md); the pool is MAINNET_POOLS[1].
   // Its testnet is Ethereum Sepolia (the "ethereum" entry). Gas is
   // expensive here, so the relay stops while it is over its ceiling (lib/relay/gasCeiling).
   "ethereum-mainnet": {
@@ -643,21 +643,20 @@ const TESTNET_KEYS: NetworkKey[] = ["robinhood", "tempo", ...(["base", "ethereum
 /** True once at least one mainnet pool is filled in: the app then labels mainnet and testnet. */
 export const MAINNET_ENABLED = MAINNET_KEYS.length > 0;
 
-/** The network a visitor starts on before mainnet is live (and on the server, always). */
+/** The network the server starts on, and a visitor too if no mainnet had a pool. */
 export const DEFAULT_NETWORK_KEY: NetworkKey = "robinhood";
 
 let sessionDefault: NetworkKey | null = null;
 
 /**
- * The network a visitor lands on when they never picked one: Robinhood Chain
- * testnet, as always, until mainnet is live; from then a mainnet (Robinhood
- * Chain's, or Tempo's when only Tempo has a pool). Worked out once per page
- * load, so the selector and lib code never disagree if the launch passes while
- * a tab is open. On the server it is always DEFAULT_NETWORK_KEY.
+ * The network a visitor lands on when they never picked one: the first mainnet
+ * with a pool (Robinhood Chain's). Worked out once per page load, so the
+ * selector and lib code never disagree. On the server it is always
+ * DEFAULT_NETWORK_KEY.
  */
 export function defaultNetworkKey(): NetworkKey {
   if (typeof window === "undefined") return DEFAULT_NETWORK_KEY;
-  sessionDefault ??= isMainnetLive() && MAINNET_KEYS[0] ? MAINNET_KEYS[0] : DEFAULT_NETWORK_KEY;
+  sessionDefault ??= MAINNET_KEYS[0] ?? DEFAULT_NETWORK_KEY;
   return sessionDefault;
 }
 

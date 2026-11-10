@@ -190,7 +190,6 @@ import {
 } from "./telegram";
 import { hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { HUNT_INPUT_MAX, countHuntStep, glimHuntReply, huntEnabled, huntSubject } from "@/lib/hunt";
-import { isMainnetLive } from "@/lib/mainnet";
 
 /** t.me/gloamhq. TELEGRAM_GROUP_ID overrides it. */
 const GLOAM_GROUP_ID = -1004464028206;
@@ -211,7 +210,6 @@ const PHRASE_MAX_CHARS = 120;
 export type BotConfig = {
   groupId: number;
   persona: string;
-  testingOpen: boolean;
   /** Admin handles, lower case, without "@". */
   admins: string[];
   /** TELEGRAM_ADMIN_IDS, and ids given with a handle ("yomi_ops:600"): admins by numeric id, which survives a handle change. */
@@ -263,7 +261,6 @@ export function botConfig(): BotConfig {
   return {
     groupId: Number.isSafeInteger(group) && group !== 0 ? group : GLOAM_GROUP_ID,
     persona: personaName(),
-    testingOpen: /^(1|true|yes|on)$/i.test(process.env.GLOAM_TESTING_OPEN?.trim() ?? ""),
     admins: admins.handles,
     adminIds: [...ids(process.env.TELEGRAM_ADMIN_IDS), ...admins.ids],
     pinnedAdmins: admins.pinned,
@@ -319,12 +316,9 @@ function isTrusted(u: TgUser, c: BotConfig): boolean {
 // ---------------------------------------------------------------- copy
 
 function groupGuide(c: BotConfig): string {
-  const testing = c.testingOpen
-    ? "Testers, your guide is pinned in the Testers topic."
-    : "Testing directions land in the Testers topic soon.";
   return (
     `Hi, I'm ${c.persona}, Gloam's community helper bot. Tag me or reply to me with a question, or just ask in Help.\n\n` +
-    `Ideas and bugs go in Feedback, or type /bug and what happened. /ca gives the $GLOAM contract, and replying /spam to a message reports it. ${testing}\n\n` +
+    `Ideas and bugs go in Feedback, or type /bug and what happened. /ca gives the $GLOAM contract, and replying /spam to a message reports it. Testing directions land in the Testers topic soon.\n\n` +
     `Docs live at gloam.trade/docs, news at @gloamtrade, and anything private goes to hello@gloam.trade. Admins never ask for your keys or funds.`
   );
 }
@@ -406,28 +400,16 @@ function cantAnswer(c: BotConfig, name: string, topic: number, kind: Fallback): 
 }
 
 function codeTip(name: string): string {
-  // once mainnet is live a code in the group may be a mainnet one
-  if (isMainnetLive()) {
-    return (
-      `Quick heads-up, ${name}: testnet codes are fine here, but a mainnet payment code or claim link works like cash, ` +
-      `so whoever sees it can claim it. Send those privately, or pay the person's Gloam address instead so the payment is sealed to them.`
-    );
-  }
+  // a code in the group may be a mainnet one
   return (
-    `Quick heads-up, ${name}: fine here on testnet. On mainnet a plain payment code or claim link works like cash, ` +
+    `Quick heads-up, ${name}: testnet codes are fine here, but a mainnet payment code or claim link works like cash, ` +
     `so whoever sees it can claim it. Send those privately, or pay the person's Gloam address instead so the payment is sealed to them.`
   );
 }
 
 function phraseTip(name: string): string {
-  if (isMainnetLive()) {
-    return (
-      `Quick heads-up, ${name}: on testnet this is fine, but on mainnet share the phrase for a locked code privately, ` +
-      `never next to the code, because the code plus its phrase lets anyone claim it.`
-    );
-  }
   return (
-    `Quick heads-up, ${name}: fine here on testnet. On mainnet, share the phrase for a locked code privately, ` +
+    `Quick heads-up, ${name}: on testnet this is fine, but on mainnet share the phrase for a locked code privately, ` +
     `never next to the code, because the code plus its phrase lets anyone claim it.`
   );
 }
@@ -850,7 +832,7 @@ async function compose(x: Compose): Promise<{ reply: string | null; sentinel: Se
     botModel(),
   );
   const raw = await askModel(
-    systemPrompt({ persona: x.c.persona, testingOpen: x.c.testingOpen, admins: x.c.admins }),
+    systemPrompt({ persona: x.c.persona, admins: x.c.admins }),
     userPrompt({ persona: x.c.persona, ...x.input }),
     x.image,
     model,
@@ -879,7 +861,7 @@ function joinerOf(u: TgUser): Joiner {
 async function flushWelcome(c: BotConfig): Promise<void> {
   const batch = await takeWelcomeBatch().catch(() => null);
   if (!batch?.length) return;
-  if (await sendMessage(c.groupId, welcomeHtml(batch, c.testingOpen), { parseMode: "HTML" })) await count("welcomes");
+  if (await sendMessage(c.groupId, welcomeHtml(batch), { parseMode: "HTML" })) await count("welcomes");
 }
 
 async function welcome(users: TgUser[], c: BotConfig): Promise<void> {
@@ -1601,7 +1583,7 @@ async function chatWithTeam(
     ...history.map((l): ChatTurn => ({ role: l.b ? "assistant" : "user", text: l.b ? l.t : markAddresses(l.t) })),
     { role: "user", text: markAddresses(said) },
   ];
-  const r = await askTeamChat(teamSystemPrompt({ persona: c.persona, testingOpen: c.testingOpen, admins: c.admins }), fullContext, turns, image);
+  const r = await askTeamChat(teamSystemPrompt({ persona: c.persona, admins: c.admins }), fullContext, turns, image);
   if (!("text" in r)) {
     await sendMessage(chatId, chatMiss(r.miss, owner));
     return;

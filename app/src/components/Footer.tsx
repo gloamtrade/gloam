@@ -3,7 +3,6 @@ import Link from "next/link";
 import { AppLink } from "./AppLink";
 import { FooterUpdates } from "./FooterUpdates";
 import { Mark } from "./Logo";
-import { MainnetCopy } from "./MainnetCountdown";
 import { ThemeSegmented } from "./ThemeToggle";
 import { POSTS, postHref } from "@/lib/posts";
 
@@ -192,12 +191,7 @@ export function Footer() {
 
           <div className="mt-5 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <p className="text-[12.5px] text-mute">
-              © {year} Gloam.{" "}
-              <MainnetCopy
-                live="Live on mainnet."
-                before="Testnet software."
-              />{" "}
-              Not investment, legal or tax advice.
+              © {year} Gloam. Live on mainnet. Not investment, legal or tax advice.
             </p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
               <ThemeSegmented />

@@ -1,30 +1,19 @@
 import type { Metadata } from "next";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
-import { isMainnetLive, liveMainnetNames } from "@/lib/mainnet";
+import { liveMainnetNames } from "@/lib/mainnet";
 import { paidSpotsLeft, testersCap } from "@/lib/testers";
 import { TestersForm } from "./TestersForm";
 
 export const dynamic = "force-dynamic";
 
-// Worked out per request (the page is dynamic), so it names mainnet once mainnet is live.
-export function generateMetadata(): Metadata {
-  return {
-    title: "Become a tester",
-    description: isMainnetLive()
-      ? `Join the private Gloam testers group. Gloam is live on ${liveMainnetNames()} mainnet. Try what is new on the testnet first, and tell us what breaks.`
-      : "Join the private Gloam testers group. Use private payments on Tempo and Robinhood Chain testnet, and tell us what breaks.",
-    alternates: { canonical: "/testers" },
-  };
-}
+export const metadata: Metadata = {
+  title: "Become a tester",
+  description: `Join the private Gloam testers group. Gloam is live on ${liveMainnetNames()} mainnet. Try what is new on the testnet first, and tell us what breaks.`,
+  alternates: { canonical: "/testers" },
+};
 
 const PERKS = [
-  "A private Telegram group with the team",
-  "New features before anyone else",
-  "A direct say in what we fix before mainnet",
-];
-
-const LIVE_PERKS = [
   "A private Telegram group with the team",
   "New features before anyone else",
   "A direct say in what we fix and build next",
@@ -33,7 +22,6 @@ const LIVE_PERKS = [
 export default async function TestersPage() {
   // if storage can't be read, assume paid spots are full so nobody is promised a reward by mistake
   const paidFull = (await paidSpotsLeft().catch(() => 0)) === 0;
-  const live = isMainnetLive();
   return (
     <div className="relative min-h-screen bg-panel text-foreground">
       <Header />
@@ -44,17 +32,11 @@ export default async function TestersPage() {
             <p className="t-label">Testers</p>
             <h1 className="t-display-xl mt-5 max-w-[11ch]">Help us test Gloam.</h1>
             <p className="mt-6 max-w-[44ch] text-[16px] leading-relaxed text-soft sm:text-[17px]">
-              {live ? (
-                `Gloam is live on ${liveMainnetNames()} mainnet. Try what is new on the testnet first, push it, and tell us what breaks.`
-              ) : (
-                <>
-                  Gloam is live on Tempo and Robinhood Chain testnet. Use it, push it, and tell us what breaks before
-                  mainnet.
-                </>
-              )}
+              Gloam is live on {liveMainnetNames()} mainnet. Try what is new on the testnet first, push it, and tell us
+              what breaks.
             </p>
             <ul className="mt-9 flex flex-col gap-3.5">
-              {(live ? LIVE_PERKS : PERKS).map((p) => (
+              {PERKS.map((p) => (
                 <li key={p} className="flex items-start gap-3 text-[15px] text-soft">
                   <span aria-hidden className="mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full bg-sealed" />
                   {p}
@@ -62,7 +44,7 @@ export default async function TestersPage() {
               ))}
             </ul>
             <p className="mt-9 text-[13px] text-mute">
-              {live ? "Testing happens on the testnet." : "Testnet only."}
+              Testing happens on the testnet.
             </p>
           </div>
 

@@ -4,6 +4,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { swapMainnets } from "@/lib/vaultSwap";
 import { ELYSIUM, ELYSIUM_TESTNET } from "@/lib/elysium";
+import { CASH_OUT_FEE_BPS, CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 const MAINNETS = liveMainnetNames();
 
@@ -135,7 +136,7 @@ npm install snarkjs   # optional peer, for proving`}</code>
           live limit from the vault.
         </li>
         <li>
-          A mainnet cash out costs 0.5% (<code>CASH_OUT_FEE_BPS = 50</code>);{" "}
+          A mainnet cash out costs {CASH_OUT_FEE_PERCENT} (<code>CASH_OUT_FEE_BPS = {CASH_OUT_FEE_BPS}</code>);{" "}
           <code>cashOutFee(amount)</code> is what the pool keeps. The pool takes
           it when the cash out lands, so for a rate that matters read{" "}
           <code>readCashOutFeeBps(client, pool)</code>. Direct deposits and
@@ -197,7 +198,7 @@ await wallet.writeContract({
 });`}</code>
       </pre>
       <p>
-        To practice on the free testnet, use <code>GLOAM_NETWORKS.tempo</code>{" "}
+        To test it on testnet first, use <code>GLOAM_NETWORKS.tempo</code>{" "}
         (or <code>GLOAM_NETWORKS.robinhood</code>, where you can also shield
         test ETH) as <code>net</code>; the same code proves with the dev keys
         there. A complete runnable agent is in{" "}
@@ -439,7 +440,7 @@ for (const p of payments) {
       <h2>Guardrails</h2>
       <p>
         Mainnet ({MAINNET_IDS}) runs on the final ceremony keys, with
-        deposit limits, a 0.5% cash-out fee. It was reviewed internally before
+        deposit limits, a {CASH_OUT_FEE_PERCENT} cash-out fee. It was reviewed internally before
         launch, and Kann Audits has since reviewed the vault contracts (
         <Link href="/security">report, 1 November 2026</Link>) and found no Critical, High or Medium issues. The SDK was
         not part of that review. The Robinhood Chain and Tempo

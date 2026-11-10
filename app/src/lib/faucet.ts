@@ -4,7 +4,7 @@ import type { NetworkKey } from "./networks";
 export const FAUCET_URL = "https://faucet.testnet.chain.robinhood.com/";
 
 export const FAUCET_BLURB =
-  "Get free testnet ETH and sample stock tokens. Claim once every 24 hours.";
+  "Get testnet ETH and sample stock tokens. Claim once every 24 hours.";
 
 export interface FaucetInfo {
   /** Card heading, names the asset you get. */
@@ -22,7 +22,7 @@ export interface FaucetInfo {
 /** Test funds exist on the testnets only; a mainnet has no faucet. */
 const FAUCETS: Partial<Record<NetworkKey, FaucetInfo>> = {
   robinhood: {
-    title: "Free testnet ETH",
+    title: "Testnet ETH",
     blurb: FAUCET_BLURB,
     url: FAUCET_URL,
     cta: "Open faucet →",

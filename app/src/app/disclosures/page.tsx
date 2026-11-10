@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ELYSIUM, ELYSIUM_LIVE_SINCE } from "@/lib/elysium";
 import Link from "next/link";
 import { LegalLayout } from "@/components/LegalLayout";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = { title: "Disclosures" };
 
@@ -43,7 +44,7 @@ export default function DisclosuresPage() {
         on Base and Ethereum, and 2,500,000 per deposit and 25,000,000 in total
         for $GLOAM{ELYSIUM ? ", and 500 per deposit and 25,000 in total for USDC on Elysium" : ""}. Cash outs and
         private payments are never limited.
-        Direct deposits and private payments are free; a cash out costs 0.5% of
+        Direct deposits and private payments are free; a cash out costs {CASH_OUT_FEE_PERCENT} of
         its amount. Money bridged in from another chain pays the bridge&apos;s
         fees, shown before you send.
       </p>

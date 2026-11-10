@@ -4,7 +4,6 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { SealedField } from "@/components/ui/SealedField";
 import { FlowField } from "@/components/ui/FlowField";
-import { MainnetCopy } from "@/components/MainnetCountdown";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { CursorReveal } from "@/components/ui/CursorReveal";
 import { SealStream } from "@/components/landing/SealStream";
@@ -109,12 +108,7 @@ const USES = [
   {
     icon: <IconStocks />,
     title: "Stocks on Robinhood Chain",
-    body: (
-      <MainnetCopy
-        live="Swap a stock from your private balance on Robinhood Chain. Your position stays yours."
-        before="Hold tokenized stocks with the size of your position off the public record."
-      />
-    ),
+    body: "Swap a stock from your private balance on Robinhood Chain. Your position stays yours.",
     href: "/docs/product",
   },
 ];
@@ -145,12 +139,7 @@ const WHAT = [
   {
     label: "The protocol",
     title: "Open vault contracts",
-    body: (
-      <MainnetCopy
-        live={`Private balances on ${liveMainnetNames()} mainnet, with a free testnet to practice on. Settlement stays public, the amounts and the people stay private.`}
-        before="Private balances on Tempo and Robinhood Chain testnet. Settlement stays public, the amounts and the people stay private."
-      />
-    ),
+    body: `Private balances on ${liveMainnetNames()} mainnet, and on testnet to try it first. Settlement stays public, the amounts and the people stay private.`,
     href: "/verify#contracts",
     cta: "Verify the contracts",
   },
@@ -301,15 +290,11 @@ export function Landing() {
             <SealedField tone="soft" />
             <div className="relative mx-auto max-w-[720px] text-center">
               <h2 className="t-display-l">
-                <MainnetCopy live="Private money, live on mainnet" before="Private money, live on testnet" />
+                Private money, live on mainnet
               </h2>
               <p className="mx-auto mt-4 max-w-[52ch] text-[17px] leading-[1.6] text-mute sm:text-[19px]">
                 Add money privately, pay anyone, and prove what you hold without
-                showing the number.{" "}
-                <MainnetCopy
-                  live="Live on mainnet, with a testnet to try things first."
-                  before="On testnet today, with real contracts."
-                />
+                showing the number. Live on mainnet, with a testnet to try things first.
               </p>
             </div>
             <LiveProduct />
@@ -431,7 +416,7 @@ export function Landing() {
                 </ul>
                 <div className="mt-8 flex flex-wrap gap-2">
                   <AppLink href="/app/payroll" className="btn btn-ink">
-                    <MainnetCopy live="Run payroll" before="Run a test payroll" />
+                    Run payroll
                   </AppLink>
                   <Link href="/docs/payroll" className="btn btn-quiet">
                     How payroll works

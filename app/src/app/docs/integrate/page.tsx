@@ -3,6 +3,10 @@ import { MAINNET_CHAINS, liveMainnetNames } from "@/lib/mainnet";
 import { ELYSIUM_ENABLED, ELYSIUM_TESTNET } from "@/lib/elysium";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
+import { CASH_OUT_FEE_BPS, CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+
+/** The fee on the sample's 100 USDG cash out, from the live rate. */
+const EXAMPLE_FEE = (100 * CASH_OUT_FEE_BPS) / 10_000;
 
 export const metadata: Metadata = {
   title: "Add Gloam to your agent kit or marketplace",
@@ -168,12 +172,12 @@ for (const t of gloam.definitions) {
   "previewId": "pv_Xq3...",
   "digest": "sha256:9c1e...",
   "action": "cash_out",
-  "summary": "Cash out 100 USDG to 0xAbc... on Robinhood Chain mainnet: 99.5 USDG arrives after the 0.5% fee.",
+  "summary": "Cash out 100 USDG to 0xAbc... on Robinhood Chain mainnet: ${100 - EXAMPLE_FEE} USDG arrives after the ${CASH_OUT_FEE_PERCENT} fee.",
   "details": {
     "amount": "100 USDG",
     "to": "0xAbc...",
-    "fee": { "bps": 50, "percent": "0.5%", "amount": "0.5 USDG" },
-    "receives": "99.5 USDG"
+    "fee": { "bps": ${CASH_OUT_FEE_BPS}, "percent": "${CASH_OUT_FEE_PERCENT}", "amount": "${EXAMPLE_FEE} USDG" },
+    "receives": "${100 - EXAMPLE_FEE} USDG"
   },
   "walletSigns": [],
   "submittedBy": "the Gloam relay, which pays the gas (your wallet does not appear next to it)"
@@ -462,7 +466,7 @@ export async function verifyGloamCashout(args: {
           asset and the amount. A private payment shows only that a shielded
           transfer happened.
         </li>
-        <li>Deposits and private payments are free. A cash out costs 0.5%.</li>
+        <li>Deposits and private payments are free. A cash out costs {CASH_OUT_FEE_PERCENT}.</li>
         <li>
           Mainnets: {liveMainnetNames()}, with deposit limits (50,000 of a
           stablecoin per deposit{ELYSIUM_ENABLED ? "; 500 USDC on Elysium" : ""}).{" "}

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { liveMainnetNames } from "@/lib/mainnet";
 import Link from "next/link";
 import { LegalLayout } from "@/components/LegalLayout";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = { title: "Terms of Use" };
 
@@ -22,7 +23,7 @@ export default function TermsPage() {
         Gloam runs on mainnet and on testnets. On mainnet (Robinhood Chain and
         Tempo, from Gloam&apos;s mainnet launch on 21 October 2026) you use
         real assets, and you can lose them. On mainnet, deposits
-        have limits, a cash out costs 0.5% of its amount, and the contracts
+        have limits, a cash out costs {CASH_OUT_FEE_PERCENT} of its amount, and the contracts
         were reviewed internally before launch. Kann Audits then reviewed the
         vault contracts (<Link href="/security">report, 1 November 2026</Link>)
         and found no Critical, High or Medium issues. That review did not cover

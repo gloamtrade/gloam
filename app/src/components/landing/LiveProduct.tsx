@@ -5,7 +5,6 @@ import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { useState, type ReactNode } from "react";
 import { SealDots } from "@/components/ui/SealDots";
-import { useMainnetLive } from "@/components/MainnetCountdown";
 
 /**
  * The three product cards on the landing, as small working demos. Each card has
@@ -272,12 +271,11 @@ const VIEWS: { key: View; label: string }[] = [
   { key: "public", label: "What the public sees" },
 ];
 
-/** What goes into a private balance once mainnet is live: the mainnet pools' assets (stocks come in through a private swap). */
+/** What goes into a private balance: the mainnet pools' assets (stocks come in through a private swap). */
 const MAINNET_BALANCE_BODY = "Move USDG, USDC.e, pathUSD, USDT0 or $GLOAM into a balance only you can see.";
 
 export function LiveProduct() {
   const [view, setView] = useState<View>("you");
-  const live = useMainnetLive();
   return (
     <>
       <div className="relative mt-8 flex justify-center">
@@ -298,9 +296,7 @@ export function LiveProduct() {
         </div>
       </div>
       <p className="relative mt-3 text-center text-[13px] text-mute">
-        {live
-          ? "Try the controls. The buttons open the real app."
-          : "Try the controls. The buttons open the real app on testnet."}
+        Try the controls. The buttons open the real app.
       </p>
       <div className="relative mx-auto mt-8 grid max-w-[1080px] gap-4 md:grid-cols-3">
         {CARDS.map(({ Card: Demo, label, body, href }) => (
@@ -315,7 +311,7 @@ export function LiveProduct() {
               {label} <span aria-hidden>→</span>
             </Link>
             <p className="mt-2 text-[14px] leading-relaxed text-mute">
-              {live && Demo === AddCard ? MAINNET_BALANCE_BODY : body}
+              {Demo === AddCard ? MAINNET_BALANCE_BODY : body}
             </p>
           </div>
         ))}

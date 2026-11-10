@@ -4,6 +4,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { ELYSIUM } from "@/lib/elysium";
 import { SWAP_REF_MAX, SWAP_REF_WORDS, swapNetworks } from "@/lib/swapLink";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 /** Where a swap link fills in a swap now (lib/swapLink): the docs follow each network's switch. */
 const SWAP_NETWORKS = swapNetworks();
@@ -166,7 +167,7 @@ export default function DocsPartnersPage() {
         <code>&quot;charged&quot;: false</code>.
       </p>
       <p>
-        Gloam&apos;s own fee is separate. On mainnet a cash out costs 0.5%, kept
+        Gloam&apos;s own fee is separate. On mainnet a cash out costs {CASH_OUT_FEE_PERCENT}, kept
         by the vault; direct deposits and private payments are free. Your partner fee is
         not added on top of that yet.
       </p>

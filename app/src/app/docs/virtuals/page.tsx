@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { mainnetPool } from "@/lib/mainnet";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = {
   title: "Virtuals agents",
@@ -47,7 +48,7 @@ const FUNCTIONS: { name: string; args: string; does: string; chain: string }[] =
   {
     name: "gloam_cash_out",
     args: "amount, to, asset?",
-    does: "From the private balance to a public 0x address. The pool keeps 0.5%.",
+    does: `From the private balance to a public 0x address. The pool keeps ${CASH_OUT_FEE_PERCENT}.`,
     chain: "The cash out: asset, amount and recipient",
   },
   {
@@ -580,7 +581,7 @@ GLOAM_LIMITS_FILE=./limits.json
       </p>
       <h3>What does it cost?</h3>
       <p>
-        Adding money directly and paying privately are free. A cash out costs 0.5%. The
+        Adding money directly and paying privately are free. A cash out costs {CASH_OUT_FEE_PERCENT}. The
         payout provider charges 0.5%, at least 0.05, and ACP takes its own fees
         on what is escrowed.
       </p>

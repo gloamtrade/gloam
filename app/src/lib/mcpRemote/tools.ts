@@ -33,6 +33,7 @@ import { MAX_PROOF_TEXT, ProofInputError, verifyProofText, type ApiVerifyResult 
 import { SharedCountUnavailable, hitRateLimit } from "./rateLimit";
 import { findSecret, secretWarning } from "./safety";
 import { HUNT_INPUT_MAX, countHuntStep, huntEnabled, huntMcpArg, huntMcpPiecesArg, huntSubject, mcpHuntFinal } from "@/lib/hunt";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const SITE = "https://www.gloam.trade";
 export const MCP_URL = `${SITE}/mcp`;
@@ -184,7 +185,7 @@ const BASE_TESTNET_LINE =
 const STATUS = MAINNET_ENABLED
   ? `Mainnet: ${andList(
       NETWORK_KEYS.filter((k) => !getNetwork(k).testnet).map((k) => `${getNetwork(k).label} (${getNetwork(k).chainId})`)
-    )}, with the trusted setup's final keys (13 contributors) and deposit limits. Direct deposits and private payments are free; a cash out costs 0.5%. Reviewed internally before launch, and Kann Audits reviewed the vault contracts (report, 1 November 2026: gloam.trade/security) and found no Critical, High or Medium issues; the swap routers, circuits, app and relay were not part of it. Testnets: Tempo Moderato (42431) and Robinhood Chain testnet (46630), with development keys.${BASE_TESTNET_LINE}${ETHEREUM_LINE} Private swaps are live on ${swapMainnets()} mainnet: who swapped stays private, the tokens and amounts are public. This server quotes them (gloam_swap_quote) and never makes one: swap in the app (Vault > Swap) or with the local server (${LOCAL_SERVER}). The old private trade (sealed swaps) is retired.`
+    )}, with the trusted setup's final keys (13 contributors) and deposit limits. Direct deposits and private payments are free; a cash out costs ${CASH_OUT_FEE_PERCENT}. Reviewed internally before launch, and Kann Audits reviewed the vault contracts (report, 1 November 2026: gloam.trade/security) and found no Critical, High or Medium issues; the swap routers, circuits, app and relay were not part of it. Testnets: Tempo Moderato (42431) and Robinhood Chain testnet (46630), with development keys.${BASE_TESTNET_LINE}${ETHEREUM_LINE} Private swaps are live on ${swapMainnets()} mainnet: who swapped stays private, the tokens and amounts are public. This server quotes them (gloam_swap_quote) and never makes one: swap in the app (Vault > Swap) or with the local server (${LOCAL_SERVER}). The old private trade (sealed swaps) is retired.`
   : `Testnet only: Tempo Moderato (42431) and Robinhood Chain testnet (46630). Testnet proofs use development keys; the production ceremony is done (13 contributors) and mainnet deploys its final keys.${BASE_TESTNET_LINE} The old private trade (sealed swaps) is retired.`;
 
 const WHAT_IS_PUBLIC =

@@ -5,6 +5,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram, PoolPicture } from "@/components/docs/FlowDiagram";
 import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { ELYSIUM_ENABLED } from "@/lib/elysium";
+import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 /** The mainnets with a pool in, as words: "Robinhood Chain and Tempo" until Base and Ethereum are in. */
 const MAINNETS = liveMainnetNames();
@@ -16,7 +17,7 @@ const NEXT_MAINNETS = [BASE_LIVE ? null : "Base", ETHEREUM_LIVE ? null : "Ethere
 export const metadata: Metadata = {
   title: "Docs",
   description:
-    `Gloam docs: private money on public chains, on ${MAINNETS}, explained simply. Private balances, payments, payroll, on mainnet and on the free testnet.`,
+    `Gloam docs: private money on public chains, on ${MAINNETS}, explained simply. Private balances, payments, payroll, on mainnet and on testnet.`,
 };
 
 export default function DocsOverviewPage() {
@@ -47,7 +48,7 @@ export default function DocsOverviewPage() {
         limits cap what goes in. The code was reviewed internally before
         launch, and Kann Audits has since reviewed the vault contracts (
         <Link href="/security">report, 1 November 2026</Link>) and found no Critical, High or Medium issues. Deposits and private payments are
-        free, and cashing out costs 0.5%. The Robinhood Chain and Tempo
+        free, and cashing out costs {CASH_OUT_FEE_PERCENT}. The Robinhood Chain and Tempo
         testnets keep <strong>development proving keys</strong>; Base Sepolia
         and Ethereum Sepolia run the final keys. Details: <Link href="/docs/chain">Networks</Link>.
       </p>
@@ -56,16 +57,16 @@ export default function DocsOverviewPage() {
 
       <h2 id="try">Try it (2 minutes)</h2>
       <p>
-        Want to practice first? Use the free testnet:{" "}
+        Want to test it on testnet first? Follow the{" "}
         <Link href="/docs/testnet">
-          <strong>Practice on testnet</strong>
+          <strong>testnet guide</strong>
         </Link>
         .
       </p>
       <ol>
         <li>
           Open <AppLink href="/app">/app</AppLink>, connect a wallet, and pick a
-          network: a mainnet ({MAINNETS}), or a testnet to practice
+          network: a mainnet ({MAINNETS}), or a testnet to try it
           first.
         </li>
         <li>

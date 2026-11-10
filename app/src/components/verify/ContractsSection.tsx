@@ -330,7 +330,7 @@ function NetworkCard({ entry, state, onRetry }: { entry: DirectoryEntry; state: 
 
 type CsvState = { status: "idle" } | { status: "preparing" } | { status: "done"; missing: string[] } | { status: "failed" };
 
-export function ContractsSection({ live }: { live: boolean }) {
+export function ContractsSection() {
   const [shown, setShown] = useState<NetworkKey>(() => firstOn(ENTRIES.some((e) => e.kind === "mainnet" && e.live) ? "mainnet" : "testnet").key);
   const entry = ENTRIES.find((e) => e.key === shown)!;
   const side: Side = entry.kind;
@@ -402,17 +402,8 @@ export function ContractsSection({ live }: { live: boolean }) {
             <div className="max-w-[640px]">
               <h2 className="t-display-l">The contracts</h2>
               <p className="mt-5 max-w-[54ch] text-[16px] leading-relaxed text-mute">
-                {live ? (
-                  <>
-                    Gloam runs on {liveMainnetNames()} mainnet, and on the testnets. Every address here comes from the
-                    list the app itself uses, and each vault is read on chain as you look. The source is on GitHub.
-                  </>
-                ) : (
-                  <>
-                    Every address here comes from the list the app itself uses, and each vault is read on chain as you
-                    look. The source is on GitHub.
-                  </>
-                )}
+                Gloam runs on {liveMainnetNames()} mainnet, and on the testnets. Every address here comes from the
+                list the app itself uses, and each vault is read on chain as you look. The source is on GitHub.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">

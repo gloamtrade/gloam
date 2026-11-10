@@ -164,7 +164,7 @@ if (MODE === "off") {
   ok(!CSP_CONNECT_SOURCES.some((s: string) => /elysium|kinetiq/.test(s)), "off: no Elysium host in the CSP");
   ok(tokens.shieldTokensFor(CHAIN_ID).every((t) => t.address.toLowerCase() !== USDC.toLowerCase()), "off: no Elysium USDC");
   ok(!tokens.shieldTokensFor(TESTNET_ID).some((t) => t.address.toLowerCase() === "0x7d29d8047b905000459c0e80c34a26ceedcb47b2"), "off: no Elysium test USDC");
-  ok(!/elysium/i.test(knowledgeBlock(false, true)) && !/elysium/i.test(knowledgeBlock(true, true)), "off: Glim never names Elysium");
+  ok(!/elysium/i.test(knowledgeBlock()), "off: Glim never names Elysium");
   ok(!/elysium/i.test(toolText), "off: no remote MCP tool names Elysium");
   ok(!/elysium/i.test((await networksText()).text), "off: the remote MCP's networks say nothing");
   ok((await networksText("elysium-mainnet")).isError && (await networksText("elysium")).isError, "off: the remote MCP refuses both keys");
@@ -200,7 +200,7 @@ if (MODE === "off") {
   ok(CSP_CONNECT_SOURCES.includes("https://testnet-rpc.elysium.kinetiq.xyz"), "on: the CSP allows the testnet RPC");
   // The key never shows.
   ok(ely.ELYSIUM_RPC_DISPLAY === "https://elysium-mainnet.g.alchemy.com/v2/{API_KEY}", "on: the RPC is shown redacted");
-  const glim = knowledgeBlock(false, true);
+  const glim = knowledgeBlock();
   ok(/Elysium mainnet \(chain ID 99901\)/.test(glim) && /Elysium testnet \(chain ID 99801\)/.test(glim), "on: Glim knows both");
   ok(!glim.includes(KEY), "on: Glim never shows the RPC key");
   ok(!/partner(ed|ship)? with Kinetiq|official partner/i.test(glim.replace(/no partnership with Kinetiq or Hyperliquid/g, "")), "on: Glim claims no partnership");

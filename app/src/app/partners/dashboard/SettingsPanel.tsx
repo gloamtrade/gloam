@@ -2,7 +2,6 @@
 
 import { useState, type FormEvent } from "react";
 import { isAddress } from "viem";
-import { useMainnetLive } from "@/components/MainnetCountdown";
 import { getNetwork } from "@/lib/networks";
 import { portal, PortalError, type PartnerAccount } from "./client";
 import { Card, Field, fmtUsd, Notice } from "./ui";
@@ -28,7 +27,6 @@ export function SettingsPanel({ partner, onSaved }: { partner: PartnerAccount; o
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const mainnetLive = useMainnetLive();
 
   const cents = toHundredths(flat, 100);
   const cBps = toHundredths(cashout, 100);
@@ -74,11 +72,7 @@ export function SettingsPanel({ partner, onSaved }: { partner: PartnerAccount; o
     <form onSubmit={save} className="space-y-4">
       <Card
         title="Your fee"
-        foot={
-          mainnetLive
-            ? "Partner fees are not charged yet, on mainnet or testnet. Your dashboard counts what this setting would earn on each payment."
-            : "Testnet: nothing is charged. Your dashboard counts what this setting would earn on each payment."
-        }
+        foot="Partner fees are not charged yet, on mainnet or testnet. Your dashboard counts what this setting would earn on each payment."
       >
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
           <Field label="Per private payment" htmlFor="fee-flat" hint="A flat amount, up to $1.00. The payment's amount is hidden, even from us.">
