@@ -714,6 +714,40 @@ await test("F1, B2, J1 fixed: a cash out scheduled for later counts to its job's
   assert.equal(await P.attributedTo(RH.chainId, FX.cashOuts[0]!), null, "a job with no code binds nothing");
 });
 
+await test("a scheduled run's sent jobs settle in one batch: codes read together, only jobs with one read back, each counted once", async () => {
+  const h = FX.cashOuts[2]!;
+  // the job above counted it: take that back exactly, so the batch counts it afresh
+  assert.equal((await P.reverseActivity(RH.chainId, h))?.partnerId, motion.id);
+  sentByRelay(h);
+  await A.bindScheduledJob({ jobId: "job-gone", code: offrampCode, at: before(h, 6 * 3600) });
+  const read: string[] = [];
+  const readJob = async (id: string) => {
+    read.push(id);
+    return id === "job-1" ? { net: RH, hash: h } : null;
+  };
+  const deps = after(h, 26 * 3600);
+  await A.afterScheduledSends(["job-1", "job-none", "job-1", "job-gone"], readJob, deps);
+  assert.deepEqual(read.sort(), ["job-1", "job-gone"], "a job with no code is never read back; one listed twice is read once");
+  const c = await P.countedRecord(RH.chainId, h);
+  assert.equal(c?.partnerId, motion.id);
+  assert.equal(c?.record.linkBind, "relay");
+  const stats = await kv1(["HGETALL", k("stats2", motion.id)]);
+  // the same run reported again, and two overlapping runs: still counted once
+  await A.afterScheduledSends(["job-1"], readJob, deps);
+  assert.deepEqual(await kv1(["HGETALL", k("stats2", motion.id)]), stats, "a second settle counts nothing");
+  await P.reverseActivity(RH.chainId, h);
+  await Promise.all([A.afterScheduledSends(["job-1", "job-none"], readJob, deps), A.afterScheduledSends(["job-1"], readJob, deps)]);
+  assert.deepEqual(await kv1(["HGETALL", k("stats2", motion.id)]), stats, "two runs at once count it once");
+  assert.equal((await P.countedRecord(RH.chainId, h))?.partnerId, motion.id);
+  // a job that can't be read, and nothing sent at all, never throw
+  await A.afterScheduledSends(["job-1"], async () => {
+    throw new Error("store down");
+  }, deps);
+  await A.afterScheduledSends([], readJob, deps);
+  unregister([h]);
+  sentByRelay(h, false);
+});
+
 await test("binding: flows fit; other chains, random, failed and too-old transactions count for nothing; Ethereum and swaps take no wallet registration", async () => {
   const h = FX.cashOuts[3]!;
   sentByRelay(h);

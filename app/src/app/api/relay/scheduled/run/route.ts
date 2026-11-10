@@ -1,5 +1,5 @@
 import { NextResponse, after } from "next/server";
-import { afterScheduledSend } from "@/lib/partnerAttribution";
+import { afterScheduledSends } from "@/lib/partnerAttribution";
 import { webhookSecretOk } from "@/lib/telegramBot/rules";
 import { runDueJobs, takeNotices } from "@/lib/relay/scheduled";
 import { deliverNotices } from "@/lib/relay/webhook";
@@ -44,15 +44,16 @@ export async function GET(req: Request) {
       }, { watchUntil }),
   });
   // A cash out scheduled from a partner's link kept its code with the job: bind it to the
-  // transaction just sent, and count it (the run already watched each receipt). Never fails the run.
+  // transaction just sent, and count it (the run already watched each receipt). Every sent
+  // job's code is read in one go; only a job with one is read back. Never fails the run.
   const sent = results.filter((r) => r.status === "sent").map((r) => r.id);
   if (sent.length) {
-    after(async () => {
-      for (const id of sent) {
-        const job = await store.get(id).catch(() => null);
-        if (job?.hash) await afterScheduledSend({ net: networkForChain(job.chainId), jobId: id, hash: job.hash });
-      }
-    });
+    after(() =>
+      afterScheduledSends(sent, async (id) => {
+        const job = await store.get(id);
+        return job?.hash ? { net: networkForChain(job.chainId), hash: job.hash } : null;
+      }),
+    );
   }
   // counts only: no ids, amounts or addresses in the logs
   const tally: Record<string, number> = {};
