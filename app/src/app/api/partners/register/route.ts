@@ -43,7 +43,9 @@ export async function POST(req: NextRequest) {
     } catch {
       throw new ApiError(400, "bad_chain", "Gloam does not run a vault on that chain.");
     }
-    if (!(await hitRateLimit(`${input.code}:${ip}`, "partner-reg-code", PER_CODE_IP_PER_MIN)).allowed) {
+    // the code is its own dimension, added after the IP is grouped: written into the IP
+    // ("code:2001:db8::1") it was read as part of an IPv6 address, grouping /48 or wider
+    if (!(await hitRateLimit(ip, "partner-reg-code", PER_CODE_IP_PER_MIN, Date.now(), 60, { scope: input.code })).allowed) {
       throw new ApiError(429, "rate_limited", "Too many registrations for this link from here.");
     }
     const r = await registerLink(input);

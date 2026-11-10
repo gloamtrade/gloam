@@ -141,10 +141,13 @@ export function rateKeysKeyed(): boolean {
 /**
  * What a key says about who is counted: an HMAC under the server secret, over
  * the bucket too, so one subject has a different name in every bucket. Without
- * the secret, a plain hash.
+ * the secret, a plain hash. `scope` splits one IP's count by something else (a
+ * link code, say). It is added after the IP is grouped, so it never changes how
+ * the IP is read: a scope written into the IP itself ("code:2001:db8::1") would
+ * be read as part of an IPv6 address and group far wider than /64.
  */
-function ipKey(bucket: string, ip: string, v6Bits?: V6Bits): string {
-  const subject = ipBucket(ip, v6Bits);
+function ipKey(bucket: string, ip: string, v6Bits?: V6Bits, scope?: string): string {
+  const subject = scope ? `${ipBucket(ip, v6Bits)}|${scope}` : ipBucket(ip, v6Bits);
   const secret = rateKeySecret();
   if (secret) return createHmac("sha256", secret).update(`gloam-rl|${bucket}|${subject}`).digest("hex").slice(0, 32);
   return createHash("sha256").update(`gloam-mcp|${subject}`).digest("hex").slice(0, 32);
@@ -229,6 +232,8 @@ async function redisIncr(key: string, windowSec: number): Promise<number> {
  * this never throws; with `failClosed` (the relay's sends) it throws
  * SharedCountUnavailable instead, and also in a production build with no Redis.
  * `v6Bits` widens what one IPv6 client counts as, for this limit only.
+ * `scope` counts this IP separately per value (see ipKey); pass it rather than
+ * writing it into `ip`.
  */
 export async function hitRateLimit(
   ip: string,
@@ -236,13 +241,13 @@ export async function hitRateLimit(
   limit: number,
   now = Date.now(),
   windowSec = WINDOW_SEC,
-  opts: { failClosed?: boolean; v6Bits?: V6Bits } = {},
+  opts: { failClosed?: boolean; v6Bits?: V6Bits; scope?: string } = {},
 ): Promise<RateResult> {
   const span = Number.isSafeInteger(windowSec) && windowSec > 0 ? windowSec : WINDOW_SEC;
   const window = Math.floor(now / 1000 / span);
   // one-minute keys keep their old shape; longer windows name their length
   const slot = span === WINDOW_SEC ? `${window}` : `${span}s:${window}`;
-  const key = `${PREFIX}${bucket}:${ipKey(bucket, ip, opts.v6Bits)}:${slot}`;
+  const key = `${PREFIX}${bucket}:${ipKey(bucket, ip, opts.v6Bits, opts.scope)}:${slot}`;
   let n: number;
   if (redisConfigured() && !LOCAL_BUCKETS.has(bucket)) {
     try {
@@ -314,12 +319,12 @@ export async function readRateLimit(
   bucket: string,
   now = Date.now(),
   windowSec = WINDOW_SEC,
-  opts: { failClosed?: boolean; v6Bits?: V6Bits } = {},
+  opts: { failClosed?: boolean; v6Bits?: V6Bits; scope?: string } = {},
 ): Promise<number> {
   const span = Number.isSafeInteger(windowSec) && windowSec > 0 ? windowSec : WINDOW_SEC;
   const window = Math.floor(now / 1000 / span);
   const slot = span === WINDOW_SEC ? `${window}` : `${span}s:${window}`;
-  const key = `${PREFIX}${bucket}:${ipKey(bucket, ip, opts.v6Bits)}:${slot}`;
+  const key = `${PREFIX}${bucket}:${ipKey(bucket, ip, opts.v6Bits, opts.scope)}:${slot}`;
   const inMemory = () => {
     const hit = memCounts().get(key);
     return hit && hit.exp > now ? hit.n : 0;

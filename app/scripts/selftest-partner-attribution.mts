@@ -802,6 +802,26 @@ await test("N4 fixed: a registration lasts an hour, and one IP (or /64) gets a s
   assert.equal(sameNet.status, 429, "another address in the same /64 shares it");
 });
 
+await test("a code's per-IP count groups IPv4 by address and IPv6 by /64, never wider", async () => {
+  const c = (await L.issueLinkCode({ partnerId: motion.id, by: "partner" })).code;
+  let n = 9000;
+  const send = (ip: string) =>
+    registerPost(
+      routeReq("/api/partners/register", { chainId: RH.chainId, nullifierHash: `0x${(n++).toString(16).padStart(64, "0")}`, bindHash: `0x${"25".repeat(32)}`, code: c, flow: "pay" }, { "x-forwarded-for": ip }) as never
+    );
+  for (const [first, same, neighbour] of [
+    ["198.51.100.30", "198.51.100.30", "198.51.100.31"],
+    ["2001:db8:5:2::1", "2001:db8:5:2:ffff::7", "2001:db8:5:3::1"],
+  ]) {
+    let ok = 0;
+    for (let i = 0; i < 10; i++) if ((await send(first!)).status === 201) ok++;
+    assert.equal(ok, 10, `${first}: its share`);
+    assert.equal((await send(same!)).status, 429, `${same}: the same address or /64 shares it`);
+    // `${code}:${ip}` read an IPv6 address with the code in front, so the next /64 in the /48 was refused too
+    assert.equal((await send(neighbour!)).status, 201, `${neighbour}: the next address or /64 keeps its own`);
+  }
+});
+
 // ---------------------------------------------------------------- privacy (F3)
 
 function storeText(): string {
