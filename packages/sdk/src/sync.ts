@@ -45,7 +45,7 @@ export type ChainLeaf = {
 };
 
 export interface SyncedTree {
-  /** The rebuilt tree — call `.path(i)` yourself, or use the helpers below. It never changes after it is handed out. */
+  /** The rebuilt tree: call `.path(i)` yourself, or use the helpers below. It never changes after it is handed out. */
   tree: IncrementalMerkleTreePoseidon;
   leaves: ChainLeaf[];
   root: Hex;
