@@ -20,12 +20,14 @@ export type ActivityTx = {
 };
 
 async function fetchActivity(address: string, mainnetChainId?: number) {
-  // A testnet asks exactly as before; a mainnet names its chain.
-  const chain = mainnetChainId ? `&chainId=${mainnetChainId}` : "";
-  const res = await fetch(
-    `/api/activity?address=${encodeURIComponent(address)}${chain}`,
-    { cache: "no-store" }
-  );
+  // A testnet asks exactly as before; a mainnet names its chain. The wallet goes
+  // in the body, never the URL, where access logs would keep it next to the IP.
+  const res = await fetch("/api/activity", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(mainnetChainId ? { address, chainId: mainnetChainId } : { address }),
+  });
   if (!res.ok) throw new Error("activity_failed");
   return res.json() as Promise<{ txs: ActivityTx[] }>;
 }

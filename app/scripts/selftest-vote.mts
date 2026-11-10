@@ -576,9 +576,17 @@ await test("routes: /api/vote lists every published vote, /api/vote/me gives one
   assert.deepEqual(lj.data.votes.map((v) => v.id).sort(), VOTES.filter((v) => v.published).map((v) => v.id).sort());
   for (const v of lj.data.votes) assert.equal(v.details.length, VOTES.find((x) => x.id === v.id)!.options.length);
 
-  const meReq = (q: string) => new Request(`http://localhost/api/vote/me${q}`, { headers: { "x-forwarded-for": "203.0.113.9" } });
-  assert.equal((await meRoute.GET(meReq("?address=nope"))).status, 400);
-  assert.equal((await meRoute.GET(meReq(""))).status, 400);
+  // the wallet goes in a POST body, never the URL (access logs keep URLs next to IPs)
+  const meReq = (body: unknown) =>
+    new Request("http://localhost/api/vote/me", { method: "POST", body: typeof body === "string" ? body : JSON.stringify(body), headers: { "x-forwarded-for": "203.0.113.9", "content-type": "application/json" } });
+  const meGet = meRoute.GET();
+  assert.equal(meGet.status, 405);
+  assert.equal(meGet.headers.get("allow"), "POST");
+  assert.equal((await meRoute.POST(meReq({ address: "nope" }))).status, 400);
+  assert.equal((await meRoute.POST(meReq({}))).status, 400);
+  assert.equal((await meRoute.POST(meReq("not json"))).status, 400);
+  assert.equal((await meRoute.POST(meReq(["0x1111111111111111111111111111111111111111"]))).status, 400, "an array is not the body");
+  assert.equal((await meRoute.POST(meReq({ address: "0x1111111111111111111111111111111111111111", pad: "x".repeat(300) }))).status, 413);
   // the largest eligible holder in the snapshot: weight, share, nothing cast yet
   const pub = VOTES.find((v) => v.published)!;
   const snap = registry.snapshotFor(pub)!;
@@ -587,12 +595,12 @@ await test("routes: /api/vote lists every published vote, /api/vote/me gives one
   const closeWeighted = core.weightingOf(pub) === "close";
   // a close-weighted vote reads the wallet's GLOAM now: with no chain it says so instead of guessing
   if (closeWeighted) {
-    assert.equal((await meRoute.GET(meReq(`?address=${top![0]}`))).status, 503);
+    assert.equal((await meRoute.POST(meReq({ address: top![0] }))).status, 503);
     // the wallet now holds a little less than at the snapshot: that is its weight
     chainReads.setVoteChain(fakeChain({ [top![0]]: BigInt(top![1]) - 1n }));
     top![1] = (BigInt(top![1]) - 1n).toString();
   }
-  const res = await meRoute.GET(meReq(`?address=${top![0]}`));
+  const res = await meRoute.POST(meReq({ address: top![0] }));
   assert.equal(res.status, 200);
   const mj = (await res.json()) as { data: { name: string | null; votes: Record<string, { weight: string; eligibleWallets: number; ballot: unknown; excluded: string | null }> } };
   assert.equal(mj.data.name, null);
@@ -604,7 +612,7 @@ await test("routes: /api/vote lists every published vote, /api/vote/me gives one
     if (!closeWeighted) assert.equal(st.eligibleWallets, core.eligibleTotal(snap, ex).wallets);
   }
   // a team wallet comes back excluded with weight 0
-  const team = (await (await meRoute.GET(meReq("?address=0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8"))).json()) as typeof mj;
+  const team = (await (await meRoute.POST(meReq({ address: "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8" }))).json()) as typeof mj;
   for (const st of Object.values(team.data.votes)) {
     assert.equal(st.weight, "0");
     assert.match(st.excluded ?? "", /Team/);

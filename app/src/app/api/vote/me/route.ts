@@ -12,24 +12,42 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const READS_PER_MINUTE = 60;
+/** { "address": "0x…" } fits in far less. */
+const MAX_BODY = 256;
 
 function fail(status: number, code: string, message: string, headers?: HeadersInit) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status, headers: { "Cache-Control": "no-store", ...headers } });
 }
 
 /**
- * One wallet across every vote the site shows: its ENS name (when it has
- * one), and per vote its weight, why it is excluded, its vote so far, and the
- * eligible total its share is worked out against. For a close-weighted vote
- * the weight is the wallet's $GLOAM now (at the closing block once counted),
- * and `eligibleWallets` is 0 until the final count is in.
+ * The wallet goes in a POST body, never in the URL, where access logs would
+ * keep it next to the IP. Nothing outside the app asked this way.
  */
-export async function GET(req: Request) {
+export function GET() {
+  return fail(405, "method_not_allowed", "Send { address } in the body of a POST.", { Allow: "POST" });
+}
+
+/**
+ * POST { address }: one wallet across every vote the site shows: its ENS name
+ * (when it has one), and per vote its weight, why it is excluded, its vote so
+ * far, and the eligible total its share is worked out against. For a
+ * close-weighted vote the weight is the wallet's $GLOAM now (at the closing
+ * block once counted), and `eligibleWallets` is 0 until the final count is in.
+ */
+export async function POST(req: Request) {
   const rate = await hitRateLimit(clientIp(req), "vote-me", READS_PER_MINUTE);
   if (!rate.allowed) return fail(429, "rate_limited", "Too many requests. Wait a minute.", { "Retry-After": String(rate.retryAfterSec) });
-  const raw = new URL(req.url).searchParams.get("address")?.trim() ?? "";
-  if (!isAddress(raw, { strict: false })) return fail(400, "bad_address", "That wallet address doesn't look right.");
-  const address = getAddress(raw);
+  const text = await req.text().catch(() => "");
+  if (text.length > MAX_BODY) return fail(413, "too_large", "Send only { address }.");
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return fail(400, "bad_body", "Send { address } as JSON.");
+  }
+  const raw = body && typeof body === "object" && !Array.isArray(body) ? (body as { address?: unknown }).address : undefined;
+  if (typeof raw !== "string" || !isAddress(raw.trim(), { strict: false })) return fail(400, "bad_address", "That wallet address doesn't look right.");
+  const address = getAddress(raw.trim());
   try {
     const [name, votes] = await Promise.all([
       ensNameOf(address),

@@ -71,7 +71,7 @@ export function useVoteWallet() {
   };
 }
 
-/** One wallet's name, weight and votes across every vote, from /api/vote/me. */
+/** One wallet's name, weight and votes across every vote, from POST /api/vote/me. */
 export function useMe(address: string | undefined) {
   const [me, setMe] = useState<Me | null>(null);
   const [failed, setFailed] = useState(false);
@@ -80,7 +80,8 @@ export function useMe(address: string | undefined) {
   useEffect(() => {
     if (!address) return;
     let stop = false;
-    fetch(`/api/vote/me?address=${address}`, { cache: "no-store" })
+    // the wallet in the body, never the URL, where access logs would keep it next to the IP
+    fetch("/api/vote/me", { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ address }) })
       .then((r) => r.json())
       .then((j) => {
         if (stop) return;
