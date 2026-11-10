@@ -21,9 +21,9 @@
  *    refuses other content types, rate limits, counts per directive per day,
  *    and carries on quietly when the store is missing or does not answer
  *
- * Run from app/, with Elysium off and on, as CI does:
+ * Run from app/, with Elysium on (the default) and off, as CI does:
  *   ../mcp/node_modules/.bin/tsx scripts/selftest-claim-csp.mts
- *   NEXT_PUBLIC_ELYSIUM_ENABLED=1 ../mcp/node_modules/.bin/tsx scripts/selftest-claim-csp.mts
+ *   NEXT_PUBLIC_ELYSIUM_ENABLED=0 ../mcp/node_modules/.bin/tsx scripts/selftest-claim-csp.mts
  */
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -36,7 +36,8 @@ for (const k of TURNKEY) delete env[k];
 delete env.UPSTASH_REDIS_REST_URL;
 delete env.UPSTASH_REDIS_REST_TOKEN;
 env.GLOAM_PARTNERS_STORE = "memory";
-const elysiumOn = /^(1|true|on|yes)$/i.test((env.NEXT_PUBLIC_ELYSIUM_ENABLED ?? "").trim());
+// on unless the flag says "0", "false", "off" or "no" (lib/elysium.ts elysiumFlagFrom)
+const elysiumOn = !/^(0|false|off|no)$/i.test((env.NEXT_PUBLIC_ELYSIUM_ENABLED ?? "").trim());
 
 const csp = await import("../csp.config.mjs");
 const nextConfig = (await import("../next.config")).default;
