@@ -4,7 +4,7 @@
   "version": "0.8.0",
   "private": false,
   "type": "module",
-  "description": "Gloam MCP server: private stablecoin payments for AI agents on Tempo, Robinhood Chain, Base and Ethereum, live on mainnet and testnet (Elysium support is coming), under spending limits the agent cannot lift.",
+  "description": "Gloam MCP server: private stablecoin payments for AI agents on Tempo, Robinhood Chain, Base, Ethereum and Elysium, live on mainnet and testnet, under spending limits the agent cannot lift.",
   "license": "MIT",
   "homepage": "https://gloam.trade/docs/agents",
   "repository": {

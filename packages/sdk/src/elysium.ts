@@ -7,10 +7,11 @@
  * HyperEVM (999; its testnet to HyperEVM testnet 998), with HYPE as its gas coin
  * and blocks about every 100 ms. Its mainnet chain id is 99901 (Kinetiq's docs,
  * elysium.kinetiq.xyz/docs/connecting-to-elysium); its public RPC, explorer and
- * USDC address are published at launch, so those start empty and Elysium
- * mainnet does not exist for the SDK until all of them are in:
- * elysiumMainnetConfig() returns null, gloamNetworks() leaves it out, and the
- * builders refuse its chain id instead of guessing a pool.
+ * USDC address were published at launch. Until every value is in, Elysium
+ * mainnet does not exist for the SDK: elysiumMainnetConfig() returns null,
+ * gloamNetworks() leaves it out, and the builders refuse its chain id instead
+ * of guessing a pool. All of them are in since launch day, 9 November 2026,
+ * except the memo board (none deployed yet).
  *
  * FILLED IN ON LAUNCH DAY (DEPLOY-ELYSIUM.md):
  *   rpcUrl, explorerUrl, usdc (and usdcDecimals if it is not 6) by hand, from

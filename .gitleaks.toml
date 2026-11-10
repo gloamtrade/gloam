@@ -1,4 +1,4 @@
-# Gloam — secret scan allowlist for public crypto artifacts and on-chain data.
+# Gloam: secret scan allowlist for public crypto artifacts and on-chain data.
 # Real keys must never land in the repo (use DEPLOYER_PK env only).
 
 title = "gloam"
@@ -7,7 +7,7 @@ title = "gloam"
 useDefault = true
 
 [allowlist]
-description = "Public contracts, circuit artifacts, test fixtures — not private keys"
+description = "Public contracts, circuit artifacts, test fixtures, not private keys"
 paths = [
   '''(^|/)app/public/circuits/.*''',
   '''(^|/)contracts/test/fixtures/.*''',

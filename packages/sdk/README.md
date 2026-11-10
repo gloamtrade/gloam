@@ -2,7 +2,7 @@
 
 **Private stablecoin payments for apps and agents on Robinhood Chain, Tempo, Base and Ethereum, as a package.**
 
-Add shielded balances, private payments, and selective disclosure to any app or agent on Robinhood Chain, Tempo, Base or Ethereum. Live on all four mainnets, on the trusted setup's final keys. Elysium mainnet support is coming. Real zero-knowledge proofs, no proving stack to build from scratch.
+Add shielded balances, private payments, and selective disclosure to any app or agent on Robinhood Chain, Tempo, Base, Ethereum or Elysium. Live on all five mainnets, on the trusted setup's final keys (Elysium from the release after 0.6.0). Real zero-knowledge proofs, no proving stack to build from scratch.
 
 [![npm version](https://img.shields.io/npm/v/@gloamtrade/sdk?color=0B0C0E&label=npm)](https://www.npmjs.com/package/@gloamtrade/sdk)
 [![license](https://img.shields.io/npm/l/@gloamtrade/sdk?color=0B0C0E)](https://github.com/gloamtrade/gloam/blob/main/LICENSE)
@@ -75,14 +75,15 @@ That scaffolds a Next.js app already wired to the SDK. See [create-gloam-app](ht
 
 ## Networks: mainnet and testnet
 
-Gloam runs on four chains, each with a mainnet and a testnet. They are separate pools of the same design, not a bridge. Robinhood Chain and Tempo mainnet are live since 21 October 2026, Base and Ethereum mainnet since 26 October 2026 (from 0.4.1). Elysium mainnet support is coming ([Elysium](#elysium-coming)).
+Gloam runs on five chains, each with a mainnet and, all but Elysium, a testnet. They are separate pools of the same design, not a bridge. Robinhood Chain and Tempo mainnet are live since 21 October 2026, Base and Ethereum mainnet since 26 October 2026 (from 0.4.1), Elysium mainnet since 9 November 2026 (from the release after 0.6.0, [Elysium](#elysium)).
 
 | Network | Key | Chain id | Pool | Assets (deposit limit per deposit / total) | Keys |
 | --- | --- | --- | --- | --- | --- |
-| Robinhood Chain | `robinhood-mainnet` | `4663` | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` (block `94194599`) | USDG (50,000 / 2,500,000), $GLOAM (2,500,000 / 25,000,000), PONS (390,000 / 9,800,000), CASHCAT (960,000 / 24,000,000); once its timelocked limit lands: ETH (11 / 110), AI (400,000 / 4,000,000), ORBIO (1,000,000 / 10,000,000), GRIFT (no limit) | Final |
+| Robinhood Chain | `robinhood-mainnet` | `4663` | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` (block `94194599`) | USDG (50,000 / 2,500,000), $GLOAM (2,500,000 / 25,000,000), PONS (390,000 / 9,800,000), CASHCAT (960,000 / 24,000,000), ETH (11 / 110), AI (400,000 / 4,000,000), ORBIO (1,000,000 / 10,000,000); GRIFT (no limit) once its timelocked change lands | Final |
 | Tempo | `tempo-mainnet` | `4217` | `0x39e28cde55cab798874746ac52cb4b5cc99a0194` (block `45172561`) | USDC.e, pathUSD, USDT0, OUSD (50,000 / 2,500,000 each) | Final |
 | Base | `base-mainnet` | `8453` | `0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194` (block `53109632`) | USDC, EURC, USDT (50,000 / 2,500,000 each), ETH (20 / 1,000), BDX (no limit once its timelocked change lands) | Final |
 | Ethereum | `ethereum-mainnet` | `1` | `0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194` (block `26276183`) | USDC, USDT, USDG, PYUSD, EURC (50,000 / 2,500,000 each), ETH (20 / 1,000), BDX (no limit once its timelocked change lands) | Final |
+| Elysium | `elysium-mainnet` | `99901` | `0x89d3042390204f57b8b4F8949D3c2203E4002164` (block `3248495`) | USDC (500 / 25,000) | Final |
 | Robinhood Chain testnet | `robinhood` | `46630` | `0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740` | Test ETH, test USDG, stock tokens | Dev |
 | Tempo testnet (Moderato) | `tempo` | `42431` | `0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb` | PathUSD and other test stablecoins | Dev |
 
@@ -100,8 +101,8 @@ Each `GloamNetwork` carries `chainId`, `pool`, `deployBlock`, a viem `chain`, `r
 What is different on mainnet:
 
 - **Final keys.** The mainnet verifiers hold the final keys of the 13-contributor trusted setup (drand round 6561386, release `ceremony-final`). The testnets keep the single-party dev keys. A proof made with one set never verifies against the other, so prove with `circuitArtifactUrls(circuit, chainId)`, which picks the right set for the chain.
-- **Payments only.** The mainnet pools (`ShieldPoolPayments`) take deposits, private payments and cash outs, and have no swap code. Private swaps go through a separate router, on the mainnets listed in the [docs](https://gloam.trade/docs/private-swaps); from 0.5.0 this SDK builds them too ([Private swaps](#private-swaps)). On Robinhood Chain mainnet, stock tokens go in and out of the private balance through those swaps; this SDK does not list them as deposit assets. Robinhood Chain mainnet takes no native ETH deposit until its timelocked limit lands (below).
-- **Deposit limits.** 50,000 per deposit and 2,500,000 in total for each stablecoin, 20 and 1,000 for ETH on Base and Ethereum, 2,500,000 and 25,000,000 for $GLOAM. On Robinhood Chain, ETH (11 per deposit, 110 in total), AI (400,000 and 4,000,000) and ORBIO (1,000,000 and 10,000,000) opened on 3 November 2026. From 0.4.2 the SDK reads the limits live from the vault (`readDepositLimit`, `assertDepositWithinLiveLimit`); the `depositLimit` on each asset holds the limit read on chain on 2 November 2026. Pass `client` (a viem public client on that chain) to `buildShieldBoundIntent` and it refuses an amount over the vault's live per-deposit limit, or over the room left under its total, before it proves. If the vault can't be read, nothing is refused: the vault enforces its own limits. An unlisted asset is refused either way. Cash outs and private payments are never limited.
+- **Payments only.** The mainnet pools (`ShieldPoolPayments`) take deposits, private payments and cash outs, and have no swap code. Private swaps go through a separate router, on the mainnets listed in the [docs](https://gloam.trade/docs/private-swaps); from 0.5.0 this SDK builds them too ([Private swaps](#private-swaps)). On Robinhood Chain mainnet, stock tokens go in and out of the private balance through those swaps; this SDK does not list them as deposit assets.
+- **Deposit limits.** 50,000 per deposit and 2,500,000 in total for each stablecoin, 20 and 1,000 for ETH on Base and Ethereum, 2,500,000 and 25,000,000 for $GLOAM, 500 and 25,000 for USDC on Elysium. On Robinhood Chain, ETH (11 per deposit, 110 in total), AI (400,000 and 4,000,000) and ORBIO (1,000,000 and 10,000,000) opened on 3 November 2026. From 0.4.2 the SDK reads the limits live from the vault (`readDepositLimit`, `assertDepositWithinLiveLimit`); the `depositLimit` on each asset holds the limit read on chain on 2 November 2026. Pass `client` (a viem public client on that chain) to `buildShieldBoundIntent` and it refuses an amount over the vault's live per-deposit limit, or over the room left under its total, before it proves. If the vault can't be read, nothing is refused: the vault enforces its own limits. An unlisted asset is refused either way. Cash outs and private payments are never limited.
 - **Fees.** Deposits and private payments are free. A cash out costs 0.5% (0.25% until 3 November 2026): the pool keeps `cashOutFee(amount, bps)` and sends the rest. The owner can change the fee through the vault's timelock, so from 0.5.0 `readCashOutFeeBps(client, pool)` reads it live; the swap planner always does, and `buildUnshieldIntent` does when you pass `client`.
 - **Pools come with the SDK version.** Mainnet pool addresses live in `MAINNET_POOLS`. If your SDK version has no pool for a mainnet, `mainnetNetwork()` returns `null` and the builders refuse that chain id rather than guess. Update the SDK, or pass `poolAddress` yourself.
 
@@ -141,15 +142,15 @@ Ethereum mainnet is the fourth chain, live since 26 October 2026: from 0.4.1, `m
 
 0.4.0 knows Ethereum Sepolia, a testnet on the mainnet pool and final keys like Base Sepolia, live since 25 October 2026: `testnetNetwork("ethereum")` returns its vault (`0x465EbfcdE1e384C7B1e8388E1aFEA95438c7A0ef`, deploy block `11992914`) and its payment-message board. Its proofs always use the final keys (`ceremonyForChainId(11155111)`).
 
-### Elysium (coming)
+### Elysium
 
-Elysium mainnet support is coming: Elysium is Kinetiq's Hyperliquid L2, an Arbitrum Orbit chain with HYPE as its gas coin, and the SDK already knows it as `elysium-mainnet`, coming in a release that has its values in.
+Elysium mainnet is live since 9 November 2026. Elysium is Kinetiq's Hyperliquid L2, an Arbitrum Orbit chain with HYPE as its gas coin. The SDK knows it as `elysium-mainnet` (chain id `99901`), with its values in one file, `src/elysium.ts` (`ELYSIUM_MAINNET`, `elysiumMainnetConfig()`). They are in from the release after 0.6.0; 0.6.0 itself returns `null` for `mainnetNetwork("elysium")` and refuses its chain id.
 
-- Until then (coming), `mainnetNetwork("elysium")` returns `null`, `gloamNetworks()` leaves it out and the builders refuse its chain id. The values live in one file, `src/elysium.ts` (`ELYSIUM_MAINNET`, `elysiumMainnetConfig()`); Elysium support is coming once every one is in.
-- Coming for Elysium: the same vault (`ShieldPoolPayments`) on the final keys, USDC only at the launch limits (500 per deposit, 25,000 in total), the 0.5% cash-out fee. Elysium testnet support (`99801`, key `elysium`, `testnetNetwork("elysium")`, test USDC at Base Sepolia's limits, final keys) is coming the same way, once its pool is in `ELYSIUM_TESTNET`. Gas on Elysium, once support is in (coming), is paid in HYPE; HYPE itself is not listed as a deposit.
-- Not on Elysium yet, even once support is in (coming): private swaps (`planVaultSwap` refuses with "Private swaps are not on Elysium yet") and the bridge.
-- Short links (coming for Elysium): Elysium mainnet's USDC is id 45 and its testnet's id 46 in `SHORT_LINK_WHERE`, each reserved until its values are in.
-- Keys (coming for Elysium): `src/elysium.ts` ships in the npm package, so `elysiumMainnetConfig()` and `elysiumTestnetConfig()` refuse an RPC URL with an API key in it; `redactRpcUrl(url)` hides a key for display. Keyed RPCs for Elysium, once support is in (coming), go in your own env.
+- The vault is `ShieldPoolPayments` on the final keys, at its own address (`0x89d3042390204f57b8b4F8949D3c2203E4002164`, deploy block `3248495`), owned from its deploy by a `VaultOwnerGuard`. USDC only (500 per deposit, 25,000 in total), the 0.5% cash-out fee. Gas is paid in HYPE; HYPE itself is not listed as a deposit. There is no payment-message board there yet (`payMemo` is `null`).
+- Elysium testnet (`99801`, key `elysium`, `testnetNetwork("elysium")`, test USDC, final keys) stays `null` until its pool is in `ELYSIUM_TESTNET`.
+- Not on Elysium yet: private swaps (`planVaultSwap` refuses with "Private swaps are not on Elysium yet").
+- Short links: Elysium mainnet's USDC is id 45 in `SHORT_LINK_WHERE`; id 46 stays reserved for its testnet until that pool is in.
+- Keys: `src/elysium.ts` ships in the npm package, so `elysiumMainnetConfig()` and `elysiumTestnetConfig()` refuse an RPC URL with an API key in it; `redactRpcUrl(url)` hides a key for display. Keyed RPCs for Elysium go in your own env.
 
 ## Quickstart: shield your first note
 
@@ -333,7 +334,7 @@ Private payments are free and have no limit. Every network, mainnet included, ha
 
 From 0.5.0 the SDK quotes, builds and finishes private swaps, with the same planning as the Gloam app (routers, pools, routes, buffers and quote stops; a parity test holds the two together). A swap takes one note out of the vault through a one-time escrow, trades it on a public DEX, and puts the new note back in, in one transaction the Gloam relay sends. **It hides who swapped. The tokens and the amounts are public**, like any trade on that DEX.
 
-Where it runs: Robinhood Chain (router v2) and Tempo today. Base and Ethereum get the next router (GloamVaultSwapV4c); until its address is switched on for a chain, `quoteSwap` and `buildSwapIntent` refuse that chain with `no_swap`. `swapChainIds()` lists the chains where a swap can be made now. Private swaps are not on Elysium yet, and its support is coming without them.
+Where it runs: Robinhood Chain (router v2) and Tempo today. Base and Ethereum get the next router (GloamVaultSwapV4c); until its address is switched on for a chain, `quoteSwap` and `buildSwapIntent` refuse that chain with `no_swap`. `swapChainIds()` lists the chains where a swap can be made now. Private swaps are not on Elysium yet.
 
 ```ts
 import {
@@ -603,16 +604,16 @@ Everything exports from one barrel. The crypto and math core is pure and runs an
 ### Networks, keys and fees (new in 0.1.0)
 
 ```ts
-mainnetNetwork("robinhood" | "tempo" | "base" | "ethereum" | "elysium"): GloamNetwork | null  // null until this SDK version has the pool ("elysium": coming)
-testnetNetwork("robinhood" | "tempo" | "base" | "ethereum" | "elysium"): GloamNetwork | null  // "base" (0.3.0) is Base Sepolia, "ethereum" (0.4.0) Ethereum Sepolia, "elysium" Elysium testnet (coming)
+mainnetNetwork("robinhood" | "tempo" | "base" | "ethereum" | "elysium"): GloamNetwork | null  // null until this SDK version has the pool ("elysium": after 0.6.0)
+testnetNetwork("robinhood" | "tempo" | "base" | "ethereum" | "elysium"): GloamNetwork | null  // "base" (0.3.0) is Base Sepolia, "ethereum" (0.4.0) Ethereum Sepolia, "elysium" Elysium testnet (null until its pool is in)
 gloamNetworks(): GloamNetwork[]                             // mainnets with a pool first, then testnets
-getGloamNetwork(key): GloamNetwork | null                   // "robinhood-mainnet" | "tempo-mainnet" | "base-mainnet" | "ethereum-mainnet" | "elysium-mainnet" (coming) | "robinhood" | "tempo" | "base"
+getGloamNetwork(key): GloamNetwork | null                   // "robinhood-mainnet" | "tempo-mainnet" | "base-mainnet" | "ethereum-mainnet" | "elysium-mainnet" | "robinhood" | "tempo" | "base" | "ethereum" | "elysium"
 networkForChainId(chainId): GloamNetwork | undefined        // now finds mainnets too
 GLOAM_NETWORKS / GLOAM_TESTNETS                             // the two testnets, unchanged
 poolForChainId(chainId): Address                            // throws rather than guess
 isMainnetChainId(chainId), networkName(chainId)
-isPaymentsPoolChainId(chainId)                              // ShieldPoolPayments: every mainnet, Base Sepolia and Ethereum Sepolia
-ceremonyForChainId(chainId): "dev" | "production"           // production (final keys) on 4663, 4217, 8453, 1, 84532 and 11155111
+isPaymentsPoolChainId(chainId)                              // ShieldPoolPayments: every mainnet, Base Sepolia, Ethereum Sepolia and Elysium testnet
+ceremonyForChainId(chainId): "dev" | "production"           // production (final keys) on 4663, 4217, 8453, 1, 99901, 84532, 11155111 and 99801
 circuitArtifactUrls(circuit, chainId, base?)                // { wasm, zkey } for "shield" | "transfer" | "unshield"
 circuitArtifactFiles(circuit, ceremony), CIRCUIT_SHA256     // relative paths and SHA-256 to check a download
 GLOAM_ARTIFACTS_URL                                         // https://www.gloam.trade/circuits
@@ -858,7 +859,7 @@ PUBLIC_INPUTS.sealedSwap // [root, nullifier, newCOut, newCChange, assetIn, asse
 
 ## Guardrails and honesty
 
-- **Mainnet.** Robinhood Chain (`4663`), Tempo (`4217`), Base (`8453`) and Ethereum (`1`) run on the final keys of the 13-contributor trusted setup, with deposit limits. Elysium mainnet support is coming, on the same final keys. The contracts and circuits had an internal pre-mainnet review on 20 October 2026 with no Critical or High findings open. Kann Audits then reviewed the vault contracts (report, 1 November 2026: [gloam.trade/security](https://gloam.trade/security)) and found no Critical, High or Medium issues. The circuits and this SDK were not part of that review.
+- **Mainnet.** Robinhood Chain (`4663`), Tempo (`4217`), Base (`8453`), Ethereum (`1`) and Elysium (`99901`) run on the final keys of the 13-contributor trusted setup, with deposit limits. The contracts and circuits had an internal pre-mainnet review on 20 October 2026 with no Critical or High findings open. Kann Audits then reviewed the vault contracts (report, 1 November 2026: [gloam.trade/security](https://gloam.trade/security)) and found no Critical, High or Medium issues. The circuits and this SDK were not part of that review.
 - **A new pool has a small crowd.** Privacy depends on how many notes you hide among. On a brand new mainnet pool that crowd is thin at first, so do not treat a quick deposit and cash out of the same amount as unlinkable.
 - **Testnet runs on dev keys.** Robinhood Chain testnet (`46630`) and Tempo Moderato (`42431`) keep running with the single-party dev keys. Base Sepolia (`84532`) and Ethereum Sepolia (`11155111`) are testnets too, but on the final keys.
 - **Real privacy only.** No mock successes. If a path cannot be private, the SDK returns a plan rather than a fake result.

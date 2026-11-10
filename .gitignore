@@ -8,7 +8,7 @@ out
 build
 dist
 
-# env / secrets — never commit real keys
+# env / secrets: never commit real keys
 .env
 .env.*
 !.env.example

@@ -5,11 +5,11 @@
  *
  * Virtuals agents live on Base and Robinhood Chain, so those are the networks
  * that matter here: Base Sepolia ("base", a testnet on the mainnet pool and
- * final keys), Base mainnet ("base-mainnet", once its pool is in the SDK) and
- * Robinhood Chain mainnet ("robinhood-mainnet"). Tempo and the Robinhood Chain
- * testnet work too, and Ethereum. Elysium mainnet ("elysium-mainnet": USDC
- * only, gas in HYPE) and its testnet ("elysium", 99801) work once the SDK has
- * their values. A network whose pool
+ * final keys), Base mainnet ("base-mainnet") and Robinhood Chain mainnet
+ * ("robinhood-mainnet"). Tempo and the Robinhood Chain testnet work too, and
+ * Ethereum. Elysium mainnet ("elysium-mainnet": USDC only, gas in HYPE) works
+ * with an SDK that has its values (after 0.6.0), and its testnet ("elysium",
+ * 99801) once its pool is in. A network whose pool
  * this SDK version does not have is refused, never guessed.
  */
 import { getGloamNetwork, type GloamAsset, type GloamNetwork, type GloamNetworkKey } from "@gloamtrade/sdk";
