@@ -148,7 +148,7 @@ check("Glim reads an 8-digit chain id from a wrong-network error", () => {
     "The current chain of the wallet (id: 1) does not match the target chain for the transaction (id: 11155111 – Ethereum Sepolia)."
   );
   assert.deepEqual(m, { wallet: 1, want: 11155111 });
-  const fix = chainFix("Ada", { wallet: 1, want: 11155111 }, true);
+  const fix = chainFix("Ada", { wallet: 1, want: 11155111 });
   assert.match(fix, /Switch to Ethereum/);
   assert.match(fix, /Ethereum Sepolia testnet \(11155111\)/);
   assert.match(fix, /chain ID 11155111/);
@@ -169,7 +169,7 @@ if (!on) {
   });
 
   check("as shipped: Glim never names it", () => {
-    const k = knowledgeBlock(false, true);
+    const k = knowledgeBlock();
     assert.doesNotMatch(k, /Ethereum Sepolia \(chain ID 11155111\)/);
   });
 
@@ -232,7 +232,7 @@ if (on) {
   });
 
   check("its pool in: Glim knows it, with its faucets and chain details", () => {
-    const k = knowledgeBlock(false, true);
+    const k = knowledgeBlock();
     assert.match(k, /Ethereum Sepolia \(chain ID 11155111\)/);
     assert.match(k, /https:\/\/sepolia\.etherscan\.io/);
     const start = k.indexOf("\nETHEREUM SEPOLIA");

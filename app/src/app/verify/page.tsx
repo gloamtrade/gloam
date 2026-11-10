@@ -24,7 +24,6 @@ import { ProofVerdict, amountOf, symbolOf } from "@/components/verify/ProofVerdi
 import { networkForChain } from "@/lib/proofs/chain";
 import { track } from "@/lib/track";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
-import { useMainnetLive } from "@/components/MainnetCountdown";
 import { ContractsSection } from "@/components/verify/ContractsSection";
 import { OwnershipStatement } from "@/components/verify/OwnershipStatement";
 import { CheckMark } from "@/components/verify/VerifyBits";
@@ -110,16 +109,12 @@ const FACTS: Fact[] = [
     title: "Open source",
     body: "Contracts, circuits, app and SDK are public. Compare what is deployed with the repo yourself.",
   },
-];
-
-/** Once mainnet is live: the deposit limits sit next to the facts above. */
-const LIVE_FACTS: Fact[] = [
-  ...FACTS,
   {
     title: "Deposit limits",
     body: "On mainnet each stablecoin takes up to 50,000 per deposit and 2,500,000 in total, and $GLOAM 2,500,000 and 25,000,000. Cash outs and private payments are never limited. Raising a limit waits the same three days; lowering one is instant.",
   },
 ];
+
 
 /** What Gloam's servers do hold, said exactly (lib/recovery, lib/relay/scheduled, mcp/src/noteStore, lib/mcpRemote). */
 const SERVER_HOLDS: { title: string; body: string }[] = [
@@ -146,7 +141,6 @@ const SERVER_HOLDS: { title: string; body: string }[] = [
  * own. Shown under every finished result, shared link or pasted.
  */
 function MakeYourOwn({ from }: { from: "link" | "page" }) {
-  const live = useMainnetLive();
   return (
     <div className="gl-card mt-4 p-5 sm:p-7">
       <p className="text-[18px] leading-snug tracking-[-0.01em] text-foreground">Make your own proof</p>
@@ -162,9 +156,7 @@ function MakeYourOwn({ from }: { from: "link" | "page" }) {
         Make your own proof
       </AppLink>
       <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
-        {live
-          ? "Add money privately, then prove only what you choose. You can try it on testnet first."
-          : "On testnet: add money privately, then prove only what you choose."}
+        Add money privately, then prove only what you choose. You can try it on testnet first.
       </p>
     </div>
   );
@@ -215,7 +207,6 @@ export default function VerifyPage() {
   // Opened from a shared link (and not swapped for another proof): the result
   // leads the page, phone first, instead of the hero.
   const shared = Boolean(urlProof) && typed === null;
-  const live = useMainnetLive();
 
   // Opened from a shared link: check the proof straight away.
   useEffect(() => {
@@ -483,7 +474,7 @@ export default function VerifyPage() {
         )}
 
         {/* the contracts */}
-        <ContractsSection live={live} />
+        <ContractsSection />
 
         {/* no middlemen */}
         <section className="mx-auto max-w-[1240px] px-6 pb-8 pt-20 sm:pt-28">
@@ -491,32 +482,20 @@ export default function VerifyPage() {
             <div>
               <h2 className="t-display-l max-w-[10ch]">No middlemen</h2>
               <p className="mt-5 max-w-[34ch] text-[15px] leading-relaxed text-mute">
-                {live ? (
-                  <>
-                    Mainnet proofs use the final keys from the trusted setup, which
-                    closed on 17 October with 13 contributors, and Base Sepolia and
-                    Ethereum Sepolia use them too. The Robinhood Chain and Tempo
-                    testnets keep development keys. Gloam was reviewed internally
-                    before launch, and Kann Audits has since reviewed the vault
-                    contracts (
-                    <Link href="/security" className="text-foreground underline decoration-line-strong underline-offset-4 hover:decoration-foreground">
-                      report, 1 November 2026
-                    </Link>
-                    ) and found no Critical, High or Medium issues.
-                  </>
-                ) : (
-                  <>
-                    Testnet proofs still use development
-                    keys. The production trusted setup closed on 17 October with 13
-                    contributors, and mainnet uses its final keys. It was reviewed
-                    internally before launch, and Kann Audits has since reviewed the
-                    vault contracts.
-                  </>
-                )}
+                Mainnet proofs use the final keys from the trusted setup, which
+                closed on 17 October with 13 contributors, and Base Sepolia and
+                Ethereum Sepolia use them too. The Robinhood Chain and Tempo
+                testnets keep development keys. Gloam was reviewed internally
+                before launch, and Kann Audits has since reviewed the vault
+                contracts (
+                <Link href="/security" className="text-foreground underline decoration-line-strong underline-offset-4 hover:decoration-foreground">
+                  report, 1 November 2026
+                </Link>
+                ) and found no Critical, High or Medium issues.
               </p>
             </div>
             <div className="grid grid-cols-1 gap-10 sm:grid-cols-2">
-              {(live ? LIVE_FACTS : FACTS).map((f) => (
+              {FACTS.map((f) => (
                 <div key={f.title} className="border-t border-foreground pt-5">
                   <p className="flex items-center gap-2.5 text-[18px] leading-snug tracking-[-0.01em]">
                     <span className="shrink-0 text-sealed">

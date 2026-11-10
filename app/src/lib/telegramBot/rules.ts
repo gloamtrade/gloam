@@ -6,7 +6,7 @@
  */
 import { createHash, timingSafeEqual } from "crypto";
 import { english } from "viem/accounts";
-import { baseSepoliaPool, ethereumSepoliaPool, isMainnetLive, liveMainnetNames, mainnetPool } from "@/lib/mainnet";
+import { baseSepoliaPool, ethereumSepoliaPool, liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { COPYCAT_GLOAM, GLOAM_TOKEN } from "./knowledge";
 import type { TgMessage, TgPhotoSize, TgUser } from "./telegram";
 import { ELYSIUM, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET } from "@/lib/elysium";
@@ -1185,8 +1185,6 @@ export function readSentinel(raw: string): { sentinel: Sentinel; text: string } 
 const EMOJI = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{FE0F}\u{200D}\u{20E3}]/gu;
 export const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
 const HANDLE_RE = /(?<![\w@.])@([A-Za-z0-9_]{3,32})\b/g;
-const MAINNET_LIVE =
-  /\bmainnet\s+(?:is\s+|has\s+)?(?:now\s+|already\s+)?(?:live|launched|out|open)\b|\b(?:live|launched|available|running)\s+on\s+mainnet\b/gi;
 const DATE_WORD = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|march|apr(?:il)?|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|q[1-4]|20\d\d|next (?:week|month|year))`;
 const MAINNET_DATE = new RegExp(
   String.raw`\bmainnet\b[^.!?\n]{0,60}\b${DATE_WORD}\b|\b${DATE_WORD}\b[^.!?\n]{0,60}\bmainnet\b`,
@@ -1240,8 +1238,6 @@ export type ReplyPolicy = {
   team?: boolean;
   /** Values that must never appear in a reply: the deployment's own keys and tokens. */
   secrets?: string[];
-  /** Mainnet is live, so "mainnet is live" is true and may go out. Left out: worked out from the clock and the pools. */
-  mainnetLive?: boolean;
   /** What the asker wrote: a 0x address they posted may come back in a group reply. */
   askerText?: string;
 };
@@ -1260,7 +1256,6 @@ export function linkAllowed(link: string): boolean {
 }
 
 const ANY_EVM_ADDRESS = /\b0x[0-9a-fA-F]{40}\b/g;
-const ABOUT_TOKEN = /\$gloam\b|\btoken\b/i;
 /** An address in a reply, written with or without its 0x (40 hex characters standing alone, never part of a hash). */
 const REPLY_ADDRESS = /(?<![0-9a-zA-Z])(?:0x)?[0-9a-fA-F]{40}(?![0-9a-zA-Z])/g;
 /** A wallet name ("gloambuyback.eth"): it points at an address just as one does. */
@@ -1321,18 +1316,14 @@ const TOKEN_TALK = /\$gloam\b|\b(?:ca|contracts?|tokens?|addy|official|legit|gen
 const AUDITED_CLAIM =
   /\b(?:is|are|was|were|been|got|fully|already|externally|independently|professionally)\s+(?:fully\s+|externally\s+|independently\s+|professionally\s+)?audited\b/gi;
 
-/** One sentence breaks a rule that dropping it fixes: an off-list link, email or handle, a wrong address, a price, a mainnet claim or date, an "audited" claim, posing as a person. */
-function brokenSentence(s: string, team: boolean, okHandles: Set<string>, mainnetLive = false, posted = new Set<string>()): boolean {
+/** One sentence breaks a rule that dropping it fixes: an off-list link, email or handle, a wrong address, a price, a mainnet date, an "audited" claim, posing as a person. */
+function brokenSentence(s: string, team: boolean, okHandles: Set<string>, posted = new Set<string>()): boolean {
   if ((s.match(LINK_RE) ?? []).some((l) => !linkAllowed(l))) return true;
   if ((s.match(EMAIL_RE) ?? []).some((e) => e.toLowerCase() !== "hello@gloam.trade")) return true;
   for (const m of s.matchAll(HANDLE_RE)) if (!okHandles.has(m[1]!.toLowerCase())) return true;
   if (wrongAddress(s, team, posted)) return true;
   if (TOKEN_PRICE.test(s)) return true;
   for (const m of s.matchAll(AUDITED_CLAIM)) if (!negated(s, m.index ?? 0, m[0])) return true;
-  // $GLOAM really is on Robinhood Chain mainnet; the app is the part that is not, until mainnet is live
-  if (!mainnetLive && !ABOUT_TOKEN.test(s)) {
-    for (const m of s.matchAll(MAINNET_LIVE)) if (!negated(s, m.index ?? 0, m[0])) return true;
-  }
   if (MAINNET_DATE.test(s) && !officialLaunch(s)) return true;
   return HUMAN_CLAIM.test(s);
 }
@@ -1395,10 +1386,10 @@ export function tidyReply(raw: string): string {
  * The model's reply, made safe to post, or null. Anything shaped like a seed
  * phrase, key or deployment secret, or a payment code or claim link, sinks the
  * whole reply. A sentence with an off-list link, email or handle, an address
- * that is not $GLOAM's, a token price, a claim that the app is on mainnet
- * (until it is) or a date for it other than the announced one, a claim that
- * Gloam is audited, or claiming to be a person is dropped, and the rest goes out. A group reply that lost most
- * of its sentences is not sent at all.
+ * that is not $GLOAM's, a token price, a mainnet date other than the announced
+ * ones, a claim that Gloam is audited, or claiming to be a person is dropped,
+ * and the rest goes out. A group reply that lost most of its sentences is not
+ * sent at all.
  */
 export function cleanReply(raw: string, policy: ReplyPolicy): string | null {
   const text = clip(tidyReply(raw), policy.maxChars ?? MAX_REPLY);
@@ -1408,10 +1399,9 @@ export function cleanReply(raw: string, policy: ReplyPolicy): string | null {
   // a code or claim link read off a screenshot is never repeated; an address is fine
   if ([...scanCodes(text).kinds].some((k) => k !== "address" && k !== "request_link")) return null;
   const okHandles = new Set(["gloamtrade", "gloamhq", ...policy.handles.map((h) => h.toLowerCase())]);
-  const live = policy.mainnetLive ?? isMainnetLive();
   const asked = policy.askerText ?? "";
   const posted = new Set([...addressesIn(asked), ...walletNamesIn(asked)]);
-  const r = dropBroken(text, (s) => brokenSentence(s, Boolean(policy.team), okHandles, live, posted));
+  const r = dropBroken(text, (s) => brokenSentence(s, Boolean(policy.team), okHandles, posted));
   if (!r.kept) return null;
   if (!policy.team && r.dropped * 2 > r.kept + r.dropped) return null;
   return r.text;
@@ -1510,7 +1500,7 @@ const WELCOME_TAG_CHARS = 3_500;
  * username are tagged as @username; the rest get a mention link to their
  * account, so the tag works without a username.
  */
-export function welcomeHtml(joiners: Joiner[], testingOpen: boolean): string {
+export function welcomeHtml(joiners: Joiner[]): string {
   const tags: string[] = [];
   let used = 0;
   for (const j of joiners.slice(0, WELCOME_TAGS)) {
@@ -1525,11 +1515,10 @@ export function welcomeHtml(joiners: Joiner[], testingOpen: boolean): string {
   const others = joiners.length - tags.length;
   if (others > 0) tags.push(`${others} ${others === 1 ? "other" : "others"}`);
   const list = tags.length > 1 ? `${tags.slice(0, -1).join(", ")} and ${tags[tags.length - 1]}` : (tags[0] ?? "friends");
-  const testing = testingOpen ? " Testers, your guide is pinned in the Testers topic." : "";
   // A warm hello and where to start, naming every mainnet with a vault in. No admin handles: they would ping the admins on every welcome, and the group shows who they are.
   return (
     `Welcome to Gloam, ${list}. Glad you're here.\n\n` +
-    `Send and receive money privately on ${liveMainnetNames()} at gloam.trade/app. Questions go in Help.${testing}\n\n` +
+    `Send and receive money privately on ${liveMainnetNames()} at gloam.trade/app. Questions go in Help.\n\n` +
     `Never share your keys with anyone.`
   );
 }
@@ -1620,8 +1609,8 @@ const CHAIN_DETAILS: Record<number, string> = {
   ...(ELYSIUM_TESTNET ? { [ELYSIUM_TESTNET.chainId]: `RPC ${ELYSIUM_TESTNET.rpcUrl}, chain ID ${ELYSIUM_TESTNET.chainId}, currency HYPE.` } : {}),
 };
 
-/** The fix once mainnet is live: the wallet and the app can each be on a mainnet or a testnet. */
-function liveChainFix(name: string, m: ChainMismatch): string {
+/** The fix for a wrong-network error, in the helper's voice: the wallet and the app can each be on a mainnet or a testnet. */
+export function chainFix(name: string, m: ChainMismatch): string {
   const mainnets = new Set<number>([...([4663, 4217, 8453, 1] as const).filter((id) => mainnetPool(id)), ...(ELYSIUM ? [ELYSIUM.chainId] : [])]);
   const want = `${chainLabel(m.want)} (${m.want})`;
   const tempo = m.want === 42431 || m.want === 4217;
@@ -1676,24 +1665,6 @@ export function chainMismatch(text: string): ChainMismatch | null {
 }
 
 const chainLabel = (id: number) => CHAIN_NAMES[id] ?? `chain ${id}`;
-
-/** The fix for a wrong-network error, in the helper's voice. Before mainnet is live, exactly as it always was. */
-export function chainFix(name: string, m: ChainMismatch, mainnetLive: boolean = isMainnetLive()): string {
-  if (mainnetLive) return liveChainFix(name, m);
-  const want = m.want === 42431 ? "Tempo testnet (42431)" : m.want === 46630 ? "Robinhood Chain testnet (46630)" : chainLabel(m.want);
-  const button = m.want === 42431 ? "Switch to Tempo" : "Switch to Robinhood Chain";
-  const why =
-    m.wallet === 4663
-      ? "Your wallet is on Robinhood Chain mainnet (4663). Gloam runs on the testnet, so the wallet has to be on " + want + "."
-      : `Your wallet is on ${chainLabel(m.wallet)} and the app is on ${want}, so the wallet refuses the transaction.`;
-  return (
-    `Easy one, ${name}. ${why} Tap "${button}" on the wallet button at the top of the app (or Settings > Network > Add to wallet), ` +
-    `approve it in your wallet, then try again. If your wallet won't switch, add the testnet by hand: ` +
-    (m.want === 42431
-      ? "RPC https://rpc.moderato.tempo.xyz, chain ID 42431, currency USD."
-      : "RPC https://rpc.testnet.chain.robinhood.com, chain ID 46630, currency ETH.")
-  );
-}
 
 // ---------------------------------------------------------------- links to group messages
 

@@ -6,29 +6,10 @@ import { Mark } from "@/components/Logo";
 import { SealedField } from "@/components/ui/SealedField";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { readDemo } from "@/lib/demoFlag";
-import { MAINNET_CONFIGURED, MAINNET_LAUNCH_MS, isMainnetLive, liveMainnetNames } from "@/lib/mainnet";
+import { liveMainnetNames } from "@/lib/mainnet";
 
-const STORAGE_KEY = "gloam_testnet_welcome_v1";
-/** Its own key, so someone who closed the testnet welcome still gets the mainnet one once. */
-const MAINNET_STORAGE_KEY = "gloam_mainnet_welcome_v1";
-
-/**
- * Whether mainnet was live when this page was built. A page built since the
- * launch holds the mainnet welcome in its server HTML, so the head start below
- * shows it with the first paint (it was the slowest paint of a first visit:
- * 4.3 s on a throttled phone, waiting for the app's JavaScript). Same value in
- * the browser, since the launch time has passed for both.
- */
-const BUILT_LIVE = isMainnetLive();
-
-/**
- * A page built before the launch holds the testnet welcome. Once mainnet is
- * live the head start stands aside on it and React shows the mainnet welcome,
- * so nobody reads the testnet welcome on a page that now opens on mainnet.
- */
-const LIVE_GUARD = MAINNET_CONFIGURED && !BUILT_LIVE ? `if(Date.now()>=${MAINNET_LAUNCH_MS})return;` : "";
-/** The key the shown welcome is dismissed under. */
-const SHOWN_KEY = BUILT_LIVE ? MAINNET_STORAGE_KEY : STORAGE_KEY;
+/** The key the welcome is dismissed under (the mainnet welcome's; the older testnet one is no longer read). */
+const SHOWN_KEY = "gloam_mainnet_welcome_v1";
 
 /**
  * Shown once, before the app's JavaScript arrives: the modal is in the server
@@ -37,32 +18,28 @@ const SHOWN_KEY = BUILT_LIVE ? MAINNET_STORAGE_KEY : STORAGE_KEY;
  * paint instead of seconds later, after the wallet code loads. Once React takes
  * over, state drives it as before (and recording demos keep it shut).
  */
-const REVEAL_SCRIPT = `(function(){try{${LIVE_GUARD}if(localStorage.getItem('${SHOWN_KEY}')==='1')return;if(/[?&]demo=1/.test(location.search)||sessionStorage.getItem('gloam_demo')==='1')return;var el=document.getElementById('gl-welcome');if(el)el.hidden=false}catch(e){}})()`;
+const REVEAL_SCRIPT = `(function(){try{if(localStorage.getItem('${SHOWN_KEY}')==='1')return;if(/[?&]demo=1/.test(location.search)||sessionStorage.getItem('gloam_demo')==='1')return;var el=document.getElementById('gl-welcome');if(el)el.hidden=false}catch(e){}})()`;
 
 export function WelcomeModal() {
   const [open, setOpen] = useState(false);
-  const [live, setLive] = useState(BUILT_LIVE);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const liveNow = isMainnetLive();
     let show = true;
     try {
-      if (localStorage.getItem(liveNow ? MAINNET_STORAGE_KEY : STORAGE_KEY) === "1" || readDemo()) show = false;
+      if (localStorage.getItem(SHOWN_KEY) === "1" || readDemo()) show = false;
     } catch {
       /* storage unavailable: show it */
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- takes over from the head-start script: whether to show depends on this browser's storage, read once after mount
-    if (liveNow) setLive(true);
     // The head start may have unhidden it; React's own state takes over here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- takes over from the head-start script: whether to show depends on this browser's storage, read once after mount
     if (show) setOpen(true);
     else if (ref.current) ref.current.hidden = true;
   }, []);
 
   function dismiss() {
     try {
-      localStorage.setItem(STORAGE_KEY, "1");
-      if (live) localStorage.setItem(MAINNET_STORAGE_KEY, "1");
+      localStorage.setItem(SHOWN_KEY, "1");
     } catch {
       /* ignore */
     }
@@ -100,21 +77,14 @@ export function WelcomeModal() {
             <div className="mb-6 max-sm:hidden">
               <Mark size={32} />
             </div>
-            <p className="t-eyebrow">{live ? "Gloam mainnet" : "Gloam testnet"}</p>
+            <p className="t-eyebrow">Gloam mainnet</p>
             <h2 id="welcome-title" className="t-display-m mt-2 text-foreground">
               Welcome to Gloam
             </h2>
-            {live ? (
-              <p className="mt-3 text-[15px] leading-relaxed text-mute">
-                Private money on {liveMainnetNames()} mainnet.
-                The testnet stays open for trying things first.
-              </p>
-            ) : (
-              <p className="mt-3 text-[15px] leading-relaxed text-mute">
-                Private money on Robinhood Chain and Tempo. This is the testnet,
-                so don&apos;t send mainnet funds here.
-              </p>
-            )}
+            <p className="mt-3 text-[15px] leading-relaxed text-mute">
+              Private money on {liveMainnetNames()} mainnet.
+              The testnet stays open for trying things first.
+            </p>
           </div>
         </div>
 
@@ -122,13 +92,9 @@ export function WelcomeModal() {
           <p className="text-[15px] text-foreground">Quick start</p>
           <ol className="mt-2">
             {[
-              live ? (
-                <>Connect a wallet and pick a network. The menu marks each one Mainnet or Testnet.</>
-              ) : (
-                <>Connect a wallet and pick a network: Robinhood Chain or Tempo.</>
-              ),
+              <>Connect a wallet and pick a network. The menu marks each one Mainnet or Testnet.</>,
               <>
-                {live ? "On testnet, claim test funds if you need them. The" : "Claim test funds if you need them. The"}{" "}
+                On testnet, claim test funds if you need them. The{" "}
                 <Link
                   href="/docs/testnet"
                   className="font-medium text-foreground underline decoration-line-strong underline-offset-4 hover:decoration-foreground"

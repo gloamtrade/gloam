@@ -140,14 +140,14 @@ if (MODE === "off" || MODE === "coming") {
   const dir = contractDirectory().map((d) => d.key);
   if (MODE === "off") {
     ok(elysiumFacts() === null, "off: Glim has no Elysium facts");
-    ok(!/elysium/i.test(knowledgeBlock(false, true)), "off: Glim never names Elysium");
+    ok(!/elysium/i.test(knowledgeBlock()), "off: Glim never names Elysium");
     ok(!dir.includes("elysium-mainnet"), "off: /verify does not list it");
   } else {
     const facts = elysiumFacts() ?? "";
     ok(/coming/.test(facts) && /not live yet/.test(facts), "coming: Glim words it as coming");
     ok(/no partnership/.test(facts), "coming: Glim never claims a partnership");
     ok(!/\d{1,2} November/.test(facts), "coming: Glim gives no date");
-    ok(knowledgeBlock(false, true).includes(facts), "coming: the facts are in the block");
+    ok(knowledgeBlock().includes(facts), "coming: the facts are in the block");
     const entry = contractDirectory().find((d) => d.key === "elysium-mainnet");
     ok(entry && !entry.live && entry.rows.length === 0, "coming: /verify lists it as next, with no rows");
   }

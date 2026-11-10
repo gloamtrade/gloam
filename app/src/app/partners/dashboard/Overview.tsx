@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { SealDots } from "@/components/ui/SealDots";
-import { useMainnetLive } from "@/components/MainnetCountdown";
 import { getNetwork } from "@/lib/networks";
 import type { Activity, FeeSetting, Stats } from "./client";
 import { ago, ArrowIcon, Card, fmtInt, fmtUnits, fmtUsd, fullDate, Kpi, LockIcon } from "./ui";
@@ -205,7 +204,6 @@ export function Overview({
   tier: "mainnet" | "testnet";
   onTier: (t: "mainnet" | "testnet") => void;
 }) {
-  const mainnetLive = useMainnetLive();
   if (!stats) {
     return (
       <div aria-busy={loading} className="space-y-3">
@@ -242,7 +240,7 @@ export function Overview({
         <Kpi
           label="Would-be fees"
           value={testnet ? "Not priced" : fmtUsd(t.commissionUsd)}
-          sub={testnet ? "testnet, nothing charged" : mainnetLive ? "nothing charged yet" : "nothing charged"}
+          sub={testnet ? "testnet, nothing charged" : "nothing charged yet"}
         />
         <Kpi label="Active keys" value={fmtInt(activeKeys)} sub={stats.lastActivity ? `last cash out, deposit or swap ${ago(stats.lastActivity)}` : "nothing public yet"} />
       </div>

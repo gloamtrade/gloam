@@ -9,7 +9,6 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useSyncExternalStore } from "react";
-import { isMainnetLive } from "@/lib/mainnet";
 import { isNetworkKey } from "@/lib/networks";
 import { vaultActionSearch } from "@/lib/vaultHub";
 import { useNetwork } from "./NetworkProvider";
@@ -63,7 +62,7 @@ export function StocksLiveNotice() {
   // The server and the first client render say closed, so nobody who closed it sees it flash.
   const closed = useStocksNoticeClosed();
 
-  if (closed || !settled || network.testnet || !isMainnetLive() || !isNetworkKey(MAINNET)) return null;
+  if (closed || !settled || network.testnet || !isNetworkKey(MAINNET)) return null;
   // Already on the Swap this points to.
   if (networkKey === MAINNET && pathname === "/app/vault" && tab === "swap") return null;
 

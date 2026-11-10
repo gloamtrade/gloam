@@ -19,8 +19,6 @@ export type MetricsPayload = {
   ok: boolean;
   generatedAt?: string;
   launch?: {
-    open: boolean;
-    forceOpen: boolean;
     opensAt: string;
     opensAtMs: number;
   };

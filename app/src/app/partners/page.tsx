@@ -6,17 +6,13 @@ import { FlowField } from "@/components/ui/FlowField";
 import { SealedField } from "@/components/ui/SealedField";
 import { SealDots } from "@/components/ui/SealDots";
 import { CodeTabs, type CodeTab } from "@/app/sdk/SdkClient";
-import { MainnetCopy } from "@/components/MainnetCountdown";
-import { MAINNET_CONFIGURED } from "@/lib/mainnet";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
 import { LivePartnersSection } from "@/components/LivePartners";
 
 export const metadata: Metadata = {
   title: "Partners",
-  // Fixed at build time: names mainnet once a mainnet pool is filled in (lib/mainnet.ts).
-  description: MAINNET_CONFIGURED
-    ? "Add private payments to your app with one API key. Set your own fee and see every payment your app brings in. Partner fees are not charged yet, on mainnet or testnet."
-    : "Add private payments to your app with one API key. Set your own fee and see every payment your app brings in. On testnet nothing is charged.",
+  description:
+    "Add private payments to your app with one API key. Set your own fee and see every payment your app brings in. Partner fees are not charged yet, on mainnet or testnet.",
   alternates: { canonical: "/partners" },
 };
 
@@ -101,10 +97,7 @@ function Statement() {
         <span className="tnum text-foreground">$2.10</span>
       </div>
       <p className="mt-3 text-[12px] leading-relaxed text-mute">
-        <MainnetCopy
-          live="Nothing charged yet. Fees show what your setting would earn."
-          before="Testnet, nothing charged. Fees show what your setting would earn."
-        />
+        Nothing charged yet. Fees show what your setting would earn.
       </p>
     </div>
   );
@@ -313,55 +306,27 @@ export default function PartnersPage() {
               </div>
 
               <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <MainnetCopy
-                  live={
-                    <>
-                      <div className="rounded-[18px] bg-panel p-6 sm:p-7">
-                        <p className="text-[16px] text-foreground">Partner fees are not charged yet</p>
-                        <p className="mt-2 text-[14px] leading-relaxed text-mute">
-                          Gloam is live on mainnet, and the testnet stays open for
-                          practice. On both, your portal counts every payment your
-                          key brings in and shows the fee your setting would have
-                          earned, labeled as such. No partner fee is taken from
-                          anyone. Use a live key (gloam_live_) on mainnet and a test
-                          key (gloam_test_) on testnet.
-                        </p>
-                      </div>
-                      <div className="rounded-[18px] bg-panel p-6 sm:p-7">
-                        <p className="text-[16px] text-foreground">Real partner fees come later</p>
-                        <p className="mt-2 text-[14px] leading-relaxed text-mute">
-                          Taking a fee for real needs a fee output inside the
-                          zero-knowledge circuits and the vault contract, so the fee
-                          is paid by the proof itself and nobody can skip it. The
-                          mainnet pools do not have one yet. The only fee on mainnet
-                          today is Gloam&apos;s own 0.5% on cash outs.
-                        </p>
-                      </div>
-                    </>
-                  }
-                  before={
-                    <>
-                      <div className="rounded-[18px] bg-panel p-6 sm:p-7">
-                        <p className="text-[16px] text-foreground">Testnet: nothing is charged</p>
-                        <p className="mt-2 text-[14px] leading-relaxed text-mute">
-                          Gloam runs on Robinhood Chain testnet and Tempo testnet today.
-                          Your portal counts every payment your key brings in and shows
-                          the fee your setting would have earned, labeled as such. No
-                          money is taken from anyone.
-                        </p>
-                      </div>
-                      <div className="rounded-[18px] bg-panel p-6 sm:p-7">
-                        <p className="text-[16px] text-foreground">Real fees come with mainnet</p>
-                        <p className="mt-2 text-[14px] leading-relaxed text-mute">
-                          Taking a fee for real needs a fee output inside the
-                          zero-knowledge circuits and the vault contract, so the fee is
-                          paid by the proof itself and nobody can skip it. That ships
-                          with the mainnet ceremony and audit.
-                        </p>
-                      </div>
-                    </>
-                  }
-                />
+                <div className="rounded-[18px] bg-panel p-6 sm:p-7">
+                  <p className="text-[16px] text-foreground">Partner fees are not charged yet</p>
+                  <p className="mt-2 text-[14px] leading-relaxed text-mute">
+                    Gloam is live on mainnet, and the testnet stays open for
+                    practice. On both, your portal counts every payment your
+                    key brings in and shows the fee your setting would have
+                    earned, labeled as such. No partner fee is taken from
+                    anyone. Use a live key (gloam_live_) on mainnet and a test
+                    key (gloam_test_) on testnet.
+                  </p>
+                </div>
+                <div className="rounded-[18px] bg-panel p-6 sm:p-7">
+                  <p className="text-[16px] text-foreground">Real partner fees come later</p>
+                  <p className="mt-2 text-[14px] leading-relaxed text-mute">
+                    Taking a fee for real needs a fee output inside the
+                    zero-knowledge circuits and the vault contract, so the fee
+                    is paid by the proof itself and nobody can skip it. The
+                    mainnet pools do not have one yet. The only fee on mainnet
+                    today is Gloam&apos;s own 0.5% on cash outs.
+                  </p>
+                </div>
               </div>
             </div>
           </div>

@@ -3,15 +3,6 @@ import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
-import {
-  CountdownDigits,
-  LocalLaunchTime,
-  MainnetCopy,
-  MainnetHeadline,
-  MainnetHeroActions,
-  MainnetLiveNote,
-  MainnetTestnetLine,
-} from "@/components/MainnetCountdown";
 import { FlowField } from "@/components/ui/FlowField";
 import { MAINNET_LAUNCH_LABEL, liveMainnetNames } from "@/lib/mainnet";
 import { swapMainnets } from "@/lib/vaultSwap";
@@ -47,27 +38,23 @@ export default function MainnetPage() {
             <FlowField />
             <div className="relative z-10 mx-auto w-full max-w-[1040px]">
               <p className="t-label">Mainnet</p>
-              <MainnetHeadline />
+              <h1 className="t-display-xl mt-5 max-w-[16ch]">Gloam is live on mainnet</h1>
 
-              <div className="mt-10 sm:mt-12">
-                <CountdownDigits
-                  onDone={
-                    <p className="t-display-l max-w-[22ch]">
-                      It&apos;s time. Mainnet is rolling out now.
-                    </p>
-                  }
-                  onLive={<MainnetLiveNote />}
-                />
+              <div className="mt-10 flex flex-col gap-3 sm:mt-12">
+                <p className="t-display-l max-w-[22ch]">Private payments, on mainnet.</p>
+                <p className="max-w-[46ch] text-[16px] leading-relaxed text-soft">Live on {MAINNETS}.</p>
               </div>
 
-              <div className="mt-8 flex flex-col gap-1.5">
-                <p className="text-[18px] tracking-[-0.01em]">{MAINNET_LAUNCH_LABEL}</p>
-                <p className="min-h-[1.5em] text-[14.5px] text-mute">
-                  <LocalLaunchTime />
-                </p>
-              </div>
+              <p className="mt-8 text-[18px] tracking-[-0.01em]">{MAINNET_LAUNCH_LABEL}</p>
 
-              <MainnetHeroActions />
+              <div className="mt-6 flex flex-wrap gap-2">
+                <AppLink href="/app" className="btn btn-ink btn-lg">
+                  Open the app
+                </AppLink>
+                <a href="https://x.com/gloamtrade" target="_blank" rel="noopener noreferrer" className="btn btn-quiet btn-lg">
+                  Follow on X <span aria-hidden>→</span>
+                </a>
+              </div>
             </div>
           </div>
         </section>
@@ -75,9 +62,7 @@ export default function MainnetPage() {
         <section className="mx-auto max-w-[1240px] px-6 py-20 sm:py-28">
           <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1fr_2fr]">
             <div>
-              <h2 className="t-display-l max-w-[12ch]">
-                <MainnetCopy live="What is live" before="What goes live" />
-              </h2>
+              <h2 className="t-display-l max-w-[12ch]">What is live</h2>
               <p className="mt-5 max-w-[34ch] text-[15px] leading-relaxed text-mute">
                 The same Gloam you can try today, on mainnet.
               </p>
@@ -95,11 +80,13 @@ export default function MainnetPage() {
 
         <section className="mx-auto max-w-[1240px] px-6 pb-8">
           <div className="flex flex-col items-start gap-4 border-t border-line pt-10 sm:flex-row sm:items-center sm:justify-between">
-            <MainnetTestnetLine />
+            <p className="max-w-[46ch] text-[15px] leading-relaxed text-soft">
+              The testnet stays open for trying things first.
+            </p>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
               <AppLink href="/app" className="gl-arrowlink">
-                {/* once live, /app opens on mainnet; the testnet is one pick away in its network menu */}
-                <MainnetCopy live="Open the app" before="Try the testnet" /> <span aria-hidden>→</span>
+                {/* /app opens on mainnet; the testnet is one pick away in its network menu */}
+                Open the app <span aria-hidden>→</span>
               </AppLink>
               <Link href="/docs/testnet" className="gl-arrowlink">
                 Testnet guide <span aria-hidden>→</span>

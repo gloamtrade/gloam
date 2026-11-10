@@ -7,11 +7,7 @@ import { fetchRelayVolume } from "@/lib/relayVolume";
 import { readTractionSummary } from "@/lib/tractionStore";
 import { readFunnel } from "@/lib/funnelStore";
 import { readPeople } from "@/lib/peopleStore";
-import {
-  isTestnetOpen,
-  testnetOpensAtMs,
-  testnetForceOpen,
-} from "@/lib/testnetLaunch";
+import { testnetOpensAtMs } from "@/lib/testnetLaunch";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -59,8 +55,6 @@ export async function GET(req: Request) {
     ok: true,
     generatedAt: new Date().toISOString(),
     launch: {
-      open: isTestnetOpen(),
-      forceOpen: testnetForceOpen(),
       opensAt: new Date(testnetOpensAtMs()).toISOString(),
       opensAtMs: testnetOpensAtMs(),
     },

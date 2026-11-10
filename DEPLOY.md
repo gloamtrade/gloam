@@ -41,7 +41,7 @@ Canonical docs live in the app at `app/src/app/docs` and `app/src/app/whitepaper
 
 ## Mainnet (deploy day)
 
-Mainnet pools are not env vars. After each mainnet deploy (runbook: [`contracts/PRODUCTION.md`](./contracts/PRODUCTION.md)), fill `MAINNET_POOLS` in `app/src/lib/mainnet.ts` with the pool address and its deploy block; the deploy script prints both. Until a chain has both, that mainnet is hidden everywhere: the app, the API, the relay, the MCP server, Glim and proofs. The site says mainnet is live once the launch time (`MAINNET_LAUNCH_ISO`, 21 October 2026, 13:00 UTC) has passed and at least one pool is in. The SDK keeps its own `MAINNET_POOLS` in `@gloamtrade/sdk`.
+Mainnet pools are not env vars. After each mainnet deploy (runbook: [`contracts/PRODUCTION.md`](./contracts/PRODUCTION.md)), fill `MAINNET_POOLS` in `app/src/lib/mainnet.ts` with the pool address and its deploy block; the deploy script prints both. Until a chain has both, that mainnet is hidden everywhere: the app, the API, the relay, the MCP server, Glim and proofs. Mainnet has been live since `MAINNET_LAUNCH_ISO` (21 October 2026, 13:00 UTC); stats count from it. The SDK keeps its own `MAINNET_POOLS` in `@gloamtrade/sdk`.
 
 | Network | Pool (`ShieldPoolPayments`) | Deploy block |
 | --- | --- | --- |

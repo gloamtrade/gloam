@@ -4,7 +4,6 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Logo } from "@/components/Logo";
-import { useMainnetLive } from "@/components/MainnetCountdown";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { SealedField } from "@/components/ui/SealedField";
 import { Spinner } from "@/components/ui/Spinner";
@@ -311,7 +310,6 @@ function Dashboard({
   const [maxLiveCodes, setMaxLiveCodes] = useState(20);
   const [err, setErr] = useState<string | null>(null);
   const [origin, setOrigin] = useState("");
-  const mainnetLive = useMainnetLive();
   const partner = session.partner;
 
   const loadStats = useCallback(async () => {
@@ -411,9 +409,7 @@ function Dashboard({
           <div className="min-w-0">
             <h1 className="t-display-m truncate">{partner.name}</h1>
             <p className="mt-2 text-[14px] text-mute">
-              {mainnetLive
-                ? "Nothing is charged yet, on mainnet or testnet. Fees show what your setting would have earned."
-                : "Testnet. Nothing is charged. Fees show what your setting would have earned."}
+              Nothing is charged yet, on mainnet or testnet. Fees show what your setting would have earned.
             </p>
           </div>
           <div
