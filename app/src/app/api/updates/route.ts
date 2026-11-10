@@ -7,10 +7,10 @@ import {
   UpdatesListFullError,
   listUpdatesSubscribers,
   subscribeToUpdates,
-  unsubscribeEmail,
   unsubscribeToken,
   updatesCsv,
   updatesSummary,
+  type UpdatesSubscriber,
 } from "@/lib/updatesList";
 
 export const runtime = "nodejs";
@@ -94,21 +94,20 @@ export async function POST(req: Request) {
 }
 
 /**
- * Leave the updates list: `{ email }` or `{ token }` (the token from an
- * unsubscribe link). The answer is the same whether the email was on the list.
+ * Leave the updates list: `{ token }`, the token from the unsubscribe link in
+ * every update. An email alone is refused: anyone can type anyone's email, so
+ * only the link proves the person asking is the one on the list. The answer is
+ * the same whether the token was live.
  */
 export async function DELETE(req: Request) {
   const read = await readBody(req, UNSUBSCRIBE_FIELDS);
   if ("res" in read) return read.res;
   const { body } = read;
+  if (typeof body.token !== "string" || !body.token) {
+    return fail(400, "To leave the list, open the unsubscribe link at the bottom of any Gloam update.");
+  }
   try {
-    if (typeof body.token === "string" && body.token) {
-      await unsubscribeToken(body.token);
-      return ok(false);
-    }
-    const email = normalizeEmail(body.email);
-    if (!email) return fail(400, "That email doesn't look right. Check it and try again.");
-    await unsubscribeEmail(email);
+    await unsubscribeToken(body.token);
     return ok(false);
   } catch (e) {
     return storeFailed(e);
@@ -119,7 +118,12 @@ export async function DELETE(req: Request) {
 export async function GET(req: Request) {
   if (!(await isAdminAuthenticated())) return fail(401, "Admin session required.");
   const backend = kvBackend();
-  const subs = backend === "none" ? [] : await listUpdatesSubscribers();
+  let subs: UpdatesSubscriber[];
+  try {
+    subs = backend === "none" ? [] : await listUpdatesSubscribers();
+  } catch {
+    return fail(503, "Could not read the updates list.");
+  }
 
   if (new URL(req.url).searchParams.get("format") === "csv") {
     return new Response(updatesCsv(subs), {

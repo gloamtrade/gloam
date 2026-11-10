@@ -10,7 +10,8 @@
  *    extra field is refused and nothing is stored; no key or value under the
  *    list's prefix holds an address, an IP or a wallet id
  *  - bad emails, oversized bodies, the bot field, the hourly limit per IP
- *  - unsubscribe by email and by link token; a used or made-up token does nothing
+ *  - unsubscribe by link token only; an email alone is refused (anyone can type
+ *    anyone's email); a used or made-up token does nothing
  *  - admin: the count and the CSV need an admin session; the CSV has email,
  *    day, source and the unsubscribe link only
  *  - the browser helper sends the email and source alone, without cookies
@@ -191,19 +192,32 @@ resetMemoryKv();
   assert.deepEqual((await call("DELETE", { token: bo.token }, "203.0.113.5")).json, { ok: true, data: { subscribed: false } });
   assert.equal((await list.listUpdatesSubscribers()).some((s) => s.email === "bo@example.org"), false);
 
-  // by email, and the same answer for an email that was never on the list
-  const gone = await call("DELETE", { email: "CY@example.net" }, "203.0.113.5");
+  // an email alone takes nobody off: anyone can type anyone's email
+  const byEmail = await call("DELETE", { email: "CY@example.net" }, "203.0.113.5");
   const never = await call("DELETE", { email: "never@example.com" }, "203.0.113.5");
-  assert.deepEqual(gone.json, never.json, "no answer says who is on the list");
+  assert.equal(byEmail.status, 400, "an email without the link's token is refused");
+  assert.match(byEmail.json.error?.message ?? "", /unsubscribe link/);
+  assert.deepEqual(byEmail.json, never.json, "no answer says who is on the list");
+  assert.equal((await list.listUpdatesSubscribers()).some((s) => s.email === "cy@example.net"), true, "still on the list");
+  for (const body of [{}, { token: "" }, { token: 42 }, { email: "cy@example.net", token: null }]) {
+    assert.equal((await call("DELETE", body, "203.0.113.5")).status, 400);
+  }
+  assert.equal((await list.listUpdatesSubscribers()).some((s) => s.email === "cy@example.net"), true);
+  // a made-up token gets the same answer as a live one, and takes nobody off
+  const fake = await call("DELETE", { token: "y".repeat(32) }, "203.0.113.5");
+  assert.deepEqual(fake.json, { ok: true, data: { subscribed: false } }, "no answer says whether a token was live");
+  assert.equal((await list.listUpdatesSubscribers()).some((s) => s.email === "cy@example.net"), true);
+  // cy's own link still works
+  const cy = (await list.listUpdatesSubscribers()).find((s) => s.email === "cy@example.net")!;
+  assert.deepEqual((await call("DELETE", { email: "cy@example.net", token: cy.token }, "203.0.113.5")).json, { ok: true, data: { subscribed: false } });
   assert.equal((await list.listUpdatesSubscribers()).some((s) => s.email === "cy@example.net"), false);
-  assert.equal((await call("DELETE", { email: "nope" }, "203.0.113.5")).status, 400);
 
   // subscribing again after leaving works, with a new token
   await call("POST", { email: "ada@example.com", source: "settings" }, "203.0.113.6");
   const back = (await list.listUpdatesSubscribers()).find((s) => s.email === "ada@example.com")!;
   assert.equal(back.source, "settings");
   assert.notEqual(back.token, ada.token);
-  n += 13;
+  n += 23;
 }
 
 // ------------------------------------------------------------ the unsubscribe page
@@ -271,19 +285,17 @@ resetMemoryKv();
   }) as typeof fetch;
   try {
     assert.deepEqual(await client.subscribeToUpdates(" Eve@Example.com ", "sign-in"), { ok: true });
-    assert.deepEqual(await client.unsubscribeFromUpdates("eve@example.com"), { ok: true });
     assert.equal((await client.subscribeToUpdates("nope", "site")).ok, false);
   } finally {
     globalThis.fetch = realFetch;
   }
-  assert.equal(sent.length, 2, "a bad email is never sent");
+  assert.equal(sent.length, 1, "a bad email is never sent");
   assert.equal(sent[0]!.url, "/api/updates");
   assert.equal(sent[0]!.init.method, "POST");
   assert.deepEqual(JSON.parse(String(sent[0]!.init.body)), { email: "eve@example.com", source: "sign-in" }, "the email and source alone");
   assert.equal(sent[0]!.init.credentials, "omit", "no cookies go with it");
-  assert.equal(sent[1]!.init.method, "DELETE");
-  assert.deepEqual(JSON.parse(String(sent[1]!.init.body)), { email: "eve@example.com" });
-  n += 10;
+  assert.equal("unsubscribeFromUpdates" in client, false, "no unsubscribe by email from the browser");
+  n += 7;
 }
 
 console.log(`updates list: ${n} passed`);

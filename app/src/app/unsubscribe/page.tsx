@@ -41,7 +41,7 @@ export default async function UnsubscribePage({ searchParams }: { searchParams: 
             ? "This email is off the Gloam updates list. You won't get any more updates from us."
             : state === "error"
               ? "We couldn't reach the list just now. Open the link again in a minute, or write to hello@gloam.trade and we'll take you off."
-              : "Open the unsubscribe link from any Gloam update to leave the list. You can also leave it in the app under Settings."}
+              : "Open the unsubscribe link from any Gloam update to leave the list, or write to hello@gloam.trade and we'll take you off."}
         </p>
         <div className="mt-8 flex flex-wrap gap-2">
           <Link href="/" className="btn btn-ghost">

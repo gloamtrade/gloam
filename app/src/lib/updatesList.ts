@@ -96,7 +96,10 @@ async function removeId(id: string): Promise<boolean> {
   return sub !== null;
 }
 
-/** Takes an email off the list. True when it was on it. */
+/**
+ * Takes an email off the list. True when it was on it. Never wire this to a
+ * public route: anyone can type anyone's email. api/updates takes the link token.
+ */
 export async function unsubscribeEmail(rawEmail: string): Promise<boolean> {
   const email = normalizeEmail(rawEmail);
   if (!email) return false;
