@@ -764,8 +764,16 @@ async function migrateOne(id: string): Promise<void> {
 
 /** "partial:<n>" when an account's older activity outran its list; null otherwise. */
 export async function migrationNote(id: string): Promise<string | null> {
-  const v = await kv1(["GET", k("v2", id)]);
-  return typeof v === "string" && v.startsWith("partial:") ? v : null;
+  return (await migrationNotes([id]))[0]!;
+}
+
+/** migrationNote for many partners, in the same order and one round trip. */
+export async function migrationNotes(ids: string[]): Promise<(string | null)[]> {
+  const raw = await kv(ids.map((id) => ["GET", k("v2", id)] as KvCommand));
+  return ids.map((_, i) => {
+    const v = raw[i];
+    return typeof v === "string" && v.startsWith("partial:") ? v : null;
+  });
 }
 
 // ---------------------------------------------------------------- summaries

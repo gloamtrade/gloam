@@ -3,7 +3,8 @@
  *
  * Two runs of this file (the second as a child process):
  *
- *  - off (as committed, no NEXT_PUBLIC_ELYSIUM_* set): no network, chain list,
+ *  - off (NEXT_PUBLIC_ELYSIUM_ENABLED=0; unset, Elysium mainnet is on with the
+ *    SDK's values, which selftest-elysium checks): no network, chain list,
  *    count, logo, contract list, CSP entry, token list, Glim fact or remote MCP
  *    text names Elysium, and copy still counts four mainnets.
  *  - on (both switches on, every value from NEXT_PUBLIC_ELYSIUM_*, a keyed RPC):
@@ -37,6 +38,8 @@ const KEY = "selftestKey0123456789abcdef";
 const RPC = `https://elysium-mainnet.g.alchemy.com/v2/${KEY}`;
 
 for (const k of Object.keys(process.env)) if (k.startsWith("NEXT_PUBLIC_ELYSIUM_")) delete process.env[k];
+// Elysium mainnet is on unless the flag says off
+if (MODE === "off") process.env.NEXT_PUBLIC_ELYSIUM_ENABLED = "0";
 delete process.env.UPSTASH_REDIS_REST_URL;
 delete process.env.UPSTASH_REDIS_REST_TOKEN;
 if (MODE === "on") {

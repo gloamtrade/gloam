@@ -1,19 +1,25 @@
 /**
- * Self-test: Elysium mainnet in the app, behind NEXT_PUBLIC_ELYSIUM_ENABLED.
+ * Self-test: Elysium mainnet in the app, on unless NEXT_PUBLIC_ELYSIUM_ENABLED
+ * says off ("0", "false", "off" or "no").
  *
- * Three runs of this file (the last two as child processes):
+ * Runs of this file (all but the first as child processes):
  *
- *  - off (as committed, no NEXT_PUBLIC_ELYSIUM_* set): Elysium does not exist.
- *    Not a network key, not in wagmi's chains, not served by the relay or the
- *    remote MCP, not in /verify's list, not in the CSP, and Glim says nothing
- *    about it. The copy still counts four mainnets.
- *  - coming (flag on, no values): still no network anywhere, but Glim and the
- *    docs word it as coming, with no partnership, and /verify lists it as next.
- *  - on (flag on, every value from NEXT_PUBLIC_ELYSIUM_*): Elysium shows up last
+ *  - off (NEXT_PUBLIC_ELYSIUM_ENABLED=0): Elysium does not exist. Not a
+ *    network key, not in wagmi's chains, not served by the relay or the remote
+ *    MCP, not in /verify's list, not in the CSP, and Glim says nothing about
+ *    it. The copy still counts four mainnets. The flag's words are checked
+ *    here too: only the off words turn it off, and the CSP reads them the same.
+ *  - default (no NEXT_PUBLIC_ELYSIUM_* set, as a preview build or a missing
+ *    variable leaves it): Elysium is on with the SDK's values, the deployed vault.
+ *  - coming (flag on, no values): only while the SDK lacks Elysium's values.
+ *    Still no network anywhere, but Glim and the docs word it as coming, with
+ *    no partnership, and /verify lists it as next.
+ *  - on (flag "1", every value from NEXT_PUBLIC_ELYSIUM_*): Elysium shows up last
  *    among the mainnets with its chain, final keys, USDC alone, HYPE as the gas
  *    coin (not listed), the relay serves it with an hourly cap in HYPE, the CSP
- *    allows its RPC, Glim and the remote MCP name it. A wrong value (the
- *    testnet's id) fails loudly.
+ *    allows its RPC, Glim and the remote MCP name it.
+ *  - bad, wrongid: a wrong value (the testnet's id, another id) fails loudly,
+ *    with the flag unset and with it "1".
  *
  * The placeholder values reach no host (fetch fails the run if anything tries).
  *
@@ -31,11 +37,13 @@ const USDC = "0x00000000000000000000000000000000000E1a5c";
 const RPC = "https://rpc.elysium.example/v1";
 
 for (const k of Object.keys(process.env)) if (k.startsWith("NEXT_PUBLIC_ELYSIUM_")) delete process.env[k];
+// Off only when the flag says so; "default" and "bad" leave it unset, as a preview build would.
+if (MODE === "off") process.env.NEXT_PUBLIC_ELYSIUM_ENABLED = "0";
 // Another mainnet's id fails loudly too, now that Elysium's (99901) is known.
 if (MODE === "wrongid") process.env.NEXT_PUBLIC_ELYSIUM_ENABLED = "1";
 delete process.env.UPSTASH_REDIS_REST_URL;
 delete process.env.UPSTASH_REDIS_REST_TOKEN;
-if (MODE === "coming" || MODE === "on" || MODE === "bad") process.env.NEXT_PUBLIC_ELYSIUM_ENABLED = "1";
+if (MODE === "coming" || MODE === "on") process.env.NEXT_PUBLIC_ELYSIUM_ENABLED = "1";
 if (MODE === "on" || MODE === "bad") {
   Object.assign(process.env, {
     NEXT_PUBLIC_ELYSIUM_CHAIN_ID: String(MODE === "bad" ? 99801 : CHAIN_ID),
@@ -66,7 +74,7 @@ if (MODE === "wrongid") {
 
 if (MODE === "bad") {
   await assert.rejects(import("../src/lib/elysium"), /testnet/);
-  console.log("selftest-elysium (bad): ok (the testnet's chain id fails the build)");
+  console.log("selftest-elysium (bad): ok (the testnet's chain id fails the build, with the flag unset)");
   process.exit(0);
 }
 
@@ -93,6 +101,20 @@ const ctx = { origin: "https://www.gloam.trade", ip: "127.0.0.1" };
 async function toolText(name: string, args: Record<string, unknown> = {}) {
   const r = await callTool(name, args, ctx);
   return { isError: Boolean(r.isError), text: (r.content[0] as { text: string }).text };
+}
+
+if (MODE === "off") {
+  // The words: only these turn it off. Unset, empty or anything else is on, in the app and the CSP.
+  const { elysiumConnectSources } = await import("../csp.config.mjs");
+  for (const raw of [undefined, "", " ", "1", "true", "TRUE", "on", "yes", "enabled", "2", "maybe"]) {
+    ok(ely.elysiumFlagFrom(raw), `"${raw}" is on`);
+    ok(elysiumConnectSources({ NEXT_PUBLIC_ELYSIUM_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === 1, `"${raw}": the CSP allows the RPC`);
+  }
+  for (const raw of ["0", "false", "FALSE", "off", "Off", "no", " 0 ", "false\n"]) {
+    ok(!ely.elysiumFlagFrom(raw), `${JSON.stringify(raw)} is off`);
+    ok(elysiumConnectSources({ NEXT_PUBLIC_ELYSIUM_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === 0, `${JSON.stringify(raw)}: no Elysium RPC in the CSP`);
+  }
+  ok(!ely.ELYSIUM_TESTNET_FLAG && ely.ELYSIUM_TESTNET === null, "the testnet keeps its own switch, off unless set");
 }
 
 // Every run: the entry is defined, payments pool, final keys, HYPE as gas.
@@ -130,19 +152,25 @@ if (MODE === "off" || MODE === "coming") {
     ok(entry && !entry.live && entry.rows.length === 0, "coming: /verify lists it as next, with no rows");
   }
 } else {
-  ok(ely.ELYSIUM_ENABLED && ely.ELYSIUM?.chainId === CHAIN_ID, "on: Elysium is on");
+  // "on" sets every value by NEXT_PUBLIC_ELYSIUM_*; "default" has none set and runs on the SDK's.
+  const want =
+    MODE === "default"
+      ? { rpc: SDK_ELYSIUM_MAINNET.rpcUrl!, pool: SDK_ELYSIUM_MAINNET.pool!, block: SDK_ELYSIUM_MAINNET.deployBlock!, explorer: SDK_ELYSIUM_MAINNET.explorerUrl!, usdc: SDK_ELYSIUM_MAINNET.usdc! }
+      : { rpc: RPC, pool: POOL, block: 1234n, explorer: "https://explorer.elysium.example", usdc: USDC };
+  if (MODE === "default") ok(process.env.NEXT_PUBLIC_ELYSIUM_ENABLED === undefined, "default: no flag set");
+  ok(ely.ELYSIUM_ENABLED && ely.ELYSIUM?.chainId === CHAIN_ID, `${MODE}: Elysium is on`);
   ok(nets.NETWORK_KEYS.includes("elysium-mainnet"), "on: a network key");
   const mainnets = nets.NETWORK_KEYS.filter((k) => !nets.getNetwork(k).testnet);
   ok(mainnets[mainnets.length - 1] === "elysium-mainnet", "on: listed after the other mainnets");
   ok(e.chainId === CHAIN_ID && e.chain.id === CHAIN_ID, "on: its chain id");
-  ok(e.chain.rpcUrls.default.http[0] === RPC, "on: its RPC");
-  ok(e.pool === POOL && e.deployBlock === 1234n, "on: its pool and block");
-  ok(e.explorerTx("0xab") === "https://explorer.elysium.example/tx/0xab", "on: explorer links");
+  ok(e.chain.rpcUrls.default.http[0] === want.rpc, "on: its RPC");
+  ok(e.pool === want.pool && e.deployBlock === want.block, "on: its pool and block");
+  ok(e.explorerTx("0xab") === `${want.explorer}/tx/0xab`, "on: explorer links");
   ok(e.payMemo === null, "on: no memo board until it is filled in");
   ok(nets.isNetworkWritable(e), "on: writable");
   ok(nets.ceremonyForChain(CHAIN_ID) === "production", "on: proofs use the final keys");
   const usdc = tokens.shieldTokensFor(CHAIN_ID);
-  ok(usdc.length === 2 && usdc[0]!.symbol === "USDC" && usdc[0]!.address === USDC && usdc[0]!.decimals === 6 && !usdc[0]!.opensWithLimit, "on: USDC open from launch");
+  ok(usdc.length === 2 && usdc[0]!.symbol === "USDC" && usdc[0]!.address === want.usdc && usdc[0]!.decimals === 6 && !usdc[0]!.opensWithLimit, "on: USDC open from launch");
   ok(usdc[1]!.symbol === "KNTQ" && usdc[1]!.decimals === 18 && usdc[1]!.opensWithLimit === true && usdc[1]!.address === "0xe45a355d9e9cAd2aD85F2d03E3eE3102A036acF0", "on: KNTQ listed, open only once its queued limit lands");
   ok(!tokens.supportsNativeShield(CHAIN_ID), "on: HYPE can't be added privately");
   // A deposit goes out right after its approval; a wallet estimating on its own RPC can
@@ -151,7 +179,7 @@ if (MODE === "off" || MODE === "coming") {
   ok(walkTuning(CHAIN_ID, e.logRange).span === 1_000_000n, "on: tree reads at the RPC's range (1,000,000 blocks at 100 ms)");
   ok(networkForChain(CHAIN_ID).key === "elysium-mainnet", "on: the relay serves it");
   ok(hourlySpendWei(CHAIN_ID, {}) === 10n ** 18n, "on: the relay's hourly cap is 1 HYPE by default");
-  ok(CSP_CONNECT_SOURCES.includes("https://rpc.elysium.example"), "on: the CSP allows its RPC");
+  ok(CSP_CONNECT_SOURCES.includes(new URL(want.rpc).origin), "on: the CSP allows its RPC");
   ok(mainnet.liveMainnetNames().endsWith("and Elysium"), "on: named last in the live mainnets");
   ok(mainnet.liveMainnetCountWords() === "five mainnets", "on: five mainnets");
   const facts = elysiumFacts() ?? "";
@@ -170,7 +198,7 @@ const SDK_FILLED = ["rpcUrl", "explorerUrl", "usdc", "pool", "deployBlock"].ever
   (k) => (SDK_ELYSIUM_MAINNET as unknown as Record<string, unknown>)[k] != null,
 );
 if (MODE === "off") {
-  const modes = SDK_FILLED ? ["on", "bad", "wrongid"] : ["coming", "on", "bad", "wrongid"];
+  const modes = SDK_FILLED ? ["default", "on", "bad", "wrongid"] : ["coming", "on", "bad", "wrongid"];
   if (SDK_FILLED) console.log("selftest-elysium: the SDK has Elysium's values, so there is no coming state to test");
   for (const mode of modes) {
     const child = spawnSync(process.execPath, [...process.execArgv, fileURLToPath(import.meta.url)], {

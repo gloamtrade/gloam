@@ -189,7 +189,19 @@ await ok("two callers at once share one read", async () => {
 await ok("fetchChainShieldNotes builds the same rows as before (ids, amounts, chain-only, no secret)", async () => {
   scan.clearDepositScans();
   const net = { ...NET, key: "tempo" } as never;
-  const notes = await shield.fetchChainShieldNotes(fakeClient(() => head) as never, ME, net);
+  // createdAt is Date.now() - i per row, so under load a millisecond could tick between
+  // two rows and tie them. The clock is held for the rows; the walk runs first on the
+  // real clock (its reads are spaced by it), so the held call only reads the newest blocks.
+  await scan.scanDeposits(fakeClient(() => head) as never, NET, ME);
+  const realNow = Date.now;
+  const frozen = realNow();
+  Date.now = () => frozen;
+  let notes: Awaited<ReturnType<typeof shield.fetchChainShieldNotes>>;
+  try {
+    notes = await shield.fetchChainShieldNotes(fakeClient(() => head) as never, ME, net);
+  } finally {
+    Date.now = realNow;
+  }
   assert.equal(notes.length, 3);
   const d = deps[0]!;
   assert.deepEqual(
@@ -197,7 +209,7 @@ await ok("fetchChainShieldNotes builds the same rows as before (ids, amounts, ch
     { id: `chain-${d.tx}-${d.leafIndex}`, asset: USD, amountWei: d.amount.toString(), commitment: d.commitment, leafIndex: 0, txHash: d.tx, secret: "0x", source: "chain", status: "open", chainId: 42431, pool: POOL, from: ME }
   );
   // newest first by createdAt, as before (merge sorts on it)
-  assert.ok(notes[0]!.createdAt > notes[1]!.createdAt);
+  assert.deepEqual(notes.map((x) => x.createdAt), [frozen, frozen - 1, frozen - 2]);
   // a chain that can't be read: no rows, as before
   const down = { getBlockNumber: async () => { throw new Error("down"); }, getLogs: async () => [] };
   scan.clearDepositScans();

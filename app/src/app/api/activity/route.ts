@@ -47,19 +47,51 @@ type TxRow = {
   isError: string;
 };
 
-export async function GET(req: NextRequest) {
-  const address = req.nextUrl.searchParams.get("address") ?? "";
-  if (!isAddress(address)) {
-    return NextResponse.json({ error: "invalid_address" }, { status: 400 });
+/** { address, chainId } fits in far less. */
+const MAX_BODY = 256;
+
+/** Every answer here names a wallet: never kept by the CDN or a browser cache. */
+const NO_STORE = { "Cache-Control": "no-store" };
+
+/**
+ * The wallet goes in a POST body, never in the URL, where access logs would
+ * keep it next to the IP. Nothing outside the app asked this way.
+ */
+export function GET() {
+  return NextResponse.json({ error: "method_not_allowed" }, { status: 405, headers: { Allow: "POST", ...NO_STORE } });
+}
+
+/**
+ * POST { address, chainId? }: a wallet's public history from the testnet's
+ * explorer. No chainId is the Robinhood Chain testnet, as always.
+ */
+function objectFrom(text: string): { address?: unknown; chainId?: unknown } | null {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
   }
-  const explorer = explorerFor(req.nextUrl.searchParams.get("chainId"));
-  if (explorer === "bad") return NextResponse.json({ error: "unknown_chain" }, { status: 400 });
-  if (explorer === null) return NextResponse.json({ txs: [], address });
+}
+
+export async function POST(req: NextRequest) {
+  const text = await req.text().catch(() => "");
+  if (text.length > MAX_BODY) return NextResponse.json({ error: "too_large" }, { status: 413, headers: NO_STORE });
+  const body = objectFrom(text);
+  if (!body) return NextResponse.json({ error: "bad_body" }, { status: 400, headers: NO_STORE });
+  const address = typeof body.address === "string" ? body.address : "";
+  if (!isAddress(address)) {
+    return NextResponse.json({ error: "invalid_address" }, { status: 400, headers: NO_STORE });
+  }
+  const chainId = body.chainId == null ? null : typeof body.chainId === "number" || typeof body.chainId === "string" ? String(body.chainId) : "";
+  const explorer = explorerFor(chainId);
+  if (explorer === "bad") return NextResponse.json({ error: "unknown_chain" }, { status: 400, headers: NO_STORE });
+  if (explorer === null) return NextResponse.json({ txs: [], address }, { headers: NO_STORE });
   const rate = await hitRateLimit(clientIp(req), "activity", PER_IP_PER_MIN);
   if (!rate.allowed) {
     return NextResponse.json(
       { txs: [], error: "rate_limited" },
-      { status: 429, headers: { "Retry-After": String(rate.retryAfterSec) } },
+      { status: 429, headers: { "Retry-After": String(rate.retryAfterSec), ...NO_STORE } },
     );
   }
 
@@ -74,7 +106,7 @@ export async function GET(req: NextRequest) {
     if (!res.ok) {
       return NextResponse.json(
         { txs: [], error: "explorer_unavailable" },
-        { status: 502 }
+        { status: 502, headers: NO_STORE }
       );
     }
     const data = (await res.json()) as {
@@ -90,12 +122,11 @@ export async function GET(req: NextRequest) {
       ok: t.isError === "0",
     }));
 
-    // public explorer data per address: the CDN answers the 30 s polls
-    return NextResponse.json({ txs, address }, { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" } });
+    return NextResponse.json({ txs, address }, { headers: NO_STORE });
   } catch {
     return NextResponse.json(
       { txs: [], error: "fetch_failed" },
-      { status: 502 }
+      { status: 502, headers: NO_STORE }
     );
   }
 }

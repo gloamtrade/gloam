@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { isAddress, getAddress } from "viem";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { KvUnavailableError } from "@/lib/partnersKv";
 import { acceptingVotes, excludedForVote, findVote, snapshotFor } from "@/lib/vote/registry";
 import { weightingOf } from "@/lib/vote/core";
-import { BalanceUnavailableError, voteSummary, voterStanding } from "@/lib/vote/results";
+import { voteSummary } from "@/lib/vote/results";
 import { BallotBusyError } from "@/lib/vote/store";
 import { VoteError, smartWalletCheck, submitBallot } from "@/lib/vote/submit";
 
@@ -28,33 +27,28 @@ function notFound() {
   return fail(404, "not_found", "There is no vote here.");
 }
 
-/** A vote's live totals. With ?address=0x…, also that wallet's weight and its vote. */
+/**
+ * A vote's live totals: the same for everyone, so the edge keeps them a few
+ * seconds. A wallet's own weight and vote come from POST /api/vote/me, with the
+ * wallet in the body: in a URL it would sit in access logs next to the IP.
+ */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  if (new URL(req.url).searchParams.has("address")) {
+    return fail(400, "address_in_url", "Send the wallet in the body of a POST to /api/vote/me, not in the URL.");
+  }
   const rate = await hitRateLimit(clientIp(req), "vote-read", READS_PER_MINUTE);
   if (!rate.allowed) return fail(429, "rate_limited", "Too many requests. Wait a minute.", { "Retry-After": String(rate.retryAfterSec) });
 
   const { id } = await ctx.params;
   const vote = findVote(id);
   if (!vote) return notFound();
-  const snapshot = snapshotFor(vote);
-  const excluded = excludedForVote(vote);
-  const address = new URL(req.url).searchParams.get("address")?.trim() ?? "";
-  if (address && !isAddress(address, { strict: false })) return fail(400, "bad_address", "That wallet address doesn't look right.");
 
   try {
-    const summary = await voteSummary(vote, snapshot, excluded, undefined, { finalize: true });
-    // a balance that can't be read now leaves `you` out; the totals still answer
-    const you =
-      address && summary.snapshotReady
-        ? await voterStanding(vote, snapshot, excluded, getAddress(address)).catch((e) => {
-            if (e instanceof BalanceUnavailableError) return null;
-            throw e;
-          })
-        : null;
+    const summary = await voteSummary(vote, snapshotFor(vote), excludedForVote(vote), undefined, { finalize: true });
     return NextResponse.json(
-      { ok: true, data: { ...summary, you } },
+      { ok: true, data: summary },
       // the totals change only when someone votes; a few seconds at the edge spares the store
-      { headers: { "Cache-Control": address ? "no-store" : "public, s-maxage=5, stale-while-revalidate=15" } },
+      { headers: { "Cache-Control": "public, s-maxage=5, stale-while-revalidate=15" } },
     );
   } catch (e) {
     if (e instanceof KvUnavailableError) return fail(503, "storage", "Results are not available for a moment. Try again shortly.");

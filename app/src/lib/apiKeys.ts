@@ -376,14 +376,22 @@ export async function meterApiKey(keyId: string, now = Date.now()): Promise<Rate
   };
 }
 
-/** Active key count per partner, for the admin list. */
+/**
+ * Active key count per partner, for the admin list. Two round trips whatever
+ * the number of partners: every partner's key set, then every key's record.
+ */
 export async function activeKeyCounts(partnerIds: string[]): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
-  await Promise.all(
-    partnerIds.map(async (pid) => {
-      out[pid] = (await readRecords(pid)).filter((r) => r.revokedAt === null).length;
-    })
-  );
+  if (partnerIds.length === 0) return out;
+  const sets = await kv(partnerIds.map((pid) => ["SMEMBERS", k("partnerkeys", pid)] as KvCommand));
+  const owned = partnerIds.flatMap((pid, i) => (Array.isArray(sets[i]) ? (sets[i] as string[]) : []).map((id) => ({ pid, id })));
+  const raw = await kv(owned.map(({ id }) => ["GET", k("keyrec", id)] as KvCommand));
+  for (const pid of partnerIds) out[pid] = 0;
+  owned.forEach(({ pid }, i) => {
+    const r = jsonOf<ApiKeyRecord>(raw[i]);
+    // the same check as readRecords: a record that names another partner is not theirs
+    if (r && r.partnerId === pid && r.revokedAt === null) out[pid]!++;
+  });
   return out;
 }
 

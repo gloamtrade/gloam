@@ -16,10 +16,11 @@
  * then it is left out of NETWORK_KEYS, isNetworkKey, allNetworks and everything
  * built on them (selector, API, relay, MCP, proofs), as if it did not exist.
  *
- * Elysium mainnet (99901) is the fifth mainnet. It is behind
- * NEXT_PUBLIC_ELYSIUM_ENABLED and its values (lib/elysium.ts): until both are
- * in it is hidden the same way. Its testnet (99801, key "elysium") has its own
- * switch, NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED, and needs its pool in.
+ * Elysium mainnet (99901) is the fifth mainnet. It is on unless
+ * NEXT_PUBLIC_ELYSIUM_ENABLED turns it off, and needs its values (lib/elysium.ts):
+ * off, or with a value missing, it is hidden the same way. Its testnet (99801,
+ * key "elysium") has its own switch, NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED, off
+ * unless set, and needs its pool in.
  */
 import { defineChain, type Address, type Chain } from "viem";
 import {
@@ -573,8 +574,8 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     explorerTx: (hash) => `${ethereumMainnet.blockExplorers.default.url}/tx/${hash}`,
     explorerAddress: (addr) => `${ethereumMainnet.blockExplorers.default.url}/address/${addr}`,
   },
-  // Not deployed yet (DEPLOY-ELYSIUM.md): hidden until NEXT_PUBLIC_ELYSIUM_ENABLED is on
-  // and every value in lib/elysium.ts is in. Payments only, USDC alone at the launch
+  // Live since 9 November 2026 (DEPLOY-ELYSIUM.md): shown unless NEXT_PUBLIC_ELYSIUM_ENABLED
+  // turns it off, while every value in lib/elysium.ts is in. Payments only, USDC alone at the launch
   // limits, gas in HYPE (not listed). Its vault is owned by a VaultOwnerGuard from the
   // deploy, so its proof checkers can never be replaced. No testnet entry.
   "elysium-mainnet": {

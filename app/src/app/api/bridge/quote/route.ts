@@ -27,7 +27,10 @@ export const dynamic = "force-dynamic";
 const RELAY_API = "https://api.relay.link";
 /** Quotes per IP per minute. Each one makes a fresh deposit address at Relay. */
 const RATE_LIMIT = 12;
-/** Swap prices per IP per minute: no deposit address, and the panel re-prices as the amount is typed. */
+/**
+ * Swap prices per IP per minute: no deposit address, and the panel re-prices as
+ * the amount is typed. Its own bucket: the MCP's private swap quotes count apart.
+ */
 const SWAP_RATE_LIMIT = 60;
 const SWAP_CHAIN_IDS = new Set(Object.values(SWAP_SOURCES).map((c) => c!.id));
 
@@ -63,7 +66,7 @@ export async function POST(req: Request) {
   const swapAsk = SWAP_CHAIN_IDS.has(Number(body.chainId));
   const rate = await hitRateLimit(
     clientIp(req),
-    swapAsk ? "swap-quote" : "bridge-quote",
+    swapAsk ? "bridge-swap-quote" : "bridge-quote",
     swapAsk ? SWAP_RATE_LIMIT : RATE_LIMIT
   );
   if (!rate.allowed) return fail(429, "Too many tries. Wait a minute.", { "Retry-After": String(rate.retryAfterSec) });

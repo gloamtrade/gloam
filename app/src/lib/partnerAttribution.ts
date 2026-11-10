@@ -519,15 +519,59 @@ export async function bindScheduledJob(args: { jobId: string; code: unknown; at:
   }
 }
 
-/** After the scheduled run sent a job: binds its code (if any) to the relay's transaction and counts it. */
-export async function afterScheduledSend(args: { net: GloamNetwork; jobId: string; hash: Hex; deps?: AttributionDeps }): Promise<void> {
+type JobCode = { code: string; at: number };
+
+/**
+ * After the scheduled run sent a job: binds its code (if any) to the relay's transaction and counts it.
+ * `code` is the job's code when the caller already read it (afterScheduledSends).
+ */
+export async function afterScheduledSend(args: { net: GloamNetwork; jobId: string; hash: Hex; deps?: AttributionDeps; code?: JobCode }): Promise<void> {
   try {
-    const j = jsonOf<{ code: string; at: number }>(await kv1(["GET", k("jobcode", args.jobId)]));
+    const j = args.code ?? jsonOf<JobCode>(await kv1(["GET", k("jobcode", args.jobId)]));
     if (!j) return;
     if (!(await bindRelayTx({ chainId: args.net.chainId, txHash: args.hash, code: j.code, flow: "pay", at: j.at }))) return;
     await settleLinkTx({ chainId: args.net.chainId, txHash: args.hash.toLowerCase() as Hex }, args.deps);
   } catch (e) {
     if (e instanceof ApiError && ["already_attributed", "not_registered", "tx_not_found", "tx_failed"].includes(e.code)) return;
     console.error("gloam_partner_settle_scheduled", logSafe(e));
+  }
+}
+
+/** Jobs bound and counted at once by afterScheduledSends: each reads the chain a few times. */
+export const SCHEDULED_SETTLE_BATCH = 4;
+
+/**
+ * afterScheduledSend for every job one scheduled run sent. Their codes are read
+ * in one round trip; most jobs have none and cost nothing more. A job with one is
+ * read (`readJob`: its network and the hash the run sent; null skips it), bound
+ * and counted, SCHEDULED_SETTLE_BATCH at a time. Each settle stays idempotent on
+ * its own: a transaction is counted once, by its claim, so a job that two
+ * overlapping runs both report counts once. Never throws.
+ */
+export async function afterScheduledSends(
+  jobIds: readonly string[],
+  readJob: (jobId: string) => Promise<{ net: GloamNetwork; hash: Hex } | null>,
+  deps?: AttributionDeps,
+): Promise<void> {
+  const ids = [...new Set(jobIds)];
+  if (!ids.length) return;
+  let raw: unknown[];
+  try {
+    raw = await kv(ids.map((id) => ["GET", k("jobcode", id)]));
+  } catch (e) {
+    console.error("gloam_partner_settle_scheduled", logSafe(e));
+    return;
+  }
+  const coded = ids.flatMap((jobId, i) => {
+    const code = jsonOf<JobCode>(raw[i]);
+    return code ? [{ jobId, code }] : [];
+  });
+  for (let i = 0; i < coded.length; i += SCHEDULED_SETTLE_BATCH) {
+    await Promise.all(
+      coded.slice(i, i + SCHEDULED_SETTLE_BATCH).map(async ({ jobId, code }) => {
+        const job = await readJob(jobId).catch(() => null);
+        if (job) await afterScheduledSend({ net: job.net, jobId, hash: job.hash, deps, code });
+      }),
+    );
   }
 }
