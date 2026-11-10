@@ -34,7 +34,6 @@ function BaseSepoliaPoolAddress() {
 }
 
 /** Base's pools are in once their addresses are filled in (lib/mainnet.ts). */
-const BASE_SEPOLIA_LIVE = baseSepoliaPool() !== null;
 const BASE_MAINNET_LIVE = mainnetPool(8453) !== null;
 /** Ethereum's pool is in once MAINNET_POOLS[1] is filled in (lib/mainnet.ts). */
 const ETHEREUM_LIVE = mainnetPool(1) !== null;
@@ -578,11 +577,7 @@ export default function DocsNetworksPage() {
         deposit limits and the {CASH_OUT_FEE_PERCENT} cash-out fee. Base Sepolia, the testnet,
         went live on 24 October 2026 and Base mainnet on 26 October 2026, on
         the same code.{" "}
-        {BASE_MAINNET_LIVE
-          ? "Both are live: Base mainnet, and Base Sepolia as its testnet."
-          : BASE_SEPOLIA_LIVE
-            ? "Base Sepolia is live as a testnet. Base mainnet is not deployed yet, so the app does not offer it."
-            : "Neither is deployed yet, so the app does not offer Base. This section is what to expect."}
+        Both are live: Base mainnet, and Base Sepolia as its testnet.
       </p>
       <ul>
         <li>
@@ -596,11 +591,11 @@ export default function DocsNetworksPage() {
         </li>
         <li>
           <strong>Mainnet pool</strong>,{" "}
-          {BASE_MAINNET_LIVE ? <MainnetPoolAddress chainId={8453} /> : <>Not deployed yet</>}
+          <MainnetPoolAddress chainId={8453} />
         </li>
         <li>
           <strong>Mainnet payment-message board</strong>,{" "}
-          {BASE_MAINNET_MEMO ? <code>{BASE_MAINNET_MEMO.address}</code> : <>Not deployed yet</>}
+          <code>{BASE_MAINNET_MEMO!.address}</code>
         </li>
         <li>
           <strong>Mainnet assets</strong>,{" "}
@@ -688,9 +683,7 @@ export default function DocsNetworksPage() {
         <code>ShieldPoolPayments</code>, the ceremony&apos;s final keys,
         deposit limits and the {CASH_OUT_FEE_PERCENT} cash-out fee. Its testnet is
         Ethereum Sepolia, below, on the same contract and keys.{" "}
-        {ETHEREUM_LIVE
-          ? "Ethereum mainnet is live."
-          : "It is not deployed yet, so the app does not offer it. This section is what to expect."}
+        Ethereum mainnet is live.
       </p>
       <ul>
         <li>
@@ -700,11 +693,11 @@ export default function DocsNetworksPage() {
           <strong>Explorer</strong>, <code>https://etherscan.io</code>
         </li>
         <li>
-          <strong>Pool</strong>, {ETHEREUM_LIVE ? <MainnetPoolAddress chainId={1} /> : <>Not deployed yet</>}
+          <strong>Pool</strong>, <MainnetPoolAddress chainId={1} />
         </li>
         <li>
           <strong>Payment-message board</strong>,{" "}
-          {ETHEREUM_MAINNET_MEMO ? <code>{ETHEREUM_MAINNET_MEMO.address}</code> : <>Not deployed yet</>}
+          <code>{ETHEREUM_MAINNET_MEMO!.address}</code>
         </li>
         <li>
           <strong>Assets</strong>, {ETHEREUM_MAINNET_TOKENS.filter((t) => t.kind === "stablecoin").map((t) => t.symbol).join(", ")} (6
@@ -770,9 +763,7 @@ export default function DocsNetworksPage() {
         ceremony&apos;s final keys, deposit limits and the 0.25% cash-out
         fee), deployed from the same address and nonce as the other chains,
         so the vault sits at the same address.{" "}
-        {ETHEREUM_SEPOLIA
-          ? "It is live in the app under Testnet."
-          : "It is not deployed yet, so the app does not offer it. This section is what to expect."}
+        It is live in the app under Testnet.
       </p>
       <ul>
         <li>
@@ -786,17 +777,11 @@ export default function DocsNetworksPage() {
         </li>
         <li>
           <strong>Pool</strong>,{" "}
-          {ETHEREUM_SEPOLIA ? (
-            <>
-              <code>{ETHEREUM_SEPOLIA.pool}</code>, deploy block <code>{ETHEREUM_SEPOLIA.deployBlock.toString()}</code>
-            </>
-          ) : (
-            <>Not deployed yet</>
-          )}
+          <code>{ETHEREUM_SEPOLIA!.pool}</code>, deploy block <code>{ETHEREUM_SEPOLIA!.deployBlock.toString()}</code>
         </li>
         <li>
           <strong>Payment-message board</strong>,{" "}
-          {ETHEREUM_SEPOLIA_MEMO ? <code>{ETHEREUM_SEPOLIA_MEMO.pool}</code> : <>Not deployed yet</>}
+          <code>{ETHEREUM_SEPOLIA_MEMO!.pool}</code>
         </li>
         <li>
           <strong>Assets</strong>, Circle&apos;s test USDC and EURC, Paxos&apos;s
