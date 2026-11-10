@@ -63,6 +63,7 @@
     "src",
     "LICENSE",
     "README.md",
+    "CHANGELOG.md",
     "plugin_metadata.yml",
     "limits.example.json",
     "env.example"
