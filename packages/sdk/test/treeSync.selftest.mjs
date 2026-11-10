@@ -690,4 +690,53 @@ function chain() {
   m.client.getBlockNumber = realHead;
 }
 
+// ── 15. a leaf list read further than this node has got: only what the node can confirm is kept ──
+{
+  // A node behind the one gloam.trade read from: the list is the same chain, just ahead.
+  const m = chain();
+  const early = m.shield(10n, 0);
+  const late = m.shield(140n, 0);
+  m.state.head = 150n;
+  const ahead = await m.truth();
+  const list = {
+    v: 1,
+    pool: SEALED_VAULT,
+    deployBlock: "0",
+    toBlock: "150",
+    leafCount: 2,
+    items: [
+      { k: "s", c: [early], bn: "10", li: 0 },
+      { k: "s", c: [late], bn: "140", li: 0 },
+    ],
+  };
+  m.state.head = 120n;
+  const ts = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, seed: async () => list, retryDelayMs: 1 });
+  const t = await ts.sync();
+  assert(t.leafCount === 1 && t.root === (await m.rootAt(120n)) && ts.toBlock === 120n, `only the leaves up to this node's head (${t.leafCount}, to ${ts.toBlock})`);
+  m.state.head = 150n;
+  assert((await ts.sync()).root === ahead.root, "and the rest once it catches up");
+
+  // A fork of the chain (a test fork): the list's later blocks never happened here, and the fork has its own.
+  const f = chain();
+  const shared = f.shield(10n, 0);
+  f.state.head = 100n;
+  const mine = f.shield(101n, 0); // made on the fork only
+  f.state.head = 102n;
+  const forkList = {
+    v: 1,
+    pool: SEALED_VAULT,
+    deployBlock: "0",
+    toBlock: "180",
+    leafCount: 2,
+    items: [
+      { k: "s", c: [shared], bn: "10", li: 0 },
+      { k: "s", c: [hex(777)], bn: "160", li: 0 }, // on the live chain only
+    ],
+  };
+  const onFork = createTreeSync(f.client, { pool: SEALED_VAULT, fromBlock: 0n, seed: async () => forkList, retryDelayMs: 1 });
+  const p = await onFork.pathForCommitment(mine);
+  assert(p && p.leafIndex === 1, "the fork's own deposit is found");
+  assert((await onFork.sync()).root === (await f.rootAt(102n)), "and the tree is the fork's");
+}
+
 console.log(`treeSync.selftest: ok (${checks} assertions)`);

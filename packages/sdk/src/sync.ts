@@ -744,6 +744,8 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
    * matching the pool (a reorg since it was saved) is dropped for a walk of the chain, not refused.
    */
   let fromLoad = false;
+  /** The loaded copy has not been read past yet: its blocks past this node's head do not count as read. */
+  let loadUnread = false;
   let verified = false;
   /** When the last sync that went through started (ms), for reuseMs. */
   let syncedAt = 0;
@@ -796,6 +798,7 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
     state = new TreeState();
     verified = false;
     fromLoad = loaded !== null;
+    loadUnread = loaded !== null;
     if (loaded) {
       await state.append(loaded.snap.items);
       toBlock = BigInt(loaded.snap.toBlock);
@@ -833,8 +836,16 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
    * `changed`: the tree changed.
    */
   const readTail = async (again = false, atBlock?: bigint): Promise<{ read: boolean; changed: boolean }> => {
-    const s = state!;
     const head = atBlock !== undefined && atBlock > toBlock ? atBlock : await headOf(client, reader);
+    if (loadUnread && head < toBlock) {
+      // A stored copy or leaf list read further than this node has got (a node behind, or a fork of the chain):
+      // keep only what this node can confirm, and read its last blocks.
+      const kept = state!.inserts.filter((r) => BigInt(r.bn) <= head);
+      await rebuild(kept);
+      toBlock = head;
+      again = true;
+    }
+    const s = state!;
     if (head <= toBlock && !again) return { read: false, changed: false };
     let from = toBlock + 1n - overlap;
     if (from < fromBlock) from = fromBlock;
@@ -843,6 +854,7 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
     const reached = head > toBlock ? head : toBlock;
     // New blocks, or the last ones again: the root has to be checked again before the tree counts as confirmed.
     verified = false;
+    loadUnread = false;
 
     // Every leaf held for the blocks just read again must still be there. One that is gone (or changed) means the
     // chain reorganized or a node answered with logs missing: rebuild from the new read, and let the root check decide.
