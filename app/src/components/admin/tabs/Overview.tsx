@@ -33,8 +33,54 @@ function MoneyCards({ side, go }: { side: Side; go: Go }) {
     nets.map((m) => ({ key: m.key, label: nameOf(m), short: nameOf(m).split(" ")[0], value: m.heldUsd, display: fmtUsd(m.heldUsd) })),
     fmtUsd
   );
+  // The headline: everything that moved in and out, added up. Deposits and cash-outs are public on
+  // chain, so their dollar amounts can be summed; private payments never are.
+  const moved = rev ? rev.depositVolume.all + rev.cashoutVolume.all : null;
+  const moved7 = rev ? rev.depositVolume.d7 + rev.cashoutVolume.d7 : null;
+  const moved1 = rev ? rev.depositVolume.d1 + rev.cashoutVolume.d1 : null;
+  const movedFoot: { label: string; value: number | null }[] = [
+    { label: `Total, ${since.toLowerCase()}`, value: moved },
+    { label: "In", value: rev ? rev.depositVolume.all : null },
+    { label: "Out", value: rev ? rev.cashoutVolume.all : null },
+    { label: "Last 7 days", value: moved7 },
+  ];
   return (
     <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <MetricCard
+        className="sm:col-span-2 xl:col-span-4"
+        title="Money moved"
+        sub={`In and out, ${window.toLowerCase()}${moved1 != null ? `, ${fmtUsd(moved1)} in the last 24 hours` : ""}`}
+        delta={weekChange(days.map((d) => d.depositUsd + d.cashoutUsd))}
+        onOpen={() => go("revenue")}
+        openLabel="Revenue"
+        loading={loading}
+        chart={
+          <StemChart
+            label="Money moved in and out a day, in dollars"
+            points={dayPoints(days, (d) => d.depositUsd + d.cashoutUsd, fmtUsdShort)}
+            empty="Nothing moved yet"
+          />
+        }
+        foot={
+          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {movedFoot.map((f, i) => (
+              <div key={f.label} className="min-w-0">
+                <dt className="truncate text-[10px] font-medium uppercase tracking-[0.09em] text-faint">{f.label}</dt>
+                {f.value == null ? (
+                  <dd className="gl-skeleton mt-2 h-[26px] w-20" />
+                ) : (
+                  <dd
+                    title={fmtUsd(f.value)}
+                    className={`tnum mt-1.5 truncate font-light leading-none tracking-[-0.03em] text-foreground ${i === 0 ? "text-[40px]" : "text-[26px]"}`}
+                  >
+                    {i === 0 ? fmtUsd(f.value) : fmtUsdBig(f.value)}
+                  </dd>
+                )}
+              </div>
+            ))}
+          </dl>
+        }
+      />
       <MetricCard
         title="Deposits"
         sub={window}
