@@ -112,14 +112,14 @@ export interface GloamNetwork {
   /** Testnet (true) or mainnet (false). */
   testnet: boolean;
   /**
-   * Tokenized stocks: the Markets page, stock holdings and private trade. Only
+   * Tokenized stocks: the Markets page, stock holdings and the Trade tab. Only
    * on Robinhood Chain testnet; the mainnet pools take payments only.
    */
   stocks: boolean;
   /**
    * The pool is ShieldPoolPayments, the mainnet contract: it takes only the
    * assets it lists, each with a deposit limit, a cash out pays the fee,
-   * and there is no private trade. Every mainnet, and Base Sepolia, which runs
+   * and there is no sealed swap code. Every mainnet, and Base Sepolia, which runs
    * the mainnet pool with test funds. The older testnets (Robinhood Chain and
    * Tempo) run ShieldPoolPoseidon: anything can go in, no limits, no fee.
    */
