@@ -72,6 +72,7 @@
   },
   "scripts": {
     "build": "tsc && node scripts/copy-vkeys.mjs",
+    "prepublishOnly": "node scripts/publish-guard.mjs",
     "prepack": "npm run typecheck && npm run build",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "tsc --noEmit -p tsconfig.test.json && tsx --test test/*.test.mts",
@@ -81,7 +82,6 @@
   "dependencies": {
     "@gloamtrade/sdk": "workspace:^",
     "@virtuals-protocol/game": "^0.1.14",
-    "circomlibjs": "0.1.7",
     "snarkjs": "^0.7.5",
     "viem": "2.55.2"
   },
