@@ -33,8 +33,7 @@ abstract contract SealedSwapGuard is Script {
             "unsafe: sealed swap must stay off until H1 (solvency accounting) and ZK-1 "
             "(rate product wraps the field: amount bits + rate bits must be <= 252, e.g. 96-bit "
             "rates in circuit and contract, and one side of the oracle rate fixed to a constant "
-            "scale) are fixed and a new circuit + ceremony is done. Then set "
-            "GLOAM_ACK_SEALED_SWAP_H1_ZK1=1"
+            "scale) are fixed and a new circuit + ceremony is done. Then set " "GLOAM_ACK_SEALED_SWAP_H1_ZK1=1"
         );
     }
 }

@@ -121,7 +121,9 @@ contract DeployBaseTest is Test, ElysiumDeploySteps {
         _token(SEPOLIA_USDC);
         _token(SEPOLIA_EURC);
         _env(
-            string.concat(vm.toString(SEPOLIA_USDC), ",", vm.toString(SEPOLIA_EURC), ",0x0000000000000000000000000000000000000000"),
+            string.concat(
+                vm.toString(SEPOLIA_USDC), ",", vm.toString(SEPOLIA_EURC), ",0x0000000000000000000000000000000000000000"
+            ),
             "500000000,500000000,200000000000000000",
             "25000000000,25000000000,10000000000000000000"
         );
@@ -140,7 +142,14 @@ contract DeployBaseTest is Test, ElysiumDeploySteps {
         _token(EURC);
         _token(USDT);
         _env(
-            string.concat(vm.toString(USDC), ",", vm.toString(EURC), ",", vm.toString(USDT), ",0x0000000000000000000000000000000000000000"),
+            string.concat(
+                vm.toString(USDC),
+                ",",
+                vm.toString(EURC),
+                ",",
+                vm.toString(USDT),
+                ",0x0000000000000000000000000000000000000000"
+            ),
             "500000000,500000000,500000000,200000000000000000",
             "25000000000,25000000000,25000000000,10000000000000000000"
         );
@@ -223,7 +232,9 @@ contract DeployBaseTest is Test, ElysiumDeploySteps {
         vm.prank(DEPLOYER);
         address poseidon = _deployPoseidon();
         assertEq(poseidon, 0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4, "PoseidonT3 where it is on the other chains");
-        assertEq(poseidon.codehash, 0x354b26999e434f8256d168395315e1f51fc15bf49bf2e6bb58fc549bd597e7da, "PoseidonT3 code");
+        assertEq(
+            poseidon.codehash, 0x354b26999e434f8256d168395315e1f51fc15bf49bf2e6bb58fc549bd597e7da, "PoseidonT3 code"
+        );
 
         // Step 3: the vault, sent as the deployer with no key in the environment.
         vm.setEnv("DEPLOYER_PK", "");

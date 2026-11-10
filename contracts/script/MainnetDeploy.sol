@@ -235,7 +235,9 @@ abstract contract MainnetDeploy is RedeployGuard {
         bps = uint16(raw);
         recipient = vm.envOr("FEE_RECIPIENT", address(0));
         if (recipient == address(0)) {
-            console2.log("FEE_RECIPIENT unset: cash-out fee left OFF (0 bps). Turning it on later takes the 3-day timelock.");
+            console2.log(
+                "FEE_RECIPIENT unset: cash-out fee left OFF (0 bps). Turning it on later takes the 3-day timelock."
+            );
             bps = 0;
         }
     }
@@ -278,13 +280,10 @@ abstract contract MainnetDeploy is RedeployGuard {
         require(!IVerifier(dual).verify(p, pub), "transfer verifier accepts a DEV-key proof");
     }
 
-    function _report(
-        ShieldPoolPayments pool,
-        address poseidon2,
-        address dual,
-        address shieldI,
-        address[] memory assets
-    ) internal view {
+    function _report(ShieldPoolPayments pool, address poseidon2, address dual, address shieldI, address[] memory assets)
+        internal
+        view
+    {
         console2.log("chainId", block.chainid);
         console2.log("poseidon2", poseidon2);
         console2.log("ShieldPoolPayments", address(pool));

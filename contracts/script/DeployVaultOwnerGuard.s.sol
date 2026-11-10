@@ -91,7 +91,7 @@ contract DeployVaultOwnerGuard is Script {
         if (at.code.length == 0) {
             vm.startBroadcast();
             // The factory's interface: 32 bytes of salt, then the init code.
-            (bool ok, ) = CREATE2_FACTORY.call(abi.encodePacked(SALT, _initCode()));
+            (bool ok,) = CREATE2_FACTORY.call(abi.encodePacked(SALT, _initCode()));
             vm.stopBroadcast();
             require(ok && at.code.length > 0, "the factory did not deploy the guard");
         } else {

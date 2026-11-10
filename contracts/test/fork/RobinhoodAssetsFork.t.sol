@@ -113,7 +113,11 @@ contract RobinhoodAssetsForkTest is Test {
         } else {
             vm.prank(POOL_MANAGER);
             IERC20F(c.asset).transfer(payer, c.amount);
-            assertEq(IERC20F(c.asset).balanceOf(payer), c.amount, string.concat(c.s, ": a plain transfer pays the exact amount"));
+            assertEq(
+                IERC20F(c.asset).balanceOf(payer),
+                c.amount,
+                string.concat(c.s, ": a plain transfer pays the exact amount")
+            );
             vm.startPrank(payer);
             IERC20F(c.asset).approve(address(VAULT), c.amount);
             VAULT.shieldBound(c.asset, c.amount, commitment, proof);
@@ -134,27 +138,45 @@ contract RobinhoodAssetsForkTest is Test {
         }
         bytes32[2] memory outs = [fx.readBytes32(_key(c.s, ".send.payment")), fx.readBytes32(_key(c.s, ".send.change"))];
         vm.prank(relayer);
-        VAULT.transfer(fx.readBytes(_key(c.s, ".send.proof")), fx.readBytes32(_key(c.s, ".send.root")), fx.readBytes32(_key(c.s, ".send.nullifier")), outs);
+        VAULT.transfer(
+            fx.readBytes(_key(c.s, ".send.proof")),
+            fx.readBytes32(_key(c.s, ".send.root")),
+            fx.readBytes32(_key(c.s, ".send.nullifier")),
+            outs
+        );
         assertEq(VAULT.deposited(c.asset) - c.depositedStart, c.amount, string.concat(c.s, ": a send moves nothing"));
     }
 
     function _unshield(Case memory c) internal {
         vm.prank(relayer);
-        VAULT.unshield(fx.readBytes(_key(c.s, ".cashOut.proof")), fx.readBytes32(_key(c.s, ".cashOut.root")), fx.readBytes32(_key(c.s, ".cashOut.nullifier")), c.asset, recipient, c.payment);
+        VAULT.unshield(
+            fx.readBytes(_key(c.s, ".cashOut.proof")),
+            fx.readBytes32(_key(c.s, ".cashOut.root")),
+            fx.readBytes32(_key(c.s, ".cashOut.nullifier")),
+            c.asset,
+            recipient,
+            c.payment
+        );
     }
 
     /// Cash out the payment: the recipient gets it less the fee, the fee stays owed until collected.
     function _cashOut(Case memory c) internal {
         uint256 gotBefore = _balance(c.asset, recipient);
         _unshield(c);
-        assertEq(_balance(c.asset, recipient) - gotBefore, c.payment - c.fee, string.concat(c.s, ": the amount less the fee"));
-        assertEq(VAULT.deposited(c.asset) - c.depositedStart, c.amount - c.payment, string.concat(c.s, ": the change stays"));
+        assertEq(
+            _balance(c.asset, recipient) - gotBefore, c.payment - c.fee, string.concat(c.s, ": the amount less the fee")
+        );
+        assertEq(
+            VAULT.deposited(c.asset) - c.depositedStart, c.amount - c.payment, string.concat(c.s, ": the change stays")
+        );
         assertEq(VAULT.feesOwed(c.asset) - c.feesStart, c.fee, string.concat(c.s, ": fee owed"));
 
         // Fees go to the treasury only, in full.
         uint256 treasuryBefore = _balance(c.asset, TREASURY);
         VAULT.collectFees(c.asset);
-        assertEq(_balance(c.asset, TREASURY) - treasuryBefore, c.fee + c.feesStart, string.concat(c.s, ": fee collected"));
+        assertEq(
+            _balance(c.asset, TREASURY) - treasuryBefore, c.fee + c.feesStart, string.concat(c.s, ": fee collected")
+        );
         assertEq(VAULT.feesOwed(c.asset), 0);
     }
 
@@ -169,8 +191,16 @@ contract RobinhoodAssetsForkTest is Test {
         _cashOut(c);
 
         // Solvency on this asset, and no other asset noticed.
-        assertGe(_balance(c.asset, address(VAULT)), VAULT.deposited(c.asset) + VAULT.feesOwed(c.asset), string.concat(s, ": backed"));
-        assertEq(_balance(c.asset, address(VAULT)) + c.feesStart - c.vaultStart, c.amount - c.payment, string.concat(s, ": only the change is added"));
+        assertGe(
+            _balance(c.asset, address(VAULT)),
+            VAULT.deposited(c.asset) + VAULT.feesOwed(c.asset),
+            string.concat(s, ": backed")
+        );
+        assertEq(
+            _balance(c.asset, address(VAULT)) + c.feesStart - c.vaultStart,
+            c.amount - c.payment,
+            string.concat(s, ": only the change is added")
+        );
         assertEq(VAULT.deposited(USDG), usdgDeposited, "USDG's books untouched");
         assertEq(IERC20F(USDG).balanceOf(address(VAULT)), usdgHeld, "USDG's balance untouched");
 
@@ -271,7 +301,14 @@ contract RobinhoodAssetsForkTest is Test {
         _send(c);
         vm.prank(relayer);
         vm.expectRevert(ShieldPoolCore.InvalidProof.selector);
-        VAULT.unshield(fx.readBytes(_key("PONS", ".cashOut.proof")), fx.readBytes32(_key("PONS", ".cashOut.root")), fx.readBytes32(_key("PONS", ".cashOut.nullifier")), other, recipient, c.payment);
+        VAULT.unshield(
+            fx.readBytes(_key("PONS", ".cashOut.proof")),
+            fx.readBytes32(_key("PONS", ".cashOut.root")),
+            fx.readBytes32(_key("PONS", ".cashOut.nullifier")),
+            other,
+            recipient,
+            c.payment
+        );
         assertEq(IERC20F(other).balanceOf(address(VAULT)), cashcatHeld);
     }
 
@@ -282,7 +319,9 @@ contract RobinhoodAssetsForkTest is Test {
         uint256 amount = fx.readUint(_key(s, ".amount"));
         vm.deal(payer, amount);
         vm.prank(payer);
-        VAULT.shieldBound{value: amount}(address(0), amount, fx.readBytes32(_key(s, ".shield.commitment")), fx.readBytes(_key(s, ".shield.proof")));
+        VAULT.shieldBound{value: amount}(
+            address(0), amount, fx.readBytes32(_key(s, ".shield.commitment")), fx.readBytes(_key(s, ".shield.proof"))
+        );
         vm.prank(OWNER);
         vm.expectRevert(ShieldPoolCore.NothingToSweep.selector);
         VAULT.sweepStrayNative(OWNER);
@@ -290,7 +329,7 @@ contract RobinhoodAssetsForkTest is Test {
         // ETH sent straight to the vault backs no note: only that much can be swept.
         vm.deal(payer, 1 ether);
         vm.prank(payer);
-        (bool ok, ) = address(VAULT).call{value: 1 ether}("");
+        (bool ok,) = address(VAULT).call{value: 1 ether}("");
         assertTrue(ok);
         uint256 before = OWNER.balance;
         vm.prank(OWNER);
@@ -302,9 +341,10 @@ contract RobinhoodAssetsForkTest is Test {
     /// The candidates left off the list, with a limit forced on the fork, so the report has facts on them.
     function _dropped(string memory s) internal {
         address asset = fx.readAddress(_key(s, ".address"));
-        (uint128 per, ) = VAULT.depositLimit(asset);
+        (uint128 per,) = VAULT.depositLimit(asset);
         assertEq(per, 0, "not open on the live vault");
-        bytes memory call_ = abi.encodeCall(ShieldPoolCore.setDepositLimit, (asset, type(uint128).max, type(uint128).max));
+        bytes memory call_ =
+            abi.encodeCall(ShieldPoolCore.setDepositLimit, (asset, type(uint128).max, type(uint128).max));
         vm.prank(OWNER);
         VAULT.queueChange(call_);
         vm.warp(block.timestamp + 3 days + 1);

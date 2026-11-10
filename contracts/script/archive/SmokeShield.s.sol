@@ -40,9 +40,7 @@ contract SmokeShield is Script {
         address me = vm.addr(pk);
 
         // unique commitment each run
-        bytes32 commitment = keccak256(
-            abi.encodePacked("gloam-smoke", me, block.timestamp, amount, pool.nextIndex())
-        );
+        bytes32 commitment = keccak256(abi.encodePacked("gloam-smoke", me, block.timestamp, amount, pool.nextIndex()));
 
         console2.log("pool", poolAddr);
         console2.log("me", me);

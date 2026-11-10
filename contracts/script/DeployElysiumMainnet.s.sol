@@ -87,7 +87,10 @@ contract DeployElysiumMainnet is MainnetDeploy {
             "ELYSIUM_CHAIN_ID is the Elysium testnet: set ELYSIUM_ALLOW_TESTNET=1 for a rehearsal there"
         );
         require(!_isOtherGloamChain(chainId), "ELYSIUM_CHAIN_ID is another Gloam chain, not Elysium");
-        require(chainId == ELYSIUM_MAINNET || chainId == ELYSIUM_TESTNET, "ELYSIUM_CHAIN_ID must be 99901, Elysium mainnet's");
+        require(
+            chainId == ELYSIUM_MAINNET || chainId == ELYSIUM_TESTNET,
+            "ELYSIUM_CHAIN_ID must be 99901, Elysium mainnet's"
+        );
         _deployMainnetGuarded(chainId, true);
     }
 
