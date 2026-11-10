@@ -319,7 +319,7 @@ importers:
         specifier: 0.7.5
         version: 0.7.5
       viem:
-        specifier: ^2.31.7
+        specifier: ^2.55.2
         version: 2.55.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.6.7)
     devDependencies:
       '@types/node':
