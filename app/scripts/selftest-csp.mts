@@ -70,7 +70,7 @@ n++;
 // nothing that would break the app if enforced by mistake, and nothing wide open
 assert.ok(CSP_REPORT_ONLY.includes("'wasm-unsafe-eval'"), "the prover's WebAssembly is allowed");
 assert.ok(!/connect-src[^;]*\s(https:|wss:|\*)(\s|;|$)/.test(CSP_REPORT_ONLY), "connect-src is a list, not every https host");
-assert.ok(!CSP_REPORT_ONLY.includes("report-uri"), "no report endpoint: reports go to the browser console");
+assert.ok(CSP_REPORT_ONLY.includes("report-uri /api/csp-report; report-to csp"), "reports go to /api/csp-report (scripts/selftest-claim-csp.mts)");
 n += 3;
 
 // next.config sends it Report-Only, next to the enforced framing policy

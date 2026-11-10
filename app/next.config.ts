@@ -1,6 +1,13 @@
 import type { NextConfig } from "next";
 import path from "node:path";
-import { CSP_APP_ENFORCED, CSP_REPORT_ONLY, embeddedWalletsBuild } from "./csp.config.mjs";
+import {
+  CLAIM_PAGE_SOURCES,
+  CSP_APP_ENFORCED,
+  CSP_CLAIM_ENFORCED,
+  CSP_REPORT_ONLY,
+  REPORTING_ENDPOINTS,
+  embeddedWalletsBuild,
+} from "./csp.config.mjs";
 
 /**
  * When this package is the Vercel Root Directory (`app`), keep tracing
@@ -17,11 +24,14 @@ const nextConfig: NextConfig = {
     formats: ["image/avif", "image/webp"],
   },
   // Every response gets the basics. Framing is refused everywhere but the pitch
-  // deck (a static page that may be embedded). The enforced CSP only covers
-  // framing, plugins, <base> and form targets. The fuller policy (script and
-  // connect sources, csp.config.mjs) is sent Report-Only first: browsers log what
-  // it would block without blocking anything, so wallet connectors, the
-  // prover's WebAssembly and analytics keep working while it is checked.
+  // deck (a static page that may be embedded). On most pages the enforced CSP
+  // only covers framing, plugins, <base> and form targets. The fuller policy
+  // (script and connect sources, csp.config.mjs) is sent Report-Only first:
+  // browsers report what it would block without blocking anything, so wallet
+  // connectors, the prover's WebAssembly and analytics keep working while it is
+  // checked. Reports go to /api/csp-report (Reporting-Endpoints names it for
+  // report-to). The claim, request and verify pages, and /app with Gloam
+  // wallets on, enforce their own policy (below).
   async headers() {
     return [
       {
@@ -59,8 +69,17 @@ const nextConfig: NextConfig = {
           },
           // production only: dev builds evaluate code for hot reload and would flood the console
           ...(process.env.NODE_ENV === "production" ? [{ key: "Content-Security-Policy-Report-Only", value: CSP_REPORT_ONLY }] : []),
+          ...(process.env.NODE_ENV === "production" ? [{ key: "Reporting-Endpoints", value: REPORTING_ENDPOINTS }] : []),
         ],
       },
+      // The pages that read a claim code, a payment request or a proof from the
+      // address enforce the claim policy (csp.config.mjs CSP_CLAIM_ENFORCED): a
+      // claim code is the payment itself, and any script on the page can read it.
+      // Production builds only, Gloam wallets or not. After the framing policy, so
+      // it replaces it on these pages.
+      ...(process.env.NODE_ENV === "production"
+        ? CLAIM_PAGE_SOURCES.map((source) => ({ source, headers: [{ key: "Content-Security-Policy", value: CSP_CLAIM_ENFORCED }] }))
+        : []),
       // Gloam wallets sign with no prompt: with them on, /app and the partner portal
       // (email sign-in) enforce where scripts, frames, workers and connections may
       // come from (csp.config.mjs). Last, so it replaces the framing-only policy above

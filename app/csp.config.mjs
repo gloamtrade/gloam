@@ -3,25 +3,49 @@ import { readFileSync } from "node:fs";
 /**
  * The Content-Security-Policy Gloam is moving towards. It is sent as
  * Content-Security-Policy-Report-Only (next.config.ts): browsers report what it
- * would block in the console but block nothing, so wallets, WalletConnect, the
- * RPCs, the prover's WebAssembly and analytics keep working while the list is
- * checked against real use. Once the console stays clean it can be enforced.
+ * would block but block nothing, so wallets, WalletConnect, the RPCs, the
+ * prover's WebAssembly and analytics keep working while the list is checked
+ * against real use. Once the reports stay clean it can be enforced.
+ *
+ * Two groups of pages enforce a policy already: /app and the partner portal
+ * with Gloam wallets on (CSP_APP_ENFORCED), and the pages that read a claim
+ * code, a payment request or a proof from the address (CSP_CLAIM_ENFORCED).
+ *
+ * Every policy names a report endpoint (/api/csp-report, through both
+ * report-uri and report-to), so violations reach the server's log instead of
+ * only the visitor's console.
  *
  * connect-src must cover every RPC the app or a wallet connector calls from the
- * browser: scripts/selftest-csp.mts fails if a network or bridge origin chain
- * uses a host that is missing here.
+ * browser: scripts/selftest-csp.mts and scripts/selftest-claim-csp.mts fail if
+ * a network or bridge origin chain uses a host that is missing here.
  */
 
-/** Gloam's own networks and their fee sponsor. */
-const GLOAM_RPCS = [
+/** Where browsers send violation reports (app/src/app/api/csp-report), and the report-to group that names it. */
+export const CSP_REPORT_PATH = "/api/csp-report";
+export const CSP_REPORT_GROUP = "csp";
+/** The Reporting-Endpoints header behind report-to (a path, read against the page's own origin). */
+export const REPORTING_ENDPOINTS = `${CSP_REPORT_GROUP}="${CSP_REPORT_PATH}"`;
+/** report-uri for browsers without the Reporting API (Firefox, Safari); report-to for the rest. */
+const REPORTING = [`report-uri ${CSP_REPORT_PATH}`, `report-to ${CSP_REPORT_GROUP}`];
+
+/**
+ * Every RPC a Gloam network reads from the browser (lib/networks, lib/chain):
+ * each chain's RPC list, mainnet and testnet, hidden mainnets too, and Ethereum
+ * Sepolia's history RPC. Elysium's come from elysiumConnectSources and
+ * elysiumTestnetConnectSources below, while their switches are on.
+ * scripts/selftest-claim-csp.mts loads lib/networks and fails when a network
+ * reads from a host that is missing here, so a new chain cannot quietly break
+ * the claim pages, which enforce this list.
+ */
+const GLOAM_NETWORK_RPCS = [
   "https://rpc.mainnet.chain.robinhood.com",
   "https://rpc.testnet.chain.robinhood.com",
   "https://rpc.tempo.xyz",
   "https://rpc.moderato.tempo.xyz",
-  "https://sponsor.moderato.tempo.xyz",
   "https://base-sepolia-rpc.publicnode.com",
   "https://sepolia.base.org",
   "https://base-rpc.publicnode.com",
+  "https://mainnet.base.org",
   // Ethereum mainnet reads through MEV Blocker, with publicnode behind it
   "https://rpc.mevblocker.io",
   "https://ethereum-rpc.publicnode.com",
@@ -30,6 +54,9 @@ const GLOAM_RPCS = [
   "https://ethereum-sepolia-rpc.publicnode.com",
   "https://sepolia.gateway.tenderly.co",
 ];
+
+/** Gloam's own networks and Tempo testnet's fee sponsor (the app's sends). */
+const GLOAM_RPCS = [...GLOAM_NETWORK_RPCS, "https://sponsor.moderato.tempo.xyz"];
 
 /** Default RPCs of the chains a private bridge order can be paid from (lib/originChains). */
 const ORIGIN_RPCS = [
@@ -139,15 +166,40 @@ export function elysiumTestnetConnectSources(env = process.env) {
   return out;
 }
 
-export const CSP_CONNECT_SOURCES = [
+/**
+ * The origin of every NEXT_PUBLIC_*_RPC_URL set for this build: an RPC an
+ * environment variable points the browser at (NEXT_PUBLIC_ELYSIUM_RPC_URL with
+ * a keyed provider, say), so an override set on Vercel cannot break a page
+ * that enforces connect-src. The origin only: a key in the path never reaches
+ * the header. Values that are not https or wss URLs are left out (the app's own
+ * config check refuses them).
+ */
+export function rpcOverrideSources(env = process.env) {
+  const out = [];
+  for (const [name, value] of Object.entries(env)) {
+    if (!/^NEXT_PUBLIC_[A-Z0-9_]*RPC_URL$/.test(name) || typeof value !== "string" || !value.trim()) continue;
+    try {
+      const u = new URL(value.trim());
+      if (u.protocol === "https:" || u.protocol === "wss:") out.push(u.origin);
+    } catch {
+      // not a URL
+    }
+  }
+  return out.sort();
+}
+
+const unique = (list) => [...new Set(list)];
+
+export const CSP_CONNECT_SOURCES = unique([
   "'self'",
   ...GLOAM_RPCS,
   ...elysiumConnectSources(),
   ...elysiumTestnetConnectSources(),
+  ...rpcOverrideSources(),
   ...ORIGIN_RPCS,
   ...SOLANA_RPCS,
   ...SERVICES,
-];
+]);
 
 const FRAMES = ["'self'", "https://*.walletconnect.org", "https://*.walletconnect.com", "https://*.turnkey.com", "https://wallet.tempo.xyz"];
 
@@ -166,6 +218,7 @@ export const CSP_REPORT_ONLY = [
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
+  ...REPORTING,
 ].join("; ");
 
 /**
@@ -188,7 +241,69 @@ export const CSP_APP_ENFORCED = [
   `connect-src ${CSP_CONNECT_SOURCES.join(" ")}`,
   `frame-src ${FRAMES.join(" ")}`,
   "worker-src 'self' blob:",
+  ...REPORTING,
 ].join("; ");
+
+/**
+ * The pages that read a bearer secret, or something close to one, from their
+ * own address: /c and /claim (a claim code in the fragment: whoever holds it
+ * can take the payment), /r (a payment request) and /verify (a proof). Whatever
+ * runs there can read the fragment, so these pages enforce the tightest policy
+ * they work under, in production builds, with or without Gloam wallets.
+ *
+ * What the pages load (checked in a browser against a production build):
+ * their own scripts, styles, fonts and images, Gloam's API (/api/relay,
+ * /api/funnel, /api/collect) and Vercel Analytics (/_vercel, same origin, after
+ * consent); /verify also reads the vault on every Gloam network over RPC and
+ * checks a proof with snarkjs, which compiles WebAssembly and runs it in
+ * workers made from blob: URLs. No wallet connector, no frame, no other host.
+ * The claim itself (proving, signing) happens in /app, under its own policy.
+ *
+ * connect-src is the Gloam networks' RPCs only (GLOAM_NETWORK_RPCS, Elysium's
+ * while its switches are on, and any NEXT_PUBLIC_*_RPC_URL override), never
+ * the bridge chains, Solana, WalletConnect or Turnkey. /c, /claim and /r read
+ * no RPC today; they keep the list so a check added to the claim page later
+ * (is this payment still unclaimed?) does not break a claim.
+ *
+ * Still open, as on /app: 'unsafe-inline' for scripts. Next's App Router
+ * writes its bootstrap and page data as inline scripts, and they would need a
+ * nonce on every request (dynamic rendering, through a proxy). What the policy
+ * does stop: a script from any other host, a connection to any host not
+ * listed, an image, font or stylesheet from another host (CSS can read an
+ * attribute such as the Claim link's href and send it out as an image
+ * request), framing, plugins, <base> and form posts elsewhere. No policy stops
+ * a script that already runs from sending the tab to another site.
+ */
+export function claimPagesCsp(env = process.env) {
+  const connect = unique([
+    "'self'",
+    ...GLOAM_NETWORK_RPCS,
+    ...elysiumConnectSources(env),
+    ...elysiumTestnetConnectSources(env),
+    ...rpcOverrideSources(env),
+  ]);
+  return [
+    "default-src 'none'",
+    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self'",
+    `connect-src ${connect.join(" ")}`,
+    "worker-src 'self' blob:",
+    "manifest-src 'self'",
+    "frame-src 'none'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "form-action 'self'",
+    ...REPORTING,
+  ].join("; ");
+}
+
+export const CSP_CLAIM_ENFORCED = claimPagesCsp();
+
+/** The pages CSP_CLAIM_ENFORCED covers, each with everything under it (next.config.ts). */
+export const CLAIM_PAGE_SOURCES = ["/c/:path*", "/claim/:path*", "/r/:path*", "/verify/:path*"];
 
 /** Gloam wallets are switched on for this build (the same rule as lib/embeddedWallet). */
 export function embeddedWalletsBuild(env = process.env) {
