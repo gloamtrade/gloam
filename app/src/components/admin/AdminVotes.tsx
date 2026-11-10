@@ -5,7 +5,11 @@ import { formatGloam, percentOf, type Ballot } from "@/lib/vote/core";
 import type { VoteSummary } from "@/lib/vote/results";
 import type { Feedback } from "@/lib/vote/feedback";
 import type { HolderRecord } from "@/lib/vote/holders";
-import { DataTable, Kpi, Panel } from "./AdminDashboard";
+import { StreamCard, StreamIcon } from "./cards";
+import { TickRow } from "./charts";
+import { agoMs } from "./format";
+import { countPoints } from "./series";
+import { CsvLink, DataTable, Notice, Panel, PanelSkeleton, StatStrip } from "./ui";
 
 type Data = {
   backend: string;
@@ -119,20 +123,8 @@ export function VotesPanel() {
     return list.filter((h) => !q || h.address.toLowerCase().includes(q)).sort(by[holderSort]);
   }, [data, query, holderSort]);
 
-  if (err) {
-    return (
-      <p className="rounded-xl bg-danger-soft px-4 py-3 text-[14px] text-danger" role="alert">
-        {err}
-      </p>
-    );
-  }
-  if (!data) {
-    return (
-      <p className="rounded-xl bg-surface px-4 py-3 text-[14px] text-mute" role="status">
-        Loading votes
-      </p>
-    );
-  }
+  if (err && !data) return <Notice tone="danger">{err}</Notice>;
+  if (!data) return <PanelSkeleton label="Loading votes" />;
 
   const one = vote === "all" ? null : data.votes.find((v) => v.summary.id === vote) ?? null;
   const wallets = new Set(data.votes.flatMap((v) => v.ballots.map((b) => b.voter.toLowerCase()))).size;
@@ -140,19 +132,64 @@ export function VotesPanel() {
 
   return (
     <>
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Votes" value={n(data.votes.length)} sub={`${n(data.votes.filter((v) => v.summary.status === "open").length)} open now`} />
-        <Kpi label="Wallets that voted" value={n(wallets)} sub="in any vote" />
-        <Kpi label="Ballots" value={n(data.votes.reduce((s, v) => s + v.ballots.length, 0))} sub={`${n(data.votes.reduce((s, v) => s + v.ballots.filter((b) => b.receivedAt > dayAgo).length, 0))} in the last 24h`} />
-        <Kpi label="Feedback notes" value={n(data.feedback.length)} sub={`${n(data.feedback.filter((f) => f.receivedAt > dayAgo).length)} in the last 24h`} />
-      </section>
+      {err && <Notice tone="danger">{err}. Showing the last answer.</Notice>}
+      <StatStrip
+        items={[
+          { label: "Votes", value: n(data.votes.length), sub: `${n(data.votes.filter((v) => v.summary.status === "open").length)} open now` },
+          { label: "Wallets that voted", value: n(wallets), sub: "in any vote" },
+          {
+            label: "Ballots",
+            value: n(data.votes.reduce((s, v) => s + v.ballots.length, 0)),
+            sub: `${n(data.votes.reduce((s, v) => s + v.ballots.filter((b) => b.receivedAt > dayAgo).length, 0))} in the last 24h`,
+          },
+          { label: "Feedback notes", value: n(data.feedback.length), sub: `${n(data.feedback.filter((f) => f.receivedAt > dayAgo).length)} in the last 24h` },
+        ]}
+      />
+
+      {(() => {
+        const all = data.votes.flatMap((v) => v.ballots);
+        const newest = all.reduce((m, b) => Math.max(m, b.receivedAt), 0);
+        const points = countPoints(
+          all.map((b) => b.receivedAt),
+          30,
+          data.loadedAt,
+          ["ballot", "ballots"]
+        );
+        return (
+          <StreamCard
+            icon={<StreamIcon kind="entry" />}
+            title="Ballots"
+            sub="Signed by wallets on the vote pages"
+            elapsed={newest ? agoMs(newest, data.loadedAt) : "None yet"}
+            tally={[
+              { value: all.length, word: "ballots" },
+              { value: data.votes.filter((v) => v.summary.status === "open").length, word: "open" },
+            ]}
+            chartLabel="Ballots a day"
+            chartUnit={(v) => `${n(v)} a day`}
+            points={points}
+            chartFoot={`30 days · ${n(points.reduce((a, p) => a + p.value, 0))} ballots`}
+            footer={<p className="text-[12px] text-faint">One mark per ballot, by vote, newest on the right</p>}
+          >
+            {data.votes.map((v) => (
+              <TickRow
+                key={v.summary.id}
+                label={v.summary.question}
+                marks={[...v.ballots]
+                  .sort((a, b) => a.receivedAt - b.receivedAt)
+                  .map((b) => ({ tone: "ok", title: `${b.choice}, ${agoMs(b.receivedAt, data.loadedAt)}` }))}
+                right={n(v.ballots.length)}
+                dim={v.summary.status !== "open"}
+              />
+            ))}
+          </StreamCard>
+        );
+      })()}
 
       <Panel
         title="Holders"
         action={
-          <a href="/api/admin/votes?format=csv&kind=holders" className="btn btn-ghost btn-sm">
-            CSV
-          </a>
+<CsvLink href="/api/admin/votes?format=csv&kind=holders">CSV</CsvLink>
         }
       >
         {(() => {
@@ -160,11 +197,19 @@ export function VotesPanel() {
           const eligible = all.filter((h) => h.eligible).length;
           const votedHolders = all.filter((h) => h.voted.length > 0).length;
           return (
-            <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Kpi label="Connected wallets" value={n(all.length)} sub={`${n(all.filter((h) => h.lastSeen > dayAgo).length)} seen in the last 24h`} />
-              <Kpi label="Eligible" value={n(eligible)} sub={`${n(all.filter((h) => h.excluded).length)} team or contract`} />
-              <Kpi label="Voted" value={n(votedHolders)} sub="connected wallets with a ballot" />
-              <Kpi label="Conversion" value={`${all.length ? percentOf(BigInt(votedHolders), BigInt(all.length)) : 0}%`} sub={`connected to voted (${eligible ? percentOf(BigInt(all.filter((h) => h.eligible && h.voted.length > 0).length), BigInt(eligible)) : 0}% of eligible)`} />
+            <div className="mb-5">
+              <StatStrip
+                items={[
+                  { label: "Connected wallets", value: n(all.length), sub: `${n(all.filter((h) => h.lastSeen > dayAgo).length)} seen in the last 24h` },
+                  { label: "Eligible", value: n(eligible), sub: `${n(all.filter((h) => h.excluded).length)} team or contract` },
+                  { label: "Voted", value: n(votedHolders), sub: "connected wallets with a ballot" },
+                  {
+                    label: "Conversion",
+                    value: `${all.length ? percentOf(BigInt(votedHolders), BigInt(all.length)) : 0}%`,
+                    sub: `connected to voted (${eligible ? percentOf(BigInt(all.filter((h) => h.eligible && h.voted.length > 0).length), BigInt(eligible)) : 0}% of eligible)`,
+                  },
+                ]}
+              />
             </div>
           );
         })()}
@@ -208,9 +253,7 @@ export function VotesPanel() {
       <Panel
         title="Tallies"
         action={
-          <a href="/api/admin/votes?download=1" className="btn btn-ghost btn-sm">
-            All data (JSON)
-          </a>
+<CsvLink href="/api/admin/votes?download=1">All data (JSON)</CsvLink>
         }
       >
         <DataTable
@@ -235,9 +278,7 @@ export function VotesPanel() {
       <Panel
         title="Every vote"
         action={
-          <a href={`/api/admin/votes?format=csv&kind=votes${vote === "all" ? "" : `&vote=${encodeURIComponent(vote)}`}`} className="btn btn-ghost btn-sm">
-            CSV
-          </a>
+<CsvLink href={`/api/admin/votes?format=csv&kind=votes${vote === "all" ? "" : `&vote=${encodeURIComponent(vote)}`}`}>CSV</CsvLink>
         }
       >
         <div className="mb-4 flex flex-col gap-3">
@@ -286,9 +327,7 @@ export function VotesPanel() {
       <Panel
         title="Feedback (private)"
         action={
-          <a href="/api/admin/votes?format=csv&kind=feedback" className="btn btn-ghost btn-sm">
-            CSV
-          </a>
+<CsvLink href="/api/admin/votes?format=csv&kind=feedback">CSV</CsvLink>
         }
       >
         <div className="mb-4">

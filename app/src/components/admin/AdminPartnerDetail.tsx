@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import { HowItWorks } from "@/components/ui/HowItWorks";
+import { Select } from "@/components/ui/Select";
 import { PartnerBreakdown, type BreakdownStats } from "@/components/partners/PartnerBreakdown";
 import type { BackfillResult } from "@/lib/partnerBackfill";
 
@@ -344,20 +345,26 @@ function Addresses({
         aria-label="Addresses to add"
       />
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px] text-mute">
-        <label className="inline-flex items-center gap-1.5">
+        <span className="inline-flex items-center gap-1.5">
           Lines with no chain are on
-          <select className="gl-input h-9 w-auto py-0 text-[13px]" value={chain} onChange={(e) => setChain(e.target.value)}>
-            {chains.map((c) => (
-              <option key={c.chainId} value={c.chainId}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <select className="gl-input h-9 w-auto py-0 text-[13px]" value={mode} onChange={(e) => setMode(e.target.value as "add" | "replace")} aria-label="Add or replace">
-          <option value="add">Add to the list</option>
-          <option value="replace">Replace the list</option>
-        </select>
+          <Select
+            label="Chain for lines with no chain"
+            className="h-9 w-auto min-w-[150px] text-[13px]"
+            value={chain}
+            onChange={setChain}
+            options={chains.map((c) => ({ value: String(c.chainId), label: c.name }))}
+          />
+        </span>
+        <Select
+          label="Add or replace"
+          className="h-9 w-auto min-w-[160px] text-[13px]"
+          value={mode}
+          onChange={(v) => setMode(v)}
+          options={[
+            { value: "add" as const, label: "Add to the list" },
+            { value: "replace" as const, label: "Replace the list" },
+          ]}
+        />
         <label className="btn btn-ghost btn-sm cursor-pointer">
           Upload CSV
           <input type="file" accept=".csv,.txt,text/csv,text/plain" className="sr-only" onChange={(e) => void onFile(e, setText)} />

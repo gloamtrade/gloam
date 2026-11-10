@@ -1,13 +1,12 @@
 "use client";
 
 /**
- * The admin overview's headline pieces: money moved in and out (the public
- * edges of the vaults), the daily in/out chart, one card per chain and the
- * activity feed. Only what the chain already shows publicly is counted:
+ * The overview's detail pieces: the daily in/out chart, one card per chain and
+ * the activity feed. Only what the chain already shows publicly is counted:
  * deposits and cash-outs carry amounts, private payments are counted, never
  * summed, because their amounts are hidden by design.
  */
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState } from "react";
 import { shortAddress } from "@/lib/chain";
 import { getNetwork, isNetworkKey, type GloamNetwork } from "@/lib/networks";
 import { ELYSIUM_LOGO } from "@/lib/chainLogo";
@@ -72,105 +71,6 @@ function Key({ series }: { series: "in" | "out" }) {
       className="inline-block h-2.5 w-2.5 shrink-0 rounded-[3px]"
       style={{ background: series === "in" ? "var(--chart-in)" : "var(--chart-out)" }}
     />
-  );
-}
-
-export type Moved = {
-  inUsd: number;
-  outUsd: number;
-  d1: number;
-  d7: number;
-  deposits: number;
-  cashouts: number;
-};
-
-/** The one hero figure: money moved in and out, with the honest note under it. */
-export function MovedHero({
-  moved,
-  window,
-  testnet,
-  footer,
-}: {
-  moved: Moved | null;
-  /** "since launch" or "all time". */
-  window: string;
-  testnet: boolean;
-  footer?: ReactNode;
-}) {
-  const total = moved ? moved.inUsd + moved.outUsd : null;
-  return (
-    <section className="gl-card relative overflow-hidden p-6 sm:p-8">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -right-28 -top-28 h-72 w-72 rounded-full opacity-60 blur-3xl"
-        style={{ background: "radial-gradient(closest-side, var(--sealed-soft), transparent)" }}
-      />
-      <div className="relative grid gap-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-        <div className="min-w-0">
-          <p className="t-label">
-            Money moved in and out, {window}
-            {testnet ? ", testnet" : ""}
-          </p>
-          {total == null ? (
-            <span
-              role="status"
-              aria-label="Reading the chains"
-              className="mt-4 block h-[44px] w-[min(100%,320px)] rounded-xl bg-surface-2 motion-safe:animate-pulse sm:h-[64px]"
-            />
-          ) : (
-            <p className="mt-4 text-[44px] font-light leading-none tracking-[-0.035em] text-foreground sm:text-[64px]">
-              {money(total)}
-            </p>
-          )}
-          {moved && (
-            <div className="mt-6 flex flex-wrap gap-x-7 gap-y-2.5 text-[14px]">
-              <span className="inline-flex items-center gap-2 text-mute">
-                <Key series="in" />
-                In <span className="tnum font-medium text-foreground">{money(moved.inUsd)}</span>
-                <span className="text-faint">{count(moved.deposits)} deposits</span>
-              </span>
-              <span className="inline-flex items-center gap-2 text-mute">
-                <Key series="out" />
-                Out <span className="tnum font-medium text-foreground">{money(moved.outUsd)}</span>
-                <span className="text-faint">{count(moved.cashouts)} cash-outs</span>
-              </span>
-            </div>
-          )}
-          <p className="mt-5 max-w-[62ch] text-[13px] leading-relaxed text-mute">
-            Deposits and cash-outs are public on chain, so their amounts are added up here. Private payment amounts stay
-            hidden, and a private swap stays inside the vault, so neither is in this number.
-          </p>
-        </div>
-        {moved && (
-          <dl className="grid grid-cols-2 gap-x-10 gap-y-4 border-t border-line pt-6 lg:min-w-[300px] lg:border-l lg:border-t-0 lg:pl-10 lg:pt-0">
-            <div>
-              <dt className="t-label">Last 24 hours</dt>
-              <dd className="tnum mt-2 text-[22px] font-light tracking-[-0.02em] text-foreground">{money(moved.d1)}</dd>
-            </div>
-            <div>
-              <dt className="t-label">Last 7 days</dt>
-              <dd className="tnum mt-2 text-[22px] font-light tracking-[-0.02em] text-foreground">{money(moved.d7)}</dd>
-            </div>
-          </dl>
-        )}
-      </div>
-      {footer && <div className="relative mt-6 border-t border-line pt-4 text-[13px] leading-relaxed text-mute">{footer}</div>}
-    </section>
-  );
-}
-
-/** A figure under the hero: label, value, one line of context. */
-export function Stat({ label, value, sub }: { label: string; value: string | null; sub?: string }) {
-  return (
-    <div className="gl-card min-w-0 px-5 py-5">
-      <p className="t-label text-balance">{label}</p>
-      {value == null ? (
-        <span aria-label="Reading" role="status" className="mt-3 block h-[26px] w-24 rounded-lg bg-surface-2 motion-safe:animate-pulse sm:h-[30px]" />
-      ) : (
-        <p className="mt-3 truncate text-[26px] font-light leading-none tracking-[-0.025em] text-foreground sm:text-[30px]">{value}</p>
-      )}
-      {sub && <p className="mt-2.5 line-clamp-2 text-[12.5px] leading-snug text-mute">{sub}</p>}
-    </div>
   );
 }
 
@@ -446,11 +346,8 @@ const FEED_KIND: Record<RecentRow["kind"], { title: string; icon: "in" | "out" |
 
 function FeedIcon({ kind }: { kind: "in" | "out" | "lock" }) {
   return (
-    <span
-      aria-hidden
-      className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${kind === "lock" ? "bg-sealed-soft text-sealed" : "bg-surface text-soft"}`}
-    >
-      <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+    <span aria-hidden className={`grid h-9 w-6 shrink-0 place-items-center ${kind === "lock" ? "text-sealed" : "text-mute"}`}>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         {kind === "lock" ? (
           <>
             <rect x="3.5" y="7" width="9" height="6.5" rx="1.6" stroke="currentColor" strokeWidth="1.5" />
