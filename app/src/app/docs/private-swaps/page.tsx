@@ -490,8 +490,10 @@ export default function DocsPrivateSwapsPage() {
       <h2 id="sealed-trade">The old sealed trade</h2>
       <p>
         Private swaps replace the first private trade design, the sealed swap.
-        That one is retired and stays off. See{" "}
-        <Link href="/docs/sealed-trade">sealed trade (retired)</Link>.
+        It tried to keep the size of a trade private too, but no tokens moved,
+        so the pool could end up owing an asset it did not hold (audit H1). It
+        is retired and stays off: the testnet pools have no sealed swap
+        verifier set, and the mainnet vaults have no sealed swap code at all.
       </p>
 
       <h2 id="try">Try it</h2>

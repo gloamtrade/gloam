@@ -73,6 +73,10 @@ const nextConfig: NextConfig = {
         : []),
     ];
   },
+  // The sealed trade is retired; its page now lives as a section of Private swaps.
+  async redirects() {
+    return [{ source: "/docs/sealed-trade", destination: "/docs/private-swaps#sealed-trade", permanent: true }];
+  },
   // The pitch deck is one static page in public/pitch.
   async rewrites() {
     return [

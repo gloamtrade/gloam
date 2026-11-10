@@ -159,7 +159,7 @@ export default function DocsOverviewPage() {
       <ul>
         <li>
           Private swaps on the testnets (private swaps, stock tokens
-          included, are on mainnet). The old <Link href="/docs/sealed-trade">sealed trade</Link> is
+          included, are on mainnet). The old <Link href="/docs/private-swaps#sealed-trade">sealed trade</Link> is
           retired
         </li>
         <li>

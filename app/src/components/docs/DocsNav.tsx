@@ -51,7 +51,6 @@ export const DOCS_NAV: DocNavGroup[] = [
       { href: "/docs/threat-model", label: "Threat model" },
       { href: "/docs/compare", label: "How Gloam compares" },
       { href: "/docs/proofs", label: "Proofs" },
-      { href: "/docs/sealed-trade", label: "Sealed trade (retired)" },
       { href: "/docs/chain", label: "Networks" },
       { href: "/docs/data", label: "Prices & oracles" },
     ],
@@ -87,7 +86,7 @@ export const DOCS_TABS: DocsTab[] = [
   {
     label: "Privacy",
     href: "/docs/privacy-model",
-    match: ["/docs/privacy-model", "/docs/threat-model", "/docs/compare", "/docs/encryption", "/docs/proofs", "/docs/sealed-trade"],
+    match: ["/docs/privacy-model", "/docs/threat-model", "/docs/compare", "/docs/encryption", "/docs/proofs"],
   },
   { label: "Networks", href: "/docs/chain", match: ["/docs/chain", "/docs/data"] },
   {

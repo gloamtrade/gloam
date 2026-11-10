@@ -246,7 +246,7 @@ const PAGE_META: Record<string, PageMeta> = {
   },
   "/docs/private-swaps": {
     description: "Swap straight from your private balance on mainnet. Who swapped stays private; the amounts are public.",
-    keywords: ["swap", "swaps", "private swap", "trade", "exchange", "dex", "uniswap", "usdg", "gloam", "pathusd", "usdc.e", "usdt0", "ousd", "refund", "buffer", "router", "escrow", "max"],
+    keywords: ["swap", "swaps", "private swap", "trade", "exchange", "dex", "uniswap", "usdg", "gloam", "pathusd", "usdc.e", "usdt0", "ousd", "refund", "buffer", "router", "escrow", "max", "sealed trade", "sealed swap", "retired"],
     headings: [
       "How a swap works",
       "What you can swap",
@@ -308,19 +308,6 @@ const PAGE_META: Record<string, PageMeta> = {
       "What about trading?",
       "The short version",
       "Where Gloam is behind",
-    ],
-  },
-  "/docs/sealed-trade": {
-    description: "The first private trade design, the sealed swap, is retired and stays off. Private swaps replaced it on mainnet.",
-    keywords: ["sealed", "sealed swap", "sealedswap", "private trade", "retired", "stocks", "stock tokens", "switched off", "h1"],
-    headings: [
-      "What replaced it",
-      "Why it was retired",
-      "Stock tokens today",
-      "How the sealed trade worked",
-      "Vault trade adapter (testnet)",
-      "What we will not do",
-      "Repo pointers",
     ],
   },
   "/docs/chain": {

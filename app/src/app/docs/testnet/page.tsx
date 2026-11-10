@@ -416,7 +416,7 @@ export default function DocsTestnetPage() {
           <strong>Private swaps</strong>, mainnet only. The testnets have no
           swap router, so there is no Swap tab here. Stock tokens can be held
           and sent privately. The old{" "}
-          <Link href="/docs/sealed-trade">sealed trade</Link> is retired.
+          <Link href="/docs/private-swaps#sealed-trade">sealed trade</Link> is retired.
         </li>
         <li>
           <strong>Wallet</strong>, public swaps / transfers from the open

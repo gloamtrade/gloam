@@ -57,7 +57,6 @@ const PAGES: { path: string; priority: number }[] = [
   { path: "/docs/sdk", priority: 0.6 },
   { path: "/docs/sdk/reference", priority: 0.5 },
   { path: "/docs/sdk/disclosure", priority: 0.5 },
-  { path: "/docs/sealed-trade", priority: 0.3 },
   { path: "/brand", priority: 0.3 },
   { path: "/privacy", priority: 0.2 },
   { path: "/terms", priority: 0.2 },
