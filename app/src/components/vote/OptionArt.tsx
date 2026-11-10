@@ -3,11 +3,6 @@
 import { TokenLogo } from "@/components/app/TokenLogo";
 import { OPTION_ART, OptionIcon } from "@/lib/vote/optionArt";
 
-/** Whether a vote has marks for its answers (lib/vote/optionArt). */
-export function hasArt(voteId: string): boolean {
-  return Boolean(OPTION_ART[voteId]);
-}
-
 /** The marks for one answer: a small overlapping cluster, network badges, or a line icon. */
 export function OptionArt({ voteId, index, size = 30 }: { voteId: string; index: number; size?: number }) {
   const art = OPTION_ART[voteId]?.[index];

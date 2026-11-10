@@ -47,16 +47,6 @@ export const robinhoodTestnet = defineChain({
 export const PRODUCT_CHAIN = robinhoodTestnet;
 export const PRODUCT_CHAIN_ID = robinhoodTestnet.id;
 
-/** Future canonical host; today the product lives at gloam.trade/app */
-export const PRODUCT_HOST_FUTURE = "testnet.gloam.trade";
-export const PRODUCT_PATH = "/app";
-
-export const EXPLORER_TX = (hash: string) =>
-  `${robinhoodTestnet.blockExplorers.default.url}/tx/${hash}`;
-
-export const EXPLORER_ADDRESS = (addr: string) =>
-  `${robinhoodTestnet.blockExplorers.default.url}/address/${addr}`;
-
 export function shortAddress(addr: string, chars = 4) {
   if (!addr || addr.length < 10) return addr;
   return `${addr.slice(0, 2 + chars)}…${addr.slice(-chars)}`;
@@ -90,15 +80,6 @@ export function formatEth(wei: bigint, digits = 4) {
     minimumFractionDigits: 0,
   });
 }
-
-/** EIP-3085 params for wallets that need the chain added first */
-export const RH_TESTNET_WALLET_PARAMS = {
-  chainId: `0x${PRODUCT_CHAIN_ID.toString(16)}`,
-  chainName: robinhoodTestnet.name,
-  nativeCurrency: robinhoodTestnet.nativeCurrency,
-  rpcUrls: [...robinhoodTestnet.rpcUrls.default.http],
-  blockExplorerUrls: [robinhoodTestnet.blockExplorers.default.url],
-} as const;
 
 /** EIP-3085 params for any viem chain, so a wallet can add + switch to it. */
 export function walletParamsForChain(chain: Chain) {

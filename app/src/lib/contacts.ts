@@ -54,7 +54,3 @@ export function upsertContact(label: string, tag: string): GloamContact {
   saveContacts([row, ...list]);
   return row;
 }
-
-export function removeContact(id: string) {
-  saveContacts(loadContacts().filter((c) => c.id !== id));
-}

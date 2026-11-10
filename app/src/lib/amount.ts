@@ -22,9 +22,3 @@ export function safeParseUnits(raw: string, decimals = 18): bigint | null {
     return null;
   }
 }
-
-export function finiteNumber(raw: string): number | null {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return n;
-}

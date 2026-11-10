@@ -398,9 +398,3 @@ export function readPaymentRequest(
 export function isWalletRequest(r: Pick<PaymentRequest, "toKind"> | null | undefined): boolean {
   return r?.toKind === "address" || r?.toKind === "ens";
 }
-
-/** "1,250 USDG", "USDG", or "" when the request names neither. */
-export function requestAmountLabel(r: Pick<PaymentRequest, "amount" | "asset">): string {
-  if (r.amount) return `${formatRequestAmount(r.amount)}${r.asset ? ` ${r.asset.symbol}` : ""}`;
-  return r.asset?.symbol ?? "";
-}
