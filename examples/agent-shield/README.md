@@ -69,7 +69,7 @@ Get test ETH from the [Robinhood Chain faucet](https://faucet.testnet.chain.robi
 | Variable | What it does |
 | --- | --- |
 | `GLOAM_AGENT_PRIVATE_KEY` | The agent's key (required). |
-| `GLOAM_NETWORK` | `robinhood-mainnet`, `tempo-mainnet`, `base-mainnet`, `ethereum-mainnet`, `robinhood`, `tempo` or `base` (Base Sepolia). Default `robinhood` (testnet). |
+| `GLOAM_NETWORK` | `robinhood-mainnet`, `tempo-mainnet`, `base-mainnet`, `ethereum-mainnet`, `elysium-mainnet` (USDC, gas in HYPE), `robinhood`, `tempo` or `base` (Base Sepolia). Default `robinhood` (testnet). |
 | `GLOAM_ASSET` | A symbol the pool lists. Default: the first stablecoin (test ETH on Robinhood Chain testnet). |
 | `GLOAM_RPC` | Your own RPC URL. Default: the network's public RPC. |
 | `GLOAM_CIRCUITS_CACHE` | Where downloaded circuit files go. Default `~/.cache/gloam/circuits`. |

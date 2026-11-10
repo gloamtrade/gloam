@@ -77,7 +77,7 @@ Get test ETH from the [Robinhood Chain faucet](https://faucet.testnet.chain.robi
 | Variable | What it does |
 | --- | --- |
 | `GLOAM_PAY_KEY` | The key that funds the buyer and signs the seller's sweep (required). |
-| `GLOAM_NETWORK` | `robinhood-mainnet`, `tempo-mainnet`, `base-mainnet`, `ethereum-mainnet`, `robinhood`, `tempo` or `base` (Base Sepolia). Default `robinhood` (testnet). |
+| `GLOAM_NETWORK` | `robinhood-mainnet`, `tempo-mainnet`, `base-mainnet`, `ethereum-mainnet`, `elysium-mainnet` (USDC, gas in HYPE), `robinhood`, `tempo` or `base` (Base Sepolia). Default `robinhood` (testnet). |
 | `GLOAM_ASSET` | A symbol or address the pool lists. Default: the first stablecoin (test ETH on Robinhood Chain testnet). |
 | `GLOAM_RPC` | Your own RPC URL. Default: the network's public RPC. |
 | `GLOAM_RELAY_URL` | Sweep through the Gloam relay instead of the seller's wallet. |

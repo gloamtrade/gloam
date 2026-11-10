@@ -60,6 +60,7 @@ import {
   gloamNetworks,
   networkName,
   NATIVE_ASSET,
+  ELYSIUM_LOG_RANGE_DEFAULT,
   type GloamAsset,
   type GloamNetwork,
   type GloamNetworkKey,
@@ -85,9 +86,11 @@ const shieldBoundAbi = [
 // ── network ──────────────────────────────────────────────────────────────────
 
 // Base ("base-mainnet", and "base" for Base Sepolia) and Ethereum ("ethereum-mainnet") work once the SDK has their pools;
-// Elysium ("elysium-mainnet", USDC, gas in HYPE) is live too, but not in this list yet.
-const NETWORK_KEYS: GloamNetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "robinhood", "tempo", "base"];
+// Elysium ("elysium-mainnet") takes USDC, with gas in HYPE.
+const NETWORK_KEYS: GloamNetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "robinhood", "tempo", "base"];
 const isNative = (a: GloamAsset) => a.address.toLowerCase() === NATIVE_ASSET.toLowerCase();
+/** Blocks per getLogs call when reading the pool's tree: Elysium's 100 ms blocks take a wider range than the default. */
+const logRange = (net: GloamNetwork) => (net.family === "elysium" ? BigInt(ELYSIUM_LOG_RANGE_DEFAULT) : undefined);
 
 /** The network from GLOAM_NETWORK; Robinhood Chain testnet when unset. */
 function pickNetwork(fallback: GloamNetworkKey = "robinhood"): GloamNetwork {
@@ -103,7 +106,9 @@ function pickNetwork(fallback: GloamNetworkKey = "robinhood"): GloamNetwork {
   if (net.testnet) {
     console.log(`${networkName(net.chainId)}. Set GLOAM_NETWORK=${net.family}-mainnet to use mainnet.`);
   } else {
-    console.log(`${net.label} mainnet. Deposit limit: at most 50,000 per stablecoin deposit.`);
+    const first = net.assets[0];
+    const cap = first?.depositLimit ? Number(formatUnits(first.depositLimit.perDeposit, first.decimals)).toLocaleString("en-US") : null;
+    console.log(`${net.label} mainnet.${cap ? ` Deposit limit: at most ${cap} per stablecoin deposit.` : ""}`);
   }
   return net;
 }
@@ -196,11 +201,11 @@ async function main() {
   const fund = parseUnits(isNative(asset) ? "0.0005" : "1", asset.decimals);
   // Precheck funding so an underfunded wallet fails clearly. A native shield
   // attaches its amount as msg.value; a token shield pulls via transferFrom
-  // after approve. On Robinhood Chain and Base the wallet also needs ETH for gas; on
-  // Tempo, gas is paid in a stablecoin.
+  // after approve. On Robinhood Chain, Base and Ethereum the wallet also needs ETH for gas,
+  // on Elysium HYPE; on Tempo, gas is paid in a stablecoin.
   if (net.family !== "tempo") {
     const eth = await pub.getBalance({ address: account.address });
-    if (eth === 0n) throw new Error(`${account.address} has no ETH for gas on ${networkName(net.chainId)}.`);
+    if (eth === 0n) throw new Error(`${account.address} has no ${net.chain.nativeCurrency.symbol} for gas on ${networkName(net.chainId)}.`);
     const needed = fund + parseUnits("0.0004", 18);
     if (isNative(asset) && eth < needed) {
       throw new Error(`${account.address} has ${formatUnits(eth, 18)} ETH but needs about ${formatUnits(needed, 18)} (the deposit plus gas).`);
@@ -259,7 +264,7 @@ async function main() {
   }
 
   // ── Buyer: sync the tree and build the private x402 payment ────────────────
-  const synced = await syncTree(pub, { pool: net.pool, fromBlock: net.deployBlock });
+  const synced = await syncTree(pub, { pool: net.pool, fromBlock: net.deployBlock, chunkSize: logRange(net) });
   const path = await synced.pathForCommitment(shield.note.commitment);
   if (!path) throw new Error("Source note not in the tree yet. Retry in a moment.");
 
@@ -300,7 +305,7 @@ async function main() {
     payload: presented,
     receiveKey: seller,
     prove: transferProver,
-    chain: sweepChainFromClient(pub, { pool: net.pool, fromBlock: net.deployBlock }),
+    chain: sweepChainFromClient(pub, { pool: net.pool, fromBlock: net.deployBlock, chunkSize: logRange(net) }),
     submit: relayUrl
       ? relaySubmitter({ url: relayUrl })
       : (intent) =>
