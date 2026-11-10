@@ -18,7 +18,6 @@
     "@turnkey/viem": "^0.14.32",
     "@vercel/analytics": "^2.0.1",
     "accounts": "^0.19.1",
-    "circomlibjs": "0.1.7",
     "framer-motion": "^12.42.2",
     "next": "16.4.3",
     "qrcode": "^1.5.4",
@@ -39,5 +38,5 @@
     "tailwindcss": "^4",
     "typescript": "^5"
   },
-  "description": "Gloam reference app: private execution on Robinhood Chain (Next.js). Marketing site + testnet vault + docs."
+  "description": "Gloam web app (Next.js): the site, the docs and the app for private payments, mainnet and testnet."
 }
