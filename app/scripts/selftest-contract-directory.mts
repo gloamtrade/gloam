@@ -43,6 +43,9 @@ if (CONFIGURED) {
 const nets = await import("../src/lib/networks");
 const dir = await import("../src/lib/contractDirectory");
 const { VAULT_SWAP_ROUTERS, swapV3Live } = await import("../src/lib/vaultSwap");
+/** Elysium mainnet is listed, after Ethereum, while NEXT_PUBLIC_ELYSIUM_ENABLED is on (as production builds it). */
+const { ELYSIUM_FLAG } = await import("../src/lib/elysium");
+const ELYSIUM_ROW = ELYSIUM_FLAG ? 1 : 0;
 
 let checks = 0;
 function check(name: string, fn: () => void) {
@@ -94,11 +97,11 @@ const byKey = Object.fromEntries(entries.map((e) => [e.key, e]));
 check("every network is listed once, mainnets first in Gloam's order", () => {
   assert.deepEqual(
     entries.map((e) => e.key),
-    ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "robinhood", "tempo", "base", "ethereum"]
+    ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", ...(ELYSIUM_ROW ? ["elysium-mainnet"] : []), "robinhood", "tempo", "base", "ethereum"]
   );
   assert.deepEqual(
     entries.map((e) => e.kind),
-    ["mainnet", "mainnet", "mainnet", "mainnet", "testnet", "testnet", "testnet", "testnet"]
+    [...Array<string>(4 + ELYSIUM_ROW).fill("mainnet"), "testnet", "testnet", "testnet", "testnet"]
   );
   assert.deepEqual(
     entries.map((e) => e.name),
@@ -107,6 +110,7 @@ check("every network is listed once, mainnets first in Gloam's order", () => {
       "Tempo",
       "Base",
       "Ethereum",
+      ...(ELYSIUM_ROW ? ["Elysium"] : []),
       "Robinhood Chain testnet",
       "Tempo Moderato testnet",
       "Base Sepolia testnet",
@@ -158,7 +162,8 @@ check("owner, treasury and deployer on the mainnet-pool vaults only; the relayer
   for (const e of entries.filter((x) => x.live)) {
     const roles = e.rows.map((r) => r.role);
     const payments = e.network.paymentsPool;
-    assert.equal(roles.includes("owner"), payments, `${e.key} owner`);
+    // Elysium's vault was born guarded: its owner is the VaultOwnerGuard from the live read, never the owner wallet row
+    assert.equal(roles.includes("owner"), payments && e.network.family !== "elysium", `${e.key} owner`);
     assert.equal(roles.includes("fee_recipient"), payments, `${e.key} treasury`);
     assert.equal(roles.includes("deployer"), payments, `${e.key} deployer`);
     assert.ok(roles.includes("relayer"), `${e.key} relayer`);

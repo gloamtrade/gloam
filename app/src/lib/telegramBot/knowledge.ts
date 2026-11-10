@@ -12,6 +12,7 @@
 
 import {
   MAINNET_CHAINS,
+  MAINNET_LAUNCH_LABEL,
   baseSepoliaPool,
   ethereumSepoliaPool,
   isMainnetLive,
@@ -381,16 +382,46 @@ function elysiumTestnetFacts(): string | null {
   return `- Elysium testnet (chain ID ${t.chainId}): a Gloam testnet like Base Sepolia, on the mainnet vault and its final keys, with test USDC only. Gas is HYPE from Elysium's testnet. In the network selector it shows as Elysium, with Testnet beside it. Add it by hand: RPC ${t.rpcUrl}, chain ID ${t.chainId}, currency HYPE, explorer ${t.explorerUrl}. Gloam has no partnership with Kinetiq or Hyperliquid; never say or suggest one.`;
 }
 
+/** The day Robinhood Chain and Tempo went live, as MAINNET_CHAINS writes it: "21 October 2026". */
+const LAUNCH_DAY = MAINNET_CHAINS.find((c) => c.chainId === 4663)!.liveSince;
+
 /** The mainnets that joined after the 21 October launch, with a pool in: "Base", "Base and Ethereum". */
 export function laterMainnets(): string[] {
   return [mainnetPool(8453) ? "Base" : null, mainnetPool(1) ? "Ethereum" : null, ELYSIUM ? "Elysium" : null].filter((n): n is string => n !== null);
 }
 
-/** The day the later mainnets went live ("26 October 2026"), or null when none is in or they joined on different days. */
-export function laterMainnetsSince(): string | null {
-  const later = laterMainnets();
-  const days = [...new Set(MAINNET_CHAINS.filter((c) => later.includes(c.name)).map((c) => c.liveSince))];
-  return days.length === 1 ? days[0]! : null;
+/** Clauses as a list, the way liveMainnetsSummary writes one: "A", "A, and B", "A, B, and C". */
+function clauseList(parts: string[]): string {
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}` : (parts[0] ?? "");
+}
+
+/**
+ * Each live mainnet with the day it went live (lib/mainnet.ts liveMainnetsByDay),
+ * for Glim's mainnet rule: "on Robinhood Chain and Tempo since Wednesday 21
+ * October, 13:00 UTC, and on Base and Ethereum since 26 October", with Elysium
+ * on its own day after them while it is on. Never one day for chains that went
+ * live on different days.
+ */
+export function liveMainnetsSinceRule(): string {
+  const days = liveMainnetsByDay();
+  return clauseList(
+    (days.length ? days : [{ names: launchNames(), since: LAUNCH_DAY }]).map(
+      (d) => `on ${d.names} since ${d.since === LAUNCH_DAY ? MAINNET_LAUNCH_LABEL : d.since.replace(/ \d{4}$/, "")}`,
+    ),
+  );
+}
+
+/**
+ * The mainnets that joined after the 21 October launch, each on its own day:
+ * "Base and Ethereum mainnet joined after that, on 26 October 2026, and Elysium
+ * mainnet on 9 November 2026 (see BASE, ETHEREUM and ELYSIUM)". `noun` follows
+ * each group of names (" mainnet" or nothing). Null when none is in.
+ */
+function laterMainnetsJoined(noun: string): string | null {
+  const days = liveMainnetsByDay().filter((d) => d.since !== LAUNCH_DAY);
+  if (!days.length) return null;
+  const see = joinNames(laterMainnets().map((n) => n.toUpperCase()));
+  return `${clauseList(days.map((d, i) => `${d.names}${noun} ${i === 0 ? "joined after that, " : ""}on ${d.since}`))} (see ${see})`;
 }
 
 /** "four mainnets: Robinhood Chain and Tempo since 21 October 2026, and Base and Ethereum since 26 October 2026" */
@@ -422,11 +453,8 @@ function ethereumSepoliaFacts(): string | null {
 function mainnetLiveFacts(): string {
   const rh = mainnetPool(4663) !== null;
   const tempo = mainnetPool(4217) !== null;
-  const later = laterMainnets();
-  const laterSince = laterMainnetsSince();
-  const joined = later.length
-    ? ` ${later.join(" and ")} mainnet joined after that${laterSince ? `, on ${laterSince}` : ""} (see ${later.map((n) => n.toUpperCase()).join(" and ")}).`
-    : "";
+  const later = laterMainnetsJoined(" mainnet");
+  const joined = later ? ` ${later}.` : "";
   const usdc = [mainnetPool(8453) ? "Base" : null, mainnetPool(1) ? "Ethereum" : null].filter((n): n is string => n !== null);
   const lines = [
     "MAINNET IS LIVE (this overrides any line below that says the app is testnet only, that mainnet is coming, or that names fewer mainnets)",
@@ -527,15 +555,14 @@ function mainnetLiveFacts(): string {
 function liveSwaps(): [string, string][] {
   const names = liveMainnetNames();
   const launch = launchNames();
-  const later = laterMainnets();
-  const laterSince = laterMainnetsSince();
+  const later = laterMainnetsJoined("");
   const rh = mainnetPool(4663) !== null;
   const usdc = [mainnetPool(8453) ? "Base" : null, mainnetPool(1) ? "Ethereum" : null].filter((n): n is string => n !== null);
   const mainnetIds = MAINNET_CHAINS.filter((c) => mainnetChainPool(c.chainId)).map((c) => `${c.name} ${c.chainId}`);
   return [
     [
       "- The app is on testnet for now, with development proving keys. Mainnet is coming on both Tempo and Robinhood Chain. The trusted-setup ceremony for mainnet is done (13 contributors). Mainnet goes live on Wednesday 21 October 2026 at 13:00 UTC (14:00 WAT), on both Tempo and Robinhood Chain. The live countdown is at gloam.trade/mainnet: when someone asks when mainnet is, give the time in UTC and send them there. That is the only date and time you may give. Never give any other, and never say mainnet is live until the team announces it; until then the app is testnet. Launch news comes in Announcements and on X @gloamtrade.",
-      `- Gloam is live on ${liveMainnetsSummary()}, with the trusted setup's final keys (13 contributors). ${launch} went live first, on Wednesday 21 October 2026 at 13:00 UTC (14:00 WAT)${later.length ? `; ${later.join(" and ")} joined after that${laterSince ? `, on ${laterSince}` : ""} (see ${later.map((n) => n.toUpperCase()).join(" and ")})` : ""}. The Robinhood Chain and Tempo testnets stay open with development proving keys. Never give or guess any other date. News comes in Announcements and on X @gloamtrade.`,
+      `- Gloam is live on ${liveMainnetsSummary()}, with the trusted setup's final keys (13 contributors). ${launch} went live first, on Wednesday 21 October 2026 at 13:00 UTC (14:00 WAT)${later ? `; ${later}` : ""}. The Robinhood Chain and Tempo testnets stay open with development proving keys. Never give or guess any other date. News comes in Announcements and on X @gloamtrade.`,
     ],
     [
       "The app itself is still on testnet; the token is not a testnet token.",

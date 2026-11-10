@@ -45,6 +45,8 @@ const SEPOLIA_POOL = "0x39e28cde55cab798874746ac52cb4b5cc99a0194";
 const SEPOLIA_MEMO = "0x01B3172d9900Cb26d57E986429b9b23854c74598";
 
 const mainnet = await import("../src/lib/mainnet");
+/** Elysium mainnet, while NEXT_PUBLIC_ELYSIUM_ENABLED is on (as production builds it): named last, after Base and Ethereum. */
+const { ELYSIUM } = await import("../src/lib/elysium");
 /** Base mainnet's real vault, once MAINNET_POOLS[8453] is filled in after the deploy. */
 const LIVE = mainnet.mainnetPool(8453);
 const CONFIGURED = process.env.GLOAM_SELFTEST_BASE === "configured" || LIVE !== null;
@@ -313,7 +315,7 @@ if (CONFIGURED) {
     assert.equal(nets.getNetwork("base-mainnet").pool, MAINNET_POOL);
     assert.equal(nets.getNetwork("base-mainnet").deployBlock, MAINNET_BLOCK);
     assert.equal(nets.networkName(nets.getNetwork("base-mainnet")), "Base");
-    assert.match(mainnet.liveMainnetNames(), /^Robinhood Chain, Tempo(, Base and Ethereum| and Base)$/);
+    assert.match(mainnet.liveMainnetNames(), ELYSIUM ? /^Robinhood Chain, Tempo, Base(, Ethereum)? and Elysium$/ : /^Robinhood Chain, Tempo(, Base and Ethereum| and Base)$/);
   });
 
   check("configured: the relay serves both Base chain ids with the same relay key", () => {

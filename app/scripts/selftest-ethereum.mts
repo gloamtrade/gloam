@@ -41,6 +41,8 @@ globalThis.fetch = (async (url: unknown) => {
 }) as typeof fetch;
 
 const mainnet = await import("../src/lib/mainnet");
+/** Elysium mainnet, while NEXT_PUBLIC_ELYSIUM_ENABLED is on (as production builds it): named last, after Ethereum. */
+const { ELYSIUM } = await import("../src/lib/elysium");
 /** The real vault, once MAINNET_POOLS[1] is filled in after the deploy. */
 const LIVE = mainnet.mainnetPool(1);
 const CONFIGURED = process.env.GLOAM_SELFTEST_ETHEREUM === "configured" || LIVE !== null;
@@ -234,7 +236,7 @@ if (CONFIGURED) {
     assert.equal(n.deployBlock, DEPLOY_BLOCK);
     assert.equal(nets.isNetworkWritable(n), true);
     assert.equal(nets.networkName(n), "Ethereum");
-    assert.match(mainnet.liveMainnetNames(), /^Robinhood Chain, Tempo(, Base)? and Ethereum$/);
+    assert.match(mainnet.liveMainnetNames(), ELYSIUM ? /^Robinhood Chain, Tempo(, Base)?, Ethereum and Elysium$/ : /^Robinhood Chain, Tempo(, Base)? and Ethereum$/);
     assert.ok(mainnet.MAINNET_CONFIGURED);
   });
 

@@ -105,6 +105,8 @@ const { DEFAULT_DAILY_DMS, systemPrompt, teamSystemPrompt, userPrompt } = await 
 const { knowledgeBlock } = await import("../src/lib/telegramBot/knowledge");
 const { liveMainnetNames } = await import("../src/lib/mainnet");
 const { isMainnetLive } = await import("../src/lib/mainnet");
+/** Elysium mainnet is on in this run (NEXT_PUBLIC_ELYSIUM_ENABLED, as production builds it): a fifth mainnet, on its own day. */
+const { ELYSIUM } = await import("../src/lib/elysium");
 const { personaName } = await import("../src/lib/telegramBot/persona");
 const { DM_TTL_SEC, IMAGES_PER_HOUR, MODLOG_TTL_SEC, dmHistory, listBugReports, readLast24h, recentModeration, rememberOwnerChat, takeImageSlot } = await import(
   "../src/lib/telegramBot/store"
@@ -623,7 +625,15 @@ await test("mainnet live: Glim says so, still never another date, and its facts 
   const post = systemPrompt({ persona: "Glim", testingOpen: false, admins: [], mainnetLive: true });
   assert.ok(pre.includes("Never say or hint that the app is live on mainnet"));
   assert.ok(!post.includes("Never say or hint that the app is live on mainnet"));
-  assert.ok(post.includes("Gloam is live on four mainnets, on Robinhood Chain and Tempo since Wednesday 21 October, 13:00 UTC, and on Base and Ethereum since 26 October, with deposit limits."), "the live mainnet rule");
+  assert.ok(
+    post.includes(
+      ELYSIUM
+        ? "Gloam is live on five mainnets, on Robinhood Chain and Tempo since Wednesday 21 October, 13:00 UTC, on Base and Ethereum since 26 October, and on Elysium since 9 November, with deposit limits."
+        : "Gloam is live on four mainnets, on Robinhood Chain and Tempo since Wednesday 21 October, 13:00 UTC, and on Base and Ethereum since 26 October, with deposit limits."
+    ),
+    "the live mainnet rule: each chain on its own day"
+  );
+  assert.ok(!/Base and Ethereum and Elysium| since then/.test(post), "Elysium is never lumped in with Base and Ethereum, and no day is left out");
   const team = teamSystemPrompt({ persona: "Glim", testingOpen: false, admins: [], mainnetLive: true });
   assert.ok(team.includes("drafts included") && !team.includes("testnet only)"));
 
@@ -652,11 +662,26 @@ await test("replies: RobinScan links to a transaction or an address may go out",
 
 await test("facts: live on four mainnets, with USDC, and none of the old two-chain wording", () => {
   const k = knowledgeBlock(false, true);
-  assert.ok(k.includes("Gloam is live on four mainnets: Robinhood Chain and Tempo since 21 October 2026, and Base and Ethereum since 26 October 2026."));
+  assert.ok(
+    k.includes(
+      ELYSIUM
+        ? "Gloam is live on five mainnets: Robinhood Chain and Tempo since 21 October 2026, Base and Ethereum since 26 October 2026, and Elysium since 9 November 2026."
+        : "Gloam is live on four mainnets: Robinhood Chain and Tempo since 21 October 2026, and Base and Ethereum since 26 October 2026."
+    )
+  );
+  assert.ok(
+    k.includes(
+      ELYSIUM
+        ? "Base and Ethereum mainnet joined after that, on 26 October 2026, and Elysium mainnet on 9 November 2026 (see BASE, ETHEREUM and ELYSIUM)."
+        : "Base and Ethereum mainnet joined after that, on 26 October 2026 (see BASE and ETHEREUM)."
+    ),
+    "each later mainnet on its own day"
+  );
+  assert.ok(!k.includes("Base and Ethereum and Elysium"), "Elysium is never lumped in with Base and Ethereum");
   assert.ok(k.includes("USDC is in the vault: on Base and Ethereum mainnet as USDC"));
   assert.ok(k.includes("Never say Gloam has no USDC."));
   assert.ok(k.includes("$GLOAM 2,500,000 per deposit and 25,000,000 in total"), "the limits in force");
-  assert.ok(k.includes("The mainnets: Robinhood Chain 4663, Tempo 4217, Base 8453 and Ethereum 1."));
+  assert.ok(k.includes(ELYSIUM ? `The mainnets: Robinhood Chain 4663, Tempo 4217, Base 8453, Ethereum 1 and Elysium ${ELYSIUM.chainId}.` : "The mainnets: Robinhood Chain 4663, Tempo 4217, Base 8453 and Ethereum 1."));
   assert.ok(k.includes('On mainnet it shows "You get"'), "the cash-out line reads as now");
   for (const stale of ["Mainnet is coming", "Next (mainnet): Gloam goes live", "Its two testnets", "the other mainnet (Robinhood Chain or Tempo)", "which joined later", "raised 100x", "25,000 per deposit, 250,000 in total"]) {
     assert.ok(!k.includes(stale), stale);
@@ -928,7 +953,10 @@ await test("welcome: tags, mention links, escaping, the others count", () => {
   assert.ok(html.includes("Bo &amp; Co</a> and "));
   assert.ok(!html.includes("<b>"));
   assert.ok(html.includes(`Send and receive money privately on ${liveMainnetNames()} at gloam.trade/app.`), "every mainnet with a vault in");
-  assert.ok(html.includes("Send and receive money privately on Robinhood Chain, Tempo, Base and Ethereum at gloam.trade/app."), "the four mainnets as shipped");
+  assert.ok(
+    html.includes(`Send and receive money privately on Robinhood Chain, Tempo, Base${ELYSIUM ? ", Ethereum and Elysium" : " and Ethereum"} at gloam.trade/app.`),
+    "the mainnets as shipped (Elysium last, while it is on)"
+  );
   assert.ok(html.includes("Questions go in Help.\n\n"), "no testing line while the tester program is closed");
   assert.ok(!/testing directions|soon/i.test(html), "nothing promised for later");
   assert.ok(html.endsWith("Never share your keys with anyone."));
