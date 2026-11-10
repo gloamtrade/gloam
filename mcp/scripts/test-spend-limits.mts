@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,6 +84,15 @@ if (process.argv.includes("--reserve-once")) {
     const log = JSON.parse(read(env.GLOAM_SPEND_LOG!));
     assert.equal(log.entries.length, 1);
     assert.equal(log.entries[0].status, "refused");
+  });
+
+  test("the spending log is readable by its owner only", { skip: process.platform === "win32" }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "gloam-limits-"));
+    const env: Env = { GLOAM_LIMITS: "off", GLOAM_SPEND_LOG: join(dir, "log.json") };
+    // A leftover temp file from a crashed write, made readable by everyone, must not pass its mode on.
+    writeFileSync(`${env.GLOAM_SPEND_LOG}.${process.pid}.tmp`, "{}", { mode: 0o644 });
+    assert.equal(authorizeSpend(pay("1"), env, NOW).ok, true);
+    assert.equal(statSync(env.GLOAM_SPEND_LOG!).mode & 0o777, 0o600);
   });
 
   test("GLOAM_LIMITS=off allows and still logs; mixing it with limits is rejected", () => {

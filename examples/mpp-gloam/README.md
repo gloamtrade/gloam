@@ -17,6 +17,9 @@ Runs against a mock pool in memory that applies the Gloam pool's transfer rules 
 |---|---|
 | `tempo-mainnet` | Tempo mainnet (4217), priced in USDC.e |
 | `robinhood-mainnet` | Robinhood Chain mainnet (4663), priced in USDG |
+| `base-mainnet` | Base mainnet (8453), priced in USDC |
+| `ethereum-mainnet` | Ethereum mainnet (1), priced in USDC |
+| `elysium-mainnet` | Elysium mainnet (99901), priced in USDC |
 | `tempo` (default) | Tempo testnet (42431), priced in PathUSD |
 | `robinhood` | Robinhood Chain testnet (46630), priced in test USDG |
 

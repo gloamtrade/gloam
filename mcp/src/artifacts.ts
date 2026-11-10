@@ -15,12 +15,14 @@
  */
 import { createHash } from "node:crypto";
 import { mkdirSync, existsSync, readFileSync, rmSync, writeFileSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { GLOAM_ARTIFACTS_URL, circuitArtifactFiles, type CeremonyKind, type GloamCircuit } from "@gloamtrade/sdk";
 
 const SOURCE = (process.env.GLOAM_ARTIFACTS_SOURCE || GLOAM_ARTIFACTS_URL).replace(/\/+$/, "");
-const CACHE = process.env.GLOAM_ARTIFACTS_DIR || join(tmpdir(), "gloam-mcp-circuits");
+// Per user (~/.gloam/circuits), not a shared temp dir another local user could write to
+// between the hash check and the proof. GLOAM_ARTIFACTS_DIR still points it anywhere.
+const CACHE = process.env.GLOAM_ARTIFACTS_DIR?.trim() || join(homedir(), ".gloam", "circuits");
 
 export type CircuitName = GloamCircuit;
 
@@ -30,7 +32,7 @@ const checked = new Set<string>();
 async function ensure(file: string, expected: string): Promise<string> {
   const dest = join(CACHE, file);
   if (checked.has(dest)) return dest;
-  mkdirSync(dirname(dest), { recursive: true });
+  mkdirSync(dirname(dest), { recursive: true, mode: 0o700 });
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!existsSync(dest) || statSync(dest).size === 0) {
       const res = await fetch(`${SOURCE}/${file}`);

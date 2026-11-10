@@ -3,13 +3,16 @@
 // the logs are the list, so this rebuilds it from ChangeQueued, ChangeExecuted
 // and ChangeCancelled, then checks each entry against changeEta on chain.
 //
-//   node launch/queue-check.mjs            all four chains
+//   node launch/queue-check.mjs            all five chains
 //   node launch/queue-check.mjs tempo base some of them
 //
 // Exits 1 if a change other than setDepositLimit or setWithdrawFee is queued on
 // any chain: the guard could never run it, and neither could anyone else, but
 // its owner should cancel it BEFORE the handover, because after it nobody can.
 // Takes a few minutes on Robinhood Chain: its RPC caps a log query's range.
+// Elysium's vault has its own address (packages/sdk/src/elysium.ts, ELYSIUM_MAINNET)
+// and is owned by its VaultOwnerGuard from the deploy; its RPC caps a log query at
+// 10,000 logs, not at a block range, so it reads a million blocks (about 28 hours) a call.
 const VAULT = "0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194";
 const QUEUED = "0x1a18849b91d03bb42f289e0bf0222c3e98a9ff96d288fa2b496f5bd28b3339fa";
 const EXECUTED = "0xacba7db33afd41cd69adcb9749e50b9fd484953f306d98d2d6e0a8ce0adb7d5c";
@@ -29,6 +32,7 @@ const CHAINS = {
   ethereum: { rpcs: ["https://rpc.mevblocker.io", "https://ethereum-rpc.publicnode.com"], from: 26276183, step: 10_000 },
   base: { rpcs: ["https://base-rpc.publicnode.com"], from: 53109632, step: 10_000 },
   robinhood: { rpcs: ["https://rpc.mainnet.chain.robinhood.com"], from: 94194599, step: 50_000 },
+  elysium: { rpcs: ["https://rpc.elysium.kinetiq.xyz"], vault: "0x89d3042390204f57b8b4F8949D3c2203E4002164", from: 3248495, step: 1_000_000 },
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -60,7 +64,7 @@ async function history(c) {
   for (let b = c.from; b <= head; b += c.step) {
     const to = Math.min(b + c.step - 1, head);
     const part = await rpc(c.rpcs, "eth_getLogs", [
-      { address: VAULT, fromBlock: "0x" + b.toString(16), toBlock: "0x" + to.toString(16), topics: [[QUEUED, EXECUTED, CANCELLED]] },
+      { address: c.vault ?? VAULT, fromBlock: "0x" + b.toString(16), toBlock: "0x" + to.toString(16), topics: [[QUEUED, EXECUTED, CANCELLED]] },
     ]);
     logs.push(...part);
     await sleep(200);
@@ -104,7 +108,7 @@ await Promise.all(
     }
     const lines = [];
     for (const [id, { eta, call }] of [...queue].sort((a, b) => a[1].eta - b[1].eta)) {
-      const live = Number(BigInt(await rpc(c.rpcs, "eth_call", [{ to: VAULT, data: "0x1bed985d" + id.slice(2) }, "latest"])));
+      const live = Number(BigInt(await rpc(c.rpcs, "eth_call", [{ to: c.vault ?? VAULT, data: "0x1bed985d" + id.slice(2) }, "latest"])));
       const setter = SETTERS[call.slice(0, 8)];
       const state = now > eta + GRACE ? "expired" : now >= eta ? "ready" : "waiting";
       const flag = ALLOWED.has(setter) ? "" : "  <- NOT A LIMIT OR FEE CHANGE";

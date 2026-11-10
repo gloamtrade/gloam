@@ -27,12 +27,17 @@ import { RELAY_MAYBE_SENT } from "./relay.js";
 import type { SweepSubmitter } from "./sweep.js";
 import { assertSwapSendable, type SwapRelayCall } from "./swapIntent.js";
 
-export const GLOAM_API_URL = "https://gloam.trade";
+/**
+ * The www host on purpose: gloam.trade answers with a 308 to www, and fetch
+ * drops the Authorization header when it follows a redirect to another origin,
+ * so a bare-host request would reach the API without its key.
+ */
+export const GLOAM_API_URL = "https://www.gloam.trade";
 
 export interface GloamApiOptions {
   /** gloam_live_... for the mainnets, gloam_test_... for the testnets. */
   apiKey: string;
-  /** Defaults to https://gloam.trade. */
+  /** Defaults to https://www.gloam.trade. */
   baseUrl?: string;
   /** Custom fetch (tests, edge runtimes). */
   fetch?: typeof fetch;

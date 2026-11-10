@@ -83,6 +83,7 @@ import {
   encodePaymentHeader,
   generateReceiveKey,
   gloamCashoutProblem,
+  gloamPaymentBinding,
   isReceiveTag,
   networkName,
   normalizeRequestAmount,
@@ -1184,11 +1185,24 @@ export class GloamAgent {
         sealed = await sealToReceiveTag(pack, payTo);
         if (!p.x402) return { deliver: sealed };
         // x402: the header is the delivery. Kept with the payment (it holds the note sealed, never in the clear).
+        // The binding ties the payment to this payee, as buildGloamPayment does: sellers refuse a payment without
+        // one, since a sealed ticket copied from the payment board would otherwise pass as a payment.
         const payload: GloamPaymentPayload = {
           x402Version: GLOAM_X402_VERSION,
           scheme: GLOAM_X402_SCHEME,
           network: this.network.chainId,
-          payload: { paymentNote: sealed, txHash: null, exec },
+          payload: {
+            paymentNote: sealed,
+            txHash: null,
+            exec,
+            binding: await gloamPaymentBinding({
+              secret: note.secret,
+              network: this.network.chainId,
+              poolAddress: this.network.pool,
+              payTo,
+              commitment: note.commitment,
+            }),
+          },
         };
         header = encodePaymentHeader(payload);
         return { x402: header };

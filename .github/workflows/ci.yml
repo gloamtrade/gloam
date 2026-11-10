@@ -1,0 +1,63 @@
+# Packages, the MCP server and the examples. The app builds on Vercel and the
+# contracts with forge, so neither runs here.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  packages:
+    name: Packages and examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # pnpm's version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The app's dependencies are installed too: some package tests check
+      # byte compatibility against the app's own source (claim links, receive
+      # tags). The app itself is not built here.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: SDK tests
+        run: pnpm --filter @gloamtrade/sdk test
+
+      - name: mppx-gloam tests
+        run: pnpm --filter @gloamtrade/mppx-gloam test
+
+      - name: MCP typecheck
+        run: pnpm --filter @gloamtrade/mcp typecheck
+
+      - name: MCP tests
+        run: pnpm --filter @gloamtrade/mcp test
+
+      - name: GAME plugin tests
+        run: pnpm --filter @gloamtrade/game-plugin-gloam test
+
+      - name: GAME plugin build
+        run: pnpm --filter @gloamtrade/game-plugin-gloam build
+
+      - name: Examples typecheck
+        run: pnpm --filter './examples/*' --workspace-concurrency=1 run --if-present typecheck
+
+      - name: Examples tests
+        run: pnpm --filter './examples/*' --workspace-concurrency=1 run --if-present test

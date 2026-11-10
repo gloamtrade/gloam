@@ -4,7 +4,8 @@
   "type": "module",
   "description": "Reference agent payment over x402, private end to end, via @gloamtrade/sdk.",
   "scripts": {
-    "start": "tsx pay-x402.ts"
+    "start": "tsx pay-x402.ts",
+    "typecheck": "tsc --noEmit --strict --target es2022 --module nodenext --moduleResolution nodenext --skipLibCheck --types node pay-x402.ts ../../packages/sdk/src/snarkjs.d.ts ../../packages/sdk/src/circomlibjs.d.ts"
   },
   "dependencies": {
     "@gloamtrade/sdk": "workspace:*",

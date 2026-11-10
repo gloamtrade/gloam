@@ -12,7 +12,8 @@
  *
  * GLOAM_NETWORK picks whose terms the charge carries: tempo (Tempo testnet,
  * PathUSD, the default), robinhood (Robinhood Chain testnet, test USDG),
- * tempo-mainnet (USDC.e) or robinhood-mainnet (USDG). The chain id, the
+ * tempo-mainnet (USDC.e), robinhood-mainnet (USDG), base-mainnet,
+ * ethereum-mainnet or elysium-mainnet (USDC). The chain id, the
  * official pool and the stablecoin come from that network; on a mainnet,
  * --real-proofs uses the ceremony's final keys. Either way, nothing moves.
  */
@@ -42,8 +43,8 @@ const step = (title: string) => console.log(`\n── ${title}`);
 
 // ── network ────────────────────────────────────────────────────────────────
 // Base ("base-mainnet", and "base" for Base Sepolia) and Ethereum ("ethereum-mainnet") work once the SDK has their pools;
-// Elysium ("elysium-mainnet", USDC, gas in HYPE) is live too, but not in this list yet.
-const NETWORK_KEYS: GloamNetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "robinhood", "tempo", "base"];
+// Elysium ("elysium-mainnet") takes USDC, with gas in HYPE.
+const NETWORK_KEYS: GloamNetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "robinhood", "tempo", "base"];
 const networkKey = (process.env.GLOAM_NETWORK?.trim() || "tempo") as GloamNetworkKey;
 if (!NETWORK_KEYS.includes(networkKey)) {
   console.error(`GLOAM_NETWORK must be one of: ${NETWORK_KEYS.join(", ")}.`);
