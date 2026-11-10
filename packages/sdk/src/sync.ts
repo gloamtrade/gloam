@@ -231,7 +231,7 @@ const RATE_LIMITED = /\b429\b|too many requests|rate.?limit|throttl/i;
 /** A node behind the one that gave the head: it has not got the block yet. */
 const NODE_BEHIND = /beyond (the )?(current )?head|header not found|unknown block|block not found|invalid block range|not (yet )?(synced|available)/i;
 const RANGE_REFUSED =
-  /block range|range (is )?too|exceeds? (the )?max|max(imum)? (block )?range|only [\d,]+ are allowed|limited to a [\d,]+ range|more than [\d,]+ (results|logs)|too many (results|logs)|logs? matched|response size|response (is )?too (big|large)|query timeout|limit exceeded/i;
+  /block range|range (is )?too|exceeds? (the )?max|max(imum)? (block )?range|only [\d,]+ are allowed|limited to a [\d,]+ range|ranges over [\d,]+ blocks|more than [\d,]+ (results|logs)|too many (results|logs)|logs? matched|response size|response (is )?too (big|large)|query timeout|limit exceeded/i;
 /** State the node no longer keeps: asking again gets the same answer. */
 const PRUNED = /missing trie node|state (is )?not available|historical state|pruned/i;
 /** Asking again gets the same answer: a bad request, a call that reverts. */
@@ -252,8 +252,8 @@ function classify(e: unknown): ErrorKind {
 
 /** The range the node says it takes ("only 100000 are allowed", "max block range 100000"), if it says. */
 function allowedSpan(e: unknown): bigint | null {
-  const m = /only ([\d,]+) are allowed|max(?:imum)? block range:? (?:is )?([\d,]+)|limited to a ([\d,]+) range|range (?:of|is) ([\d,]+)/i.exec(errText(e));
-  const v = m?.[1] ?? m?.[2] ?? m?.[3] ?? m?.[4];
+  const m = /only ([\d,]+) are allowed|max(?:imum)? block range:? (?:is )?([\d,]+)|limited to a ([\d,]+) range|ranges over ([\d,]+) blocks|range (?:of|is) ([\d,]+)/i.exec(errText(e));
+  const v = m?.[1] ?? m?.[2] ?? m?.[3] ?? m?.[4] ?? m?.[5];
   if (!v) return null;
   const n = BigInt(v.replace(/,/g, ""));
   return n > 0n ? n : null;
@@ -618,6 +618,8 @@ export interface TreeSync {
   knownPath(commitment: Hex): Promise<PoseidonMerklePath | null>;
   /** The last block read, or null before the first sync. */
   readonly toBlock: bigint | null;
+  /** Blocks per eth_getLogs it reads with now: the chain's default, or less once the RPC named a smaller range. */
+  readonly logRange: bigint;
   /**
    * Keep syncing in the background, every `intervalMs` after the last sync
    * ends, so a path is ready as soon as a note lands. Errors are retried on the
@@ -737,8 +739,11 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
   // The last block read (meaningful once `state` is set). A bigint from the start, never null: Next's file tracer
   // evaluates declarations it can and throws on null + 1n, which would break any app that bundles the SDK.
   let toBlock = -1n;
-  /** The leaves came from the store or the seed and the pool has not confirmed them yet. */
-  let borrowed = false;
+  /**
+   * The leaves came from the store or the seed (confirmed by the pool or not). A tree from one that stops
+   * matching the pool (a reorg since it was saved) is dropped for a walk of the chain, not refused.
+   */
+  let fromLoad = false;
   let verified = false;
   /** When the last sync that went through started (ms), for reuseMs. */
   let syncedAt = 0;
@@ -790,20 +795,24 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
   const start = async (loaded: { snap: TreeSnapshot; stored: boolean } | null) => {
     state = new TreeState();
     verified = false;
+    fromLoad = loaded !== null;
     if (loaded) {
       await state.append(loaded.snap.items);
       toBlock = BigInt(loaded.snap.toBlock);
-      borrowed = true;
       // Our own copy, saved after the pool confirmed this very root: still a root the pool knows.
-      if (loaded.stored && loaded.snap.root && loaded.snap.root === fieldToHex(state.tree.currentRoot).toLowerCase()) {
-        verified = true;
-        borrowed = false;
-      }
+      if (loaded.stored && loaded.snap.root && loaded.snap.root === fieldToHex(state.tree.currentRoot).toLowerCase()) verified = true;
     } else {
       await state.append([]);
       toBlock = fromBlock - 1n;
-      borrowed = false;
     }
+  };
+
+  /** The same leaves in a new tree (the old one may be in a view someone holds), to be checked again. */
+  const rebuild = async (rows: TreeInsert[]) => {
+    const s = new TreeState();
+    await s.append(rows);
+    state = s;
+    verified = false;
   };
 
   const load = async (): Promise<{ snap: TreeSnapshot; stored: boolean } | null> => {
@@ -844,12 +853,8 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
       }
     }
     if (lost) {
-      const keep = s.inserts.filter((r) => BigInt(r.bn) < from);
-      const b = borrowed;
-      await start(null);
-      borrowed = b;
       toBlock = reached;
-      await state!.append([...keep, ...fresh]);
+      await rebuild([...s.inserts.filter((r) => BigInt(r.bn) < from), ...fresh]);
       return { read: true, changed: true };
     }
 
@@ -861,12 +866,7 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
       await s.append(rows);
     } else {
       // A late answer filled in an earlier block: rebuild in order.
-      const all = [...s.inserts, ...rows].sort(byChainOrder);
-      const b = borrowed;
-      await start(null);
-      toBlock = reached;
-      borrowed = b;
-      await state!.append(all);
+      await rebuild([...s.inserts, ...rows].sort(byChainOrder));
     }
     return { read: true, changed: true };
   };
@@ -888,7 +888,7 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
         changed = (await readTail(true)).changed || changed;
         result = await check();
       }
-      if (result === "wrong" && borrowed) {
+      if (result === "wrong" && fromLoad) {
         // The stored or seeded list does not match the pool: walk the chain instead.
         await start(null);
         await readTail();
@@ -906,10 +906,7 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
           { chainId: reader.chainId, toBlock: at }
         );
       }
-      if (result === "exact" || result === "known") {
-        verified = true;
-        borrowed = false;
-      }
+      if (result === "exact" || result === "known") verified = true;
     }
     if ((changed || unsaved) && params.store) {
       const s = state!;
@@ -951,11 +948,13 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
         if (!path || verified || !verify) return path;
         if ((await isKnownRoot(fieldToHex(s.tree.currentRoot))) !== true || state !== s) return null;
         verified = true;
-        borrowed = false;
         return path;
       }),
     get toBlock() {
       return state ? toBlock : null;
+    },
+    get logRange() {
+      return reader.span;
     },
     follow(intervalMs) {
       let stopped = false;

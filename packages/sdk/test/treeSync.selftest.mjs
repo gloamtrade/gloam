@@ -621,4 +621,36 @@ function chain() {
   m.state.onGetLogs = null;
 }
 
+// ── 13. a stored copy the pool confirmed, then a deep reorg while the process was down: walked again, not refused ──
+{
+  const m = chain();
+  m.shield(10n, 0);
+  const orphan = m.shield(20n, 0);
+  let saved = null;
+  const store = { load: async () => saved && JSON.parse(JSON.stringify(saved)), save: async (x) => void (saved = x) };
+  await createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, store }).sync();
+  assert(saved.root && saved.leafCount === 2, "saved with its confirmed root");
+  m.drop(orphan);
+  m.shield(60n, 0);
+  m.state.head = 200n;
+  const want = await m.truth();
+  m.state.reads = [];
+  const ts = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, store });
+  const t = await ts.sync();
+  assert(t.root === want.root && t.leafCount === 2, "the chain is walked and the tree matches");
+  assert(m.state.reads.some(([f]) => f === 0n), "from the deploy block");
+  assert(saved.leafCount === 2 && saved.items.every((r) => r.c[0] !== orphan), "and the store no longer holds the orphan");
+
+  // logRange: the chain's default, then what the RPC named.
+  const r = poolChain(SEALED_VAULT, { chainId: 8453, head: 60_000n });
+  const narrow = createTreeSync(r.client, { pool: SEALED_VAULT, fromBlock: 0n, retryDelayMs: 1 });
+  assert(narrow.logRange === 50_000n, "Base starts at 50,000");
+  r.state.onGetLogs = (args) => {
+    if (args.toBlock - args.fromBlock + 1n > 200n) throw Object.assign(new Error("RPC error"), { code: -32614, details: "eth_getLogs is limited to a 200 range" });
+  };
+  r.shield(59_950n, 0);
+  await narrow.sync();
+  assert(narrow.logRange === 200n, `then the 200 the RPC named, got ${narrow.logRange}`);
+}
+
 console.log(`treeSync.selftest: ok (${checks} assertions)`);
