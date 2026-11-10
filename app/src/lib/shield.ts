@@ -13,6 +13,7 @@ import { readDemo } from "./demoFlag";
 import type { VaultSwapRefundInfo } from "./vaultSwap";
 import type { DelayWindow } from "./relay/scheduled";
 import { scanDeposits } from "./depositScan";
+import { isElysiumFamilyChainId } from "./elysium";
 import {
   activeHashScheme,
   activePoolAddress,
@@ -297,9 +298,16 @@ export const APPROVE_GAS_LIMIT = 120_000n;
  * differently (a fresh account's approve takes about 534k), and some wallets use
  * the app's number as-is, so on Tempo the wallet estimates instead. Base meters
  * plain EVM gas and estimates well, so it estimates too.
+ *
+ * Elysium takes the fixed limits like Robinhood Chain (both Arbitrum Orbit, with
+ * the same gas). Its blocks come every 100 ms, so a deposit goes out a moment after
+ * its approval lands, and a wallet estimating on its own RPC can ask a node that
+ * has not seen the approval yet: the estimate reverts and the wallet shows an RPC
+ * error before anything is sent. With the limit given, the wallet skips the
+ * estimate. A 7 USDC deposit there measured about 1.15M gas (limit 1.9M).
  */
 export function gasFor(chainId: number, limit: bigint): bigint | undefined {
-  return chainId === 46630 || chainId === 4663 ? limit : undefined;
+  return chainId === 46630 || chainId === 4663 || isElysiumFamilyChainId(chainId) ? limit : undefined;
 }
 
 export function isShieldDeployed(): boolean {

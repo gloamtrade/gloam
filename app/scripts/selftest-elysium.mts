@@ -82,6 +82,7 @@ const { knowledgeBlock, elysiumFacts } = await import("../src/lib/telegramBot/kn
 const { agentGasLine } = await import("../src/lib/agentTopUp");
 const { walkTuning } = await import("../src/lib/leafIndex");
 const { callTool } = await import("../src/lib/mcpRemote/tools");
+const { gasFor, SHIELD_BOUND_GAS_LIMIT, APPROVE_GAS_LIMIT } = await import("../src/lib/shield");
 
 let checks = 0;
 const ok = (cond: unknown, msg: string) => {
@@ -103,6 +104,7 @@ ok(agentGasLine(e)?.includes("HYPE for gas on Elysium"), "the agent gas line nam
 ok(mainnet.liveMainnetCount() >= 4, "the other mainnets still count");
 
 if (MODE === "off" || MODE === "coming") {
+  ok(gasFor(CHAIN_ID, SHIELD_BOUND_GAS_LIMIT) === undefined, "off: no fixed gas for a chain the build does not run");
   ok(ely.ELYSIUM === null && !ely.ELYSIUM_ENABLED, `${MODE}: Elysium is off`);
   ok(!nets.NETWORK_KEYS.includes("elysium-mainnet") && !nets.isNetworkKey("elysium-mainnet"), `${MODE}: not a network key`);
   ok(e.pool === null && e.deployBlock === null, `${MODE}: no pool`);
@@ -143,6 +145,9 @@ if (MODE === "off" || MODE === "coming") {
   ok(usdc.length === 2 && usdc[0]!.symbol === "USDC" && usdc[0]!.address === USDC && usdc[0]!.decimals === 6 && !usdc[0]!.opensWithLimit, "on: USDC open from launch");
   ok(usdc[1]!.symbol === "KNTQ" && usdc[1]!.decimals === 18 && usdc[1]!.opensWithLimit === true && usdc[1]!.address === "0xe45a355d9e9cAd2aD85F2d03E3eE3102A036acF0", "on: KNTQ listed, open only once its queued limit lands");
   ok(!tokens.supportsNativeShield(CHAIN_ID), "on: HYPE can't be added privately");
+  // A deposit goes out right after its approval; a wallet estimating on its own RPC can
+  // ask a node that has not seen the approval yet, so Elysium gives the limit like Robinhood Chain.
+  ok(gasFor(CHAIN_ID, SHIELD_BOUND_GAS_LIMIT) === SHIELD_BOUND_GAS_LIMIT && gasFor(CHAIN_ID, APPROVE_GAS_LIMIT) === APPROVE_GAS_LIMIT, "on: deposits carry a fixed gas limit");
   ok(walkTuning(CHAIN_ID, e.logRange).span === 1_000_000n, "on: tree reads at the RPC's range (1,000,000 blocks at 100 ms)");
   ok(networkForChain(CHAIN_ID).key === "elysium-mainnet", "on: the relay serves it");
   ok(hourlySpendWei(CHAIN_ID, {}) === 10n ** 18n, "on: the relay's hourly cap is 1 HYPE by default");
