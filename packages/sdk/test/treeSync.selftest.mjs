@@ -653,4 +653,41 @@ function chain() {
   assert(narrow.logRange === 200n, `then the 200 the RPC named, got ${narrow.logRange}`);
 }
 
+// ── 14. a root check that could not run is run on the next sync; a node behind on a re-read drops nothing ──
+{
+  const m = chain();
+  m.shield(10n, 0);
+  m.state.head = 150n;
+  const ts = createTreeSync(m.client, { pool: SEALED_VAULT, fromBlock: 0n, retries: 0 });
+  await ts.sync();
+  m.shield(155n, 0);
+  m.state.head = 160n;
+  const want = await m.truth();
+  const down = () => {
+    throw Object.assign(new Error("HTTP request failed. Status: 503"), { status: 503 });
+  };
+  m.state.rootAnswer = down;
+  m.state.knownAnswer = down;
+  let failed = false;
+  try {
+    await ts.sync();
+  } catch (e) {
+    failed = /could not read the pool's root/.test(e.message);
+  }
+  assert(failed, "the sync whose root check could not run throws");
+  m.state.rootAnswer = null;
+  m.state.knownAnswer = null;
+  m.state.rootReads = 0;
+  const t = await ts.sync();
+  assert(m.state.rootReads === 1 && t.root === want.root, "the next one checks the root before handing the tree out, though no block is new");
+
+  // The head this node gives is behind the blocks already read: the leaves past it stay.
+  const realHead = m.client.getBlockNumber;
+  m.client.getBlockNumber = async () => 152n;
+  const p = await ts.pathForCommitment(hex(424242));
+  assert(p === null && ts.toBlock === 160n, "an unknown leaf, nothing dropped");
+  assert((await ts.sync()).leafCount === want.leafCount, "the leaf at 155 is still there");
+  m.client.getBlockNumber = realHead;
+}
+
 console.log(`treeSync.selftest: ok (${checks} assertions)`);

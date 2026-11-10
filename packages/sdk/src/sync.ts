@@ -229,7 +229,7 @@ function errCodes(e: unknown): { status?: number; code?: number } {
 
 const RATE_LIMITED = /\b429\b|too many requests|rate.?limit|throttl/i;
 /** A node behind the one that gave the head: it has not got the block yet. */
-const NODE_BEHIND = /beyond (the )?(current )?head|header not found|unknown block|block not found|invalid block range|not (yet )?(synced|available)/i;
+const NODE_BEHIND = /beyond (the )?(current )?head|header not found|unknown block|block not found|block (is )?not (yet )?available|invalid block range|not (yet )?synced/i;
 const RANGE_REFUSED =
   /block range|range (is )?too|exceeds? (the )?max|max(imum)? (block )?range|only [\d,]+ are allowed|limited to a [\d,]+ range|ranges over [\d,]+ blocks|more than [\d,]+ (results|logs)|too many (results|logs)|logs? matched|response size|response (is )?too (big|large)|query timeout|limit exceeded/i;
 /** State the node no longer keeps: asking again gets the same answer. */
@@ -243,10 +243,10 @@ function classify(e: unknown): ErrorKind {
   const text = errText(e);
   const { status, code } = errCodes(e);
   if (status === 429 || code === 429 || RATE_LIMITED.test(text)) return "retry";
-  if (PRUNED.test(text)) return "fatal";
+  if (code === -32601 || status === 401 || status === 404 || PRUNED.test(text)) return "fatal";
   if (NODE_BEHIND.test(text)) return "retry";
   if (status === 413 || RANGE_REFUSED.test(text)) return "range";
-  if (code === -32601 || status === 400 || status === 401 || status === 404 || NOT_RETRYABLE.test(text)) return "fatal";
+  if (status === 400 || NOT_RETRYABLE.test(text)) return "fatal";
   return "retry";
 }
 
@@ -841,12 +841,16 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
     if (head < from) return { read: false, changed: false };
     const fresh = await readInserts(client, params.pool, from, head, reader);
     const reached = head > toBlock ? head : toBlock;
+    // New blocks, or the last ones again: the root has to be checked again before the tree counts as confirmed.
+    verified = false;
 
     // Every leaf held for the blocks just read again must still be there. One that is gone (or changed) means the
     // chain reorganized or a node answered with logs missing: rebuild from the new read, and let the root check decide.
     const freshByKey = new Map(fresh.map((r) => [insertKey(r), r]));
     let lost = false;
     for (let i = s.inserts.length - 1; i >= 0 && BigInt(s.inserts[i]!.bn) >= from; i--) {
+      // Held for a block past this node's head (it is behind the one that served them): not read again, kept.
+      if (BigInt(s.inserts[i]!.bn) > head) continue;
       if (!sameInsert(freshByKey.get(insertKey(s.inserts[i]!)), s.inserts[i]!)) {
         lost = true;
         break;
@@ -854,7 +858,9 @@ export function createTreeSync(client: PublicClient, params: TreeSyncParams): Tr
     }
     if (lost) {
       toBlock = reached;
-      await rebuild([...s.inserts.filter((r) => BigInt(r.bn) < from), ...fresh]);
+      const before = s.inserts.filter((r) => BigInt(r.bn) < from);
+      const after = s.inserts.filter((r) => BigInt(r.bn) > head);
+      await rebuild([...before, ...fresh, ...after]);
       return { read: true, changed: true };
     }
 
