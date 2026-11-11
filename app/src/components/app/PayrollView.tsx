@@ -1267,7 +1267,7 @@ export function PayrollView() {
                       <button
                         type="button"
                         onClick={() => setPasteOpen(true)}
-                        className="btn btn-ghost btn-sm h-10"
+                        className="btn btn-quiet btn-sm h-10"
                         aria-expanded={pasteOpen}
                       >
                         <Icon name="paste" className="h-3.5 w-3.5" />

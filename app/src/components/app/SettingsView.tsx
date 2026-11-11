@@ -492,7 +492,7 @@ export function SettingsView() {
                 href={network.explorerAddress(address)}
                 target="_blank"
                 rel="noreferrer"
-                className="btn btn-ghost btn-sm h-10"
+                className="btn btn-quiet btn-sm h-10"
               >
                 Explorer
               </a>
@@ -908,18 +908,18 @@ export function SettingsView() {
       <UpdatesCard />
 
       <Card id="help" title="Help" flush>
-        <Row label="Telegram" hint="Ask the team and other testers.">
-          <a href="https://t.me/gloamhq" target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm h-10">
+        <Row label="Telegram" hint="Ask the team and other people using Gloam.">
+          <a href="https://t.me/gloamhq" target="_blank" rel="noreferrer" className="btn btn-quiet btn-sm h-10">
             Open group
           </a>
         </Row>
         <Row label="Email" hint="hello@gloam.trade, for bugs, questions and partners.">
-          <a href="mailto:hello@gloam.trade" className="btn btn-ghost btn-sm h-10">
+          <a href="mailto:hello@gloam.trade" className="btn btn-quiet btn-sm h-10">
             Write to us
           </a>
         </Row>
         <Row label="X" hint="Updates and releases from @gloamtrade.">
-          <a href="https://x.com/gloamtrade" target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm h-10">
+          <a href="https://x.com/gloamtrade" target="_blank" rel="noreferrer" className="btn btn-quiet btn-sm h-10">
             Follow
           </a>
         </Row>
