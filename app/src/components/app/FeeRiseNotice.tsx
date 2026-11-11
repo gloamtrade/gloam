@@ -12,13 +12,14 @@
  * in another browser, goes out with nobody told.
  */
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { feeRiseNotice, waitingFeeRises, type WaitingRise } from "@/lib/cashOutLater";
 import { networkOfNote } from "@/lib/cashOutSplit";
 import { useAppAccount, useDemo } from "@/lib/demo";
 import { getAllNotes } from "@/lib/noteVault";
 import { publicClientFor } from "@/lib/rhClient";
-import { shieldPoolAbi } from "@/lib/shield";
+import { notesForWallet, shieldPoolAbi } from "@/lib/shield";
+import { useWalletState } from "@/hooks/useWalletState";
 import { vaultActionSearch } from "@/lib/vaultHub";
 import { useNetwork } from "./NetworkProvider";
 
@@ -26,12 +27,14 @@ import { useNetwork } from "./NetworkProvider";
 const LOOK_MS = 5_000;
 /** How long a vault's fee is trusted before it is read again. */
 const FEE_READ_MS = 60_000;
+const NONE: WaitingRise[] = [];
 
 export function FeeRiseNotice() {
   const { address } = useAppAccount();
   const { network, setNetworkKey } = useNetwork();
   const demoMode = useDemo();
-  const [found, setFound] = useState<WaitingRise[]>([]);
+  // What it found is the connected wallet's: gone on sign out or a switch of account.
+  const [found, setFound] = useWalletState<WaitingRise[]>(address, NONE);
   const fees = useRef(new Map<string, { bps: number | null; at: number }>());
 
   useEffect(() => {
@@ -39,8 +42,7 @@ export function FeeRiseNotice() {
     let live = true;
     const key = (n: { chainId: number; pool: string }) => `${n.chainId}:${n.pool.toLowerCase()}`;
     const look = async () => {
-      const me = address.toLowerCase();
-      const mine = getAllNotes().filter((n) => !n.from || n.from.toLowerCase() === me);
+      const mine = notesForWallet(getAllNotes(), address);
       const now = Date.now();
       for (const n of mine) {
         if (n.cashOut?.state !== "scheduled") continue;
@@ -64,7 +66,7 @@ export function FeeRiseNotice() {
       live = false;
       clearInterval(timer);
     };
-  }, [address, demoMode]);
+  }, [address, demoMode, setFound]);
 
   const shown = address && !demoMode ? found : [];
   if (shown.length === 0) return null;

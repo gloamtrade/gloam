@@ -347,22 +347,58 @@ export function notesOnNetwork<T extends Pick<LocalNote, "chainId" | "pool">>(no
   return notes.filter((n) => inActiveScope(n, scope));
 }
 
+/** What every view that would show the private balance says while no wallet is connected. */
+export const SIGNED_OUT_BALANCE_MESSAGE = "Connect a wallet to see your private balance.";
+
+/**
+ * The notes of `notes` a view shows to `wallet`, the wallet connected now.
+ * With none connected: nothing. This browser holds the notes of everyone who
+ * used it, and a signed-out page listed all of them (Duke, 11 Nov 2026: after
+ * Sign out, Portfolio still showed 50, 1,192.5 and 1,631.85 USDG with Pay
+ * buttons), so the next person at the computer saw them.
+ *
+ * A note with no `from` was saved before notes named their wallet, or by a
+ * restore or a recovery sync run with no wallet to give them, so nothing here
+ * can tell whose it is. It stays shown to any connected wallet, as it always
+ * was: hiding it from every wallet would leave money only this browser can
+ * spend with no screen that offers it. `from` decides what a view lists, never
+ * who can spend: the secret sits in this browser either way.
+ *
+ * Display only: nothing here changes or drops a note. Background work (claim
+ * sweep, spent checks, cash outs, recovery backup) reads the store itself.
+ */
+export function notesForWallet<T extends Pick<LocalNote, "from">>(
+  notes: readonly T[],
+  wallet: string | null | undefined
+): T[] {
+  if (!wallet) return [];
+  const lower = wallet.toLowerCase();
+  return notes.filter((n) => !n.from || n.from.toLowerCase() === lower);
+}
+
 /**
  * What a view of notes shows (hooks/useLocalShieldNotes): only notes on
- * `network` (chain and vault), and none before the page knows its network.
+ * `network` (chain and vault), only `wallet`'s (notesForWallet: none while
+ * signed out), and none before the page knows its network.
  * The view's state can still hold another chain's notes for a moment (read
  * before a switch, or by a sync that started on the old network and finished
  * after it), and the mainnet vaults and Base Sepolia share one address, so
  * Robinhood Chain mainnet notes showed, and could be picked, on Base Sepolia.
+ * It can hold the last wallet's notes for a moment after a sign out or a
+ * switch of account too: the filter here hides them in that same render.
  */
 export function visibleNotes(
   local: readonly LocalNote[],
   chain: readonly LocalNote[],
   network: NetScope,
-  settled: boolean
+  settled: boolean,
+  wallet: string | null | undefined
 ): { local: LocalNote[]; chain: LocalNote[] } {
-  if (!settled) return { local: [], chain: [] };
-  return { local: notesOnNetwork(local, network), chain: notesOnNetwork(chain, network) };
+  if (!settled || !wallet) return { local: [], chain: [] };
+  return {
+    local: notesForWallet(notesOnNetwork(local, network), wallet),
+    chain: notesForWallet(notesOnNetwork(chain, network), wallet),
+  };
 }
 
 /**
@@ -1179,14 +1215,28 @@ export function markAllNotesRecovered(
  * This browser's notes on the active network (chain and vault), or on `net`
  * when given: a view passes the network it shows, so what it lists always
  * matches its own label.
+ *
+ * With no `address` it returns every wallet's notes: for work that is not a
+ * view (a backup made for a wallet, payroll, a check across this browser).
+ * Never list or sum them for a screen with it: a view reads loadWalletNotes,
+ * which returns nothing while signed out.
  */
 export function loadLocalNotes(address?: string | null, net?: NetScope): LocalNote[] {
   if (typeof window === "undefined") return [];
   const scope = net ? scopeOf(net) : activeScope();
   const filtered = getAllNotes().filter((n) => inActiveScope(n, scope));
   if (!address) return filtered;
-  const lower = address.toLowerCase();
-  return filtered.filter((n) => !n.from || n.from.toLowerCase() === lower);
+  return notesForWallet(filtered, address);
+}
+
+/**
+ * The notes a view shows for `wallet` on the active network, or on `net`:
+ * that wallet's (and the ones no wallet is named on, see notesForWallet), and
+ * none at all while no wallet is connected.
+ */
+export function loadWalletNotes(wallet: string | null | undefined, net?: NetScope): LocalNote[] {
+  if (!wallet) return [];
+  return loadLocalNotes(wallet, net);
 }
 
 /** Spent/history rows kept for the activity view. Spendable notes are never trimmed. */

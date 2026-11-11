@@ -30,6 +30,7 @@ import { isTempoWallet } from "@/lib/tempoWallet";
 import { EMBEDDED_CONNECTOR_ID } from "@/lib/embeddedWallet";
 import { TURNKEY_CAN_OPEN_TEXT } from "@/lib/embeddedRecovery";
 import { useAutoRestore } from "@/hooks/useAutoRestore";
+import { useWalletState } from "@/hooks/useWalletState";
 
 type Busy = "on-wallet" | "on-passkey" | "restore-wallet" | "restore-passkey" | "restore-older" | "save" | "off" | "update" | "older" | null;
 /** "wait": nothing went wrong and nothing is finished yet, so it is not shown as done. */
@@ -117,7 +118,8 @@ function useRecovery() {
   const [passkeyOk, setPasskeyOk] = useState(false);
   const [walletBrowser, setWalletBrowser] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
-  const [message, setMessage] = useState<Message>(null);
+  // "Restored 3 balances": gone on sign out or a switch of account.
+  const [message, setMessage] = useWalletState<Message>(address, null);
   /** A wallet restore found nothing, so the older backup step is on offer. */
   const [offerOlder, setOfferOlder] = useState(false);
 

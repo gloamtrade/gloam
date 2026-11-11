@@ -14,7 +14,7 @@ import { formatEth } from "@/lib/chain";
 import { useAppAccount, useAppBalance, useAppTokenBalances } from "@/lib/demo";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { useAutoRestoreStatus } from "@/hooks/useAutoRestoreStatus";
-import { assetLabel, formatAssetAmount, formatAssetLabel, isNativeAsset, isShieldDeployed } from "@/lib/shield";
+import { assetLabel, formatAssetAmount, formatAssetLabel, isNativeAsset, isShieldDeployed, SIGNED_OUT_BALANCE_MESSAGE } from "@/lib/shield";
 import { addableTokensFor, isDollarStable, isNativeAddable, knownTokens, nativeTokenFor } from "@/lib/tokens";
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
 import { faucetFor } from "@/lib/faucet";
@@ -238,15 +238,17 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
             loading={privateLoading}
             empty={balancesVisible ? "0" : null}
             note={
-              !balancesVisible
-                ? "Connect to see it. Only you can."
-                : restoring
-                  ? "Syncing your private balance…"
-                  : setAside
-                    ? `${setAside} more is set aside for agent top-ups.`
-                    : hasPrivate
-                      ? "Only you can see it."
-                      : "Nothing here yet. Only you will see this number."
+              !isConnected
+                ? SIGNED_OUT_BALANCE_MESSAGE
+                : !balancesVisible
+                  ? `Switch your wallet to ${network.label} to see it.`
+                  : restoring
+                    ? "Syncing your private balance…"
+                    : setAside
+                      ? `${setAside} more is set aside for agent top-ups.`
+                      : hasPrivate
+                        ? "Only you can see it."
+                        : "Nothing here yet. Only you will see this number."
             }
           />
           <BalancePane

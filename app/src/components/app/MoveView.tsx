@@ -14,10 +14,11 @@ import { shortAddress } from "@/lib/chain";
 import { useAppAccount, useAppTxReceipt, useAppWriteContract, useDemo } from "@/lib/demo";
 import { knownTokens, nativeTokenFor, shieldTokensFor } from "@/lib/tokens";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
+import { useWalletState } from "@/hooks/useWalletState";
 import { usePoolDeposited } from "@/hooks/usePoolDeposited";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient, publicClientFor } from "@/lib/rhClient";
-import { HASH_SCHEME, dropUnsentNote, gasFor, noteNetworkProblem, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
+import { HASH_SCHEME, dropUnsentNote, gasFor, noteNetworkProblem, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, SIGNED_OUT_BALANCE_MESSAGE, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
 import {
   claimNoteId,
   isClaimedNote,
@@ -203,6 +204,9 @@ const TESTNET_CHAIN_IDS = new Set<number>([46630, 42431]);
 /** Relay failures after which the payment may still have gone out (a timeout, a lost reply). */
 const RELAY_MAYBE_SENT = new Set(["maybe_sent", "rpc", "network", "error", "internal", "in_flight"]);
 
+/** No payments listed: one constant, so the wallet-scoped list starts over on the same empty list. */
+const NO_INBOX: { memo: ScannedMemo; label: string; ticket: string; note?: string }[] = [];
+
 export function MoveView() {
   const shieldLive = isShieldDeployed();
   const poseidonMode = HASH_SCHEME === "poseidon";
@@ -267,8 +271,8 @@ export function MoveView() {
   const [xDestId, setXDestId] = useState<string | null>(null);
   const [xQuote, setXQuote] = useState<CrossChainQuote | null>(null);
   const [xSent, setXSent] = useState<CrossChainQuote | null>(null);
-  /** What was just scheduled: one cash out, or a private cash out's pieces (count, from `at` to `until`). */
-  const [scheduledNotice, setScheduledNotice] = useState<{ at: number; label: string; count?: number; until?: number } | null>(null);
+  /** What was just scheduled: one cash out, or a private cash out's pieces (count, from `at` to `until`). Gone on sign out. */
+  const [scheduledNotice, setScheduledNotice] = useWalletState<{ at: number; label: string; count?: number; until?: number } | null>(address, null);
   // Cash out privately (lib/cashOutPrivately): a few pieces over time, the
   // default whenever it is offered, unless this browser chose all at once.
   const [privatePref, setPrivatePref] = useState(() => readPrivatePref().on);
@@ -302,7 +306,8 @@ export function MoveView() {
   const [sendPassphrase, setSendPassphrase] = useState("");
   const [importText, setImportText] = useState("");
   const [importPassphrase, setImportPassphrase] = useState("");
-  const [importOk, setImportOk] = useState<{
+  // A claim's or a secure's result names its amount: it goes on sign out or a switch of account.
+  const [importOk, setImportOk] = useWalletState<{
     text: string;
     note?: string;
     /** A claim just secured: what it can do next (AfterClaimNext), full the first time in this browser. */
@@ -310,7 +315,7 @@ export function MoveView() {
     tone?: "warn" | "danger";
     /** A claim this says is not secured yet: the message changes once it is (secured with no one asking). */
     pending?: { id: string; label: string };
-  } | null>(null);
+  } | null>(address, null);
   /** The claimed payment being secured right now (lib/claimSweep). */
   const [securingId, setSecuringId] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -348,10 +353,12 @@ export function MoveView() {
   const [myIdentity, setMyIdentity] = useState<ReceiveIdentity | null>(null);
   const [tagCopied, setTagCopied] = useState(false);
   const [shareLocked, setShareLocked] = useState(false);
-  const [inbox, setInbox] = useState<
+  // Payments to this browser's Gloam address, with their amounts: read and listed
+  // only while a wallet is connected, and gone on sign out or a switch of account.
+  const [inbox, setInbox] = useWalletState<
     { memo: ScannedMemo; label: string; ticket: string; note?: string }[]
-  >([]);
-  const [inboxStatus, setInboxStatus] = useState<string | null>(null);
+  >(address, NO_INBOX);
+  const [inboxStatus, setInboxStatus] = useWalletState<string | null>(address, null);
   const [memoPosted, setMemoPosted] = useState(false);
   /** A claim code nobody else will get (no heads-up reached a Gloam address): the sender must keep it. */
   const mustSaveCode = Boolean(shareBlob) && !memoPosted;
@@ -498,7 +505,7 @@ export function MoveView() {
         setClaimPreview(null);
         setImportOk(null);
       }),
-    []
+    [setImportOk]
   );
 
   // While a payment waits in the claim box, the new-wallet sheet (EmbeddedWalletFlow)
@@ -1898,6 +1905,9 @@ export function MoveView() {
   }
 
   async function scanInbox() {
+    // This browser's Gloam address is not a wallet's: what it was paid is read only
+    // while one is connected, so a signed-out page never lists anyone's payments.
+    if (!address) return;
     if (!isPayMemoLive()) {
       setInboxStatus(
         "Not available on this network yet. Ask the sender for a claim link."
@@ -2295,15 +2305,16 @@ export function MoveView() {
     shownNetworkKey.current = networkKey;
     setInbox([]);
     setInboxStatus(null);
-  }, [networkKey]);
+  }, [networkKey, setInbox, setInboxStatus]);
 
-  // Auto-scan inbox when opening Receive (if memo board live), and again on a network switch
+  // Auto-scan inbox when opening Receive (if memo board live), again on a network switch,
+  // and once a wallet connects (or another one does: the list starts over for it)
   useEffect(() => {
-    if (mode !== "receive" || !isPayMemoLive()) return;
+    if (mode !== "receive" || !isPayMemoLive() || !address) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- opening Receive scans the payment-message board, which marks the scan as running
     void scanInbox();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- open-tab scan once per enter
-  }, [mode, networkKey]);
+  }, [mode, networkKey, address]);
 
   // Live preview when pasting a ticket (amount only, not a full claim)
   useEffect(() => {
@@ -2452,7 +2463,7 @@ export function MoveView() {
       setClaimPreview(null);
     }, 0);
     return () => window.clearTimeout(t);
-  }, [request, mode, payWalletTo, recipientTag]);
+  }, [request, mode, payWalletTo, recipientTag, setImportOk]);
 
   // The URL and the mode follow each other. The app nav's Pay privately,
   // Receive and Cash out links only change ?mode= on a page already showing
@@ -2471,7 +2482,7 @@ export function MoveView() {
     setStatus(null);
     setImportOk(null);
     setClaimPreview(null);
-  }, [urlMode]);
+  }, [urlMode, setImportOk]);
   useEffect(() => {
     const next = searchWithMoveMode(window.location.search, mode);
     if (next === null) return;
@@ -3622,30 +3633,43 @@ export function MoveView() {
               <span className="mx-auto grid h-11 w-11 place-items-center rounded-full bg-panel text-mute shadow-card">
                 <LockIcon />
               </span>
-              <p className="mt-4 text-[15px] text-foreground">
-                Nothing in your private balance yet
-              </p>
-              <p className="mx-auto mt-1.5 max-w-[40ch] text-[13.5px] leading-relaxed text-mute">
-                Add money first, or open Receive to claim a payment someone sent
-                you.
-              </p>
-              <div className="mt-5 flex flex-wrap justify-center gap-2">
-                <Link href="/app/vault?tab=shield" className="btn btn-ink">
-                  Add money
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => selectMode("receive")}
-                  className="btn btn-ghost"
-                >
-                  Receive
-                </button>
-              </div>
+              {!isConnected ? (
+                <>
+                  {/* Signed out: no balance is read, so none is said to be empty. */}
+                  <p className="mt-4 text-[15px] text-foreground">{SIGNED_OUT_BALANCE_MESSAGE}</p>
+                  <div className="mt-5 flex justify-center">
+                    <WalletMenu />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="mt-4 text-[15px] text-foreground">
+                    Nothing in your private balance yet
+                  </p>
+                  <p className="mx-auto mt-1.5 max-w-[40ch] text-[13.5px] leading-relaxed text-mute">
+                    Add money first, or open Receive to claim a payment someone sent
+                    you.
+                  </p>
+                  <div className="mt-5 flex flex-wrap justify-center gap-2">
+                    <Link href="/app/vault?tab=shield" className="btn btn-ink">
+                      Add money
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => selectMode("receive")}
+                      className="btn btn-ghost"
+                    >
+                      Receive
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
             </>
           ) : null}
 
-          {mode === "send" && shieldLive && <SentLinks onTakeBack={takeBackLink} />}
+          {/* Sent links hold live claim codes and their amounts: listed only while a wallet is connected. */}
+          {mode === "send" && shieldLive && isConnected && <SentLinks onTakeBack={takeBackLink} />}
 
           {mode === "receive" && (
             <div className="mt-6 space-y-7">
@@ -3743,21 +3767,23 @@ export function MoveView() {
                   <h3 className="text-[15px] font-medium text-foreground">
                     Payments to you
                   </h3>
-                  <button
-                    type="button"
-                    onClick={() => void scanInbox()}
-                    disabled={scanning}
-                    className="btn btn-ghost btn-sm"
-                  >
-                    {scanning ? (
-                      <>
-                        <Spinner />
-                        Checking…
-                      </>
-                    ) : (
-                      "Check now"
-                    )}
-                  </button>
+                  {address && (
+                    <button
+                      type="button"
+                      onClick={() => void scanInbox()}
+                      disabled={scanning}
+                      className="btn btn-ghost btn-sm"
+                    >
+                      {scanning ? (
+                        <>
+                          <Spinner />
+                          Checking…
+                        </>
+                      ) : (
+                        "Check now"
+                      )}
+                    </button>
+                  )}
                 </div>
                 <p className="mt-1 text-[13px] leading-relaxed text-mute">
                   When someone pays your Gloam address, it shows up here on its
@@ -3766,6 +3792,9 @@ export function MoveView() {
                     ? ""
                     : " Not available on this network yet, so paste the claim link below."}
                 </p>
+                {!address && memoLive && (
+                  <p className="mt-3 text-[13px] text-soft">Connect a wallet to see payments to you.</p>
+                )}
                 {inboxStatus && (
                   <p className="mt-3 text-[13px] text-soft" aria-live="polite">
                     {inboxStatus}
@@ -3977,7 +4006,7 @@ export function MoveView() {
             </div>
           ) : (
             <>
-              <PrivateBalanceCard rows={totals} />
+              <PrivateBalanceCard rows={totals} signedOut={!isConnected} />
               <div className="gl-card p-5">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-[13px] text-mute">What the explorer shows</p>
@@ -4279,7 +4308,7 @@ type BalanceRow = {
 };
 
 /** The private balance, only visible to its owner. Carries the sealed glow. */
-function PrivateBalanceCard({ rows }: { rows: BalanceRow[] }) {
+function PrivateBalanceCard({ rows, signedOut }: { rows: BalanceRow[]; signedOut: boolean }) {
   const [hidden, setHidden] = useState(false);
   return (
     <div className="gl-card relative overflow-hidden p-5">
@@ -4317,6 +4346,8 @@ function PrivateBalanceCard({ rows }: { rows: BalanceRow[] }) {
               </li>
             ))}
           </ul>
+        ) : signedOut ? (
+          <p className="mt-4 max-w-[30ch] text-[13px] leading-relaxed text-mute">{SIGNED_OUT_BALANCE_MESSAGE}</p>
         ) : (
           <div className="mt-4">
             <p className="tnum text-[34px] font-light leading-none tracking-[-0.02em] text-foreground">

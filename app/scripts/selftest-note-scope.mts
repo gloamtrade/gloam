@@ -112,19 +112,19 @@ await test("the state the hook kept across the switch is Duke's 249.239539 USDG,
 
 await test("notes of 4663 in the store while 84532 is active: none shown, none counted, none spendable", () => {
   // the hook's state still holds the 4663 notes (the bug); what it shows must not
-  const shown = visibleNotes(heldFromBefore, [], BASE, true);
+  const shown = visibleNotes(heldFromBefore, [], BASE, true, ME);
   assert.deepEqual(shown.local, []);
   assert.deepEqual(activeSpendableNotes(shown.local), []);
   assert.equal(sumByAsset(shown.local).size, 0, "no balance row, so no USDG headline");
   // and a fresh read on Base Sepolia holds only its own note
   assert.deepEqual(shield.loadLocalNotes(ME).map((n) => n.id), [baseNote.id]);
-  assert.deepEqual(visibleNotes(shield.loadLocalNotes(ME), [], BASE, true).local.map((n) => n.id), [baseNote.id]);
+  assert.deepEqual(visibleNotes(shield.loadLocalNotes(ME), [], BASE, true, ME).local.map((n) => n.id), [baseNote.id]);
   // chain history rows of another chain are dropped the same way
-  assert.deepEqual(visibleNotes([], heldFromBefore, BASE, true).chain, []);
+  assert.deepEqual(visibleNotes([], heldFromBefore, BASE, true, ME).chain, []);
 });
 
 await test("nothing is shown before the page knows its network (first render)", () => {
-  assert.deepEqual(visibleNotes(shield.loadLocalNotes(ME), heldFromBefore, BASE, false), { local: [], chain: [] });
+  assert.deepEqual(visibleNotes(shield.loadLocalNotes(ME), heldFromBefore, BASE, false, ME), { local: [], chain: [] });
 });
 
 await test("Base mainnet and Ethereum notes at the same address never show on Base Sepolia, nor its notes on them", () => {
