@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
-import { FlowDiagram, PoolPicture } from "@/components/docs/FlowDiagram";
+import { PoolPicture } from "@/components/docs/FlowDiagram";
 import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { ELYSIUM_ENABLED } from "@/lib/elysium";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
@@ -37,8 +37,8 @@ export default function DocsOverviewPage() {
         It runs on <strong>{MAINNETS}</strong> mainnet, and on four testnets:
         Robinhood Chain testnet, Tempo Moderato, Base Sepolia and Ethereum
         Sepolia. You
-        put money into a shared vault (“shield”), pay privately inside it, and
-        cash out with a real proof. Proofs are made on your device, and nobody
+        add money to a shared vault, pay privately inside it, and cash out
+        with a real proof. Proofs are made on your device, and nobody
         else holds a key. See{" "}
         <Link href="/docs/compare">how Gloam compares</Link>.
       </p>
@@ -70,35 +70,16 @@ export default function DocsOverviewPage() {
           first.
         </li>
         <li>
-          <AppLink href="/app/vault?tab=shield">Shield</AppLink> a small amount.
+          <AppLink href="/app/vault?tab=shield">Add privately</AppLink>: move a
+          small amount from your wallet into your private balance.
         </li>
         <li>
-          <AppLink href="/app/vault?tab=move">Move</AppLink> to pay a Gloam address or cash
-          out. A proof made in your browser settles it, and the amount never
-          shows.
+          <AppLink href="/app/vault?tab=move">Pay privately</AppLink> to a Gloam
+          address, or <AppLink href="/app/vault?tab=move&mode=cashout">cash out</AppLink>{" "}
+          to any wallet. A proof made in your browser settles it, and a private
+          payment&apos;s amount never shows.
         </li>
       </ol>
-
-      <FlowDiagram
-        title="What those buttons mean"
-        steps={[
-          {
-            n: "1",
-            title: "Shield",
-            body: "Deposit into the Gloam vault. Your wallet balance goes down; the vault holds the asset.",
-          },
-          {
-            n: "2",
-            title: "Private send",
-            body: "Send inside the vault to a Gloam address. The sender and amount stay sealed.",
-          },
-          {
-            n: "3",
-            title: "Cash out",
-            body: "Move money back to a public balance with a real proof, made in your browser.",
-          },
-        ]}
-      />
 
       <h2 id="works">What works today</h2>
       <ul>
@@ -111,7 +92,7 @@ export default function DocsOverviewPage() {
           Send public balances: ETH{ELYSIUM_ENABLED ? " (HYPE on Elysium)" : ""} and every token listed on the network
         </li>
         <li>
-          Shield into the vault: USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO
+          Add privately: USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO
           on Robinhood Chain mainnet;
           USDC.e, pathUSD, USDT0 and OUSD on Tempo mainnet;
           {BASE_LIVE ? " USDC, EURC, USDT and ETH on Base mainnet;" : ""}
@@ -120,10 +101,10 @@ export default function DocsOverviewPage() {
           ETH, stock tokens and stablecoins on the testnets
         </li>
         <li>
-          Private send to a Gloam address, or by claim link with an optional
+          Pay privately to a Gloam address, or by claim link with an optional
           passphrase
         </li>
-        <li>Cash out with a real zero-knowledge proof</li>
+        <li>Cash out to any wallet, with a real proof made in your browser</li>
         <li>
           <Link href="/docs/private-swaps">Private swaps</Link> on Robinhood
           Chain and Tempo mainnet: swap from your private balance, with who
@@ -160,8 +141,7 @@ export default function DocsOverviewPage() {
       <ul>
         <li>
           Private swaps on the testnets (private swaps, stock tokens
-          included, are on mainnet). The old <Link href="/docs/private-swaps#sealed-trade">sealed trade</Link> is
-          retired
+          included, are on mainnet)
         </li>
         <li>
           <Link href="/docs/data">On-chain price oracles</Link> (no Chainlink /
@@ -182,7 +162,7 @@ export default function DocsOverviewPage() {
           <Link href="/docs/testnet">Practice on testnet</Link>
         </li>
         <li>
-          <Link href="/docs/encryption">How shield works (simple)</Link>
+          <Link href="/docs/encryption">How shield works</Link>
         </li>
         <li>
           <Link href="/docs/product">What ships when</Link>
