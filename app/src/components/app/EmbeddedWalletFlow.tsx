@@ -36,6 +36,8 @@ import {
 import { networkName } from "@/lib/networks";
 import { getActiveTurnkeyAccount, onEmbeddedSheetRequest, setEmbeddedNeedsWallet } from "@/lib/turnkeyBridge";
 import { claimWaiting, goToClaim, onClaimWaiting } from "@/lib/claimLinkStore";
+import { claimFirstAfterWallet } from "@/lib/claimHelp";
+import { relayFor, relayPreferred } from "@/lib/relay/client";
 import { autoRestoreSyncing } from "@/lib/autoRestore";
 import { useAutoRestoreStatus } from "@/hooks/useAutoRestoreStatus";
 import { subscribeToUpdates } from "@/lib/updatesClient";
@@ -100,8 +102,22 @@ function Sheet({ signedIn }: { signedIn: boolean }) {
   const [updates, setUpdates] = useState(false);
   const updatesSent = useRef(false);
   const signInEmail = user?.userEmail?.trim() || null;
-  // A claim link brought this person here: the next step is that claim, not Add funds.
-  const claimNext = useSyncExternalStore(onClaimWaiting, claimWaiting, () => false);
+  // A claim link brought this person here: the next step is that claim, not Add funds,
+  // while the claim is free (the relay is up here and this browser leaves it on). A new
+  // wallet holds no gas, so with the relay off it needs Add funds first.
+  const claimWaitingNow = useSyncExternalStore(onClaimWaiting, claimWaiting, () => false);
+  const { network } = useNetwork();
+  const [relayStatus, setRelayStatus] = useState<{ chainId: number; up: boolean } | null>(null);
+  useEffect(() => {
+    let live = true;
+    void relayFor(network.chainId).then((r) => {
+      if (live) setRelayStatus({ chainId: network.chainId, up: Boolean(r?.enabled) });
+    });
+    return () => {
+      live = false;
+    };
+  }, [network.chainId]);
+  const relayUp = relayStatus?.chainId === network.chainId && relayStatus.up && relayPreferred();
 
   const wallet = pickEmbeddedWallet(wallets);
   const embeddedConnected = Boolean(
@@ -176,6 +192,8 @@ function Sheet({ signedIn }: { signedIn: boolean }) {
     backup.seen();
     setDismissed(true);
     setShowAddress(false);
+    // Add funds from the menu lasts until the sheet closes: a later claim still goes back to its payment
+    setFundingAsked(false);
   };
 
   const nameProblem = walletNameProblem(name);
@@ -236,7 +254,7 @@ function Sheet({ signedIn }: { signedIn: boolean }) {
       updatesEmail={signInEmail}
       updates={updates}
       onUpdates={setUpdates}
-      claimNext={claimNext && !fundingAsked}
+      claimNext={claimFirstAfterWallet({ waiting: claimWaitingNow, relayUp, fundingAsked })}
     />
   );
 }

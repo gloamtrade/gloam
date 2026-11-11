@@ -10,7 +10,7 @@ import { NETWORK_KEYS, getNetwork, isNetworkKey, setShownNetworkKey, type Networ
 import { liveMainnetNames } from "@/lib/mainnet";
 import { decodeNotePackage, isEncryptedPackage, paymentCodeIn } from "@/lib/notePackage";
 import { inWalletBrowser } from "@/lib/passkey";
-import { relayFor } from "@/lib/relay/client";
+import { relayFor, relayPreferred } from "@/lib/relay/client";
 import { WALLETCONNECT_ENABLED } from "@/lib/walletConnect";
 import { claimNeedsWalletApp, claimSignInLine, emailClaimOn } from "@/lib/claimHelp";
 import { assetLabel, formatAssetAmount } from "@/lib/shield";
@@ -80,8 +80,9 @@ export default function ClaimPage() {
   const [linkNet, setLinkNet] = useState<NetworkKey | null>(null);
   const [pasted, setPasted] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
-  // Whether the Gloam relay is up on the link's network: then it pays the
-  // network fee and claiming is free. Unknown (null) until it answers.
+  // Whether claiming is free: the Gloam relay is up on the link's network and
+  // this browser hasn't turned it off, so the relay pays the network fee (as Pay >
+  // Receive reads it). Unknown (null) until the relay answers.
   const [relayUp, setRelayUp] = useState<boolean | null>(null);
   const readyNet = view.kind === "ready" ? view.net : null;
   // Counts the payments this page has started reading; only the newest one is
@@ -92,7 +93,7 @@ export default function ClaimPage() {
     if (!readyNet) return;
     let live = true;
     void relayFor(getNetwork(readyNet).chainId).then((r) => {
-      if (live) setRelayUp(Boolean(r?.enabled));
+      if (live) setRelayUp(Boolean(r?.enabled) && relayPreferred());
     });
     return () => {
       live = false;
@@ -180,11 +181,14 @@ export default function ClaimPage() {
   const shownNet = view.kind === "ready" ? view.net : linkNet;
   const net = shownNet ? getNetwork(shownNet) : null;
   const realNet = net && !net.testnet ? net : null;
-  // How the next screen lets this person in: email where Gloam wallets run, a wallet beside it (lib/claimHelp).
+  // How the next screen lets this person in: email first where Gloam wallets run
+  // and the relay makes claiming free, a wallet beside it (lib/claimHelp). Said
+  // once the relay has answered, so the line never changes under the reader.
   const signIn =
-    view.kind === "ready"
+    view.kind === "ready" && relayUp !== null
       ? {
           email: emailClaimOn(view.net),
+          relayUp,
           networkKey: view.net,
           networkLabel: getNetwork(view.net).label,
           walletBrowser,
