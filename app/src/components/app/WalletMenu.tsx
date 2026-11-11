@@ -27,18 +27,13 @@ import {
 } from "@/lib/feeSponsor";
 import { isTempoWallet, preloadTempoWallet } from "@/lib/tempoWallet";
 import { WALLETCONNECT_ID, prefersWalletConnect } from "@/lib/walletConnect";
-import { EMBEDDED_CONNECTOR_ID } from "@/lib/embeddedWallet";
+import { EMBEDDED_CONNECTOR_ID, EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
 import { walletDeclined } from "@/lib/walletErrors";
 import { embeddedAvailability, onEmbeddedAvailability, openEmbeddedSheet, signOutEmbedded } from "@/lib/turnkeyBridge";
 import { forgetClaim } from "@/lib/claimLinkStore";
 import { useNetwork } from "./NetworkProvider";
-import { TURNKEY_ENABLED } from "./TurnkeyEmbeddedProvider";
-import { ClientOnly } from "./ClientOnly";
-
-// Email and passkey sign-in (Gloam wallets) ships only when Turnkey is switched on.
-const TurnkeyHeaderSignIn = dynamic(() =>
-  import("./TurnkeyHeaderSignIn").then((m) => m.TurnkeyHeaderSignIn),
-);
+// Reads the kit's state from lib/turnkeyBridge; the kit itself loads only when needed (TurnkeyKitGate).
+import { TurnkeyHeaderSignIn } from "./TurnkeyHeaderSignIn";
 
 // The wallet-app sheet (and its animation library) loads the first time it opens, not with every app page.
 const WalletConnectSheet = dynamic(() => import("./WalletConnectSheet").then((m) => m.WalletConnectSheet), { ssr: false });
@@ -93,7 +88,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
   const { switchChainAsync, isPending: switching } = useSwitchChain();
   // Gloam wallets: offered while the Turnkey kit can work on this page.
   const embeddedState = useSyncExternalStore(onEmbeddedAvailability, embeddedAvailability, () => "starting" as const);
-  const offerEmbedded = TURNKEY_ENABLED && embeddedState !== "unavailable";
+  const offerEmbedded = EMBEDDED_WALLETS && embeddedState !== "unavailable";
   // `wc`: no wallet in this browser, so "use a wallet" opens WalletConnect
   const [env, setEnv] = useState<{ mounted: boolean; auto: WalletMenuVariant; wc: boolean }>(
     { mounted: false, auto: "inline", wc: false }
@@ -245,17 +240,15 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
               : "flex flex-col items-stretch gap-1"
           }
         >
-          <ClientOnly>
-            <TurnkeyHeaderSignIn
-              className={primary}
-              quietClassName={`text-[13px] text-mute transition-colors hover:text-foreground disabled:opacity-60 ${
-                compact ? "h-9 px-1" : "h-9 w-full rounded-full hover:bg-surface"
-              }`}
-              fallback={plainConnect}
-              onUseWallet={canUseWallet ? openWallet : undefined}
-              walletLabel={wc ? "Use a wallet app" : "Use a browser wallet"}
-            />
-          </ClientOnly>
+          <TurnkeyHeaderSignIn
+            className={primary}
+            quietClassName={`text-[13px] text-mute transition-colors hover:text-foreground disabled:opacity-60 ${
+              compact ? "h-9 px-1" : "h-9 w-full rounded-full hover:bg-surface"
+            }`}
+            fallback={plainConnect}
+            onUseWallet={canUseWallet ? openWallet : undefined}
+            walletLabel={wc ? "Use a wallet app" : "Use a browser wallet"}
+          />
           <button
             type="button"
             onClick={openWallet}

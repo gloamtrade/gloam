@@ -76,6 +76,63 @@ export function embeddedRpId(hostname: string): string {
   return h === "gloam.trade" || h.endsWith(".gloam.trade") ? "gloam.trade" : h;
 }
 
+/**
+ * Where the Turnkey kit keeps a sign-in in localStorage (@turnkey/core's
+ * WebStorageManager): the list of session keys, the active one, and the default
+ * session's own key. scripts/selftest-embedded-flow.mts checks them against the
+ * installed kit, so an upgrade that moves them fails there first.
+ */
+export const TURNKEY_SESSION_LIST_KEY = "@turnkey/all-session-keys";
+export const TURNKEY_ACTIVE_SESSION_KEY = "@turnkey/active-session-key";
+export const TURNKEY_DEFAULT_SESSION_KEY = "@turnkey/session/v3";
+
+/**
+ * Whether this browser holds a Gloam wallet sign-in that may still be good, read
+ * from storage without the kit. The kit is a large download, so the app starts it
+ * on load only for someone who signed in before (the kit then restores the session
+ * and signs them in) and otherwise waits for a Sign in.
+ *
+ * Cautious on purpose: a stored session counts unless its expiry is known and has
+ * passed (the kit's own test: `expiry` in seconds, still ahead), so someone signed
+ * in is never left signed out. One that turns out stale only costs loading the kit,
+ * which then clears it. Storage that can't be read counts as none: the kit could
+ * not read it either.
+ */
+export function storedTurnkeySession(
+  storage: { getItem(key: string): string | null } | null | undefined,
+  now: number = Date.now(),
+): boolean {
+  if (!storage) return false;
+  try {
+    const read = (key: string): unknown => {
+      const raw = storage.getItem(key);
+      if (raw === null) return undefined;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw;
+      }
+    };
+    const listed = read(TURNKEY_SESSION_LIST_KEY);
+    const active = read(TURNKEY_ACTIVE_SESSION_KEY);
+    const keys = new Set<string>([TURNKEY_DEFAULT_SESSION_KEY]);
+    if (Array.isArray(listed)) for (const k of listed) if (typeof k === "string") keys.add(k);
+    if (typeof active === "string") keys.add(active);
+    for (const key of keys) {
+      const session = read(key);
+      if (session === undefined || session === null) continue;
+      const expiry = typeof session === "object" ? (session as { expiry?: unknown }).expiry : undefined;
+      const seconds = typeof expiry === "number" ? expiry : typeof expiry === "string" && /^\d+$/.test(expiry) ? Number(expiry) : NaN;
+      // a session in a shape this doesn't know: the kit decides
+      if (!Number.isFinite(seconds)) return true;
+      if (seconds * 1000 > now) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 /** The slice of a Turnkey wallet this app reads. */
 export type WalletLike = {
   source?: string;

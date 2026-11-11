@@ -1,6 +1,7 @@
 "use client";
 
 import type { Address, Hex, LocalAccount } from "viem";
+import { EMBEDDED_WALLETS, storedTurnkeySession } from "./embeddedWallet";
 
 /**
  * Bridge between Turnkey's embedded wallet (react-wallet-kit) and viem/wagmi.
@@ -110,20 +111,29 @@ const signInListeners = new Set<SignInListener>();
 export const SIGN_IN_PENDING_MS = 30_000;
 /** A Sign in tapped while no sheet was listening yet (the kit's code still loading): the sheet opens with it. */
 let pendingSignIn: { opts: SignInSheetOptions; at: number } | null = null;
+const pendingListeners = new Set<() => void>();
+
+function setPendingSignIn(next: { opts: SignInSheetOptions; at: number } | null) {
+  if (next === pendingSignIn) return;
+  pendingSignIn = next;
+  pendingListeners.forEach((fn) => fn());
+}
 
 /**
  * Opens Gloam's sign-in sheet (email code or passkey), drawn by
- * components/app/GloamSignInSheet inside the Turnkey provider. A tap is never
- * dropped: when no sheet is listening yet, the request waits (up to
+ * components/app/GloamSignInSheet inside the Turnkey provider. In the app the kit
+ * loads only when it is needed (TurnkeyKitGate), so this asks for it too. A tap
+ * is never dropped: when no sheet is listening yet, the request waits (up to
  * SIGN_IN_PENDING_MS) and the sheet opens with it as soon as it mounts, showing
  * "Getting sign-in ready…" until the kit is up. Says whether a sheet was there.
  */
 export function openSignInSheet(opts: SignInSheetOptions = {}, now = Date.now()): boolean {
+  wantEmbeddedKit();
   if (signInListeners.size === 0) {
-    pendingSignIn = { opts, at: now };
+    setPendingSignIn({ opts, at: now });
     return false;
   }
-  pendingSignIn = null;
+  setPendingSignIn(null);
   signInListeners.forEach((fn) => fn(opts));
   return true;
 }
@@ -132,9 +142,95 @@ export function openSignInSheet(opts: SignInSheetOptions = {}, now = Date.now())
 export function onSignInSheetRequest(fn: SignInListener, now = Date.now()): () => void {
   signInListeners.add(fn);
   const waiting = pendingSignIn;
-  pendingSignIn = null;
+  setPendingSignIn(null);
   if (waiting && now - waiting.at <= SIGN_IN_PENDING_MS) fn(waiting.opts);
   return () => signInListeners.delete(fn);
+}
+
+/** A Sign in was tapped and waits for the sheet (the kit is still loading): the button shows it is working. */
+export function signInWaiting(now = Date.now()): boolean {
+  return pendingSignIn !== null && now - pendingSignIn.at <= SIGN_IN_PENDING_MS;
+}
+
+export function onSignInWaiting(fn: () => void): () => void {
+  pendingListeners.add(fn);
+  return () => pendingListeners.delete(fn);
+}
+
+/** Forgets a Sign in that is waiting: the kit could not load, so no sheet will take it. */
+export function dropSignInWaiting() {
+  setPendingSignIn(null);
+}
+
+/* ---------------------------------------------------------------- the kit */
+
+/**
+ * Whether the Turnkey kit should run on this page. It is a large download, so the
+ * app (components/app/TurnkeyKitGate) starts it only for someone with a stored
+ * sign-in (lib/embeddedWallet storedTurnkeySession) or once they ask to sign in.
+ * Once wanted, it stays wanted for the page's life.
+ */
+let kitWanted = false;
+const kitListeners = new Set<() => void>();
+
+export function wantEmbeddedKit() {
+  if (kitWanted) return;
+  kitWanted = true;
+  kitListeners.forEach((fn) => fn());
+}
+
+export function embeddedKitWanted(): boolean {
+  return kitWanted;
+}
+
+export function onEmbeddedKitWanted(fn: () => void): () => void {
+  kitListeners.add(fn);
+  return () => kitListeners.delete(fn);
+}
+
+/**
+ * On load: this browser holds a sign-in that may still be good, so the kit is
+ * wanted at once, to sign the person back in, and until it has looked the header
+ * says the wallet is opening (never Sign in to someone who is signed in). Says
+ * whether it was.
+ */
+export function wantEmbeddedKitIfSignedIn(
+  storage: { getItem(key: string): string | null } | null | undefined,
+  enabled: boolean = EMBEDDED_WALLETS,
+  now: number = Date.now(),
+): boolean {
+  if (!enabled || !storedTurnkeySession(storage, now)) return false;
+  if (auth === "signed-out") setEmbeddedAuth("restoring");
+  wantEmbeddedKit();
+  return true;
+}
+
+/* ---------------------------------------------------------------- signed in */
+
+/**
+ * Whether the kit holds a session, published by the kit (TurnkeyWagmiSync) for
+ * the parts of the app outside it: the header's Sign in reads this, not the kit,
+ * so it never has to load the kit to know someone is signed out. "restoring": a
+ * sign-in is stored in this browser and the kit, still loading or starting, has
+ * not said yet whether it is good.
+ */
+export type EmbeddedAuth = "signed-out" | "restoring" | "signed-in";
+let auth: EmbeddedAuth = "signed-out";
+const authListeners = new Set<() => void>();
+
+export function setEmbeddedAuth(a: EmbeddedAuth) {
+  if (a === auth) return;
+  auth = a;
+  authListeners.forEach((fn) => fn());
+}
+
+export function embeddedAuth(): EmbeddedAuth {
+  return auth;
+}
+
+export function onEmbeddedAuth(fn: () => void): () => void {
+  authListeners.add(fn);
+  return () => authListeners.delete(fn);
 }
 
 /* ---------------------------------------------------------------- the sheet */

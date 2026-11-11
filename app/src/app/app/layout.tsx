@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { preconnect } from "react-dom";
 import { Web3Provider } from "@/components/app/Web3Provider";
-import { TurnkeyEmbeddedProvider } from "@/components/app/TurnkeyEmbeddedProvider";
 import { AppThemeScope } from "@/components/app/AppThemeScope";
 import { liveMainnetNames } from "@/lib/mainnet";
 
@@ -23,10 +22,13 @@ export default function ProductLayout({
   // on those pages the two connections were opened for nothing.
   preconnect("https://rpc.mainnet.chain.robinhood.com", { crossOrigin: "anonymous" });
   preconnect("https://rpc.tempo.xyz", { crossOrigin: "anonymous" });
+  // Gloam wallets (the Turnkey kit) are not wrapped around the app: the kit is a
+  // large download, so it starts inside Web3Provider only for someone signed in or
+  // asking to sign in (TurnkeyKitGate), and the pages never wait for it.
   return (
-    <TurnkeyEmbeddedProvider>
+    <>
       <AppThemeScope />
       <Web3Provider>{children}</Web3Provider>
-    </TurnkeyEmbeddedProvider>
+    </>
   );
 }

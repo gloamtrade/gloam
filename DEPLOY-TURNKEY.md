@@ -211,8 +211,10 @@ Add the preview's exact URL to Allowed Origins, set the variables on that previe
 8. Tempo testnet: send test stablecoins to the wallet, Add privately: the first send sets
    a fee token, then the deposit goes through with the fee taken in the stablecoin.
 9. Bridge: on a mainnet, Add funds > Bring money from another chain opens the bridge.
-10. Turn Allowed Origins off for the preview (or open a URL not in the list): the app
-    offers Connect wallet only, and the console names the origin to add.
+10. Turn Allowed Origins off for the preview (or open a URL not in the list), then tap
+    Sign in: the sheet says email and passkey sign-in isn't available here and offers the
+    browser wallet, the header then offers Connect wallet only, and the console names the
+    origin to add. (The kit loads only on Sign in, so before the tap the page can't know.)
 11. With the flag on, open `/app` pages, sign in, add privately (which makes a proof) and
     connect a browser wallet and WalletConnect: the console shows no "Refused to load" or
     "Refused to connect" line. If one does, add that host in `csp.config.mjs`. One line is
@@ -243,6 +245,12 @@ Add the preview's exact URL to Allowed Origins, set the variables on that previe
     them. Try it on an iPhone (Safari) and an Android phone (Chrome): the popup must open
     there too. Sign in with Google using an email that already has a Gloam account: a
     second account and wallet, as described above.
+17. The kit loads only when it is needed (TurnkeyKitGate). In a fresh private window,
+    `/app` makes no request to turnkey.com until Sign in is tapped; the button shows a
+    spinner until the sheet opens, and Continue works once "Getting sign-in ready…" is
+    gone. Signed in, reload `/app`: the header says "Opening your wallet…" from the
+    first paint, then shows the address, never Sign in in between. Sign out, reload:
+    Sign in again, and no request to turnkey.com.
 
 ## Rolling back
 

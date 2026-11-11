@@ -15,8 +15,9 @@ export const TURNKEY_ENABLED = EMBEDDED_WALLETS;
 const TurnkeyKitProvider = dynamic(() => import("./TurnkeyKit"));
 
 /**
- * Wraps the product app with Turnkey embedded wallets (passkey / email login).
- * Scoped to /app only, the marketing site never mounts this.
+ * Wraps a page with Turnkey embedded wallets (passkey / email login), for pages
+ * that call the kit directly (the partner portal). The app does not wrap its
+ * pages: it starts the kit beside them only when needed (TurnkeyKitGate).
  */
 export function TurnkeyEmbeddedProvider({ children }: { children: ReactNode }) {
   if (!TURNKEY_ENABLED) return <>{children}</>;
