@@ -130,6 +130,15 @@ const nextConfig: NextConfig = {
       ".js": [".ts", ".tsx", ".js"],
       ".mjs": [".mts", ".mjs"],
     };
+    // The SDK has its own viem install (packages/sdk/node_modules), an older
+    // version than the app's. Compiled from source, its `import "viem"` put that
+    // second copy of viem next to the app's on every page that uses the SDK.
+    // Its imports now resolve from the app's node_modules first, so one viem
+    // ships; anything the app does not install resolves as before.
+    config.module.rules.push({
+      test: /[\\/]packages[\\/]sdk[\\/]src[\\/]/,
+      resolve: { modules: [path.join(__dirname, "node_modules"), "..."] },
+    });
     return config;
   },
 };
