@@ -119,9 +119,7 @@ export function EmptyCard({
     <section className="gl-card relative overflow-hidden">
       <SealedField tone="soft" />
       <div className="relative z-[1] flex flex-col items-start max-sm:p-6 sm:p-8">
-        <span className="grid h-11 w-11 place-items-center rounded-full bg-panel text-foreground shadow-card">
-          <ShieldCheck className="h-5 w-5" />
-        </span>
+        <ShieldCheck className="h-6 w-6 text-foreground" />
         <h2 className="mt-5 text-[22px] font-light tracking-[-0.012em] text-foreground">{title}</h2>
         <p className="mt-2 max-w-[48ch] text-[14px] leading-relaxed text-mute">{body}</p>
         {action && <div className="mt-6">{action}</div>}

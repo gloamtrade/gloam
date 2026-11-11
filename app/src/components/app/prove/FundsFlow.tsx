@@ -454,13 +454,17 @@ function FundsAside({
         ]}
         never={["Your balance", "Your other balances", "Your wallet", "Your history"]}
         note={
-          <p>
-            One thing to know: the proof carries a spend marker for each balance behind it. If you
-            later spend one of them, whoever has the proof can tell it was spent, and when. Before a
-            cash out or swap, Gloam moves those balances to a fresh one first, so the proof
-            doesn&apos;t lead to where the money went or how much. The move and the cash out land
-            close together, so their timing can still hint at a link.
-          </p>
+          <ul className="space-y-2">
+            <li>
+              The proof carries a spend marker for each balance behind it. If you later spend one,
+              whoever has the proof can tell it was spent, and when.
+            </li>
+            <li>
+              Before a cash out or swap, Gloam moves those balances to a fresh one first, so the proof
+              doesn&apos;t lead to where the money went or how much.
+            </li>
+            <li>The move and the cash out land close together, so their timing can still hint at a link.</li>
+          </ul>
         }
       />
       <SafeToShare />

@@ -241,13 +241,15 @@ function BalanceAside({
         ]}
         never={["Your other balances", "Your history"]}
         note={
-          <p>
-            The proof points at this balance&apos;s record in the vault, so whoever has it can find
-            the transaction that made it. A balance straight from a deposit can&apos;t be proven
-            this way, because its record names your wallet: send it to your own Gloam address first.
-            A balance from a send you made without the relay shows that wallet too. It does not
-            show whether the balance moves later. An At least proof does.
-          </p>
+          <ul className="space-y-2">
+            <li>Whoever has the proof can find the transaction that made this balance.</li>
+            <li>
+              A balance straight from a deposit can&apos;t be proven this way: its record names your
+              wallet. Send it to your own Gloam address first.
+            </li>
+            <li>A balance from a send you made without the relay shows that wallet too.</li>
+            <li>It does not show whether the balance moves later. An At least proof does.</li>
+          </ul>
         }
       />
       <SafeToShare />
