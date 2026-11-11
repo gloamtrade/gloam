@@ -716,7 +716,7 @@ export function PortfolioView() {
                       <TokenLogo
                         id={
                           isNativeAsset(n.asset)
-                            ? "eth"
+                            ? nativeId
                             : (tokenSet.find((t) => t.address.toLowerCase() === n.asset.toLowerCase())?.id ??
                               assetLabel(n.asset).toLowerCase())
                         }

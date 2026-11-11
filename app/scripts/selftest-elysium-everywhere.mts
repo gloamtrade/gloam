@@ -186,7 +186,8 @@ if (MODE === "off") {
     const n = nets.getNetwork(key);
     ok(n.primaryAsset.symbol === "HYPE" && n.chain.nativeCurrency.symbol === "HYPE", `on: ${key} gas in HYPE`);
     ok(n.ceremony === "production" && n.paymentsPool, `on: ${key} on the final keys`);
-    ok(!tokens.supportsNativeShield(n.chainId), `on: ${key} does not list HYPE`);
+    // mainnet's vault lists HYPE (offered once its limit lands); the testnet's does not
+    ok(tokens.supportsNativeShield(n.chainId) === (key === "elysium-mainnet"), `on: ${key} ${key === "elysium-mainnet" ? "lists" : "does not list"} HYPE`);
     ok(networkForChain(n.chainId).key === key, `on: the relay serves ${key}`);
     ok(sendGasMost(n.chainId, "unshield") === 4_800_000n, `on: ${key} gets Orbit gas room, like Robinhood Chain`);
   }

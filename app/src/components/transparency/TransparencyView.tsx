@@ -103,6 +103,8 @@ function useLedger(key: NetworkKey | null) {
 type Market = { id: string; source: string; mark: number; address?: string };
 type Prices = {
   ethUsd: number | null;
+  /** HYPE's price: the Elysium vault's native coin, never valued at ETH's. */
+  hypeUsd: number | null;
   /** Live marks by token address (the markets feed); for a stock this is a share price, not a token price. */
   byAddress: Map<string, number>;
   markets: Market[];
@@ -132,7 +134,7 @@ function usePrices(): { prices: Prices | null; waiting: boolean } {
     let live = true;
     const markets = fetch("/api/markets", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null) as Promise<{ ethUsd?: number | null; markets?: Partial<Market>[] } | null>;
+      .catch(() => null) as Promise<{ ethUsd?: number | null; hypeUsd?: number | null; markets?: Partial<Market>[] } | null>;
     // display only: a slow price read never holds the other prices back
     const tokenPrices = fetch("/api/token-marks", { signal: AbortSignal.timeout(5_000) })
       .then((r) => (r.ok ? r.json() : null))
@@ -152,7 +154,13 @@ function usePrices(): { prices: Prices | null; waiting: boolean } {
       for (const [address, usd] of Object.entries(t?.marks ?? {})) {
         if (typeof usd === "number" && usd > 0) tokenMarks.set(address.toLowerCase(), usd);
       }
-      setPrices({ ethUsd: typeof d?.ethUsd === "number" ? d.ethUsd : null, byAddress, markets: list, tokenMarks });
+      setPrices({
+        ethUsd: typeof d?.ethUsd === "number" ? d.ethUsd : null,
+        hypeUsd: typeof d?.hypeUsd === "number" ? d.hypeUsd : null,
+        byAddress,
+        markets: list,
+        tokenMarks,
+      });
     });
     return () => {
       live = false;
@@ -186,7 +194,7 @@ function fmtUsd(n: number): string {
 
 /**
  * A holding's dollar value, priced as the server's figures price it
- * (lib/onchainMetrics usdOf): stablecoins $1, ETH and WETH at ETH's price, a
+ * (lib/onchainMetrics usdOf): stablecoins $1, ETH and WETH at ETH's price, HYPE at HYPE's, a
  * Robinhood Chain stock at its share price times uiMultiplier / 1e18 (never the
  * share price alone), anything else at its live mark or the server's price. Null
  * means no price: left out of the total and named, never counted as $0.
@@ -195,6 +203,8 @@ function usdFor(h: VaultHolding, chainId: number, prices: Prices | null): number
   const amount = units(h.raw, h.decimals);
   if (h.stable) return amount;
   if (!prices) return null;
+  // the native coin: HYPE on Elysium at HYPE's price, ETH everywhere else
+  if (!h.address && h.symbol === "HYPE") return prices.hypeUsd != null ? amount * prices.hypeUsd : null;
   if (!h.address || h.id === "weth") return prices.ethUsd != null ? amount * prices.ethUsd : null;
   if (chainId === 4663 && h.kind === "stock") {
     const mult = h.uiMultiplier ? BigInt(h.uiMultiplier) : null;
@@ -373,7 +383,13 @@ function HoldingsCard({ ledger, prices, waiting }: { ledger: Ledger; prices: Pri
           <ul className="mt-5 divide-y divide-line border-y border-line">
             {held.map(({ h, amount, usd }) => (
               <li key={h.id} className="flex min-h-[56px] items-center gap-3 py-2">
-                {h.address ? <TokenLogo id={h.id} symbol={h.symbol} size={30} /> : <EthGlyph size={30} />}
+                {h.address ? (
+                  <TokenLogo id={h.id} symbol={h.symbol} size={30} />
+                ) : h.symbol === "HYPE" ? (
+                  <TokenLogo id="hype" symbol="HYPE" size={30} />
+                ) : (
+                  <EthGlyph size={30} />
+                )}
                 <span className="min-w-0 flex-1">
                   <span className="tnum block truncate text-[15px] text-foreground">
                     {fmtAmount(amount, h.stable)} <span className="text-mute">{h.symbol}</span>

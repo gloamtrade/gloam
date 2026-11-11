@@ -4,7 +4,7 @@
  * a router and its allowlisted pools do, and the gaps are written down here so a
  * new listing can't quietly leave one.
  *
- *  - Base and Ethereum have no swap router deployed.
+ *  - Base and Ethereum have no swap router deployed, and Elysium has none either.
  *  - ETH on Robinhood Chain can't swap: the deployed router refuses a native note
  *    (GloamVaultSwap: NativeNotSupported). WETH notes swap.
  *  - GRIFT has no pool on the router yet: a pool goes through the router's own
@@ -37,6 +37,8 @@ const SWAPS: Record<string, readonly string[]> = {
   "tempo-mainnet": ["USDC.e", "pathUSD", "USDT0", "OUSD"],
   "base-mainnet": swapV3Live(8453) ? ["USDC", "USDT", "EURC"] : [],
   "ethereum-mainnet": swapV3Live(1) ? ["USDC", "USDT", "USDG", "EURC"] : [],
+  // Elysium: USDC, KNTQ and native HYPE (both opening with their limits), no private swaps yet
+  "elysium-mainnet": [],
 };
 const KEYS = Object.keys(SWAPS) as (keyof typeof SWAPS & Parameters<typeof getNetwork>[0])[];
 /** Every gated asset read open: the app once each limit has landed. */
