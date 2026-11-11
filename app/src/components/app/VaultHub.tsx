@@ -228,8 +228,10 @@ function ActionRow({
     tabs[next]?.focus();
   }
 
+  // Desktop lists these same actions in the sidebar, so the row is for phones and tablets
+  // (globals.css .vault-tabstrip).
   return (
-    <div className="flex items-center gap-2">
+    <div className="vault-tabstrip items-center gap-2">
       <Link
         href="/app/vault"
         aria-label="Vault overview"
