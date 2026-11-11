@@ -350,7 +350,7 @@ function HoldingsCard({ ledger, prices, waiting }: { ledger: Ledger; prices: Pri
       <div className="relative">
         <div className="flex items-center justify-between gap-3">
           <p className="text-[13px] text-mute">Held in the vault</p>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-0.5 text-[12px] text-mute">
+          <span className="inline-flex items-center gap-1.5 text-[12.5px] text-mute">
             <EyeIcon size={12} />
             Public
           </span>
@@ -433,8 +433,8 @@ function CountTiles({ ledger }: { ledger: Ledger }) {
           <div className="flex items-center justify-between gap-2">
             <p className="text-[13px] text-mute">{c.label}</p>
             {c.sealed && (
-              <span className="grid h-6 w-6 place-items-center rounded-full bg-sealed-soft text-sealed" aria-label="Sealed">
-                <LockIcon size={11} />
+              <span className="text-sealed" role="img" aria-label="Sealed">
+                <LockIcon size={13} />
               </span>
             )}
           </div>
@@ -725,13 +725,8 @@ export function TransparencyView() {
                     <li key={k} className="flex min-h-[52px] items-center justify-between gap-4 py-2 text-[14px] lg:block lg:min-h-0 lg:px-6 lg:py-3">
                       <span className="text-mute lg:block">{k}</span>
                       <span className="inline-flex items-center gap-2 text-right text-foreground lg:mt-1.5 lg:text-left lg:text-[17px]">
-                        <span
-                          aria-hidden
-                          className={`grid h-5 w-5 shrink-0 place-items-center rounded-full max-lg:order-2 ${
-                            sealed ? "bg-sealed-soft text-sealed" : "bg-surface text-soft"
-                          }`}
-                        >
-                          {sealed ? <LockIcon size={10} /> : <EyeIcon size={11} />}
+                        <span aria-hidden className={`shrink-0 max-lg:order-2 ${sealed ? "text-sealed" : "text-mute"}`}>
+                          {sealed ? <LockIcon size={13} /> : <EyeIcon size={14} />}
                         </span>
                         {v}
                       </span>
@@ -839,12 +834,7 @@ export function TransparencyView() {
               <div className="grid grid-cols-1 gap-10 sm:grid-cols-2">
                 {PRIVATE_FACTS.map((f) => (
                   <div key={f.title} className="border-t border-foreground pt-5">
-                    <p className="flex items-center gap-2.5 text-[18px] leading-snug tracking-[-0.01em]">
-                      <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-sealed-soft text-sealed">
-                        <LockIcon size={10} />
-                      </span>
-                      {f.title}
-                    </p>
+                    <p className="text-[18px] leading-snug tracking-[-0.01em]">{f.title}</p>
                     <p className="mt-3 text-[14px] leading-relaxed text-mute">{f.body}</p>
                   </div>
                 ))}
