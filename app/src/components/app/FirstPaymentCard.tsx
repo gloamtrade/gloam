@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { IntentLink } from "@/components/IntentLink";
 import { useMemo, useSyncExternalStore } from "react";
 import type { LocalNote } from "@/lib/shield";
 import {
@@ -74,13 +74,13 @@ export function FirstPaymentCard({
             Gloam transactions.
           </p>
         </div>
-        <Link
+        <IntentLink
           href={firstPayHref(suggestion)}
           onClick={() => track("first_pay_nudge_open", { chainId })}
           className="btn btn-ink btn-sm shrink-0 max-sm:self-start"
         >
           {label}
-        </Link>
+        </IntentLink>
       </div>
 
       <button

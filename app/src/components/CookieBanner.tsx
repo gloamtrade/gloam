@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import Link from "next/link";
+import { IntentLink } from "@/components/IntentLink";
 import { CONSENT_KEY, getConsent, setConsent, subscribeConsent, type ConsentValue } from "@/lib/consent";
 import { readDemo } from "@/lib/demoFlag";
 
@@ -52,9 +52,9 @@ export function CookieBanner() {
         <p className="text-[13px] leading-relaxed text-mute sm:hidden">
           No ad or tracking cookies. Essential only keeps what the site needs and a few anonymous totals. Accept all
           adds anonymous counts of visits and app steps.{" "}
-          <Link href="/cookies" className="text-foreground underline underline-offset-2">
+          <IntentLink href="/cookies" className="text-foreground underline underline-offset-2">
             More
-          </Link>
+          </IntentLink>
         </p>
         <p className="mt-1.5 text-[13px] leading-relaxed text-mute max-sm:hidden">
           We set no ad or tracking cookies. Essential only keeps what the site
@@ -63,13 +63,13 @@ export function CookieBanner() {
           turns on anonymous counts with no cookies: page views, visits and
           app steps.
           See{" "}
-          <Link href="/cookies" className="text-foreground underline underline-offset-2">
+          <IntentLink href="/cookies" className="text-foreground underline underline-offset-2">
             Cookies
-          </Link>{" "}
+          </IntentLink>{" "}
           and{" "}
-          <Link href="/privacy" className="text-foreground underline underline-offset-2">
+          <IntentLink href="/privacy" className="text-foreground underline underline-offset-2">
             Privacy
-          </Link>
+          </IntentLink>
           .
         </p>
         <div className="mt-3 flex gap-2 sm:mt-4">

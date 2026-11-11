@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { IntentLink } from "@/components/IntentLink";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { Suspense, useEffect, useState } from "react";
@@ -124,7 +124,7 @@ function NavLink({
   size?: "desktop" | "sheet";
 }) {
   return (
-    <Link
+    <IntentLink
       href={item.href}
       onClick={onClick}
       aria-current={active ? "page" : undefined}
@@ -136,7 +136,7 @@ function NavLink({
     >
       {item.icon}
       {item.label}
-    </Link>
+    </IntentLink>
   );
 }
 
@@ -187,7 +187,7 @@ function TabBar({ items, pathname }: { items: NavItem[]; pathname: string }) {
           const active = isActive(pathname, item.href, item.exact);
           return (
             <li key={item.href} className="min-w-0 flex-1">
-              <Link
+              <IntentLink
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={`flex h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] leading-none transition-colors ${
@@ -196,7 +196,7 @@ function TabBar({ items, pathname }: { items: NavItem[]; pathname: string }) {
               >
                 {item.icon}
                 <span className="max-w-full truncate">{item.label}</span>
-              </Link>
+              </IntentLink>
             </li>
           );
         })}
@@ -328,13 +328,13 @@ export function AppShell({
                 onClick={() => setOpen(false)}
               />
             </nav>
-            <Link
+            <IntentLink
               href="/"
               onClick={() => setOpen(false)}
               className="mt-5 block text-[14px] text-mute hover:text-foreground"
             >
               Back to gloam.trade
-            </Link>
+            </IntentLink>
           </div>
         )}
       </header>
@@ -375,21 +375,21 @@ export function AppShell({
                   : `Gloam on ${network.label} testnet. Not investment, legal or tax advice.`}
             </p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <Link href="/docs/testnet" className="hover:text-foreground">
+              <IntentLink href="/docs/testnet" className="hover:text-foreground">
                 Testnet guide
-              </Link>
-              <Link href="/app/settings#help" className="hover:text-foreground">
+              </IntentLink>
+              <IntentLink href="/app/settings#help" className="hover:text-foreground">
                 Help
-              </Link>
-              <Link href="/privacy" className="hover:text-foreground">
+              </IntentLink>
+              <IntentLink href="/privacy" className="hover:text-foreground">
                 Privacy
-              </Link>
-              <Link href="/terms" className="hover:text-foreground">
+              </IntentLink>
+              <IntentLink href="/terms" className="hover:text-foreground">
                 Terms
-              </Link>
-              <Link href="/cookies" className="hover:text-foreground">
+              </IntentLink>
+              <IntentLink href="/cookies" className="hover:text-foreground">
                 Cookies
-              </Link>
+              </IntentLink>
               <a href="https://t.me/gloamhq" target="_blank" rel="noreferrer" className="hover:text-foreground">
                 Telegram
               </a>

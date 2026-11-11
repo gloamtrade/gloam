@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import Link from "next/link";
+import { IntentLink } from "@/components/IntentLink";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -145,10 +145,10 @@ function QuickAction({
     );
   }
   return (
-    <Link href={href} className={cls} aria-label={short ? label : undefined}>
+    <IntentLink href={href} className={cls} aria-label={short ? label : undefined}>
       {icon}
       {text}
-    </Link>
+    </IntentLink>
   );
 }
 
@@ -753,12 +753,12 @@ export function PortfolioView() {
                         {isUnsecuredClaim(n) && !n.unfunded && (
                           <p className="mt-0.5 text-[12.5px] text-warn">
                             Not secured yet, so the sender can still take it back.{" "}
-                            <Link
+                            <IntentLink
                               href="/app/vault?tab=move"
                               className="font-medium underline underline-offset-4"
                             >
                               Secure it
-                            </Link>
+                            </IntentLink>
                           </p>
                         )}
                         {n.note && (
@@ -782,7 +782,7 @@ export function PortfolioView() {
                         </a>
                       )}
                       {network.stocks && (
-                        <Link
+                        <IntentLink
                           href={
                             isNativeAsset(n.asset)
                               ? "/app/trade"
@@ -797,11 +797,11 @@ export function PortfolioView() {
                           className="btn btn-quiet btn-sm h-10"
                         >
                           Trade
-                        </Link>
+                        </IntentLink>
                       )}
-                      <Link href="/app/vault?tab=move" className="btn btn-ghost btn-sm h-10">
+                      <IntentLink href="/app/vault?tab=move" className="btn btn-ghost btn-sm h-10">
                         Pay
-                      </Link>
+                      </IntentLink>
                     </div>
                   </li>
                 ))}
@@ -810,12 +810,12 @@ export function PortfolioView() {
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line py-3 max-sm:px-5 sm:px-6">
                 <p className="text-[13px] text-mute">Pay from it privately, or cash out to any wallet.</p>
                 <div className="flex gap-1">
-                  <Link href="/app/vault?tab=move" className="btn btn-quiet btn-sm h-10">
+                  <IntentLink href="/app/vault?tab=move" className="btn btn-quiet btn-sm h-10">
                     Pay privately
-                  </Link>
-                  <Link href="/app/vault?tab=move&mode=cashout" className="btn btn-quiet btn-sm h-10">
+                  </IntentLink>
+                  <IntentLink href="/app/vault?tab=move&mode=cashout" className="btn btn-quiet btn-sm h-10">
                     Cash out
-                  </Link>
+                  </IntentLink>
                 </div>
               </div>
             </section>
@@ -889,9 +889,9 @@ export function PortfolioView() {
                     body={`Gloam takes ${tokenSet.map((t) => t.symbol).join(", ")} on ${network.label}. Once one is in your wallet, you can add it privately.`}
                     action={
                       shieldLive && bridgeVisible(network) ? (
-                        <Link href="/app/vault?tab=shield" className="btn btn-ghost h-10">
+                        <IntentLink href="/app/vault?tab=shield" className="btn btn-ghost h-10">
                           Bring money over
-                        </Link>
+                        </IntentLink>
                       ) : undefined
                     }
                   />
@@ -944,9 +944,9 @@ export function PortfolioView() {
                             // The gas coin. Until the pool takes it (Robinhood Chain mainnet,
                             // before ETH's limit lands), swap it into the stablecoin it does.
                             shieldLive && isNativeAddable(network.chainId, openGated) ? (
-                              <Link href={addAssetHref("eth")} className="btn btn-ghost btn-sm h-10">
+                              <IntentLink href={addAssetHref("eth")} className="btn btn-ghost btn-sm h-10">
                                 Add privately
-                              </Link>
+                              </IntentLink>
                             ) : (
                               <SwapToStableButton recipient={address ?? undefined} onArrived={() => router.push("/app/shield")} />
                             )
@@ -954,9 +954,9 @@ export function PortfolioView() {
                             <>
                               {shieldLive &&
                                 (r.addable ? (
-                                  <Link href={addAssetHref(r.id)} className="btn btn-ghost btn-sm h-10">
+                                  <IntentLink href={addAssetHref(r.id)} className="btn btn-ghost btn-sm h-10">
                                     Add privately
-                                  </Link>
+                                  </IntentLink>
                                 ) : (
                                   // Add only takes the pool's tokens, so a stock or swap token can't go in as it is.
                                   // The in-app swap sells the gas coin only, so point at the wallet's own swap.
@@ -975,9 +975,9 @@ export function PortfolioView() {
                                   </div>
                                 ))}
                               {network.stocks && (
-                                <Link href={`/app/trade?market=${r.id}`} className="btn btn-quiet btn-sm h-10">
+                                <IntentLink href={`/app/trade?market=${r.id}`} className="btn btn-quiet btn-sm h-10">
                                   Trade
-                                </Link>
+                                </IntentLink>
                               )}
                             </>
                           )}

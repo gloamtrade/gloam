@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { IntentLink } from "@/components/IntentLink";
 
 /**
  * The docs map: sidebar groups, top tabs, and the helpers that decide what is
@@ -147,11 +148,19 @@ export function DocsNavList({
   pathname,
   onNavigate,
   dense = false,
+  onIntent = false,
 }: {
   pathname: string;
   onNavigate?: () => void;
   dense?: boolean;
+  /**
+   * Fetch each page only when its link is touched, pointed at or focused. The
+   * phone sheet sits just off screen while closed, close enough for every link
+   * in it to count as in view, so plain links fetched every docs page on load.
+   */
+  onIntent?: boolean;
 }) {
+  const To = onIntent ? IntentLink : Link;
   return (
     <>
       {DOCS_NAV.map((group) => (
@@ -162,7 +171,7 @@ export function DocsNavList({
               const active = isDocActive(pathname, item.href);
               return (
                 <li key={item.href}>
-                  <Link
+                  <To
                     href={item.href}
                     onClick={onNavigate}
                     aria-current={active ? "page" : undefined}
@@ -175,7 +184,7 @@ export function DocsNavList({
                     }`}
                   >
                     {item.label}
-                  </Link>
+                  </To>
                 </li>
               );
             })}

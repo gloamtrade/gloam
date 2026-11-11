@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { IntentLink } from "@/components/IntentLink";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useNetwork } from "./NetworkProvider";
@@ -72,7 +72,7 @@ function VaultNavList({
 
   return (
     <div role="group" aria-labelledby={`nav-vault-${size}`}>
-      <Link
+      <IntentLink
         id={`nav-vault-${size}`}
         href="/app/vault"
         onClick={onNavigate}
@@ -87,13 +87,13 @@ function VaultNavList({
       >
         {icon}
         Vault
-      </Link>
+      </IntentLink>
       <ul className="mt-0.5 flex flex-col gap-0.5">
         {actions.map((a) => {
           const active = current === a.id;
           return (
             <li key={a.id}>
-              <Link
+              <IntentLink
                 href={a.href}
                 onClick={onNavigate}
                 aria-current={active ? "page" : undefined}
@@ -102,7 +102,7 @@ function VaultNavList({
                 }`}
               >
                 {a.label}
-              </Link>
+              </IntentLink>
             </li>
           );
         })}
