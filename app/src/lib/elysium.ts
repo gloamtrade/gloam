@@ -170,7 +170,7 @@ export function isElysiumTestnetChainId(chainId: unknown): boolean {
   return ELYSIUM_TESTNET !== null && Number(chainId) === ELYSIUM_TESTNET.chainId;
 }
 
-/** True for either Elysium network while it is on: HYPE gas, USDC only, no native shield. */
+/** True for either Elysium network while it is on: HYPE gas. Mainnet's vault lists HYPE (from its live limit), the testnet's does not. */
 export function isElysiumFamilyChainId(chainId: unknown): boolean {
   return isElysiumChainId(chainId) || isElysiumTestnetChainId(chainId);
 }

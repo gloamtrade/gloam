@@ -138,7 +138,7 @@ Runbook: [`DEPLOY-ETHEREUM.md`](./DEPLOY-ETHEREUM.md).
 Elysium mainnet (`99901`) is the fifth chain, live since 9 November 2026. Elysium is Kinetiq's Hyperliquid L2, an Arbitrum Orbit chain that settles to HyperEVM, with HYPE as its gas coin. Gloam there is the same vault (`ShieldPoolPayments`, the final keys, deposit limits, the 0.5% cash-out fee), with one difference: its owner is a `VaultOwnerGuard` from the deploy itself, so its proof checkers can never be replaced and its ownership can never move.
 
 - **Contracts.** Vault `0x89d3042390204f57b8b4F8949D3c2203E4002164` (deploy block `3248495`), owned by the guard `0x268D7CAd645282D1e77461b5B2dd997bd54eFAf5`. No payment-message board yet. Addresses: [`contracts/deployments/elysium-mainnet.json`](./contracts/deployments/elysium-mainnet.json).
-- **Assets.** USDC, 500 per deposit and 25,000 in total. HYPE, the gas coin, is not a pool asset.
+- **Assets.** USDC, 500 per deposit and 25,000 in total. HYPE (the gas coin, native in the vault: 12 per deposit, 600 in total) and KNTQ (1,400 / 70,000) are queued through the timelock; the app offers each once its live limit is above 0.
 - **Bring money over.** Into Elysium USDC from other chains through Relay, or swap HYPE into USDC on Elysium.
 - **Not on Elysium yet.** Private swaps, and a Gloam testnet (Elysium testnet `99801` is known to the SDK and switched off until its vault is deployed).
 - **SDK and MCP.** The SDK and the local MCP server in this repo know Elysium mainnet as `elysium-mainnet`; on npm from `@gloamtrade/sdk` 0.7.0 and `@gloamtrade/mcp` 0.9.0.

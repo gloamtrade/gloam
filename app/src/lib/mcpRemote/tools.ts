@@ -123,7 +123,7 @@ const MAINNET_PROP_TEXT: Partial<Record<NetworkKey, string>> = {
   "robinhood-mainnet": '"robinhood-mainnet" (Robinhood Chain mainnet: USDG, GLOAM, PONS, CASHCAT, ETH, AI and ORBIO)',
   "base-mainnet": '"base-mainnet" (Base mainnet: USDC, EURC, USDT, ETH)',
   "ethereum-mainnet": '"ethereum-mainnet" (Ethereum mainnet: USDC, USDT, USDG, PYUSD, EURC, ETH)',
-  "elysium-mainnet": '"elysium-mainnet" (Elysium mainnet: USDC; gas in HYPE)',
+  "elysium-mainnet": '"elysium-mainnet" (Elysium mainnet: USDC, then HYPE and KNTQ once their queued deposit limits land; gas in HYPE)',
 };
 
 /** What each live mainnet takes as a deposit, for the networks tool. */
@@ -133,7 +133,7 @@ const MAINNET_DEPOSITS_TEXT = (
     ["robinhood-mainnet", "USDG, GLOAM, PONS, CASHCAT, ETH, AI and ORBIO on Robinhood Chain"],
     ["base-mainnet", "USDC, EURC, USDT and ETH on Base"],
     ["ethereum-mainnet", "USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum"],
-    ["elysium-mainnet", "USDC on Elysium"],
+    ["elysium-mainnet", "USDC on Elysium, with HYPE and KNTQ once their queued deposit limits land"],
   ] as const
 )
   .filter(([k]) => (NETWORK_KEYS as readonly string[]).includes(k))
@@ -411,7 +411,7 @@ function networkView(key: NetworkKey, origin: string) {
       n.family === "tempo"
         ? "Paid in stablecoins; Tempo has no gas coin. Deposits are tokens only."
         : n.family === "elysium"
-          ? "HYPE (Elysium's gas coin). Deposits are USDC only; HYPE is not listed."
+          ? "HYPE (Elysium's gas coin). Deposits: USDC, and HYPE and KNTQ once their queued deposit limits land (depositLimit above 0)."
           : "ETH",
     // The relay pays the gas of relayed payments; over this price it waits (Ethereum)
     relayMaxGasGwei: (() => {
