@@ -149,7 +149,7 @@ function MobileSheet({
           />
         </div>
         <nav aria-label="Docs" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-6 pt-6">
-          <DocsNavList pathname={pathname} onNavigate={onClose} dense />
+          <DocsNavList pathname={pathname} onNavigate={onClose} dense onIntent />
         </nav>
         <div className="shrink-0 space-y-3 border-t border-line px-4 pb-[max(16px,env(safe-area-inset-bottom))] pt-4">
           <div className="flex items-center justify-between gap-3">

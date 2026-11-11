@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { IntentLink } from "@/components/IntentLink";
 import { useEffect, useRef, useState } from "react";
 import { Mark } from "@/components/Logo";
 import { SealedField } from "@/components/ui/SealedField";
@@ -95,13 +95,13 @@ export function WelcomeModal() {
               <>Connect a wallet and pick a network. The menu marks each one Mainnet or Testnet.</>,
               <>
                 On testnet, claim test funds if you need them. The{" "}
-                <Link
+                <IntentLink
                   href="/docs/testnet"
                   className="font-medium text-foreground underline decoration-line-strong underline-offset-4 hover:decoration-foreground"
                   onClick={dismiss}
                 >
                   testnet guide
-                </Link>{" "}
+                </IntentLink>{" "}
                 shows how.
               </>,
               <>
@@ -150,13 +150,13 @@ export function WelcomeModal() {
           >
             Enter the app
           </button>
-          <Link
+          <IntentLink
             href="/docs/testnet"
             onClick={dismiss}
             className="btn btn-quiet h-[44px] px-[20px] sm:h-12 sm:px-6 sm:text-[15px]"
           >
             Testnet guide
-          </Link>
+          </IntentLink>
         </div>
       </div>
     </div>

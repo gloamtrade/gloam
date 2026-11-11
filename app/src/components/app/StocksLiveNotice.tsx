@@ -6,7 +6,7 @@
  * views only, never on the Swap it points to, and stays away once closed
  * (kept in this browser; blocked storage keeps it closed for the page's life).
  */
-import Link from "next/link";
+import { IntentLink } from "@/components/IntentLink";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useSyncExternalStore } from "react";
 import { isNetworkKey } from "@/lib/networks";
@@ -72,7 +72,7 @@ export function StocksLiveNotice() {
         <span className="block font-medium text-foreground">Private stocks are live</span>
         Buy and sell tokenized stocks on Robinhood Chain from your private balance.
       </p>
-      <Link
+      <IntentLink
         href={`/app/vault${vaultActionSearch("swap", "")}`}
         onClick={() => {
           if (networkKey !== MAINNET) setNetworkKey(MAINNET);
@@ -81,7 +81,7 @@ export function StocksLiveNotice() {
         className="btn btn-ghost btn-sm h-10 shrink-0"
       >
         Swap privately
-      </Link>
+      </IntentLink>
       <button
         type="button"
         onClick={close}

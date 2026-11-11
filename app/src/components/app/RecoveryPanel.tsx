@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { IntentLink } from "@/components/IntentLink";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useSignMessage } from "wagmi";
 import { useAppAccount } from "@/lib/demo";
@@ -593,9 +593,9 @@ export function RecoveryNudge({ hasBalance, hasDeposits }: { hasBalance: boolean
                 {r.busy === "restore-older" ? "Check your wallet…" : "I have an older backup"}
               </button>
             )}
-            <Link href="/app/settings#recovery" className="btn btn-ghost btn-sm">
+            <IntentLink href="/app/settings#recovery" className="btn btn-ghost btn-sm">
               {noBackup || older ? "See recovery" : "Other ways"}
-            </Link>
+            </IntentLink>
           </div>
         )}
       </div>
@@ -670,9 +670,9 @@ function RestoreFallback({
               {r.busy === "restore-older" ? "Check your wallet…" : "I have an older backup"}
             </button>
           )}
-          <Link href="/app/settings#backup" className="btn btn-ghost btn-sm">
+          <IntentLink href="/app/settings#backup" className="btn btn-ghost btn-sm">
             Use a backup file
-          </Link>
+          </IntentLink>
         </div>
       </div>
       {onSnooze && (

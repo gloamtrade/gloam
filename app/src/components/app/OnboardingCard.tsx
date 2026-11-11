@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { IntentLink } from "@/components/IntentLink";
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useModalFocus } from "@/hooks/useModalFocus";
@@ -242,7 +242,7 @@ export function OnboardingCard() {
                           </a>
                         )
                       ) : (
-                        <Link
+                        <IntentLink
                           href={step.href}
                           onClick={() => {
                             markOnboardingStep(step.id);
@@ -251,7 +251,7 @@ export function OnboardingCard() {
                           className="btn btn-ink btn-sm shrink-0"
                         >
                           Go
-                        </Link>
+                        </IntentLink>
                       )
                     ) : (
                       <button
