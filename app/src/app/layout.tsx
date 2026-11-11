@@ -98,9 +98,6 @@ export default function RootLayout({
           type="font/woff2"
           crossOrigin=""
         />
-        {/* The app reads these chains on every load: open the connections early. */}
-        <link rel="preconnect" href="https://rpc.mainnet.chain.robinhood.com" crossOrigin="" />
-        <link rel="preconnect" href="https://rpc.tempo.xyz" crossOrigin="" />
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: DEVICE_BOOT_SCRIPT }} />
       </head>
