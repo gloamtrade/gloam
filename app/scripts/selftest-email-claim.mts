@@ -3,22 +3,30 @@
  * wallet, Turnkey) as well as with a wallet, on every mainnet.
  *
  *  - the /claim page's line under Claim it (lib/claimHelp): email sign-in on
- *    every Gloam network while Gloam wallets are on, with a wallet next to it;
- *    with them off it says plainly that email sign-in isn't available and what
- *    gets in instead; the "open it in your wallet app" card only when nothing
- *    else on a phone does
+ *    every Gloam network while Gloam wallets are on and claiming is free (the
+ *    relay is up and this browser leaves it on), with a wallet next to it; with
+ *    the relay off the wallet lines and the wallet-app card stand as before;
+ *    with Gloam wallets off it says plainly that email sign-in isn't available
+ *    and what gets in instead
  *  - the claim stays in the fragment: the app path carries it after "#" only,
  *    and reads back the same code
  *  - the hand-off across sign-in (lib/claimLinkStore): the code a link opened is
  *    kept for this tab until it is claimed, so a reload while the person reads
- *    the email code brings it back; it is dropped once claimed, edited or too
- *    old; odd values never come back; blocked storage never throws; it holds
- *    the code and network only, and nothing in it sends or logs anything
+ *    the email code brings it back; it lasts 15 minutes and an old one is
+ *    scrubbed when a page loads the store and on every keep; it is dropped once
+ *    claimed, dead (claimed already, no value, not what the vault holds),
+ *    edited, or on an explicit Sign out or Disconnect, which also empties the
+ *    claim box; odd values never come back; blocked storage never throws; it
+ *    holds the code and network only, and nothing in it sends or logs anything
  *  - the new-wallet sheet goes back to a waiting claim (claimWaiting, goToClaim)
+ *    only while claiming is free, and not after Add funds from the menu
  *  - the welcome never covers a claim (WelcomeModal's head-start script, run here)
  *  - the claim page names an Elysium amount from Elysium's own tokens
- *  - the wiring in Pay > Receive, the claim page, the welcome and the new-wallet
- *    sheet, read from the source
+ *  - the wiring in Pay > Receive, the claim page, the welcome, the wallet menu,
+ *    Settings and the new-wallet sheet, read from the source; the claim page's
+ *    help pulls in no wallet code (its whole import graph is walked)
+ *  - Glim's facts: with Gloam wallets on, a claim link is claimed by signing in
+ *    with an email on every mainnet, not "Robinhood Chain needs a wallet app"
  *
  * Securing a claim through the Gloam relay with a wallet that holds no gas (the
  * wallet is never asked to send) is covered by selftest-claim-sweep.mts.
@@ -34,9 +42,31 @@ env.NEXT_PUBLIC_TURNKEY_ENABLED = "true";
 env.NEXT_PUBLIC_TURNKEY_ORGANIZATION_ID = "org-test";
 env.NEXT_PUBLIC_TURNKEY_AUTH_PROXY_CONFIG_ID = "proxy-test";
 
-const { claimNeedsWalletApp, claimSignInLine, emailClaimOn } = await import("../src/lib/claimHelp");
+// An old kept link already in the tab when a page loads the store: it is scrubbed on load.
+const winAtLoad = (globalThis as unknown as { window: { sessionStorage: Storage } }).window;
+winAtLoad.sessionStorage.setItem(
+  "gloam.claimLink",
+  JSON.stringify({ code: "gloam3.ZdA2MpbegfJCpxPZ6yWS8WI8wxs7tdKXhKwQx7xD8lxd2ny8", on: "base-mainnet", at: Date.now() - 16 * 60_000 })
+);
+
+const { claimFirstAfterWallet, claimNeedsWalletApp, claimSignInLine, emailClaimOn } = await import("../src/lib/claimHelp");
+const scrubbedOnLoad = winAtLoad.sessionStorage.getItem("gloam.claimLink") === null;
 const store = await import("../src/lib/claimLinkStore");
-const { CLAIM_LINK_KEEP_MS, claimWaiting, dropClaimLink, goToClaim, keepClaimLink, keptClaimLink, onClaimWaiting, onGoToClaim, setClaimWaiting } = store;
+const {
+  CLAIM_LINK_KEEP_MS,
+  claimWaiting,
+  dropClaimLink,
+  forgetClaim,
+  goToClaim,
+  keepClaimLink,
+  keptClaimLink,
+  onClaimWaiting,
+  onForgetClaim,
+  onGoToClaim,
+  scrubClaimLink,
+  setClaimWaiting,
+} = store;
+const scrubbedByStore = winAtLoad.sessionStorage.getItem("gloam.claimLink") === null;
 const { appClaimPath, claimLinkFor, codeFromHash } = await import("../src/lib/claimLink");
 const { NETWORK_KEYS, getNetwork, setShownNetworkKey } = await import("../src/lib/networks");
 const { assetLabel, formatAssetAmount } = await import("../src/lib/shield");
@@ -77,10 +107,10 @@ test("every live mainnet offers email sign-in while Gloam wallets are on, none w
   assert.equal(emailClaimOn("base-mainnet"), true);
 });
 
-test("with email on, the line offers email first and a wallet beside it, on every mainnet", () => {
+test("with email on and the relay up, the line offers email first and a wallet beside it, on every mainnet", () => {
   for (const k of MAINNETS) {
     for (const walletConnect of [true, false]) {
-      const i = { email: true, networkKey: k, networkLabel: label(k), walletBrowser: false, walletConnect };
+      const i = { email: true, relayUp: true, networkKey: k, networkLabel: label(k), walletBrowser: false, walletConnect };
       assert.equal(claimSignInLine(i), "On the next screen, sign in with your email or connect a wallet.");
       assert.equal(claimNeedsWalletApp(i), false, `${k}: no "open it in your wallet app" card when email gets in`);
       const wb = { ...i, walletBrowser: true };
@@ -90,9 +120,35 @@ test("with email on, the line offers email first and a wallet beside it, on ever
   }
 });
 
+test("with the relay off (down here, or turned off in this browser), the wallet lines and the card stand as before", () => {
+  // a new email wallet holds no gas, so email first would lead to a claim that can't be secured
+  for (const k of [...MAINNETS, "tempo"]) {
+    const i = { email: true, relayUp: false, networkKey: k, networkLabel: label(k), walletBrowser: false, walletConnect: false };
+    assert.equal(claimSignInLine(i), `You'll need a wallet app such as MetaMask or Rabby to claim on ${label(k)}.`, k);
+    assert.equal(claimNeedsWalletApp(i), true, `${k}: the wallet-app card is back`);
+    assert.equal(claimSignInLine({ ...i, walletConnect: true }), "Connect a wallet on the next screen.");
+    assert.equal(claimNeedsWalletApp({ ...i, walletConnect: true }), false);
+    assert.equal(claimSignInLine({ ...i, walletBrowser: true }), "Connect your wallet on the next screen.");
+    assert.equal(claimNeedsWalletApp({ ...i, walletBrowser: true }), false);
+  }
+  const page = read("../src/app/claim/page.tsx");
+  // the network's relay and this browser's own setting, as Pay > Receive reads them
+  assert.match(page, /setRelayUp\(Boolean\(r\?\.enabled\) && relayPreferred\(\)\)/);
+  assert.match(page, /view\.kind === "ready" && relayUp !== null/, "said once the relay answered, never changed under the reader");
+  assert.match(page, /email: emailClaimOn\(view\.net\),\s*\n\s*relayUp,/);
+});
+
+test("after a new wallet, back to the payment only while the claim is free and Add funds wasn't asked for", () => {
+  for (const waiting of [true, false])
+    for (const relayUp of [true, false])
+      for (const fundingAsked of [true, false])
+        assert.equal(claimFirstAfterWallet({ waiting, relayUp, fundingAsked }), waiting && relayUp && !fundingAsked, JSON.stringify({ waiting, relayUp, fundingAsked }));
+});
+
 test("with email off, the line says so plainly and names what gets in instead", () => {
   for (const k of MAINNETS) {
-    const off = { email: false, networkKey: k, networkLabel: label(k), walletBrowser: false, walletConnect: false };
+    for (const relayUp of [true, false]) {
+    const off = { email: false, relayUp, networkKey: k, networkLabel: label(k), walletBrowser: false, walletConnect: false };
     assert.equal(
       claimSignInLine(off),
       `Email sign-in isn't available here yet. You'll need a wallet app such as MetaMask or Rabby to claim on ${label(k)}.`
@@ -104,9 +160,10 @@ test("with email off, the line says so plainly and names what gets in instead", 
     const wb = { ...off, walletBrowser: true };
     assert.equal(claimSignInLine(wb), "Connect your wallet on the next screen.");
     assert.equal(claimNeedsWalletApp(wb), false);
+    }
   }
   // Tempo testnet's passkey account, which the app offers while Gloam wallets are off
-  const tempo = { email: false, networkKey: "tempo", networkLabel: "Tempo", walletBrowser: false, walletConnect: false };
+  const tempo = { email: false, relayUp: true, networkKey: "tempo", networkLabel: "Tempo", walletBrowser: false, walletConnect: false };
   assert.equal(claimSignInLine(tempo), "No wallet needed: sign in with a passkey on the next screen.");
   assert.equal(claimNeedsWalletApp(tempo), false);
 });
@@ -115,9 +172,10 @@ test("the claim page's lines keep the copy rules", () => {
   const lines: string[] = [];
   for (const k of [...MAINNETS, "tempo"])
     for (const email of [true, false])
-      for (const walletBrowser of [true, false])
-        for (const walletConnect of [true, false])
-          lines.push(claimSignInLine({ email, networkKey: k, networkLabel: label(k), walletBrowser, walletConnect }));
+      for (const relayUp of [true, false])
+        for (const walletBrowser of [true, false])
+          for (const walletConnect of [true, false])
+            lines.push(claimSignInLine({ email, relayUp, networkKey: k, networkLabel: label(k), walletBrowser, walletConnect }));
   for (const l of new Set(lines)) {
     assert.ok(!/\u2014|\u2013/.test(l), `no dashes: ${l}`);
     assert.ok(!/happy to|real money|test money|seamless/i.test(l), l);
@@ -181,7 +239,63 @@ test("claimed, edited or too old: the tab stops keeping it", () => {
   assert.equal(ss().getItem("gloam.claimLink"), null, "and removed, not just ignored");
   keepClaimLink(SHORT, "base-mainnet", t0);
   assert.equal(keptClaimLink(t0 - 1), null, "a time from the future reads as damaged");
-  assert.equal(CLAIM_LINK_KEEP_MS, 30 * 60_000);
+  assert.equal(CLAIM_LINK_KEEP_MS, 15 * 60_000, "15 minutes");
+});
+
+test("an old kept link is scrubbed when a page loads the store and on every keep, not only when the app reads it", () => {
+  assert.ok(scrubbedByStore, "loading the store removed one 16 minutes old");
+  assert.equal(scrubbedOnLoad, false, "the claim page's help loads no store, so the scrub is the store's own");
+  ss().clear();
+  const t0 = 1_800_000_000_000;
+  keepClaimLink(SHORT, "base-mainnet", t0);
+  scrubClaimLink(t0 + CLAIM_LINK_KEEP_MS - 1);
+  assert.equal(keptClaimLink(t0 + CLAIM_LINK_KEEP_MS - 1)?.code, SHORT, "a fresh one stays");
+  scrubClaimLink(t0 + CLAIM_LINK_KEEP_MS);
+  assert.equal(ss().getItem("gloam.claimLink"), null, "an old one goes");
+  // a keep that keeps nothing (not a payment code) still scrubs the old one
+  keepClaimLink(SHORT, "base-mainnet", t0);
+  keepClaimLink("not a code", "base-mainnet", t0 + CLAIM_LINK_KEEP_MS + 1);
+  assert.equal(ss().getItem("gloam.claimLink"), null);
+  ss().setItem("gloam.claimLink", "{damaged");
+  keepClaimLink("", null);
+  assert.equal(ss().getItem("gloam.claimLink"), null, "damaged goes too");
+  const src = read("../src/lib/claimLinkStore.ts");
+  assert.match(src, /if \(typeof window !== "undefined"\) scrubClaimLink\(\);/, "on load");
+  assert.match(src, /export function keepClaimLink\(code: string, on: NetworkKey \| null, now = Date\.now\(\)\): void \{\s*\n\s*scrubClaimLink\(now\);\s*\n\s*if \(!looksLikeCode\(code\)\) return;/, "first thing on every keep");
+});
+
+test("an explicit Sign out or Disconnect forgets the kept link and empties the claim box", () => {
+  ss().clear();
+  keepClaimLink(SHORT, "base-mainnet");
+  let emptied = 0;
+  const off = onForgetClaim(() => emptied++);
+  forgetClaim();
+  assert.equal(keptClaimLink(), null, "the tab no longer keeps it");
+  assert.equal(emptied, 1, "the claim box is told to empty");
+  off();
+  forgetClaim();
+  assert.equal(emptied, 1, "unsubscribed");
+  const menu = read("../src/components/app/WalletMenu.tsx");
+  assert.match(menu, /const leave = \(\) => \{\s*\n\s*forgetClaim\(\);\s*\n\s*disconnect\(\);/);
+  assert.match(menu, /setOpen\(false\);\s*\n\s*leave\(\);/, "the menu's Sign out and Disconnect");
+  assert.match(menu, /setSwitchFailed\(false\);\s*\n\s*disconnect\(\);/, "a reconnect after a failed switch keeps the claim");
+  assert.match(read("../src/components/app/TurnkeyHeaderSignIn.tsx"), /forgetClaim\(\);\s*\n\s*try \{\s*\n\s*await signOutEmbedded\(\);/);
+  assert.match(read("../src/components/app/SettingsView.tsx"), /const disconnect = \(\) => \{\s*\n\s*forgetClaim\(\);/);
+  const view = read("../src/components/app/MoveView.tsx");
+  assert.match(view, /onForgetClaim\(\(\) => \{\s*\n\s*setImportText\(""\);\s*\n\s*setImportPassphrase\(""\);\s*\n\s*setClaimPreview\(null\);\s*\n\s*setImportOk\(null\);/);
+});
+
+test("a dead code (claimed already, no value, not what the vault holds) stops filling the box", () => {
+  const view = read("../src/components/app/MoveView.tsx");
+  assert.match(view, /class DeadCodeError extends Error \{\}/);
+  assert.match(view, /throw new DeadCodeError\("This payment has no readable amount\."\)/);
+  assert.match(view, /throw new DeadCodeError\("This payment carries no value\."\)/);
+  assert.match(view, /throw new DeadCodeError\(\s*\n\s*"The amount in this payment does not match what it holds in the vault, so it was not claimed\."/);
+  assert.equal(view.match(/throw new DeadCodeError\(moved\)/g)?.length, 2, "both ways of finding it claimed already");
+  assert.doesNotMatch(view, /throw new Error\(moved\)/);
+  assert.match(view, /if \(e instanceof DeadCodeError\) dropClaimLink\(\);\s*\n\s*setError\(walletErrorForPeople\(e, "Couldn't open this payment/);
+  // a code that may still work (wrong network, wrong phrase, a read that failed) stays kept
+  assert.match(view, /if \(wrongNetwork\) throw new Error\(wrongNetwork\);/);
 });
 
 test("only payment codes are kept, and nothing odd ever comes back", () => {
@@ -308,9 +422,40 @@ test("the claim page says how the next screen lets people in, from lib/claimHelp
   assert.match(page, /\{claimSignInLine\(signIn\)\}/);
   assert.match(page, /signIn && claimNeedsWalletApp\(signIn\) &&/);
   assert.doesNotMatch(page, /You'll need a wallet app such as MetaMask/, "the old line lives in lib/claimHelp now");
-  // the claim page's strict CSP leaves out wallet code: lib/claimHelp pulls none in
-  const help = read("../src/lib/claimHelp.ts");
-  assert.doesNotMatch(help, /wagmi|@turnkey|turnkeyBridge|walletConnect"|from "react"/);
+  // the claim page's strict CSP leaves out wallet code: nothing lib/claimHelp loads, all the way down, pulls any in
+  const seen = new Set<string>();
+  const packages = new Set<string>();
+  const walk = (file: string) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    const src = readFileSync(file, "utf8");
+    for (const m of src.matchAll(/(?:^|\n)\s*(?:import|export)\s+(type\s+)?(?:[^;]*?\sfrom\s+)?["']([^"']+)["']/g)) {
+      if (m[1]) continue; // types only: nothing reaches the bundle
+      const spec = m[2]!;
+      const local = spec.startsWith("@/") ? new URL(`../src/${spec.slice(2)}`, import.meta.url) : spec.startsWith(".") ? new URL(spec, `file://${file}`) : null;
+      if (!local) {
+        packages.add(spec);
+        continue;
+      }
+      const base = local.pathname;
+      const hit = [base, `${base}.ts`, `${base}.tsx`, `${base}/index.ts`].find((f) => {
+        try {
+          return readFileSync(f) && !f.endsWith("/");
+        } catch {
+          return false;
+        }
+      });
+      assert.ok(hit, `resolves ${spec} from ${file}`);
+      walk(hit);
+    }
+  };
+  walk(new URL("../src/lib/claimHelp.ts", import.meta.url).pathname);
+  const files = [...seen].map((f) => f.slice(f.indexOf("/src/") + 1));
+  for (const f of files) assert.doesNotMatch(f, /turnkey|wagmi|walletConnect|embeddedProvider|embeddedGas|tempoWallet|solanaWallet/i, `no wallet code: ${f}`);
+  for (const pkg of packages) assert.doesNotMatch(pkg, /^(wagmi|@wagmi|@turnkey|@walletconnect|@reown|react|react-dom|next)(\/|$)/, `no wallet or UI package: ${pkg} (${files.join(", ")})`);
+  assert.ok(files.includes("src/lib/embeddedWallet.ts"), "the switch is read from lib/embeddedWallet");
+  assert.ok(files.includes("src/lib/networks.ts") && files.length > 4, `the whole graph was walked: ${files.join(", ")}`);
+  assert.equal(read("../src/lib/embeddedWallet.ts").match(/(?:^|\n)\s*import\s/g), null, "lib/embeddedWallet imports nothing");
 });
 
 test("Pay > Receive keeps the link it reads, brings it back once, and drops it once claimed", () => {
@@ -319,10 +464,16 @@ test("Pay > Receive keeps the link it reads, brings it back once, and drops it o
   assert.match(view, /window\.history\.replaceState\(window\.history\.state, "", window\.location\.pathname \+ window\.location\.search\);[\s\S]{0,200}keepClaimLink\(code, isNetworkKey\(net\) \? net : null\);/);
   // after a reload: once, on Receive only, never over a link in the bar or text in the box
   const restore = view.slice(view.indexOf("const restoredClaim = useRef(false);"), view.indexOf("const claimInBox ="));
-  assert.match(restore, /if \(codeFromHash\(window\.location\.hash\)\) return;/);
+  assert.match(restore, /if \(claimFromLink\.current \|\| codeFromHash\(window\.location\.hash\)\) return;/);
   assert.match(restore, /!== "receive"\) return;/);
-  assert.match(restore, /setImportText\(\(now\) => \(now\.trim\(\) \? now : kept\.code\)\)/);
   assert.match(restore, /restoredClaim\.current = true;/);
+  // the network moves only when the restore fills the box
+  const empty = restore.indexOf("if (importTextNow.current.trim()) return;");
+  const kept = restore.indexOf("const kept = keptClaimLink();");
+  const move = restore.indexOf("if (kept.on && kept.on !== networkKey) setNetworkKey(kept.on);");
+  const fill = restore.indexOf("setImportText(kept.code);");
+  assert.ok(empty > 0 && empty < kept && kept < move && move < fill, "empty box, then the kept link, then the network, then the box");
+  assert.match(view, /claimFromLink\.current = true;\s*\n\s*window\.history\.replaceState/);
   // claimed: dropped before anything else can fail
   assert.match(view, /const r = await claimCode\(importText, importPassphrase\);\s*\n\s*if \(r\.isNew\) countLinkClaimed\(importText\);\s*\n\s*\/\/[^\n]*\n\s*dropClaimLink\(\);/);
   // an edit, or another payment picked from the list
@@ -340,14 +491,33 @@ test("Pay > Receive keeps the link it reads, brings it back once, and drops it o
   assert.match(view, /const signInOffered = EMBEDDED_WALLETS && embeddedState !== "unavailable";/);
 });
 
-test("the new-wallet sheet goes back to a waiting claim, unless Add funds was asked for", () => {
+test("the new-wallet sheet goes back to a waiting claim while it is free, unless Add funds was asked for", () => {
   const flow = read("../src/components/app/EmbeddedWalletFlow.tsx");
-  assert.match(flow, /const claimNext = useSyncExternalStore\(onClaimWaiting, claimWaiting, \(\) => false\);/);
-  assert.match(flow, /claimNext=\{claimNext && !fundingAsked\}/);
+  assert.match(flow, /const claimWaitingNow = useSyncExternalStore\(onClaimWaiting, claimWaiting, \(\) => false\);/);
+  assert.match(flow, /claimNext=\{claimFirstAfterWallet\(\{ waiting: claimWaitingNow, relayUp, fundingAsked \}\)\}/);
+  assert.match(flow, /const relayUp = relayStatus\?\.chainId === network\.chainId && relayStatus\.up && relayPreferred\(\);/);
+  // Add funds from the menu lasts until the sheet closes
+  assert.match(flow, /setShowAddress\(false\);\s*\n\s*\/\/[^\n]*\n\s*setFundingAsked\(false\);\s*\n\s*\};/);
   assert.match(flow, /if \(req === "funding"\) \{\s*\n\s*setFunding\(true\);\s*\n\s*setFundingAsked\(true\);/);
   assert.match(flow, /onLeave\(\);\s*\n\s*goToClaim\(\);/);
   assert.match(flow, />\s*Back to your payment\s*</);
   assert.match(flow, /\? "Your wallet is ready"/);
+});
+
+/* ---------------------------------------------------------------- Glim */
+
+const { knowledgeBlock } = await import("../src/lib/telegramBot/knowledge");
+
+test("Glim says a claim link is claimed with an email sign-in on every mainnet, not with a wallet app only", () => {
+  const k = knowledgeBlock();
+  assert.match(k, /On every mainnet \([^)]+\) you can claim by signing in with your email/);
+  for (const k2 of MAINNETS) assert.ok(k.includes(label(k2)), `names ${label(k2)}`);
+  assert.match(k, /While the Gloam relay is on \(the default\) claiming needs no gas/);
+  assert.match(k, /A wallet works too: /);
+  assert.doesNotMatch(k, /On Robinhood Chain you need a wallet app/);
+  assert.doesNotMatch(k, /Robinhood Chain needs (a wallet|a browser wallet)/);
+  assert.match(k, /A Gloam wallet \(email or passkey sign-in\) works on every network/);
+  assert.ok(!/\u2014|\u2013/.test(k.slice(k.indexOf("A claim link looks like"), k.indexOf("A payment request link"))), "no dashes");
 });
 
 console.log(`\n${passed} email-claim checks passed`);
