@@ -16,6 +16,7 @@
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-signin-sheet.mts
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   DEFAULT_OTP_FORMAT,
   RESEND_COOLDOWN_MS,
@@ -327,6 +328,23 @@ test("a Sign in tapped before the sheet is listening is never dropped: the sheet
   assert.deepEqual(seen, ["early", "now"]);
   off2();
   off3();
+});
+
+test("the sign-in and new-wallet sheets rise in on CSS, not framer-motion, and stay still for reduced motion", () => {
+  const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
+  for (const f of ["GloamSignInSheet", "EmbeddedWalletFlow"]) {
+    const src = read(`../src/components/app/${f}.tsx`);
+    assert.doesNotMatch(src, /framer-motion|<motion\./, `${f}: no animation library in the kit's download`);
+    assert.match(src, /className="gl-rise-scrim absolute inset-0 bg-black\/40 backdrop-blur-sm"/, `${f}: backdrop`);
+    assert.match(src, /<div className="gl-rise-sheet relative z-\[1\] max-h-\[92dvh\]/, `${f}: panel`);
+  }
+  const css = read("../src/app/globals.css");
+  // the spring it had (stiffness 420, damping 36): 16px up, settled by 0.36s
+  assert.match(css, /@keyframes gl-rise-in \{\s*from \{\s*opacity: 0;\s*transform: translateY\(16px\);/);
+  assert.match(css, /\.gl-rise-sheet \{\s*animation: gl-rise-in 0\.36s var\(--ease-out\) both;\s*animation-timing-function: linear\(0, /);
+  assert.match(css, /\.gl-rise-scrim \{\s*animation: gl-fade-in 0\.2s ease-in-out both;/);
+  const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)", css.indexOf(".gl-rise-scrim")));
+  assert.match(reduced.slice(0, reduced.indexOf("animation: none")), /\.gl-rise-sheet,\s*\n\s*\.gl-rise-scrim,/);
 });
 
 console.log(`selftest-signin-sheet: ${passed} passed`);
