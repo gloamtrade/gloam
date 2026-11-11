@@ -15,10 +15,21 @@
  */
 import { EMBEDDED_WALLETS } from "./embeddedWallet";
 import { isNetworkKey } from "./networks";
+import { nativeTokenFor } from "./tokens";
 
 /** Email sign-in for a claim on this network: Gloam wallets are on, and the Gloam wallet signs on every Gloam network. */
 export function emailClaimOn(networkKey: string, walletsOn: boolean = EMBEDDED_WALLETS): boolean {
   return walletsOn && isNetworkKey(networkKey);
+}
+
+/**
+ * The coin a claim link pays in, when it is the chain's own: HYPE on Elysium,
+ * ETH elsewhere, read from the link's chain, never from the network the
+ * browser saved (a HYPE link opened with Base saved showed "ETH"). Null for a
+ * token, which the link's network's token list names.
+ */
+export function claimNativeSymbol(asset: string, chainId: number): string | null {
+  return !asset || /^0x0{40}$/i.test(asset) ? nativeTokenFor(chainId).symbol : null;
 }
 
 export type ClaimSignInInput = {

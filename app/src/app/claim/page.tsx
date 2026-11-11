@@ -12,7 +12,7 @@ import { decodeNotePackage, isEncryptedPackage, paymentCodeIn } from "@/lib/note
 import { inWalletBrowser } from "@/lib/passkey";
 import { relayFor, relayPreferred } from "@/lib/relay/client";
 import { WALLETCONNECT_ENABLED } from "@/lib/walletConnect";
-import { claimNeedsWalletApp, claimSignInLine, emailClaimOn } from "@/lib/claimHelp";
+import { claimNativeSymbol, claimNeedsWalletApp, claimSignInLine, emailClaimOn } from "@/lib/claimHelp";
 import { assetLabel, formatAssetAmount } from "@/lib/shield";
 import { TokenLogo } from "@/components/app/TokenLogo";
 import { chainLogoSrc } from "@/lib/chainLogo";
@@ -54,10 +54,11 @@ async function readyView(code: string, linkNet: NetworkKey): Promise<View | "dam
       if (own) net = own;
       // Amounts and symbols are read from the link's own network's tokens: this
       // page has no network picker, so it would otherwise read the browser's
-      // saved one (an Elysium USDC link showed "<0.0001 0xb47c…0B65").
+      // saved one (an Elysium USDC link showed "<0.0001 0xb47c…0B65"). The
+      // chain's own coin is named by the link's chain too (HYPE on Elysium).
       setShownNetworkKey(net);
       amount = formatAssetAmount(pack.amountWei, pack.asset);
-      symbol = assetLabel(pack.asset);
+      symbol = claimNativeSymbol(pack.asset, getNetwork(net).chainId) ?? assetLabel(pack.asset);
       note = pack.note;
     } catch {
       return "damaged";

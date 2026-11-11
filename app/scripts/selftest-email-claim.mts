@@ -21,7 +21,9 @@
  *  - the new-wallet sheet goes back to a waiting claim (claimWaiting, goToClaim)
  *    only while claiming is free, and not after Add funds from the menu
  *  - the welcome never covers a claim (WelcomeModal's head-start script, run here)
- *  - the claim page names an Elysium amount from Elysium's own tokens
+ *  - the claim page names an Elysium amount from Elysium's own tokens, and the
+ *    chain's own coin by the link's chain (HYPE on Elysium), never by the
+ *    network the browser saved
  *  - the wiring in Pay > Receive, the claim page, the welcome, the wallet menu,
  *    Settings and the new-wallet sheet, read from the source; the claim page's
  *    help pulls in no wallet code (its whole import graph is walked)
@@ -49,7 +51,7 @@ winAtLoad.sessionStorage.setItem(
   JSON.stringify({ code: "gloam3.ZdA2MpbegfJCpxPZ6yWS8WI8wxs7tdKXhKwQx7xD8lxd2ny8", on: "base-mainnet", at: Date.now() - 16 * 60_000 })
 );
 
-const { claimFirstAfterWallet, claimNeedsWalletApp, claimSignInLine, emailClaimOn } = await import("../src/lib/claimHelp");
+const { claimFirstAfterWallet, claimNativeSymbol, claimNeedsWalletApp, claimSignInLine, emailClaimOn } = await import("../src/lib/claimHelp");
 const scrubbedOnLoad = winAtLoad.sessionStorage.getItem("gloam.claimLink") === null;
 const store = await import("../src/lib/claimLinkStore");
 const {
@@ -414,6 +416,23 @@ test("an Elysium link's amount reads from Elysium's tokens, whatever network the
   assert.ok(page.indexOf("if (own) net = own;") < at, "after the code's own chain is known");
 });
 
+test("a link in the chain's own coin is named by the link's chain: HYPE on Elysium, ETH elsewhere", () => {
+  const ZERO = "0x0000000000000000000000000000000000000000";
+  setShownNetworkKey("base-mainnet");
+  assert.equal(assetLabel(ZERO), "ETH", "read by the saved network, a HYPE link said ETH (the bug)");
+  // Elysium links exist only while Elysium is a network in this build
+  if (elysiumOn) {
+    assert.equal(claimNativeSymbol(ZERO, getNetwork("elysium-mainnet").chainId), "HYPE", "Elysium");
+    assert.equal(claimNativeSymbol("", getNetwork("elysium-mainnet").chainId), "HYPE");
+  }
+  for (const id of [4663, 8453, 1, 46630, 84532, 11155111]) assert.equal(claimNativeSymbol(ZERO, id), "ETH", String(id));
+  assert.equal(claimNativeSymbol("0x20c000000000000000000000b9537d11c60e8b50", 4217), null, "a token is named by the token list");
+  assert.equal(claimNativeSymbol("0x0000000000000000000000000000000000000001", 99901), null);
+  const page = read("../src/app/claim/page.tsx");
+  assert.match(page, /symbol = claimNativeSymbol\(pack\.asset, getNetwork\(net\)\.chainId\) \?\? assetLabel\(pack\.asset\);/);
+  assert.ok(page.indexOf("if (own) net = own;") < page.indexOf("symbol = claimNativeSymbol("), "after the code's own chain is known");
+});
+
 /* ---------------------------------------------------------------- the wiring */
 
 test("the claim page says how the next screen lets people in, from lib/claimHelp", () => {
@@ -454,7 +473,7 @@ test("the claim page says how the next screen lets people in, from lib/claimHelp
   for (const f of files) assert.doesNotMatch(f, /turnkey|wagmi|walletConnect|embeddedProvider|embeddedGas|tempoWallet|solanaWallet/i, `no wallet code: ${f}`);
   for (const pkg of packages) assert.doesNotMatch(pkg, /^(wagmi|@wagmi|@turnkey|@walletconnect|@reown|react|react-dom|next)(\/|$)/, `no wallet or UI package: ${pkg} (${files.join(", ")})`);
   assert.ok(files.includes("src/lib/embeddedWallet.ts"), "the switch is read from lib/embeddedWallet");
-  assert.ok(files.includes("src/lib/networks.ts") && files.length > 4, `the whole graph was walked: ${files.join(", ")}`);
+  assert.ok(files.includes("src/lib/networks.ts") && files.includes("src/lib/tokens.ts") && files.length > 4, `the whole graph was walked: ${files.join(", ")}`);
   assert.equal(read("../src/lib/embeddedWallet.ts").match(/(?:^|\n)\s*import\s/g), null, "lib/embeddedWallet imports nothing");
 });
 
