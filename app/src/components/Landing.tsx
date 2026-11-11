@@ -107,9 +107,9 @@ const USES = [
   },
   {
     icon: <IconStocks />,
-    title: "Stocks on Robinhood Chain",
-    body: "Swap a stock from your private balance on Robinhood Chain. Your position stays yours.",
-    href: "/docs/product",
+    title: "Swaps and stocks",
+    body: "Swap from your private balance on Robinhood Chain, stocks included, and on Tempo. Who swapped stays private; the amounts show.",
+    href: "/docs/private-swaps",
   },
 ];
 
@@ -125,30 +125,6 @@ const TRUST = [
   {
     title: "Open source, end to end",
     body: "Contracts, circuits, app and SDK are public. Check the deployed code against the repo yourself.",
-  },
-];
-
-const WHAT = [
-  {
-    label: "The app",
-    title: "Use it today",
-    body: "Hold, pay and run payroll privately from your own wallet. Gloam never holds your keys, and there is no admin withdraw.",
-    href: "/app",
-    cta: "Open app",
-  },
-  {
-    label: "The protocol",
-    title: "Open vault contracts",
-    body: `Private balances on ${liveMainnetNames()} mainnet, and on testnet to try it first. Settlement stays public, the amounts and the people stay private.`,
-    href: "/verify#contracts",
-    cta: "Verify the contracts",
-  },
-  {
-    label: "The SDK",
-    title: "Build on it",
-    body: "Add private payments, payroll and proofs to your own app or agent with one package.",
-    href: "/sdk",
-    cta: "Explore the SDK",
   },
 ];
 
@@ -177,7 +153,6 @@ const DEV_LINKS = [
   { label: "Try it live", href: "/sdk/playground" },
   { label: "SDK on npm", href: "https://www.npmjs.com/package/@gloamtrade/sdk" },
   { label: "MCP server", href: "/docs/agents#the-mcp-server" },
-  { label: "x402 payments", href: "/docs/agents" },
 ];
 
 const SNIPPET = `import {
@@ -227,40 +202,11 @@ export function Landing() {
                 </Link>
               </div>
             </div>
-            <a
-              href="#how"
-              className="gl-glass absolute bottom-8 right-8 z-10 hidden h-10 items-center gap-2 rounded-xl px-4 text-[13.5px] text-foreground transition-colors hover:bg-panel/70 sm:inline-flex lg:bottom-14 lg:right-14"
-            >
-              Scroll to explore <span aria-hidden>↓</span>
-            </a>
           </div>
         </section>
 
         {/* partners already live on Gloam, right under the hero */}
         <LivePartnersStrip />
-
-        {/* what Gloam is: one product you use, build on and can check */}
-        <section aria-labelledby="what-gloam-is" className="mx-auto max-w-[1400px] px-4 pt-16 sm:px-7 sm:pt-24">
-          <h2 id="what-gloam-is" className="sr-only">What Gloam is</h2>
-          <div className="grid gap-10 sm:grid-cols-3">
-            {WHAT.map((w) => {
-              const To = w.href.startsWith("/app") ? AppLink : Link;
-              return (
-                <div key={w.label} className="flex flex-col border-t border-foreground pt-5">
-                  <p className="t-label text-mute">{w.label}</p>
-                  <p className="mt-3 text-[19px] leading-snug tracking-[-0.01em]">{w.title}</p>
-                  <p className="mt-2 max-w-[38ch] text-[14px] leading-relaxed text-mute">{w.body}</p>
-                  <To
-                    href={w.href}
-                    className="gl-arrowlink mt-auto pt-4"
-                  >
-                    {w.cta} <span aria-hidden>→</span>
-                  </To>
-                </div>
-              );
-            })}
-          </div>
-        </section>
 
         {/* thesis + signature */}
         <section id="how" className="scroll-mt-20 pb-6 pt-24 sm:pt-36">
@@ -294,7 +240,7 @@ export function Landing() {
               </h2>
               <p className="mx-auto mt-4 max-w-[52ch] text-[17px] leading-[1.6] text-mute sm:text-[19px]">
                 Add money privately, pay anyone, and prove what you hold without
-                showing the number. Live on mainnet, with a testnet to try things first.
+                showing the number. Live on {liveMainnetNames()} mainnet, and on testnet.
               </p>
             </div>
             <LiveProduct />
@@ -315,8 +261,8 @@ export function Landing() {
           </div>
           <div className="mt-10 grid gap-3 md:grid-cols-2">
             <div className="gl-tile flex flex-col p-6 sm:p-10">
-              <p className="t-label">Committee model</p>
-              <p className="mt-1.5 text-[14px] text-mute">Zama, Arcium, Tempo Zones</p>
+              <p className="text-[13px] font-medium text-soft">Committee model</p>
+              <p className="mt-1 text-[14px] text-mute">Zama, Arcium, Tempo Zones</p>
               <p className="mt-8 text-[22px] leading-snug tracking-[-0.01em] sm:text-[24px]">
                 A committee or an operator holds the key.
               </p>
@@ -325,9 +271,9 @@ export function Landing() {
                 payments included.
               </p>
             </div>
-            <div className="gl-tile flex flex-col bg-sealed-soft p-6 sm:p-10">
-              <p className="t-label text-sealed">Gloam</p>
-              <p className="mt-1.5 text-[14px] text-mute">Owner-only proofs</p>
+            <div className="gl-tile flex flex-col border border-line-strong bg-panel p-6 sm:p-10">
+              <p className="text-[13px] font-medium text-sealed">Gloam</p>
+              <p className="mt-1 text-[14px] text-mute">Owner-only proofs</p>
               <p className="mt-8 text-[22px] leading-snug tracking-[-0.01em] sm:text-[24px]">
                 Your device makes the proof. Nobody else holds a key.
               </p>
@@ -337,9 +283,8 @@ export function Landing() {
             </div>
           </div>
           <p className="mt-6 max-w-[72ch] text-[15px] leading-relaxed text-mute">
-            Some private payment services, like Helius Privacy, make your proof
-            on their server, so the server sees your amounts. Gloam proofs are
-            made on your device, never on our servers.{" "}
+            Some services, like Helius Privacy, make your proof on their server.
+            Gloam makes it on your device.{" "}
             <Link href="/docs/compare" className="text-foreground underline-offset-4 hover:underline">
               How Gloam compares <span aria-hidden>→</span>
             </Link>
@@ -376,15 +321,6 @@ export function Landing() {
               );
             })}
           </div>
-          <p className="mt-8 max-w-[68ch] text-[15px] leading-relaxed text-mute">
-            <span className="text-foreground">New: private swaps.</span> Swap
-            straight from your private balance on Robinhood Chain and Tempo
-            mainnet. Who swapped stays private; the amounts show, like any DEX
-            trade.{" "}
-            <Link href="/docs/private-swaps" className="text-foreground underline-offset-4 hover:underline">
-              About private swaps <span aria-hidden>→</span>
-            </Link>
-          </p>
         </section>
 
         {/* payroll spotlight */}
@@ -435,8 +371,7 @@ export function Landing() {
         <section className="mx-auto max-w-[1400px] px-4 pb-20 pt-20 sm:px-7 sm:pb-32 sm:pt-32">
           <div className="theme-dark gl-panel grid gap-10 border border-transparent bg-[#0b0c0e] px-6 py-12 text-foreground dark:border-line dark:bg-panel sm:px-12 sm:py-16 lg:grid-cols-[1fr_1.1fr] lg:items-center">
             <div className="relative min-w-0">
-              <p className="t-label text-mute">For developers and agents</p>
-              <h2 className="t-display-l mt-4 max-w-[15ch] text-foreground">
+              <h2 className="t-display-l max-w-[15ch] text-foreground">
                 Add private payments to anything
               </h2>
               <p className="mt-5 max-w-[48ch] text-[17px] leading-[1.6] text-mute sm:text-[18px]">
