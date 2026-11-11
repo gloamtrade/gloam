@@ -1114,9 +1114,12 @@ export function PayrollView() {
                     <TokenLogo id={o.logoId} symbol={o.symbol} size={38} />
                     <span className="min-w-0">
                       <span className="block text-[14px] font-medium leading-tight text-foreground">{o.symbol}</span>
-                      <span className="tnum mt-0.5 block text-[12px] leading-tight text-mute">
-                        {b > 0n ? `${formatAssetAmount(b, o.address, summaryDecimals(o.address))} private` : "No private balance"}
-                      </span>
+                      {/* Signed out no balance is read, so none is named, not even "No private balance". */}
+                      {isConnected && (
+                        <span className="tnum mt-0.5 block text-[12px] leading-tight text-mute">
+                          {b > 0n ? `${formatAssetAmount(b, o.address, summaryDecimals(o.address))} private` : "No private balance"}
+                        </span>
+                      )}
                     </span>
                   </button>
                 );
