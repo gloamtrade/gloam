@@ -304,12 +304,26 @@ export const ETHEREUM_SEPOLIA_TOKENS: OnchainToken[] = [
 /** Native ETH, as a private swap lists it: the vault's address(0), on the chains that hold it. */
 export const NATIVE_ETH_TOKEN: OnchainToken = { id: "eth", symbol: "ETH", name: "Ether", address: "0x0000000000000000000000000000000000000000", decimals: 18, yahoo: "", kind: "token", coingecko: "ethereum" };
 
+/** Native HYPE, Elysium's gas coin: the vault's address(0) there, like ETH elsewhere. */
+export const NATIVE_HYPE_TOKEN: OnchainToken = { id: "hype", symbol: "HYPE", name: "Hyperliquid", address: "0x0000000000000000000000000000000000000000", decimals: 18, yahoo: "", kind: "token", coingecko: "hyperliquid" };
+
+/**
+ * The chain's native coin as the app names, draws and prices it: HYPE on
+ * Elysium, ETH everywhere else that holds one (Tempo holds none:
+ * supportsNativeShield). Its id is the TokenLogo id and the market feed's.
+ */
+export function nativeTokenFor(chainId: number): OnchainToken {
+  return isElysiumFamilyChainId(chainId) ? NATIVE_HYPE_TOKEN : NATIVE_ETH_TOKEN;
+}
+
 /**
  * Elysium mainnet, behind NEXT_PUBLIC_ELYSIUM_ENABLED (lib/elysium.ts): USDC from
  * launch (500 per deposit, 25,000 in total; address and decimals from lib/elysium.ts),
  * and KNTQ, Kinetiq's token as bridged through Elysium's canonical gateway
  * (l1Address 0x0000…c2d6 on HyperEVM), open once its queued limit lands
- * (1,400 per deposit, 70,000 in total; queued 9 Nov 2026). HYPE, the gas coin, is not listed yet.
+ * (1,400 per deposit, 70,000 in total; queued 9 Nov 2026, executable 12 Nov
+ * 15:06 UTC). HYPE, the gas coin, is the vault's native asset (supportsNativeShield),
+ * opened the same way (12 per deposit, 600 in total; executable 12 Nov 14:19 UTC).
  */
 export const ELYSIUM_MAINNET_TOKENS: OnchainToken[] = ELYSIUM
   ? [
@@ -377,10 +391,13 @@ const NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 /**
  * Chains whose vault lists the native coin ahead of its deposit limit, as
- * opensWithLimit does for a token. On Robinhood Chain mainnet ETH's limit is 0
- * until it lands through the timelock (QueueRobinhoodAssets).
+ * opensWithLimit does for a token: Add offers it only once the pool's live
+ * depositLimit(address(0)) is open. On Robinhood Chain mainnet ETH's limit was 0
+ * until it landed through the timelock (QueueRobinhoodAssets); on Elysium
+ * mainnet HYPE's is 0 until its queued change runs (12 Nov 2026), and from then
+ * Add offers it with no deploy.
  */
-const NATIVE_OPENS_WITH_LIMIT: ReadonlySet<number> = new Set([4663]);
+const NATIVE_OPENS_WITH_LIMIT: ReadonlySet<number> = new Set([4663, ...(ELYSIUM ? [ELYSIUM.chainId] : [])]);
 
 /** Everything whose live limit decides what Add offers: limitGatedTokensFor, plus the native coin where it opens the same way. */
 export function limitGatedAssetsFor(chainId: number): Pick<OnchainToken, "address">[] {
@@ -464,12 +481,12 @@ export function knownTokens(chainId?: number): OnchainToken[] {
 /**
  * Whether the vault on a chain lists its native coin, so holds and reports it.
  * Tempo (testnet 42431, mainnet 4217) has no native coin and blocks native
- * msg.value. Robinhood Chain, Base and Ethereum list ETH. Add offers it only when
- * isNativeAddable says so.
+ * msg.value. Robinhood Chain, Base and Ethereum list ETH, Elysium mainnet HYPE.
+ * Add offers it only when isNativeAddable says so.
  */
 export function supportsNativeShield(chainId: number): boolean {
-  // Elysium's vaults (mainnet and testnet) do not list HYPE.
-  if (isElysiumFamilyChainId(chainId)) return false;
+  // Elysium testnet's vault does not list HYPE; mainnet's does, from its live limit.
+  if (isElysiumTestnetChainId(chainId)) return false;
   return chainId !== 42431 && chainId !== 4217;
 }
 

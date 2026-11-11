@@ -15,7 +15,7 @@ import { useAppAccount, useAppBalance, useAppTokenBalances } from "@/lib/demo";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { useAutoRestoreStatus } from "@/hooks/useAutoRestoreStatus";
 import { assetLabel, formatAssetAmount, formatAssetLabel, isNativeAsset, isShieldDeployed } from "@/lib/shield";
-import { addableTokensFor, isDollarStable, isNativeAddable, knownTokens } from "@/lib/tokens";
+import { addableTokensFor, isDollarStable, isNativeAddable, knownTokens, nativeTokenFor } from "@/lib/tokens";
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
 import { faucetFor } from "@/lib/faucet";
 import { bridgeVisible } from "@/lib/bridge";
@@ -86,14 +86,14 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
       rows.push({
         id: "eth",
         symbol,
-        logoId: "eth",
+        logoId: nativeTokenFor(network.chainId).id,
         text: formatEth(nativeBal.value),
         amount: Number(formatUnits(nativeBal.value, 18)),
         dollar: false,
       });
     }
     return rows.sort(compareHoldings);
-  }, [balancesVisible, tokens, tokenBals, nativeOk, nativeBal, network.primaryAsset.symbol]);
+  }, [balancesVisible, tokens, tokenBals, nativeOk, nativeBal, network.primaryAsset.symbol, network.chainId]);
 
   // The private side: this browser's notes in this vault.
   const known = useMemo(() => knownTokens(network.chainId), [network.chainId]);
@@ -107,14 +107,14 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
       rows.push({
         id: asset,
         symbol,
-        logoId: isNativeAsset(asset) ? "eth" : (t?.id ?? symbol.toLowerCase()),
+        logoId: isNativeAsset(asset) ? nativeTokenFor(network.chainId).id : (t?.id ?? symbol.toLowerCase()),
         text: isNativeAsset(asset) ? formatEth(raw) : formatAssetAmount(raw, asset),
-        amount: t ? Number(formatUnits(raw, t.decimals)) : 0,
+        amount: isNativeAsset(asset) ? Number(formatUnits(raw, 18)) : t ? Number(formatUnits(raw, t.decimals)) : 0,
         dollar: Boolean(t && isDollarStable(t)),
       });
     });
     return rows.sort(compareHoldings);
-  }, [balancesVisible, byAsset, known]);
+  }, [balancesVisible, byAsset, known, network.chainId]);
 
   const hasPrivate = privateRows.length > 0;
   // Money set aside for agent top-ups is out of the balance, for months at times: say where it went.

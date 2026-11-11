@@ -857,11 +857,13 @@ export default function DocsNetworksPage() {
                 </li>
                 <li>
                   <strong>Assets</strong>, USDC ({ELYSIUM.usdcDecimals} decimals). HYPE, the gas
-                  coin, is not listed.
+                  coin, and KNTQ (18 decimals each) join once their deposit limits, queued
+                  through the timelock, take effect: Add offers each from then.
                 </li>
                 <li>
                   <strong>Deposit limits</strong>, 500 USDC per deposit and 25,000 in total at
-                  launch, raised only through the vault&apos;s 3-day timelock
+                  launch, raised only through the vault&apos;s 3-day timelock. Queued: 12 HYPE
+                  per deposit and 600 in total, 1,400 KNTQ per deposit and 70,000 in total
                 </li>
                 <li>
                   <strong>Bring money over</strong> into Elysium USDC from other chains through

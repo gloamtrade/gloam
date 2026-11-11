@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useReadContract, useReadContracts } from "wagmi";
+import { useGasPrice, useReadContract, useReadContracts } from "wagmi";
 import {
   decodeEventLog,
   formatEther,
@@ -29,14 +29,14 @@ import { erc20Abi } from "@/lib/dex";
 import { useEthPrice, useLiveMarkets } from "@/hooks/useLiveMarkets";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { formatUsd } from "@/lib/markets";
-import { addableTokensFor, approvalsBeforeDeposit, isDollarStable, isNativeAddable } from "@/lib/tokens";
+import { addableTokensFor, approvalsBeforeDeposit, isDollarStable, isNativeAddable, nativeTokenFor } from "@/lib/tokens";
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
 import { hasCoingeckoMarks, useCoingeckoMarks } from "@/hooks/useCoingeckoMarks";
 import { surelyNotSent, walletErrorForPeople } from "@/lib/walletErrors";
 import { publicClientFor } from "@/lib/rhClient";
 
 import { isNoLimit } from "@gloamtrade/sdk";
-import { APPROVE_GAS_LIMIT, gasFor, HASH_SCHEME, NATIVE_ASSET, SHIELD_GAS_LIMIT, SHIELD_BOUND_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, dropUnsentNote, formatAssetAmount, isNativeAsset, isShieldDeployed, makeNoteMaterial, markAllNotesRecovered, saveLocalNote, shieldPoolAbi } from "@/lib/shield";
+import { APPROVE_GAS_LIMIT, gasFor, HASH_SCHEME, NATIVE_ASSET, SHIELD_GAS_LIMIT, SHIELD_BOUND_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, dropUnsentNote, formatAssetAmount, isNativeAsset, isShieldDeployed, makeNoteMaterial, markAllNotesRecovered, nativeGasReserve, saveLocalNote, shieldPoolAbi } from "@/lib/shield";
 import { makeBoundNotePoseidon } from "@/lib/notePoseidon";
 import { createTxLog, depositAfterLostApproval, depositCall, networkMovedMessage, type DepositCall } from "@/lib/depositFlow";
 import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
@@ -81,8 +81,11 @@ export function ShieldView() {
     networkNow.current = network;
   }, [network]);
   const onProduct = chainId === network.chainId;
-  const { ethUsd } = useEthPrice();
+  const { ethUsd, hypeUsd } = useEthPrice();
   const { data: marketData } = useLiveMarkets();
+  // The chain's own coin (HYPE on Elysium, ETH elsewhere): its name, logo and price.
+  const nativeToken = nativeTokenFor(network.chainId);
+  const nativeUsd = network.family === "elysium" ? hypeUsd : ethUsd;
   // $GLOAM, PONS, AI and the like: the markets feed has no price for them.
   const { marks: geckoMarks } = useCoingeckoMarks(hasCoingeckoMarks(network.chainId));
   const deployed = isShieldDeployed() && Boolean(network.pool);
@@ -143,6 +146,13 @@ export function ShieldView() {
     chainId: network.chainId,
     enabled: Boolean(address),
   });
+  // What a native deposit keeps back for its own gas, from the chain's gas price now
+  // (lib/shield nativeGasReserve): about 0.003 HYPE on Elysium.
+  const { data: gasPrice } = useGasPrice({
+    chainId: network.chainId,
+    query: { enabled: Boolean(address && nativeOk && !demo), refetchInterval: 60_000 },
+  });
+  const gasReserve = nativeGasReserve(network.chainId, gasPrice);
 
   // Every asset the vault takes, read once, so the form opens on one this
   // wallet holds rather than on one it has none of.
@@ -394,7 +404,7 @@ export function ShieldView() {
     ? isDollarStable(selectedToken)
       ? 1
       : (marketData?.markets?.find((m) => m.id === selectedToken.id)?.mark ?? geckoMarks.get(selectedToken.address.toLowerCase()) ?? 0)
-    : ethUsd ?? 0;
+    : nativeUsd ?? 0;
 
   useEffect(() => {
     if (!isSuccess || !hash || !receipt) return;
@@ -596,7 +606,7 @@ export function ShieldView() {
     if (overLimit) return overLimit;
     if (!selectedToken && ethBal) {
       // value is at most the balance here (checked above), so this also catches the whole balance
-      if (value > ethBal.value - 50_000_000_000_000n) {
+      if (value > ethBal.value - gasReserve) {
         return `Leave a little ${network.primaryAsset.symbol} for gas.`;
       }
     }
@@ -984,8 +994,8 @@ export function ShieldView() {
       : null;
 
   const myShieldUsd =
-    ethUsd != null && shieldedWei > BigInt(0)
-      ? formatUsd((Number(shieldedWei) / 1e18) * ethUsd)
+    nativeUsd != null && shieldedWei > BigInt(0)
+      ? formatUsd((Number(shieldedWei) / 1e18) * nativeUsd)
       : null;
 
   // The same order as the Vault overview (lib/vaultHub compareHoldings).
@@ -1039,7 +1049,7 @@ export function ShieldView() {
       : maxLabel;
 
   const logoIdFor = (asset: string): string | null => {
-    if (isNativeAsset(asset)) return null;
+    if (isNativeAsset(asset)) return nativeToken.id;
     return (
       tokens.find((t) => t.address.toLowerCase() === asset.toLowerCase())?.id ??
       asset
@@ -1163,7 +1173,7 @@ export function ShieldView() {
                         walletBalance > leaveForGas ? walletBalance - leaveForGas : BigInt(0);
                       setAmount(v === BigInt(0) ? "0" : formatUnits(v, decimals).slice(0, 18));
                     } else {
-                      const leave = 50_000_000_000_000n;
+                      const leave = gasReserve;
                       const v =
                         walletBalance > leave ? walletBalance - leave : BigInt(0);
                       setAmount(v === BigInt(0) ? "0" : formatEther(v).slice(0, 12));
@@ -1204,7 +1214,7 @@ export function ShieldView() {
                   }}
                   options={[
                     ...(nativeOk
-                      ? [{ value: "eth", label: "ETH", description: "Ether", icon: <AssetMark id={null} symbol="ETH" size={30} /> }]
+                      ? [{ value: "eth", label: nativeToken.symbol, description: nativeToken.name, icon: <AssetMark id={nativeToken.id} symbol={nativeToken.symbol} size={30} /> }]
                       : []),
                     ...tokens.map((t) => ({
                       value: t.id,

@@ -12,7 +12,7 @@ import { amountTextError } from "@/lib/amountText";
 import { AmountProblem } from "./AmountProblem";
 import { shortAddress } from "@/lib/chain";
 import { useAppAccount, useAppTxReceipt, useAppWriteContract, useDemo } from "@/lib/demo";
-import { knownTokens, shieldTokensFor } from "@/lib/tokens";
+import { knownTokens, nativeTokenFor, shieldTokensFor } from "@/lib/tokens";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { usePoolDeposited } from "@/hooks/usePoolDeposited";
 import { useShieldTree } from "@/hooks/useShieldTree";
@@ -2418,7 +2418,8 @@ export function MoveView() {
   // every token the chain knows, so a note a swap brought in (WETH, a stock token) shows its logo too
   const shieldTokens = knownTokens(network.chainId);
   const logoIdFor = (asset: string): string | null => {
-    if (isNativeAsset(asset)) return null;
+    // the chain's own coin: HYPE on Elysium, ETH elsewhere
+    if (isNativeAsset(asset)) return nativeTokenFor(network.chainId).id;
     return (
       shieldTokens.find((t) => t.address.toLowerCase() === asset.toLowerCase())?.id ??
       asset

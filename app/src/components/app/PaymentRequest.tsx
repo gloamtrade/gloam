@@ -494,6 +494,8 @@ export function PartnerLine({ name }: { name: string }) {
 
 function AssetGlyph({ asset, size }: { asset: RequestAsset; size: number }) {
   if (!asset.native) return <TokenLogo id={asset.id} symbol={asset.symbol} size={size} />;
+  // Elysium's native coin is HYPE: its own logo, never the ETH diamond below
+  if (asset.symbol === "HYPE") return <TokenLogo id="hype" symbol="HYPE" size={size} />;
   return (
     <span
       aria-hidden

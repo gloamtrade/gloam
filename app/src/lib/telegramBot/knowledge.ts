@@ -364,7 +364,7 @@ export function elysiumFacts(): string | null {
   const e = ELYSIUM;
   return [
     head,
-    `- Elysium mainnet (chain ID ${e.chainId}): live, joined after the 21 October launch. Elysium is Kinetiq's Hyperliquid L2. The vault takes USDC only: 500 per deposit and 25,000 in total. Gas on Elysium is paid in HYPE, not ETH; HYPE itself can't be added privately. Same ${CASH_OUT_FEE_PERCENT} cash-out fee as the other mainnets, same final keys. ${noTie}`,
+    `- Elysium mainnet (chain ID ${e.chainId}): live, joined after the 21 October launch. Elysium is Kinetiq's Hyperliquid L2. The vault takes USDC: 500 per deposit and 25,000 in total. HYPE (12 per deposit, 600 in total) and KNTQ (1,400 per deposit, 70,000 in total) are queued through the vault's 3-day public notice; each can be added privately once its change runs, and Add shows it from then. Gas on Elysium is paid in HYPE, not ETH. Same ${CASH_OUT_FEE_PERCENT} cash-out fee as the other mainnets, same final keys. ${noTie}`,
     "- Elysium's vault is owned by a guard contract from the day it was deployed: nobody, the Gloam team included, can ever change its proof checkers. Limits and the fee still change only with three days of public notice, and can be lowered at once.",
     `- There are no private swaps on Elysium yet; never give a date. Bring money over (the bridge) brings USDC into Elysium from other chains through Relay, and swaps HYPE into USDC on Elysium. In the network selector it shows as Elysium, with Mainnet beside it. Details, if someone adds the chain by hand: RPC ${ELYSIUM_RPC_DISPLAY}, chain ID ${e.chainId}, currency HYPE, explorer ${e.explorerUrl}.`,
     ...(testnet ? [testnet] : []),

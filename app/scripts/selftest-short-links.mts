@@ -117,6 +117,17 @@ const seedBytes = (h: Hex) => Uint8Array.from(h.slice(2).match(/../g)!.map((b) =
 
 // ---------------------------------------------------------------- every network and token
 
+/**
+ * Assets a network lists that have no short id yet. Their short links write the
+ * vault and asset out in full, so they open the same (checked below) and every
+ * SDK version reads them, but run longer, until an id is appended to
+ * SHORT_LINK_WHERE in packages/sdk/src/shortLink.ts and published. Elysium's
+ * native HYPE is listed (opening once its queued limit lands, 12 Nov 2026)
+ * without one: an id the published SDK 0.7.0 doesn't know would make a HYPE
+ * link unreadable to agents on it.
+ */
+const NO_SHORT_ID_YET = new Set(["elysium-mainnet HYPE"]);
+
 const lengths: { kind: string; long: number; short: number }[] = [];
 for (const key of NETWORK_KEYS) {
   const net = getNetwork(key);
@@ -125,8 +136,11 @@ for (const key of NETWORK_KEYS) {
     const inTable = SHORT_LINK_WHERE.some(
       (w) => w.chainId === net.chainId && w.pool.toLowerCase() === net.pool!.toLowerCase() && w.asset.toLowerCase() === asset.address.toLowerCase()
     );
+    // Written out only until the SDK release that gives it an id; from then on
+    // it is checked like every other token.
+    const writtenOut = NO_SHORT_ID_YET.has(where) && !inTable;
     // Every token a network takes has a short id (a new one fails here until it is added).
-    assert.ok(inTable, `${where} has a short id`);
+    if (!writtenOut) assert.ok(inTable, `${where} has a short id`);
     n++;
     for (const withSeed of [true, false]) {
       const { seed, secret } = withSeed ? { seed: seedHex(i), secret: seedToSecret(seedBytes(seedHex(i))) } : { seed: undefined, secret: hexToField(`0x${(i + 3).toString(16).repeat(62)}`) };
@@ -152,7 +166,8 @@ for (const key of NETWORK_KEYS) {
       assert.equal((await decodeNotePackage(inApp!)).commitment, a.commitment, `${tag}: the in-app claim path opens it`);
       assert.equal(readShortClaim(c.slice("gloam3.".length)).amountWei, a.amountWei, `${tag}: the landing page reads it without Poseidon`);
       n += 15;
-      if (!note) lengths.push({ kind: `${key} ${asset.symbol} ${withSeed ? "seed" : "secret"}`, long: long.length, short: short.length });
+      // the lengths below are for links with a short id
+      if (!note && !writtenOut) lengths.push({ kind: `${key} ${asset.symbol} ${withSeed ? "seed" : "secret"}`, long: long.length, short: short.length });
     }
   }
 }
@@ -318,7 +333,8 @@ console.log(`claim links: long ${longMin}+ chars; short ${Math.min(...lengths.ma
         const got = readPaymentRequest(requestParamsFrom(u.search, u.hash), "robinhood-mainnet")!;
         assert.deepEqual(got.problems, [], `${where}: nothing wrong`);
         n += 5;
-        if (j === 0 && !draft.note && !draft.name) {
+        // the lengths are for assets with a short id (NO_SHORT_ID_YET writes the vault and asset out)
+        if (j === 0 && !draft.note && !draft.name && !NO_SHORT_ID_YET.has(`${key} ${asset.symbol}`)) {
           reqLengths.push(short.length);
           longReq = Math.max(longReq, long.length);
         }

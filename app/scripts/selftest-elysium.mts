@@ -15,8 +15,8 @@
  *    Still no network anywhere, but Glim and the docs word it as coming, with
  *    no partnership, and /verify lists it as next.
  *  - on (flag "1", every value from NEXT_PUBLIC_ELYSIUM_*): Elysium shows up last
- *    among the mainnets with its chain, final keys, USDC alone, HYPE as the gas
- *    coin (not listed), the relay serves it with an hourly cap in HYPE, the CSP
+ *    among the mainnets with its chain, final keys, USDC open, HYPE as the gas
+ *    coin and KNTQ listed behind their limits, the relay serves it with an hourly cap in HYPE, the CSP
  *    allows its RPC, Glim and the remote MCP name it.
  *  - bad, wrongid: a wrong value (the testnet's id, another id) fails loudly,
  *    with the flag unset and with it "1".
@@ -172,7 +172,9 @@ if (MODE === "off" || MODE === "coming") {
   const usdc = tokens.shieldTokensFor(CHAIN_ID);
   ok(usdc.length === 2 && usdc[0]!.symbol === "USDC" && usdc[0]!.address === want.usdc && usdc[0]!.decimals === 6 && !usdc[0]!.opensWithLimit, "on: USDC open from launch");
   ok(usdc[1]!.symbol === "KNTQ" && usdc[1]!.decimals === 18 && usdc[1]!.opensWithLimit === true && usdc[1]!.address === "0xe45a355d9e9cAd2aD85F2d03E3eE3102A036acF0", "on: KNTQ listed, open only once its queued limit lands");
-  ok(!tokens.supportsNativeShield(CHAIN_ID), "on: HYPE can't be added privately");
+  // HYPE is the vault's native asset there, offered only once its queued limit lands (selftest-elysium-hype-kntq).
+  ok(tokens.supportsNativeShield(CHAIN_ID) && !tokens.isNativeAddable(CHAIN_ID), "on: HYPE listed, not offered while its limit is unread");
+  ok(tokens.nativeTokenFor(CHAIN_ID).symbol === "HYPE", "on: the native coin is named HYPE");
   // A deposit goes out right after its approval; a wallet estimating on its own RPC can
   // ask a node that has not seen the approval yet, so Elysium gives the limit like Robinhood Chain.
   ok(gasFor(CHAIN_ID, SHIELD_BOUND_GAS_LIMIT) === SHIELD_BOUND_GAS_LIMIT && gasFor(CHAIN_ID, APPROVE_GAS_LIMIT) === APPROVE_GAS_LIMIT, "on: deposits carry a fixed gas limit");
@@ -183,7 +185,8 @@ if (MODE === "off" || MODE === "coming") {
   ok(mainnet.liveMainnetNames().endsWith("and Elysium"), "on: named last in the live mainnets");
   ok(mainnet.liveMainnetCountWords() === "five mainnets", "on: five mainnets");
   const facts = elysiumFacts() ?? "";
-  ok(facts.includes(`chain ID ${CHAIN_ID}`) && facts.includes("HYPE") && facts.includes("USDC only"), "on: Glim's live facts");
+  ok(facts.includes(`chain ID ${CHAIN_ID}`) && facts.includes("HYPE") && facts.includes("KNTQ") && facts.includes("USDC: 500 per deposit"), "on: Glim's live facts");
+  ok(!facts.includes("can't be added privately"), "on: Glim never says HYPE can't be added");
   ok(/no partnership/.test(facts) && !/coming/.test(facts), "on: no partnership, no longer coming");
   const entry = contractDirectory().find((d) => d.key === "elysium-mainnet");
   ok(entry?.live && entry.rows.some((r) => r.role === "vault"), "on: /verify lists its vault");

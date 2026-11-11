@@ -276,6 +276,33 @@ export function gasFor(chainId: number, limit: bigint): bigint | undefined {
   return chainId === 46630 || chainId === 4663 || isElysiumFamilyChainId(chainId) ? limit : undefined;
 }
 
+/** The least a native deposit leaves in the wallet for its gas: 0.00005, the fixed buffer every chain kept before. */
+export const NATIVE_GAS_FLOOR = 50_000_000_000_000n;
+
+/**
+ * Elysium's gas price while it is unread: 0.5 gwei, the base fee it has held
+ * since launch (read 11 Nov 2026; the 7 USDC deposit on 10 Nov paid 0.5009 gwei).
+ */
+const ELYSIUM_GAS_PRICE_FALLBACK = 500_000_000n;
+
+/**
+ * How much of the native coin a native deposit (Max, and the form's check)
+ * keeps back for the deposit's own gas. A wallet only sends when it holds the
+ * value plus the gas limit times its highest fee, and the deposit goes out with
+ * up to SHIELD_BOUND_GAS_LIMIT, so this is that limit at three times the
+ * chain's gas price now (wallets ask about 1.5x), never below NATIVE_GAS_FLOOR.
+ * Elysium pays in HYPE at about 0.5 gwei, so the old fixed 0.00005 there was a
+ * twentieth of what a wallet holds back and a Max deposit would be refused; it
+ * now keeps about 0.003 HYPE. Robinhood Chain (0.02 gwei on 11 Nov 2026) keeps
+ * about 0.0001 ETH, Base stays at the floor. With the price unread, Elysium
+ * assumes its 0.5 gwei base fee and every other chain keeps the floor, as before.
+ */
+export function nativeGasReserve(chainId: number, gasPrice?: bigint | null): bigint {
+  const price = gasPrice && gasPrice > 0n ? gasPrice : isElysiumFamilyChainId(chainId) ? ELYSIUM_GAS_PRICE_FALLBACK : 0n;
+  const need = SHIELD_BOUND_GAS_LIMIT * price * 3n;
+  return need > NATIVE_GAS_FLOOR ? need : NATIVE_GAS_FLOOR;
+}
+
 export function isShieldDeployed(): boolean {
   return Boolean(SHIELD_POOL_ADDRESS);
 }

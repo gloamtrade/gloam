@@ -35,7 +35,7 @@ import {
 } from "viem";
 import { getNetwork, NETWORK_KEYS, networkName, type GloamNetwork, type NetworkKey } from "./networks";
 import { erc20BalanceOfAbi, isDollarStable, shieldTokensFor, supportsNativeShield } from "./tokens";
-import { loadEthUsd, loadLiveMarkets } from "./live-quotes";
+import { loadEthUsd, loadHypeUsd, loadLiveMarkets } from "./live-quotes";
 import { cacheGetJson, cacheSetJson, lastDays, utcDay } from "./tractionStore";
 import { serverTransport } from "@/lib/serverRpc";
 import { readCreatorFees, type CreatorFees } from "./creatorFees";
@@ -491,7 +491,14 @@ function fmtUnits(raw: bigint, info: AssetInfo): string {
   return frac ? `${i}.${frac}` : i;
 }
 
-export type Prices = { at: number; ethUsd: number | null; marks: Map<string, number>; stocks: "live" | "unpriced" };
+export type Prices = {
+  at: number;
+  ethUsd: number | null;
+  /** HYPE, Elysium's native coin (CoinGecko "hyperliquid"); missing or null leaves it unpriced, never at ETH's price. */
+  hypeUsd?: number | null;
+  marks: Map<string, number>;
+  stocks: "live" | "unpriced";
+};
 let priceCache: Prices | null = null;
 const PRICE_KEY = "gloam:onchain:prices:v1";
 
@@ -600,26 +607,28 @@ async function loadListedTokenMarks(): Promise<Map<string, number>> {
 }
 
 /**
- * ETH from CoinGecko, the stock tokens from live equity marks (the same source
+ * ETH and HYPE from CoinGecko, the stock tokens from live equity marks (the same source
  * as /api/markets, static fallbacks left out), $GLOAM from DEX Screener, and
  * the swap tokens as loadSwapTokenMarks says. Stablecoins count as $1, WETH as ETH. Cached five minutes in memory and Redis; the
  * upstreams are slow, so this starts alongside the chain reads.
  */
 export async function loadPrices(): Promise<Prices> {
   if (priceCache && Date.now() - priceCache.at < PRICE_TTL_MS) return priceCache;
-  const stored = await cacheGetJson<{ at: number; ethUsd: number | null; marks: [string, number][]; stocks?: Prices["stocks"] }>(PRICE_KEY);
+  const stored = await cacheGetJson<{ at: number; ethUsd: number | null; hypeUsd?: number | null; marks: [string, number][]; stocks?: Prices["stocks"] }>(PRICE_KEY);
   if (stored && Date.now() - stored.at < PRICE_TTL_MS) {
     priceCache = {
       at: stored.at,
       ethUsd: stored.ethUsd,
+      hypeUsd: stored.hypeUsd ?? null,
       marks: new Map(stored.marks),
       stocks: stored.stocks ?? (stored.marks.length ? "live" : "unpriced"),
     };
     return priceCache;
   }
   const marketsRead = withTimeout(loadLiveMarkets(), 25_000, [] as LiveMarkets);
-  const [ethUsd, markets, gloamUsd, swapMarks, listedMarks] = await Promise.all([
+  const [ethUsd, hypeUsd, markets, gloamUsd, swapMarks, listedMarks] = await Promise.all([
     withTimeout(loadEthUsd(), 15_000, null),
+    withTimeout(loadHypeUsd(), 15_000, null),
     marketsRead,
     withTimeout(loadGloamUsd(), 10_000, null),
     withTimeout(loadSwapTokenMarks(marketsRead), 25_000, new Map<string, number>()),
@@ -650,13 +659,14 @@ export async function loadPrices(): Promise<Prices> {
   priceCache = {
     at: Date.now(),
     ethUsd: ethUsd ?? prev?.ethUsd ?? null,
+    hypeUsd: hypeUsd ?? prev?.hypeUsd ?? null,
     marks: kept,
     stocks: stocksLive ? "live" : "unpriced",
   };
-  if (ethUsd != null || marks.size || gloamUsd != null || swapMarks.size || listedMarks.size) {
+  if (ethUsd != null || hypeUsd != null || marks.size || gloamUsd != null || swapMarks.size || listedMarks.size) {
     await cacheSetJson(
       PRICE_KEY,
-      { at: priceCache.at, ethUsd: priceCache.ethUsd, marks: [...priceCache.marks], stocks: priceCache.stocks },
+      { at: priceCache.at, ethUsd: priceCache.ethUsd, hypeUsd: priceCache.hypeUsd, marks: [...priceCache.marks], stocks: priceCache.stocks },
       PRICE_TTL_MS / 1000
     );
   }
@@ -665,7 +675,11 @@ export async function loadPrices(): Promise<Prices> {
 
 export function usdOf(n: GloamNetwork, asset: string, units: number, info: AssetInfo, prices: Prices): number | null {
   if (info.stable) return units;
-  if (asset === NATIVE) return n.primaryAsset.symbol === "ETH" && prices.ethUsd != null ? units * prices.ethUsd : null;
+  if (asset === NATIVE) {
+    // the chain's own coin at its own price: ETH, or HYPE on Elysium
+    const p = n.primaryAsset.symbol === "ETH" ? prices.ethUsd : n.primaryAsset.symbol === "HYPE" ? prices.hypeUsd : null;
+    return p != null ? units * p : null;
+  }
   // WETH is an ERC-20, but one token is one ETH.
   if (info.weth) return prices.ethUsd != null ? units * prices.ethUsd : null;
   const mark = prices.marks.get(asset);
@@ -1204,7 +1218,7 @@ export function counted(n: Pick<GloamNetwork, "testnet">, s: ScanState): ScanSta
 
 /** The CoinGecko id that prices `asset` in the past; null for a dollar stablecoin, a euro coin, or a token with none. */
 function geckoId(n: GloamNetwork, asset: string): string | null {
-  if (asset === NATIVE) return n.primaryAsset.symbol === "ETH" ? "ethereum" : null;
+  if (asset === NATIVE) return n.primaryAsset.symbol === "ETH" ? "ethereum" : n.primaryAsset.symbol === "HYPE" ? "hyperliquid" : null;
   const t = holdableTokens(n.chainId).find((x) => x.address.toLowerCase() === asset);
   if (!t || t.kind === "stablecoin") return null;
   return t.coingecko ?? null;
