@@ -211,6 +211,10 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
                     ) : null,
                   };
 
+  // Pay, Swap and Cash out wait for the same thing, so it is said once, not on every tile.
+  const blockedNote =
+    [...core, ...extras].map((a) => vaultActionBlocked(a, { known: privateKnown, hasPrivate })).find(Boolean) ?? null;
+
   return (
     <div className="space-y-6">
       {/* Phones: every money move on the first screen, before the balances. */}
@@ -222,9 +226,7 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
           <h2 id="vault-money-title" className="text-[15px] text-foreground">
             Your money on {network.label}
           </h2>
-          <span className="inline-flex h-6 shrink-0 items-center rounded-full bg-surface px-2.5 text-[12px] font-medium text-soft">
-            {network.testnet ? "Testnet" : "Mainnet"}
-          </span>
+          <span className="shrink-0 text-[13px] text-mute">{network.testnet ? "Testnet" : "Mainnet"}</span>
         </div>
 
         <div className="mt-4 grid gap-px border-y border-line bg-line sm:grid-cols-2">
@@ -270,9 +272,17 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
 
       {/* Every action, named, with one line. */}
       <section aria-labelledby="vault-actions-title">
-        <h2 id="vault-actions-title" className="t-eyebrow mb-3 px-1">
-          What you can do
-        </h2>
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-1">
+          <h2 id="vault-actions-title" className="t-eyebrow">
+            What you can do
+          </h2>
+          {blockedNote && (
+            <p className="inline-flex items-center gap-1.5 text-[13px] text-soft">
+              <LockGlyph />
+              {blockedNote}
+            </p>
+          )}
+        </div>
         <ul
           className={`gl-card divide-y divide-line overflow-hidden xl:grid xl:divide-x xl:divide-y-0 ${
             core.length >= 5 ? "xl:grid-cols-5" : "xl:grid-cols-4"
@@ -447,25 +457,22 @@ function ActionTile({
 }) {
   const body = (
     <>
-      <span
-        className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${
-          blocked ? "bg-surface text-faint" : "bg-surface text-foreground"
-        }`}
-        aria-hidden
-      >
-        <VaultActionIcon id={action.id} />
+      <span className={`grid h-6 w-6 shrink-0 place-items-center ${blocked ? "text-faint" : "text-foreground"}`} aria-hidden>
+        <VaultActionIcon id={action.id} size={20} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className={`block text-[15px] font-medium leading-snug ${blocked ? "text-mute" : "text-foreground"}`}>
+        <span
+          className={`flex items-center gap-1.5 text-[15px] font-medium leading-snug ${blocked ? "text-mute" : "text-foreground"}`}
+        >
           {action.label}
+          {blocked && (
+            <span className="text-faint">
+              <LockGlyph />
+            </span>
+          )}
         </span>
         <span className="mt-1 block text-[13px] leading-relaxed text-mute">{action.line}</span>
-        {blocked && (
-          <span className="mt-2 inline-flex items-center gap-1.5 text-[12.5px] font-medium text-soft">
-            <LockGlyph />
-            {blocked}
-          </span>
-        )}
+        {blocked && <span className="sr-only">{blocked}</span>}
       </span>
       {!blocked && (
         <span className={`shrink-0 text-faint transition-colors group-hover:text-foreground ${compact ? "" : "xl:hidden"}`} aria-hidden>
