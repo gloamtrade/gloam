@@ -189,6 +189,8 @@ import {
   type TgUser,
 } from "./telegram";
 import { hitRateLimit } from "@/lib/mcpRemote/rateLimit";
+import { blocktronicsEnabled } from "@/lib/blocktronics";
+import { TOKEN_CHECK_USAGE, answerTokenCheck, tokenCheckAsk, tokenCheckOff, type TokenCheckAsk } from "./tokenCheck";
 import { HUNT_INPUT_MAX, countHuntStep, glimHuntReply, huntEnabled, huntSubject } from "@/lib/hunt";
 
 /** t.me/gloamhq. TELEGRAM_GROUP_ID overrides it. */
@@ -319,6 +321,7 @@ function groupGuide(c: BotConfig): string {
   return (
     `Hi, I'm ${c.persona}, Gloam's community helper bot. Tag me or reply to me with a question, or just ask in Help.\n\n` +
     `Ideas and bugs go in Feedback, or type /bug and what happened. /ca gives the $GLOAM contract, and replying /spam to a message reports it. Testing directions land in the Testers topic soon.\n\n` +
+    (blocktronicsEnabled() ? `For a token's Blocktronics read, type token check and its contract address.\n\n` : "") +
     `Docs live at gloam.trade/docs, news at @gloamtrade, and anything private goes to hello@gloam.trade. Admins never ask for your keys or funds.`
   );
 }
@@ -334,6 +337,7 @@ function ownerHelp(c: BotConfig): string {
     `/report - the last 24 hours in the group: members, activity, what ${c.persona} did, bug reports and what people asked\n` +
     `/help - this list\n` +
     `/ca - the $GLOAM contract and token page (same in the group)\n` +
+    `/check <token address> - Blocktronics' read of a token: grade, holders, launch bundles (same in the group)\n` +
     `/answer <message link> - I answer that group message in the group, as a reply (or say "go answer this" with the link)\n` +
     `/webhook - turn on edited messages, so a question added in an edit gets an answer\n` +
     `/modlog - my last 20 moderation actions: who, what for, which rule, and what I did\n` +
@@ -937,14 +941,55 @@ async function sendTokenCard(msg: TgMessage, c: BotConfig, topic: number, name: 
   }
 }
 
+/** Token checks one person may ask for in an hour, and everyone together: each can cost a Blocktronics call. */
+const CHECKS_PER_PERSON_HOUR = 6;
+const CHECKS_PER_HOUR = 60;
+
+/** Under both hourly token-check limits (only counted while checks are on). Past one, Glim stays quiet. */
+async function checkAllowed(userId: number): Promise<boolean> {
+  if (!blocktronicsEnabled()) return true;
+  const now = Date.now();
+  if (!(await hitRateLimit(`tg:${userId}`, "tg-tokencheck", CHECKS_PER_PERSON_HOUR, now, 3_600)).allowed) return false;
+  return (await hitRateLimit("tg:all", "tg-tokencheck-all", CHECKS_PER_HOUR, now, 3_600)).allowed;
+}
+
+/** The text for a token check: Blocktronics' read, the usage line for a bare /check, or that checks are off. */
+async function tokenCheckText(ask: TokenCheckAsk | null, name: string): Promise<string> {
+  if (!blocktronicsEnabled()) return tokenCheckOff(name, ask);
+  return ask ? answerTokenCheck(ask, name) : TOKEN_CHECK_USAGE;
+}
+
+/**
+ * A token check in the group (lib/telegramBot/tokenCheck), as a reply. The
+ * caller has checked the answer limits; this adds the hourly token-check ones.
+ */
+async function sendTokenCheck(msg: TgMessage, from: TgUser, c: BotConfig, topic: number, name: string, ask: TokenCheckAsk | null): Promise<void> {
+  const chatId = msg.chat.id;
+  const threadId = msg.is_topic_message ? msg.message_thread_id : undefined;
+  if (ask && !(await checkAllowed(from.id))) return;
+  const reply = await tokenCheckText(ask, name);
+  if (!(await sendMessage(chatId, reply, { threadId, replyTo: msg.message_id }))) return;
+  await markReplied(msg.message_id).catch(() => {});
+  await remember(chatId, topic, { n: c.persona, t: reply.slice(0, 400), b: 1, a: Math.floor(Date.now() / 1000) }).catch(() => {});
+  await count("answered");
+  const asked = memoryText(messageText(msg));
+  if (asked) {
+    await logAnswered({ at: Date.now(), name, topic: topicName(topic), text: asked.slice(0, 200), reply: reply.slice(0, 200), link: messageLink(msg) }).catch(() => {});
+  }
+}
+
 async function onCommand(cmd: Command, msg: TgMessage, from: TgUser, c: BotConfig, topic: number): Promise<void> {
   const chatId = msg.chat.id;
   const threadId = msg.is_topic_message ? msg.message_thread_id : undefined;
   const name = firstName(from, c);
-  if (cmd.name !== "help" && cmd.name !== "start" && cmd.name !== "bug" && !TOKEN_COMMANDS.has(cmd.name)) return;
+  if (cmd.name !== "help" && cmd.name !== "start" && cmd.name !== "bug" && cmd.name !== "check" && !TOKEN_COMMANDS.has(cmd.name)) return;
   if (!(await withinLimits(from.id))) return;
   if (TOKEN_COMMANDS.has(cmd.name)) {
     await sendTokenCard(msg, c, topic, name);
+    return;
+  }
+  if (cmd.name === "check") {
+    await sendTokenCheck(msg, from, c, topic, name, cmd.args ? tokenCheckAsk(`token check ${cmd.args}`, c.persona) : null);
     return;
   }
   if (cmd.name === "bug") {
@@ -1334,6 +1379,14 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
     if (await withinLimits(from.id)) await sendTokenCard(msg, c, topic, name);
     return;
   }
+  // "token check 0x...", "is $PONS safe?": Blocktronics' read of that token, never a verdict
+  const check = edited ? null : tokenCheckAsk(text, c.persona);
+  if (check) {
+    const kept = memoryText(text);
+    if (kept) await logQuestion(kept).catch(() => {});
+    if (await withinLimits(from.id)) await sendTokenCheck(msg, from, c, topic, name, check);
+    return;
+  }
   const replied = explicitReply(msg);
   const toBot = replied?.from?.id === me.id;
   // a tag, a reply to Glim, or saying its name; questions get answered in every topic (not Announcements)
@@ -1667,7 +1720,18 @@ async function onPrivate(msg: TgMessage, c: BotConfig): Promise<void> {
     let reply = owner ? ownerHelp(c) : adminHelp(name);
     if (cmd.name === "report") reply = owner ? await buildReport(c.groupId, c.persona) : ADMIN_REPORT;
     if (TOKEN_COMMANDS.has(cmd.name)) reply = tokenCard();
+    if (cmd.name === "check") {
+      const ask = cmd.args ? tokenCheckAsk(`token check ${cmd.args}`, c.persona) : null;
+      if (ask && !(await checkAllowed(from.id))) return;
+      reply = await tokenCheckText(ask, name);
+    }
     await sendMessage(chatId, reply);
+    return;
+  }
+  const check = picture ? null : tokenCheckAsk(text, c.persona);
+  if (check) {
+    if (!(await checkAllowed(from.id))) return;
+    await sendMessage(chatId, await tokenCheckText(check, firstName(from, c)));
     return;
   }
   if (owner && !picture && wantsReport(text)) {
