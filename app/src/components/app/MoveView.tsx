@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { formatUnits, isAddress, type Address, type Hex } from "viem";
@@ -153,6 +153,7 @@ import { cashOutPrivacyWarnings, cashOutSender, depositWallets, presetAmounts } 
 import { CashOutAmountChips, CashOutPrivacyLine, CashOutWarnings } from "./CashOutPrivacy";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { codeFromHash } from "@/lib/claimLink";
+import { dropClaimLink, keepClaimLink, keptClaimLink, onGoToClaim, setClaimWaiting } from "@/lib/claimLinkStore";
 import { countPerson } from "@/lib/people";
 import { WalletMenu } from "./WalletMenu";
 import { AfterClaimNext } from "./AfterClaimNext";
@@ -172,7 +173,8 @@ import {
   type CrossChainQuote,
 } from "@/lib/cashOutCrossChain";
 import { checkSweep, sweepVerdict, type SweepCheck, type SweepReader } from "@/lib/sweepCheck";
-import { EMBEDDED_CONNECTOR_ID } from "@/lib/embeddedWallet";
+import { EMBEDDED_CONNECTOR_ID, EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
+import { embeddedAvailability, onEmbeddedAvailability } from "@/lib/turnkeyBridge";
 import { moveModeFromParam, searchWithMoveMode } from "@/lib/vaultNav";
 import { cashOutHandoff, classifyPayRecipient, isWalletRecipient } from "@/lib/payRecipient";
 import { useEnsAddress } from "@/hooks/useEnsAddress";
@@ -406,11 +408,25 @@ export function MoveView() {
   // the URL fragment (never sent to a server) and is cleared once read. It is
   // read the way /claim reads it (lib/claimLink), so a link cut mid-escape is
   // ignored instead of throwing, and read again when another claim link is
-  // opened in this tab, which only changes the fragment.
+  // opened in this tab, which only changes the fragment. This tab keeps it
+  // until it is claimed (lib/claimLinkStore), so a reload while the person
+  // signs in brings it back (below).
   const { setNetworkKey, networkKey } = useNetwork();
+  // Opened from a claim link (or brought back after a reload): go straight to the
+  // claim, not the address above it. Its own effect, so the network switch a link
+  // makes, which runs the effect below again, can't cancel it: it did for every
+  // link on a network other than the saved one, so a phone landed far above the claim.
+  const [claimScroll, setClaimScroll] = useState(0);
+  useEffect(() => {
+    if (!claimScroll) return;
+    const t = window.setTimeout(() => {
+      const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      document.getElementById("claim-payment")?.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [claimScroll]);
   useEffect(() => {
     let t = 0;
-    let scroll = 0;
     const openClaim = () => {
       const code = codeFromHash(window.location.hash);
       if (!code) return;
@@ -420,24 +436,61 @@ export function MoveView() {
         window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
         if (isNetworkKey(net) && net !== networkKey) setNetworkKey(net);
         countLinkOpened(code, net);
+        keepClaimLink(code, isNetworkKey(net) ? net : null);
         setMode("receive");
         setImportText(code);
-        // opened from a claim link: go straight to the claim, not the address above it
-        window.clearTimeout(scroll);
-        scroll = window.setTimeout(() => {
-          const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-          document.getElementById("claim-payment")?.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
-        }, 400);
+        setClaimScroll((n) => n + 1);
       }, 0);
     };
     openClaim();
     window.addEventListener("hashchange", openClaim);
     return () => {
       window.clearTimeout(t);
-      window.clearTimeout(scroll);
       window.removeEventListener("hashchange", openClaim);
     };
   }, [networkKey, setNetworkKey]);
+
+  // A claim link this tab opened and hasn't claimed yet, back after a reload
+  // (lib/claimLinkStore): signing in with an email sends the person to their
+  // mail app for the code, and a phone can reload the tab meanwhile. Once per
+  // visit, only on Receive, and never over a link in the address bar or
+  // something already in the box.
+  const restoredClaim = useRef(false);
+  useEffect(() => {
+    if (restoredClaim.current) return;
+    const t = window.setTimeout(() => {
+      if (restoredClaim.current) return;
+      restoredClaim.current = true;
+      if (codeFromHash(window.location.hash)) return;
+      if (moveModeFromParam(new URLSearchParams(window.location.search).get("mode")) !== "receive") return;
+      const kept = keptClaimLink();
+      if (!kept) return;
+      if (kept.on && kept.on !== networkKey) setNetworkKey(kept.on);
+      setImportText((now) => (now.trim() ? now : kept.code));
+      setClaimScroll((n) => n + 1);
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [networkKey, setNetworkKey]);
+
+  // While a payment waits in the claim box, the new-wallet sheet (EmbeddedWalletFlow)
+  // offers to go back to it instead of Add funds, and its button lands here.
+  const claimInBox = mode === "receive" && importText.trim().length > 0;
+  useEffect(() => {
+    setClaimWaiting(claimInBox);
+  }, [claimInBox]);
+  useEffect(() => () => setClaimWaiting(false), []);
+  useEffect(
+    () =>
+      onGoToClaim(() => {
+        // after the sheet has closed and handed focus back
+        window.setTimeout(() => {
+          const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          document.getElementById("claim-payment")?.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
+          document.getElementById("claim-submit")?.focus({ preventScroll: true });
+        }, 60);
+      }),
+    []
+  );
 
   // A request link opened in a tab that already shows Pay only changes the
   // fragment, so pick it up here too.
@@ -2148,6 +2201,8 @@ export function MoveView() {
     try {
       const r = await claimCode(importText, importPassphrase);
       if (r.isNew) countLinkClaimed(importText);
+      // in this browser's balance now: the tab no longer keeps the link
+      dropClaimLink();
       setImportText("");
       setImportPassphrase("");
       if (r.already) {
@@ -2280,6 +2335,9 @@ export function MoveView() {
   // eslint-disable-next-line react-hooks/refs -- each handler sets it together with busy, so the render that shows the spinner reads it current
   const busyAction = pendingAction.current;
   const connectedOk = isConnected && onProduct;
+  // Email sign-in (Gloam wallets) is what the wallet menu offers first, while the kit can run here.
+  const embeddedState = useSyncExternalStore(onEmbeddedAvailability, embeddedAvailability, () => "starting" as const);
+  const signInOffered = EMBEDDED_WALLETS && embeddedState !== "unavailable";
   const memoLive = isPayMemoLive();
 
   // Payment request: who asked (only a saved contact counts as known) and
@@ -2444,7 +2502,9 @@ export function MoveView() {
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-[16px] bg-surface px-4 py-3">
       <p className="text-[14px] text-mute">
         {!isConnected
-          ? `Connect a wallet to ${action}.`
+          ? signInOffered
+            ? `Sign in with your email or connect a wallet to ${action}.`
+            : `Connect a wallet to ${action}.`
           : `Switch to ${network.label} to ${action}.`}
       </p>
       <WalletMenu />
@@ -3712,6 +3772,7 @@ export function MoveView() {
                           className="btn btn-ghost btn-sm shrink-0"
                           onClick={() => {
                             setImportText(row.ticket);
+                            dropClaimLink();
                             setClaimPreview({
                               text: `Selected ${row.label} from your payments.`,
                               note: row.note,
@@ -3742,7 +3803,10 @@ export function MoveView() {
                 <textarea
                   id="claim-code"
                   value={importText}
-                  onChange={(e) => setImportText(e.target.value)}
+                  onChange={(e) => {
+                    setImportText(e.target.value);
+                    dropClaimLink();
+                  }}
                   rows={4}
                   spellCheck={false}
                   className="gl-input tnum mt-3 h-auto min-h-[108px] resize-none py-3 text-[13px] leading-relaxed"
@@ -3787,6 +3851,7 @@ export function MoveView() {
                     connectPrompt("claim it")
                   ) : (
                     <button
+                      id="claim-submit"
                       type="button"
                       onClick={() => void onImportNote()}
                       disabled={!importText.trim() || !isConnected || working || claimOpening}
