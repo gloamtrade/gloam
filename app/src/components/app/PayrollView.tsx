@@ -35,6 +35,7 @@ import {
   formatAssetAmountExact,
   gasFor,
   shieldPoolAbi,
+  SIGNED_OUT_BALANCE_MESSAGE,
   summaryDecimals,
 } from "@/lib/shield";
 import { MEMO_GAS_LIMIT, isPayMemoLive, payMemoAbi, payMemoAddress } from "@/lib/payMemo";
@@ -1512,27 +1513,37 @@ export function PayrollView() {
             )}
 
             <div className={`${loaded ? "mt-3" : "mt-5"} rounded-[14px] bg-surface p-4`}>
-              <div className="flex items-center justify-between gap-3 text-[13px]">
-                <span className="text-mute">Private balance</span>
-                <span className="tnum text-foreground">
-                  {formatAssetAmount(bal.total, asset, summaryDecimals(asset))} {token.symbol}
-                </span>
-              </div>
-              <div className="mt-3">
-                <Rail value={total > 0n ? coverage : 0} reduce={reduce} tone={covered ? "sealed" : "ink"} />
-              </div>
-              <p
-                className={`mt-2.5 flex items-center gap-1.5 text-[12.5px] ${
-                  covered ? "text-sealed" : plan.shortfall > 0n && total > 0n ? "text-foreground" : "text-mute"
-                }`}
-              >
-                {covered && <Icon name="check" className="h-3.5 w-3.5" />}
-                {total === 0n
-                  ? "Payments come out of your private balance."
-                  : plan.shortfall === 0n
-                    ? "Covers this run."
-                    : `${formatAssetAmountExact(plan.shortfall, asset)} ${token.symbol} short. Add it as one deposit.`}
-              </p>
+              {!isConnected ? (
+                // Signed out: no balance is read, so no amount and no shortfall against one.
+                <>
+                  <p className="text-[13px] text-mute">Private balance</p>
+                  <p className="mt-1.5 text-[12.5px] text-mute">{SIGNED_OUT_BALANCE_MESSAGE}</p>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between gap-3 text-[13px]">
+                    <span className="text-mute">Private balance</span>
+                    <span className="tnum text-foreground">
+                      {formatAssetAmount(bal.total, asset, summaryDecimals(asset))} {token.symbol}
+                    </span>
+                  </div>
+                  <div className="mt-3">
+                    <Rail value={total > 0n ? coverage : 0} reduce={reduce} tone={covered ? "sealed" : "ink"} />
+                  </div>
+                  <p
+                    className={`mt-2.5 flex items-center gap-1.5 text-[12.5px] ${
+                      covered ? "text-sealed" : plan.shortfall > 0n && total > 0n ? "text-foreground" : "text-mute"
+                    }`}
+                  >
+                    {covered && <Icon name="check" className="h-3.5 w-3.5" />}
+                    {total === 0n
+                      ? "Payments come out of your private balance."
+                      : plan.shortfall === 0n
+                        ? "Covers this run."
+                        : `${formatAssetAmountExact(plan.shortfall, asset)} ${token.symbol} short. Add it as one deposit.`}
+                  </p>
+                </>
+              )}
             </div>
 
             <div className="mt-3 space-y-3">

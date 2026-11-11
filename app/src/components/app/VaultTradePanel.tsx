@@ -41,9 +41,11 @@ import {
   isShieldDeployed,
   saveLocalNote,
   shieldPoolAbi,
+  SIGNED_OUT_BALANCE_MESSAGE,
   updateLocalNote,
   type LocalNote,
 } from "@/lib/shield";
+import { useDemo } from "@/lib/demo";
 import { makeBoundNotePoseidon } from "@/lib/notePoseidon";
 import { buildPoseidonUnshieldWitness } from "@/lib/proverPoseidon";
 import { fieldToBytes32, proveUnshieldInBrowser } from "@/lib/proveClient";
@@ -93,6 +95,8 @@ export function VaultTradePanel({
   const shieldLive = isShieldDeployed();
   const poseidonMode = HASH_SCHEME === "poseidon";
   const { address, isConnected } = useAccount();
+  // The recording demo lists the pretend wallet's notes here as before (hooks/useLocalShieldNotes).
+  const demo = useDemo();
   const { network } = useNetwork();
   const chainId = useChainId();
   const onProduct = chainId === network.chainId;
@@ -731,7 +735,11 @@ export function VaultTradePanel({
                   ? "ETH vault balance"
                   : `${marketSymbol} vault balance`}
               </p>
-              {eligible.length === 0 ? (
+              {!isConnected && !demo ? (
+                <p className="mt-2 rounded-[16px] border border-dashed border-line-strong px-4 py-4 text-[13px] leading-relaxed text-mute">
+                  {SIGNED_OUT_BALANCE_MESSAGE}
+                </p>
+              ) : eligible.length === 0 ? (
                 <p className="mt-2 rounded-[16px] border border-dashed border-line-strong px-4 py-4 text-[13px] leading-relaxed text-mute">
                   No matching balances.{" "}
                   <Link

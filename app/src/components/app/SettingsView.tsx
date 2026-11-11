@@ -8,6 +8,7 @@ import { useNetwork } from "./NetworkProvider";
 import { faucetFor } from "@/lib/faucet";
 import { addableTokensFor } from "@/lib/tokens";
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
+import { useWalletState } from "@/hooks/useWalletState";
 import {
   exportNotesBackup,
   importNotesBackup,
@@ -393,7 +394,8 @@ export function SettingsView() {
   const { settings, setSettings } = useTradingSettings();
   const [copied, setCopied] = useState(false);
   const [netMsg, setNetMsg] = useState<string | null>(null);
-  const [backupMsg, setBackupMsg] = useState<string | null>(null);
+  // Says how many balances a backup or a restore held: gone on sign out or a switch of account.
+  const [backupMsg, setBackupMsg] = useWalletState<string | null>(address, null);
   // A backup is per wallet: with none connected, export would take every wallet's balances on this browser.
   const backupReady = isConnected && Boolean(address);
   const [backupImport, setBackupImport] = useState("");

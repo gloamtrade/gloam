@@ -36,7 +36,7 @@ import { surelyNotSent, walletErrorForPeople } from "@/lib/walletErrors";
 import { publicClientFor } from "@/lib/rhClient";
 
 import { isNoLimit } from "@gloamtrade/sdk";
-import { APPROVE_GAS_LIMIT, gasFor, HASH_SCHEME, NATIVE_ASSET, SHIELD_GAS_LIMIT, SHIELD_BOUND_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, dropUnsentNote, formatAssetAmount, isNativeAsset, isShieldDeployed, makeNoteMaterial, markAllNotesRecovered, nativeGasReserve, saveLocalNote, shieldPoolAbi } from "@/lib/shield";
+import { APPROVE_GAS_LIMIT, gasFor, HASH_SCHEME, NATIVE_ASSET, SHIELD_GAS_LIMIT, SHIELD_BOUND_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, dropUnsentNote, formatAssetAmount, isNativeAsset, isShieldDeployed, makeNoteMaterial, markAllNotesRecovered, nativeGasReserve, saveLocalNote, shieldPoolAbi, SIGNED_OUT_BALANCE_MESSAGE } from "@/lib/shield";
 import { makeBoundNotePoseidon } from "@/lib/notePoseidon";
 import { createTxLog, depositAfterLostApproval, depositCall, networkMovedMessage, type DepositCall } from "@/lib/depositFlow";
 import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
@@ -1364,6 +1364,7 @@ export function ShieldView() {
           <PrivateBalanceCard
             rows={balanceRows}
             syncing={syncing}
+            signedOut={!isConnected}
             actions={
               balanceRows.length > 0 ? (
                 <>
@@ -1474,10 +1475,13 @@ type BalanceRow = {
 function PrivateBalanceCard({
   rows,
   syncing,
+  signedOut,
   actions,
 }: {
   rows: BalanceRow[];
   syncing: boolean;
+  /** No wallet connected: no balance is read, so none is shown, not even 0. */
+  signedOut: boolean;
   actions?: React.ReactNode;
 }) {
   const [hidden, setHidden] = useState(false);
@@ -1527,6 +1531,8 @@ function PrivateBalanceCard({
               </li>
             ))}
           </ul>
+        ) : signedOut ? (
+          <p className="mt-4 max-w-[30ch] text-[13px] leading-relaxed text-mute">{SIGNED_OUT_BALANCE_MESSAGE}</p>
         ) : (
           <div className="mt-4">
             <p className="tnum text-[34px] font-light leading-none tracking-[-0.02em] text-foreground">
