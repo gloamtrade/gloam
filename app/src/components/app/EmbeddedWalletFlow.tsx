@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { motion, useReducedMotion } from "framer-motion";
 import { AuthState, useTurnkey } from "@turnkey/react-wallet-kit";
 import { useAccount } from "wagmi";
 import { useModalFocus } from "@/hooks/useModalFocus";
@@ -423,7 +422,6 @@ export function WalletSheet({
 }) {
   const { network } = useNetwork();
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
-  const reduce = useReducedMotion();
   const dialog = useRef<HTMLDivElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
   const creating = step === "creating";
@@ -451,23 +449,16 @@ export function WalletSheet({
       aria-modal="true"
       aria-labelledby="gw-title"
     >
-      <motion.button
+      <button
         type="button"
         tabIndex={-1}
         aria-hidden="true"
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        className="gl-rise-scrim absolute inset-0 bg-black/40 backdrop-blur-sm"
         aria-label="Close"
         onClick={onClose}
-        initial={reduce ? false : { opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.2 }}
       />
-      <motion.div
-        className="relative z-[1] max-h-[92dvh] w-full max-w-[440px] overflow-y-auto rounded-t-[24px] bg-panel px-6 pb-[max(24px,env(safe-area-inset-bottom))] pt-6 shadow-pop sm:rounded-[24px] sm:px-7 sm:pb-7"
-        initial={reduce ? false : { opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ type: "spring", stiffness: 420, damping: 36 }}
-      >
+      {/* rises into place on CSS (gl-rise-sheet in globals.css), still for reduced motion */}
+      <div className="gl-rise-sheet relative z-[1] max-h-[92dvh] w-full max-w-[440px] overflow-y-auto rounded-t-[24px] bg-panel px-6 pb-[max(24px,env(safe-area-inset-bottom))] pt-6 shadow-pop sm:rounded-[24px] sm:px-7 sm:pb-7">
         <div className="flex items-start justify-between gap-4">
           <h2 id="gw-title" className="text-[20px] font-medium tracking-[-0.01em] text-foreground">
             {title}
@@ -575,7 +566,7 @@ export function WalletSheet({
             </button>
           </form>
         )}
-      </motion.div>
+      </div>
     </div>,
     document.body
   );
