@@ -24,17 +24,6 @@ export type { DocNavItem };
 
 export type GlanceRow = { label: string; value: string };
 
-const DEFAULT_QUICK_LINKS = [
-  { href: "/app", label: "Open the app" },
-  { href: "/docs/chain", label: "Networks" },
-  { href: "/docs/testnet", label: "Practice on testnet" },
-  { href: "/docs/payroll", label: "Private payroll" },
-  { href: "/docs/privacy-model", label: "What stays private" },
-  { href: "/whitepaper", label: "Whitepaper" },
-  { href: "https://x.com/gloamtrade", label: "@gloamtrade" },
-  { href: "mailto:hello@gloam.trade", label: "hello@gloam.trade" },
-];
-
 /** Section ids scroll to just under the sticky header (100px mobile, 112px desktop). */
 const SPY_OFFSET = 150;
 
@@ -146,7 +135,7 @@ function useRailHeight(railRef: RefObject<HTMLDivElement | null>) {
 
 function QuickLink({ href, label }: { href: string; label: string }) {
   const cls =
-    "inline-flex h-10 items-center gap-1.5 rounded-full border border-line px-3.5 text-[13px] text-soft transition-colors hover:border-line-strong hover:bg-surface/60 hover:text-foreground lg:h-8 lg:px-3";
+    "inline-flex h-10 items-center gap-1.5 text-[14px] text-soft transition-colors hover:text-foreground lg:h-8";
   if (href.startsWith("mailto:")) {
     return (
       <a href={href} className={cls}>
@@ -236,7 +225,7 @@ export function DocsLayout({
   const { index, item: here } = currentDoc(pathname);
   const prev = index > 0 ? FLAT_DOCS_NAV[index - 1] : undefined;
   const next = index >= 0 && index < FLAT_DOCS_NAV.length - 1 ? FLAT_DOCS_NAV[index + 1] : undefined;
-  const links = quickLinks ?? DEFAULT_QUICK_LINKS;
+  const links = quickLinks ?? [];
 
   return (
     <div id="top" className="min-h-screen bg-background text-foreground">
@@ -264,7 +253,7 @@ export function DocsLayout({
           <main className="min-w-0 pb-6 pt-7 sm:pt-9 lg:pt-10">
             <article data-docs-article className="mx-auto w-full max-w-[760px]">
               <div className="flex min-h-8 items-center justify-between gap-3">
-                <p className="truncate text-[13px] font-medium text-sealed">
+                <p className="truncate text-[13px] font-medium text-mute">
                   {here?.section ?? "Docs"}
                 </p>
                 <div className="flex shrink-0 items-center gap-2">
@@ -273,7 +262,7 @@ export function DocsLayout({
                 </div>
               </div>
 
-              <h1 className="mt-3 text-balance text-[30px] font-medium leading-[1.15] tracking-[-0.02em] text-foreground md:text-[36px] md:leading-[1.12]">
+              <h1 className="mt-3 text-balance text-[34px] font-light leading-[1.1] tracking-[-0.025em] text-foreground md:text-[44px] md:leading-[1.06]">
                 {title}
               </h1>
               {lede && (
@@ -300,7 +289,7 @@ export function DocsLayout({
               {links.length > 0 && (
                 <nav
                   aria-label="Quick links"
-                  className={`flex flex-wrap gap-2 ${glance && glance.length > 0 ? "mt-3" : "mt-7"}`}
+                  className={`flex flex-wrap gap-x-6 gap-y-1 ${glance && glance.length > 0 ? "mt-4" : "mt-6"}`}
                 >
                   {links.map((l) => (
                     <QuickLink key={l.href} {...l} />
