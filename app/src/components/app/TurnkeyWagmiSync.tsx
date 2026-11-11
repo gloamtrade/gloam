@@ -11,6 +11,7 @@ import {
   embeddedSignerRetries,
   onEmbeddedSignerRetry,
   setActiveTurnkeySigner,
+  setEmbeddedAuth,
   setEmbeddedAvailability,
   setEmbeddedSignInEmail,
   setEmbeddedSignOut,
@@ -22,9 +23,10 @@ import {
 /**
  * Once a sign-in completes and the Gloam wallet exists, builds the viem signer
  * for it and publishes it for the wagmi connector (lib/turnkeyBridge). Also
- * reports whether the kit started and whether the signer did (so the header can
- * offer a way out), wires sign-out, and holds the sign-in email in memory for
- * the updates field in Settings. Renders nothing.
+ * reports whether the kit started, whether someone is signed in and whether the
+ * signer started (so the header, outside the kit, can offer Sign in or a way
+ * out), wires sign-out, and holds the sign-in email in memory for the updates
+ * field in Settings. Renders nothing.
  *
  * The private-balance backup is never turned on from here: a Gloam wallet's
  * signatures are made and kept by Turnkey, so its backup goes through a passkey
@@ -54,6 +56,17 @@ export function TurnkeyWagmiSync() {
       clientState === ClientState.Error ? "unavailable" : clientState === ClientState.Ready ? "ready" : "starting",
     );
   }, [clientState]);
+
+  // Signed in or not, for the header's Sign in, which sits outside the kit (lib/turnkeyBridge).
+  // Signed out only once the kit has looked at what this browser holds: while it starts,
+  // a stored sign-in stays "restoring", so the header never says Sign in to someone signed in.
+  const signedIn = authState === AuthState.Authenticated;
+  const looked = clientState === ClientState.Error || (clientState === ClientState.Ready && !session);
+  useEffect(() => {
+    if (signedIn) setEmbeddedAuth("signed-in");
+    else if (looked) setEmbeddedAuth("signed-out");
+  }, [signedIn, looked]);
+  useEffect(() => () => setEmbeddedAuth("signed-out"), []);
 
   // The sign-in email, in memory, for the updates field in Settings (lib/turnkeyBridge).
   const email = authState === AuthState.Authenticated ? (user?.userEmail ?? null) : null;

@@ -65,9 +65,11 @@ const readDark = () => document.documentElement.dataset.theme === "dark";
 const serverDark = () => false;
 
 /**
- * The Turnkey embedded wallet provider itself. Loaded only when the feature
- * flag is on (see TurnkeyEmbeddedProvider), so the kit stays out of the app
- * bundle while passkey sign-in is switched off.
+ * The Turnkey embedded wallet provider itself, with the sign-in sheet and the
+ * wallet sync on it. Loaded only when it is needed: in the app beside the pages,
+ * for someone signed in or asking to sign in (TurnkeyKitGate, TurnkeyAppKit); on
+ * the partner portal around the page (TurnkeyEmbeddedProvider). Never while Gloam
+ * wallets are switched off.
  */
 export default function TurnkeyKitProvider({ children }: { children: ReactNode }) {
   const dark = useSyncExternalStore(subscribeTheme, readDark, serverDark);
