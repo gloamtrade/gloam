@@ -7,6 +7,7 @@ import { SealedField } from "@/components/ui/SealedField";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { readDemo } from "@/lib/demoFlag";
 import { liveMainnetNames } from "@/lib/mainnet";
+import { keptClaimLink } from "@/lib/claimLinkStore";
 
 /** The key the welcome is dismissed under (the mainnet welcome's; the older testnet one is no longer read). */
 const SHOWN_KEY = "gloam_mainnet_welcome_v1";
@@ -17,8 +18,17 @@ const SHOWN_KEY = "gloam_mainnet_welcome_v1";
  * has not dismissed it yet. On a slow phone the welcome appears with the first
  * paint instead of seconds later, after the wallet code loads. Once React takes
  * over, state drives it as before (and recording demos keep it shut).
+ *
+ * Not over a claim link: someone opening a payment (#claim=..., or one this tab
+ * keeps while they sign in, lib/claimLinkStore) came to claim it, and the claim
+ * page already said what happens next. It shows on a later visit instead.
  */
-const REVEAL_SCRIPT = `(function(){try{if(localStorage.getItem('${SHOWN_KEY}')==='1')return;if(/[?&]demo=1/.test(location.search)||sessionStorage.getItem('gloam_demo')==='1')return;var el=document.getElementById('gl-welcome');if(el)el.hidden=false}catch(e){}})()`;
+const REVEAL_SCRIPT = `(function(){try{if(localStorage.getItem('${SHOWN_KEY}')==='1')return;if(/[?&]demo=1/.test(location.search)||sessionStorage.getItem('gloam_demo')==='1')return;if(location.hash.indexOf('#claim=')===0||sessionStorage.getItem('gloam.claimLink'))return;var el=document.getElementById('gl-welcome');if(el)el.hidden=false}catch(e){}})()`;
+
+/** Opened from a claim link, now or earlier in this tab (lib/claimLinkStore). */
+function openingClaim(): boolean {
+  return window.location.hash.startsWith("#claim=") || keptClaimLink() !== null;
+}
 
 export function WelcomeModal() {
   const [open, setOpen] = useState(false);
@@ -27,7 +37,7 @@ export function WelcomeModal() {
   useEffect(() => {
     let show = true;
     try {
-      if (localStorage.getItem(SHOWN_KEY) === "1" || readDemo()) show = false;
+      if (localStorage.getItem(SHOWN_KEY) === "1" || readDemo() || openingClaim()) show = false;
     } catch {
       /* storage unavailable: show it */
     }
