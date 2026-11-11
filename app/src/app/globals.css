@@ -1230,6 +1230,17 @@ html.gl-lite .gl-field.gl-drift {
   }
 }
 
+/* The Vault's action row on an action page (components/app/VaultHub): below
+   1024px only. From there the sidebar lists the same actions. */
+.vault-tabstrip {
+  display: flex;
+}
+@media (min-width: 1024px) {
+  .vault-tabstrip {
+    display: none;
+  }
+}
+
 /* The Vault overview's row of actions: phones only (components/app/VaultHome). */
 .vault-quickrow {
   display: block;
