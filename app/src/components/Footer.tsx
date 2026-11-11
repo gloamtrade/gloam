@@ -4,7 +4,6 @@ import { AppLink } from "./AppLink";
 import { FooterUpdates } from "./FooterUpdates";
 import { Mark } from "./Logo";
 import { ThemeSegmented } from "./ThemeToggle";
-import { POSTS, postHref } from "@/lib/posts";
 
 const groups: {
   title: string;
@@ -39,12 +38,10 @@ const groups: {
   {
     title: "Company",
     links: [
-      { href: "/brand", label: "Brand" },
-      { href: "/brand#downloads", label: "Brand kit" },
+      { href: "/research", label: "Research" },
       { href: "/transparency", label: "Transparency" },
       { href: "/stats", label: "Stats" },
-      { href: "/research", label: "Research" },
-      ...POSTS.map((p) => ({ href: postHref(p), label: p.short })),
+      { href: "/brand", label: "Brand" },
       { href: "/pitch", label: "Pitch" },
     ],
   },
@@ -87,7 +84,7 @@ export function Footer() {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="mx-auto max-w-[1400px] px-4 pb-4 pt-24 sm:px-7 sm:pb-7 sm:pt-32">
+    <footer className="mx-auto w-full max-w-[1400px] px-4 pb-4 pt-24 sm:px-7 sm:pb-7 sm:pt-32">
       <div className="theme-dark gl-panel rounded-[28px] bg-black text-foreground">
         <div className="relative z-10 mx-auto max-w-[1240px] px-6 pt-12 sm:px-12 sm:pt-16">
           <div className="grid gap-12 lg:grid-cols-[1.25fr_2fr]">
@@ -134,16 +131,13 @@ export function Footer() {
                 >
                   <GitHubIcon />
                 </a>
-                <AppLink href="/app" className="btn btn-ink btn-sm ml-2">
-                  Open app
-                </AppLink>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-3">
               {groups.map((g) => (
                 <div key={g.title}>
-                  <p className="text-[11.5px] font-medium uppercase tracking-[0.14em] text-foreground">
+                  <p className="text-[13px] font-medium text-foreground">
                     {g.title}
                   </p>
                   <ul className="mt-5 space-y-3">
