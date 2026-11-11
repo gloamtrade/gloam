@@ -119,7 +119,7 @@ test("the claim page's lines keep the copy rules", () => {
         for (const walletConnect of [true, false])
           lines.push(claimSignInLine({ email, networkKey: k, networkLabel: label(k), walletBrowser, walletConnect }));
   for (const l of new Set(lines)) {
-    assert.ok(!/—|–/.test(l), `no dashes: ${l}`);
+    assert.ok(!/\u2014|\u2013/.test(l), `no dashes: ${l}`);
     assert.ok(!/happy to|real money|test money|seamless/i.test(l), l);
     assert.match(l, /^[A-Z]/, `sentence case: ${l}`);
     assert.ok(l.endsWith("."), l);
