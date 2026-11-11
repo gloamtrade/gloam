@@ -345,9 +345,8 @@ export function AppShell({
         <main className="mx-auto w-full max-w-[1120px] flex-1 px-4 pb-16 pt-5 sm:px-8 sm:pt-7">
           <FeeRiseNotice />
           <TestFundsNotice />
-          <Suspense fallback={null}>
-            <StocksLiveNotice />
-          </Suspense>
+          {/* in the first paint, hidden or shown before the app's JavaScript runs: nothing below it moves */}
+          <StocksLiveNotice />
           {/* no fade on the title: it paints with the page, not after the app's JavaScript frees the phone */}
           <div className="gl-pagehead mb-6 gap-4 sm:mb-8">
             <div>
