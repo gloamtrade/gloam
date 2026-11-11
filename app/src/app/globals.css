@@ -825,6 +825,24 @@ html.gl-lite .gl-field.gl-drift {
   animation: gl-fade-out 0.17s ease-in both;
 }
 
+/* The sign-in and new-wallet sheets (GloamSignInSheet, EmbeddedWalletFlow): the
+   panel rises 16px into place on the spring it always had (stiffness 420, damping
+   36, from rest), written out as a linear() curve, and the backdrop fades in over
+   0.2s. Browsers without linear() keep the ease-out before it. */
+@keyframes gl-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+.gl-rise-sheet {
+  animation: gl-rise-in 0.36s var(--ease-out) both;
+  animation-timing-function: linear(0, 0.039 4.2%, 0.132 8.3%, 0.249 12.5%, 0.371 16.7%, 0.488 20.8%, 0.594 25%, 0.684 29.2%, 0.76 33.3%, 0.822 37.5%, 0.87 41.7%, 0.908 45.8%, 0.937 50%, 0.958 54.2%, 0.974 58.3%, 0.985 62.5%, 0.992 66.7%, 0.997 70.8%, 1 75%, 1.002 79.2%, 1.003 87.5%, 1);
+}
+.gl-rise-scrim {
+  animation: gl-fade-in 0.2s ease-in-out both;
+}
+
 /* Dropdown lists (components/ui/Select) settle in from the button's edge. */
 @keyframes gl-pop-in {
   from {
@@ -862,6 +880,8 @@ html.gl-lite .gl-field.gl-drift {
   .gl-sheet[data-leaving="true"],
   .gl-backdrop,
   .gl-backdrop[data-leaving="true"],
+  .gl-rise-sheet,
+  .gl-rise-scrim,
   .gl-pop {
     animation: none;
   }
