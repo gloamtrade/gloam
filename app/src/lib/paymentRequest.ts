@@ -174,12 +174,9 @@ export function normalizeRequestAmount(
   return { value: frac ? `${int}.${frac}` : int };
 }
 
-/** "1250.5" → "1,250.5" without losing any decimals. */
-export function formatRequestAmount(amount: string): string {
-  const [int, frac] = amount.split(".");
-  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return frac ? `${grouped}.${frac}` : grouped;
-}
+// Lives in lib/amountText, which imports nothing: Portfolio's first-payment card
+// shows an amount without loading this module (and the ENS name handling it needs).
+export { formatRequestAmount } from "./amountText";
 
 /** Drops control and direction-override characters, squeezes spaces, caps length. */
 export function cleanRequestText(raw: string | null | undefined, max: number): string {

@@ -12,7 +12,7 @@ import {
   parseFirstPay,
   subscribeFirstPay,
 } from "@/lib/firstPayment";
-import { formatRequestAmount } from "@/lib/paymentRequest";
+import { formatRequestAmount } from "@/lib/amountText";
 import { track } from "@/lib/track";
 
 const serverSnapshot = () => "";
