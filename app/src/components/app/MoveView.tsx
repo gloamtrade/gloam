@@ -153,7 +153,7 @@ import { cashOutPrivacyWarnings, cashOutSender, depositWallets, presetAmounts } 
 import { CashOutAmountChips, CashOutPrivacyLine, CashOutWarnings } from "./CashOutPrivacy";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { codeFromHash } from "@/lib/claimLink";
-import { dropClaimLink, keepClaimLink, keptClaimLink, onGoToClaim, setClaimWaiting } from "@/lib/claimLinkStore";
+import { dropClaimLink, keepClaimLink, keptClaimLink, onForgetClaim, onGoToClaim, setClaimWaiting } from "@/lib/claimLinkStore";
 import { countPerson } from "@/lib/people";
 import { WalletMenu } from "./WalletMenu";
 import { AfterClaimNext } from "./AfterClaimNext";
@@ -183,6 +183,13 @@ import { useEnsAddress } from "@/hooks/useEnsAddress";
 type SweepStatus = SweepResult["status"] | "error";
 
 type Mode = "send" | "cashout" | "receive";
+
+/**
+ * A payment code that can never be claimed: claimed already, carrying no value,
+ * or not what the vault holds. The tab stops keeping it (lib/claimLinkStore), so
+ * a dead code no longer fills the claim box again after a reload.
+ */
+class DeadCodeError extends Error {}
 /** Direct (pay to sticky tag) vs open bearer ticket */
 type PayStyle = "direct" | "bearer";
 
@@ -417,6 +424,8 @@ export function MoveView() {
   // makes, which runs the effect below again, can't cancel it: it did for every
   // link on a network other than the saved one, so a phone landed far above the claim.
   const [claimScroll, setClaimScroll] = useState(0);
+  // A claim link was read from the address bar on this visit: nothing kept is put back over it.
+  const claimFromLink = useRef(false);
   useEffect(() => {
     if (!claimScroll) return;
     const t = window.setTimeout(() => {
@@ -433,6 +442,7 @@ export function MoveView() {
       const net = new URLSearchParams(window.location.search).get("net");
       window.clearTimeout(t);
       t = window.setTimeout(() => {
+        claimFromLink.current = true;
         window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
         if (isNetworkKey(net) && net !== networkKey) setNetworkKey(net);
         countLinkOpened(code, net);
@@ -456,21 +466,40 @@ export function MoveView() {
   // visit, only on Receive, and never over a link in the address bar or
   // something already in the box.
   const restoredClaim = useRef(false);
+  const importTextNow = useRef(importText);
+  useEffect(() => {
+    importTextNow.current = importText;
+  }, [importText]);
   useEffect(() => {
     if (restoredClaim.current) return;
     const t = window.setTimeout(() => {
       if (restoredClaim.current) return;
       restoredClaim.current = true;
-      if (codeFromHash(window.location.hash)) return;
+      if (claimFromLink.current || codeFromHash(window.location.hash)) return;
       if (moveModeFromParam(new URLSearchParams(window.location.search).get("mode")) !== "receive") return;
+      if (importTextNow.current.trim()) return;
       const kept = keptClaimLink();
       if (!kept) return;
+      // it fills the box: only now move to its network
       if (kept.on && kept.on !== networkKey) setNetworkKey(kept.on);
-      setImportText((now) => (now.trim() ? now : kept.code));
+      setImportText(kept.code);
       setClaimScroll((n) => n + 1);
     }, 0);
     return () => window.clearTimeout(t);
   }, [networkKey, setNetworkKey]);
+
+  // Signed out or disconnected on purpose (WalletMenu, Settings): the claim box
+  // empties with the tab's kept link, so the next person here never sees it.
+  useEffect(
+    () =>
+      onForgetClaim(() => {
+        setImportText("");
+        setImportPassphrase("");
+        setClaimPreview(null);
+        setImportOk(null);
+      }),
+    []
+  );
 
   // While a payment waits in the claim box, the new-wallet sheet (EmbeddedWalletFlow)
   // offers to go back to it instead of Add funds, and its button lands here.
@@ -2104,9 +2133,9 @@ export function MoveView() {
     try {
       amount = BigInt(pack.amountWei);
     } catch {
-      throw new Error("This payment has no readable amount.");
+      throw new DeadCodeError("This payment has no readable amount.");
     }
-    if (amount <= 0n) throw new Error("This payment carries no value.");
+    if (amount <= 0n) throw new DeadCodeError("This payment carries no value.");
     // The amount must be what the note holds: commitment = Poseidon(secret, amount, asset).
     const commitment = fieldToHex(
       await noteCommitmentPoseidon(hexToField(secret), amount, asset)
@@ -2116,7 +2145,7 @@ export function MoveView() {
       pack.commitment !== "0x" &&
       pack.commitment.toLowerCase() !== commitment.toLowerCase()
     ) {
-      throw new Error(
+      throw new DeadCodeError(
         "The amount in this payment does not match what it holds in the vault, so it was not claimed."
       );
     }
@@ -2134,7 +2163,7 @@ export function MoveView() {
       (n) => n.commitment.toLowerCase() === commitment.toLowerCase()
     );
     if (known && !isUnsecuredClaim(known)) {
-      if (known.status === "recovered" && !known.secured) throw new Error(moved);
+      if (known.status === "recovered" && !known.secured) throw new DeadCodeError(moved);
       return { label, note: pack.note, local: known, isNew: false, already: true, demo };
     }
 
@@ -2147,7 +2176,7 @@ export function MoveView() {
           args: [nullifier],
         })
         .catch(() => false);
-      if (spent) throw new Error(moved);
+      if (spent) throw new DeadCodeError(moved);
     }
 
     const tree = await syncShieldTree(claimClient, network).catch(() => null);
@@ -2219,6 +2248,8 @@ export function MoveView() {
       }
       await secureNote(r.local, { claimed: true, note: r.note });
     } catch (e) {
+      // a code that can never be claimed: the tab stops filling the box with it
+      if (e instanceof DeadCodeError) dropClaimLink();
       setError(walletErrorForPeople(e, "Couldn't open this payment. Check the code and try again."));
     } finally {
       claimGate.current = false;

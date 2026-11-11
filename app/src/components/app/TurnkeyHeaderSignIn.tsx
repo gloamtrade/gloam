@@ -13,6 +13,7 @@ import {
   signOutEmbedded,
 } from "@/lib/turnkeyBridge";
 import { Spinner } from "@/components/ui/Spinner";
+import { forgetClaim } from "@/lib/claimLinkStore";
 
 /**
  * Email or passkey sign-in for a Gloam wallet, sized by `className` for where it
@@ -58,6 +59,8 @@ export function TurnkeyHeaderSignIn({
         disabled={leaving}
         onClick={async () => {
           setLeaving(true);
+          // signing out on purpose: a claim link this tab holds goes too (lib/claimLinkStore)
+          forgetClaim();
           try {
             await signOutEmbedded();
           } finally {

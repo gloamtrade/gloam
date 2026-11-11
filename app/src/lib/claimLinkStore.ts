@@ -11,8 +11,13 @@
  * sessionStorage: this tab only, gone when the tab closes, never sent anywhere
  * and never logged. Only the code and its network, as the link carried them.
  * It is read back for CLAIM_LINK_KEEP_MS, and dropped the moment the payment is
- * claimed into this browser, or the person clears the box or picks another
- * payment.
+ * claimed into this browser, turns out to be dead (claimed already, no value,
+ * not what the vault holds), or the person clears the box, picks another
+ * payment, signs out or disconnects (forgetClaim, which also empties the box,
+ * so a shared computer never shows one person's payment to the next). The tab
+ * keeps it across the whole site, not only the app, so an old one is scrubbed
+ * whenever a page that loads this module opens and on every keep, not only
+ * when the app reads it.
  *
  * Also held here, in memory only: whether a payment waits in the claim box on
  * this page right now, so the new-wallet sheet (EmbeddedWalletFlow) points back
@@ -21,7 +26,7 @@
 import { isNetworkKey, type NetworkKey } from "./networks";
 
 const KEY = "gloam.claimLink";
-export const CLAIM_LINK_KEEP_MS = 30 * 60_000;
+export const CLAIM_LINK_KEEP_MS = 15 * 60_000;
 
 type Kept = { code: string; on: NetworkKey | null; at: number };
 
@@ -30,8 +35,9 @@ function looksLikeCode(code: unknown): code is string {
   return typeof code === "string" && code.length <= 8192 && /^gloam(?:1e?|2t|3)\.[A-Za-z0-9_\-.]{16,}$/.test(code);
 }
 
-/** Keeps the code a claim link opened, and the network it named, for this tab. */
+/** Keeps the code a claim link opened, and the network it named, for this tab. Scrubs an old one first. */
 export function keepClaimLink(code: string, on: NetworkKey | null, now = Date.now()): void {
+  scrubClaimLink(now);
   if (!looksLikeCode(code)) return;
   try {
     window.sessionStorage.setItem(KEY, JSON.stringify({ code, on: isNetworkKey(on) ? on : null, at: now } satisfies Kept));
@@ -69,6 +75,33 @@ export function dropClaimLink(): void {
   } catch {
     /* ignore */
   }
+}
+
+/** Removes a kept claim link that is too old or unreadable; a fresh one stays. */
+export function scrubClaimLink(now = Date.now()): void {
+  keptClaimLink(now);
+}
+
+// Every page that loads this module scrubs an old one as it opens.
+if (typeof window !== "undefined") scrubClaimLink();
+
+/* ---------------------------------------------------------------- signing out */
+
+const forgetListeners = new Set<() => void>();
+
+/**
+ * An explicit Sign out or Disconnect: the tab stops keeping the claim link, and
+ * Pay > Receive empties its claim box, so the next person at this computer
+ * never sees the payment after a reload or in the page.
+ */
+export function forgetClaim(): void {
+  dropClaimLink();
+  forgetListeners.forEach((fn) => fn());
+}
+
+export function onForgetClaim(fn: () => void): () => void {
+  forgetListeners.add(fn);
+  return () => forgetListeners.delete(fn);
 }
 
 /* ---------------------------------------------------------------- waiting */
