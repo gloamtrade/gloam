@@ -6,12 +6,13 @@ import { SealedField } from "@/components/ui/SealedField";
 import { ClaimSafetyLine } from "@/components/app/ClaimSafetyLine";
 import { appClaimPath, codeFromHash, shortCodeFromHash } from "@/lib/claimLink";
 import { countLinkOpened, isClaimLink } from "@/lib/funnel";
-import { NETWORK_KEYS, getNetwork, isNetworkKey, type NetworkKey } from "@/lib/networks";
+import { NETWORK_KEYS, getNetwork, isNetworkKey, setShownNetworkKey, type NetworkKey } from "@/lib/networks";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { decodeNotePackage, isEncryptedPackage, paymentCodeIn } from "@/lib/notePackage";
 import { inWalletBrowser } from "@/lib/passkey";
 import { relayFor } from "@/lib/relay/client";
 import { WALLETCONNECT_ENABLED } from "@/lib/walletConnect";
+import { claimNeedsWalletApp, claimSignInLine, emailClaimOn } from "@/lib/claimHelp";
 import { assetLabel, formatAssetAmount } from "@/lib/shield";
 import { TokenLogo } from "@/components/app/TokenLogo";
 import { chainLogoSrc } from "@/lib/chainLogo";
@@ -48,12 +49,16 @@ async function readyView(code: string, linkNet: NetworkKey): Promise<View | "dam
       const pack = code.startsWith(SHORT_CLAIM_PREFIX)
         ? readShortClaim(code.slice(SHORT_CLAIM_PREFIX.length))
         : await decodeNotePackage(code);
-      amount = formatAssetAmount(pack.amountWei, pack.asset);
-      symbol = assetLabel(pack.asset);
-      note = pack.note;
       // A code that names its chain is on that network, whatever ?net= says (a chat app can cut it off).
       const own = pack.chainId === undefined ? undefined : NETWORK_KEYS.find((k) => getNetwork(k).chainId === pack.chainId);
       if (own) net = own;
+      // Amounts and symbols are read from the link's own network's tokens: this
+      // page has no network picker, so it would otherwise read the browser's
+      // saved one (an Elysium USDC link showed "<0.0001 0xb47c…0B65").
+      setShownNetworkKey(net);
+      amount = formatAssetAmount(pack.amountWei, pack.asset);
+      symbol = assetLabel(pack.asset);
+      note = pack.note;
     } catch {
       return "damaged";
     }
@@ -175,6 +180,17 @@ export default function ClaimPage() {
   const shownNet = view.kind === "ready" ? view.net : linkNet;
   const net = shownNet ? getNetwork(shownNet) : null;
   const realNet = net && !net.testnet ? net : null;
+  // How the next screen lets this person in: email where Gloam wallets run, a wallet beside it (lib/claimHelp).
+  const signIn =
+    view.kind === "ready"
+      ? {
+          email: emailClaimOn(view.net),
+          networkKey: view.net,
+          networkLabel: getNetwork(view.net).label,
+          walletBrowser,
+          walletConnect: WALLETCONNECT_ENABLED,
+        }
+      : null;
 
   return (
     <div className="relative flex min-h-[100svh] flex-col bg-surface text-foreground">
@@ -288,19 +304,11 @@ export default function ClaimPage() {
                   Claim it
                 </a>
                 {relayUp !== null && <ClaimSafetyLine free={relayUp} centered className="mt-4" />}
-                <p className="mt-3 text-center text-[13px] text-mute">
-                  {view.net === "tempo"
-                    ? "No wallet needed: sign in with a passkey on the next screen."
-                    : walletBrowser
-                      ? "Connect your wallet on the next screen."
-                      : WALLETCONNECT_ENABLED
-                        ? "Connect a wallet on the next screen."
-                        : `You'll need a wallet app such as MetaMask or Rabby to claim on ${getNetwork(view.net).label}.`}
-                </p>
+                {signIn && <p className="mt-3 text-center text-[13px] text-mute">{claimSignInLine(signIn)}</p>}
               </div>
             </div>
 
-            {view.net !== "tempo" && !walletBrowser && !WALLETCONNECT_ENABLED && (
+            {signIn && claimNeedsWalletApp(signIn) && (
               <div className="mt-3 rounded-[20px] bg-panel p-5 text-[14px] leading-relaxed text-soft shadow-card">
                 <p className="text-foreground">On a phone?</p>
                 <p className="mt-1">Open this link inside your wallet app&apos;s browser, then tap Claim it.</p>
