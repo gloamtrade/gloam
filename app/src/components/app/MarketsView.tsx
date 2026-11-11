@@ -331,10 +331,10 @@ export function MarketsView() {
   );
 }
 
-/** Marks a market that can be held in the private balance: the sealed tint. */
+/** Marks a market that can be held in the private balance: the sealed tint on the words, no capsule. */
 function PrivateChip() {
   return (
-    <span className="inline-flex h-5 items-center gap-1 rounded-full bg-sealed-soft px-2 text-[11px] font-medium text-sealed">
+    <span className="inline-flex items-center gap-1 text-[12px] font-medium text-sealed" title="Can be held in your private balance">
       <svg width="9" height="9" viewBox="0 0 24 24" fill="none" aria-hidden>
         <rect x="4" y="10.5" width="16" height="10.5" rx="2.5" fill="currentColor" />
         <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="2.6" />
