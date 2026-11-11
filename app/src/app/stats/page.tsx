@@ -80,7 +80,7 @@ function ChainMark({ chainId, size = 28 }: { chainId: number; size?: number }) {
 
 function Section({ id, title, lead, children }: { id?: string; title: string; lead?: string; children: React.ReactNode }) {
   return (
-    <section id={id} className="scroll-mt-20 border-t border-line py-16 sm:py-24">
+    <section id={id} className="scroll-mt-20 border-t border-line py-16 last:pb-4 sm:py-24 sm:last:pb-4">
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-16">
         <div>
           <h2 className="t-display-m max-w-[16ch]">{title}</h2>

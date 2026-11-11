@@ -179,17 +179,14 @@ export default function AgentsPage() {
               what still shows.
             </p>
           </div>
-          <ol className="mt-12 divide-y divide-line border-y border-line">
-            {THREE.map((t, i) => (
+          <ul className="mt-12 divide-y divide-line border-y border-line">
+            {THREE.map((t) => (
               <li
                 key={t.id}
                 id={t.id}
                 className="grid scroll-mt-24 gap-4 py-8 sm:py-10 lg:grid-cols-[1fr_1.3fr] lg:gap-16"
               >
-                <p className="flex items-baseline gap-4 text-[22px] leading-snug tracking-[-0.01em] sm:text-[26px]">
-                  <span className="tnum text-[15px] text-faint">0{i + 1}</span>
-                  {t.title}
-                </p>
+                <p className="text-[22px] leading-snug tracking-[-0.01em] sm:text-[26px]">{t.title}</p>
                 <div className="max-w-[56ch]">
                   <p className="text-[16px] leading-relaxed text-soft sm:text-[17px]">{t.body}</p>
                   <p className="mt-3 text-[14px] leading-relaxed text-mute">
@@ -198,7 +195,7 @@ export default function AgentsPage() {
                 </div>
               </li>
             ))}
-          </ol>
+          </ul>
         </section>
 
         {/* quickstart */}
@@ -340,7 +337,7 @@ export default function AgentsPage() {
         </section>
 
         {/* fees and honesty */}
-        <section className="mx-auto max-w-[1400px] px-4 pb-20 pt-20 sm:px-7 sm:pb-32 sm:pt-28">
+        <section className="mx-auto max-w-[1400px] px-4 pb-4 pt-20 sm:px-7 sm:pt-28">
           <div className="grid gap-10 sm:grid-cols-3">
             <div className="border-t border-foreground pt-5">
               <p className="text-[18px] leading-snug tracking-[-0.01em]">Free to pay privately</p>
