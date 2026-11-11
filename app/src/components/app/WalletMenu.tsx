@@ -30,6 +30,7 @@ import { WALLETCONNECT_ID, prefersWalletConnect } from "@/lib/walletConnect";
 import { EMBEDDED_CONNECTOR_ID } from "@/lib/embeddedWallet";
 import { walletDeclined } from "@/lib/walletErrors";
 import { embeddedAvailability, onEmbeddedAvailability, openEmbeddedSheet, signOutEmbedded } from "@/lib/turnkeyBridge";
+import { forgetClaim } from "@/lib/claimLinkStore";
 import { useNetwork } from "./NetworkProvider";
 import { TURNKEY_ENABLED } from "./TurnkeyEmbeddedProvider";
 import { ClientOnly } from "./ClientOnly";
@@ -80,6 +81,14 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
   const embedded = connector?.id === EMBEDDED_CONNECTOR_ID;
   // A Gloam wallet signs out of Turnkey: disconnecting alone would connect it again.
   const disconnect = demo ? exitDemo : () => (embedded ? void signOutEmbedded() : wagmiDisconnect());
+  // The menu's Sign out or Disconnect: leaving on purpose, so a claim link this tab
+  // holds goes too, with the claim box (lib/claimLinkStore forgetClaim). A shared
+  // computer never shows one person's payment to the next. The Disconnect after a
+  // failed network switch is a reconnect, so it keeps the claim.
+  const leave = () => {
+    forgetClaim();
+    disconnect();
+  };
   const { network } = useNetwork();
   const { switchChainAsync, isPending: switching } = useSwitchChain();
   // Gloam wallets: offered while the Turnkey kit can work on this page.
@@ -587,7 +596,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
               role="menuitem"
               onClick={() => {
                 setOpen(false);
-                disconnect();
+                leave();
               }}
               className="flex h-10 w-full items-center gap-3 rounded-xl px-2.5 text-[14px] text-mute transition-colors hover:bg-surface hover:text-foreground"
             >

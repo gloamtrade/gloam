@@ -26,12 +26,25 @@ import { VAULT_SWAP_V2_ROUTER, swapV3Live } from "@/lib/vaultSwap";
 import { voteFacts } from "@/lib/vote/glim";
 import { CONTEST, CONTEST_TOTAL, contestDay, contestTime, placeLabel } from "@/lib/contest";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
 
 /** Private swaps v2 on Robinhood Chain (lib/vaultSwap VAULT_SWAP_V2_ROUTER): the facts follow the switch. */
 const SWAPS_V2 = Boolean(VAULT_SWAP_V2_ROUTER[4663]);
 
 /** WalletConnect is on (lib/walletConnect.ts): phones without a wallet browser can use a wallet app. */
 const WALLET_APP = Boolean(process.env.NEXT_PUBLIC_WC_PROJECT_ID?.trim());
+
+/** Gloam wallets are on (lib/embeddedWallet): sign in with an email or a passkey, on every network. */
+const EMAIL_SIGN_IN = EMBEDDED_WALLETS;
+
+/** How a claim link is claimed, as the claim page and the app offer it (lib/claimHelp). */
+function claimLinkHow(): string {
+  const wallet = WALLET_APP
+    ? "in Safari or Chrome on a phone, tap Use a wallet app and approve in MetaMask, Trust, Coinbase Wallet or OKX, then come back and tap Claim (with the Gloam relay on, the default, claiming and securing need no signature and no network switch); opening the link inside the wallet app's browser also works"
+    : "on a phone, open the link inside the wallet app's browser";
+  if (!EMAIL_SIGN_IN) return `On Tempo you can claim with a passkey sign-in, no wallet needed. On Robinhood Chain you need a wallet app: ${wallet}.`;
+  return `On every mainnet (${liveMainnetNames()}) you can claim by signing in with your email: tap Sign in, type the code the email sends, and a Gloam wallet is made for you, with no seed phrase. While the Gloam relay is on (the default) claiming needs no gas, because the relay pays the network fee. A wallet works too: ${wallet}.`;
+}
 
 /** The $GLOAM token, as gloam.trade/token shows it. The only contract address the helper may share. */
 export const GLOAM_TOKEN = {
@@ -200,7 +213,7 @@ CODES, LINKS AND ADDRESSES (what people paste in the group)
 - gloam2t.<long string> is a payment sealed to someone's Gloam address. Only that address's owner can open it, so it is safe to share.
 - gloam1.<long string> is a plain payment code, and gloam3.<about 30 letters and digits> is the same kind of code written short. Both are bearer, like cash: anyone who has one can claim the money.
 - gloam1e.<long string> is a payment code locked with a phrase. The code plus its phrase lets anyone claim it. Capitals, extra spaces and curly quotes in the phrase do not matter ("Gloam" and "gloam" both work), but the words must be the same.
-- A claim link looks like gloam.trade/c#<letters and digits> (longer ones: gloam.trade/claim?net=...#claim=<code>, and older ones gloam.trade/app/vault?...#claim=<code>). It is bearer, the same as a plain code. Tapping it opens a page showing the amount (or that it is locked) with a Claim it button that opens the app. On Tempo you can claim with a passkey sign-in, no wallet needed. On Robinhood Chain you need a wallet app: ${WALLET_APP ? "in Safari or Chrome on a phone, tap Use a wallet app and approve in MetaMask, Trust, Coinbase Wallet or OKX, then come back and tap Claim (with the Gloam relay on, the default, claiming and securing need no signature and no network switch); opening the link inside the wallet app's browser also works" : "on a phone, open the link inside the wallet app's browser"}. After claiming, the app offers Send one back.
+- A claim link looks like gloam.trade/c#<letters and digits> (longer ones: gloam.trade/claim?net=...#claim=<code>, and older ones gloam.trade/app/vault?...#claim=<code>). It is bearer, the same as a plain code. Tapping it opens a page showing the amount (or that it is locked) with a Claim it button that opens the app. ${claimLinkHow()} After claiming, the app offers Send one back.
 - A payment request link (gloam.trade/app/vault?tab=move&mode=pay#to=gloamr1...&amount=...) and the app's QR for an address or a request ("Scan to pay privately", "Scan to receive funds") only say where to pay. They are safe to share.
 - On testnet, posting codes and links in the group to test payments is fine. On mainnet, a plain code or claim link should go privately to the one person, or pay their Gloam address instead so the payment is sealed to them.
 - "Wrong passphrase or corrupt payment" means the words of the phrase differ from the sender's (capitals and spacing are fine) or the code got cut off when it was copied. Re-copy the whole code or link and check the phrase with the sender.
@@ -222,7 +235,7 @@ COMMON ISSUES (from the app)
 - "Faucet is busy, try again": wait a moment and tap it again. New funds land a few seconds after the faucet answers; the refresh button on Portfolio reloads balances.
 - Robinhood faucet: one claim every 24 hours, to the same address you use in Gloam.
 - Adding the network to a wallet: Gloam does it. Settings > Network > Add to wallet adds the selected network to the wallet, and when the wallet is on another network the wallet button shows "Switch to <network>", which adds the network if it is missing and switches. The faucet page is not needed for this.
-- Wrong network: the app's network selector and the wallet must both be on the same chain. Robinhood Chain testnet is chain ID 46630, Tempo testnet is 42431. The mainnets: ${joinNames(MAINNET_CHAINS.filter((c) => mainnetChainPool(c.chainId)).map((c) => `${c.name} ${c.chainId}`))}. Passkey accounts are on Tempo; Robinhood Chain needs ${WALLET_APP ? "a wallet (a browser wallet, or a wallet app through Use a wallet app)" : "a browser wallet"}.
+- Wrong network: the app's network selector and the wallet must both be on the same chain. Robinhood Chain testnet is chain ID 46630, Tempo testnet is 42431. The mainnets: ${joinNames(MAINNET_CHAINS.filter((c) => mainnetChainPool(c.chainId)).map((c) => `${c.name} ${c.chainId}`))}. ${EMAIL_SIGN_IN ? "A Gloam wallet (email or passkey sign-in) works on every network and follows the network picked in the app, with nothing to approve; a browser wallet or wallet app has to be switched to the same chain." : `Passkey accounts are on Tempo; Robinhood Chain needs ${WALLET_APP ? "a wallet (a browser wallet, or a wallet app through Use a wallet app)" : "a browser wallet"}.`}
 - Robinhood Chain MAINNET is chain ID 4663 (one digit shorter than the testnet's 46630). Gloam runs on both now, so the wallet has to be on the one the app's network selector shows: Robinhood Chain mainnet or Robinhood Chain testnet.
 - The error "The current chain of the wallet (id: 4663) does not match the target chain for the transaction (id: 46630)", or "Current Chain ID: 4663, Expected Chain ID: 46630": the wallet is on Robinhood Chain mainnet and the app is set to Robinhood Chain testnet. To use mainnet, pick Robinhood Chain mainnet in the app's network selector instead. To keep testing on the testnet: tap "Switch to Robinhood Chain" on the wallet button at the top of the app (or Settings > Network > Add to wallet), approve it in the wallet, then try again; if the wallet will not switch, add the testnet by hand with the details above. Any other pair of IDs means the same thing: the wallet is on the first chain, the app wants the second (42431 is Tempo testnet). This is a known fix: answer it straight away, never hand it to the team.
 - "Leave a little ETH for gas": on Robinhood Chain, keep some ETH in the wallet when adding ETH privately.

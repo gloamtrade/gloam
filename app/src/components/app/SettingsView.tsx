@@ -42,6 +42,7 @@ import { VaultHealth } from "./VaultHealth";
 import { RecoverySettingsCard } from "./RecoveryPanel";
 import { restoreMessage } from "@/lib/restoreMessage";
 import { embeddedSignInEmail, onEmbeddedSignInEmail } from "@/lib/turnkeyBridge";
+import { forgetClaim } from "@/lib/claimLinkStore";
 import { subscribeToUpdates } from "@/lib/updatesClient";
 import { BusyLabel } from "@/components/ui/Spinner";
 
@@ -382,7 +383,12 @@ export function SettingsView() {
   const openGated = useOpenGatedTokens();
   const { address, isConnected, chainId, demo } = useAppAccount();
   const { disconnect: wagmiDisconnect } = useDisconnect();
-  const disconnect = demo ? exitDemo : wagmiDisconnect;
+  // Disconnecting on purpose: a claim link this tab holds goes too (lib/claimLinkStore).
+  const disconnect = () => {
+    forgetClaim();
+    if (demo) exitDemo();
+    else wagmiDisconnect();
+  };
   const { network } = useNetwork();
   const { settings, setSettings } = useTradingSettings();
   const [copied, setCopied] = useState(false);

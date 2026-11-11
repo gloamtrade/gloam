@@ -35,6 +35,9 @@ import {
 } from "@/lib/embeddedWallet";
 import { networkName } from "@/lib/networks";
 import { getActiveTurnkeyAccount, onEmbeddedSheetRequest, setEmbeddedNeedsWallet } from "@/lib/turnkeyBridge";
+import { claimWaiting, goToClaim, onClaimWaiting } from "@/lib/claimLinkStore";
+import { claimFirstAfterWallet } from "@/lib/claimHelp";
+import { relayFor, relayPreferred } from "@/lib/relay/client";
 import { autoRestoreSyncing } from "@/lib/autoRestore";
 import { useAutoRestoreStatus } from "@/hooks/useAutoRestoreStatus";
 import { subscribeToUpdates } from "@/lib/updatesClient";
@@ -56,7 +59,10 @@ const LIST_TRIES = 3;
  *     After an email sign-in, an unticked "Email me Gloam updates" box under it
  *     sends that email alone to the updates list (lib/updatesClient), never the wallet.
  *  2. Add funds: the ways in the app already has, the ones that cost this wallet
- *     nothing first (lib/embeddedGas), with the backup offer under them.
+ *     nothing first (lib/embeddedGas), with the backup offer under them. When
+ *     a payment waits in the claim box (someone signed in to claim a link,
+ *     lib/claimLinkStore), it says the wallet is ready and goes back to that
+ *     claim instead.
  *  A wallet made before gets the backup offer on its own (once), when this
  *  browser could back up and doesn't.
  *
@@ -87,6 +93,8 @@ function Sheet({ signedIn }: { signedIn: boolean }) {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [funding, setFunding] = useState(false);
+  // Add funds asked for from the wallet menu: it shows Add funds even while a claim waits.
+  const [fundingAsked, setFundingAsked] = useState(false);
   const [justCreated, setJustCreated] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [name, setName] = useState("");
@@ -94,6 +102,22 @@ function Sheet({ signedIn }: { signedIn: boolean }) {
   const [updates, setUpdates] = useState(false);
   const updatesSent = useRef(false);
   const signInEmail = user?.userEmail?.trim() || null;
+  // A claim link brought this person here: the next step is that claim, not Add funds,
+  // while the claim is free (the relay is up here and this browser leaves it on). A new
+  // wallet holds no gas, so with the relay off it needs Add funds first.
+  const claimWaitingNow = useSyncExternalStore(onClaimWaiting, claimWaiting, () => false);
+  const { network } = useNetwork();
+  const [relayStatus, setRelayStatus] = useState<{ chainId: number; up: boolean } | null>(null);
+  useEffect(() => {
+    let live = true;
+    void relayFor(network.chainId).then((r) => {
+      if (live) setRelayStatus({ chainId: network.chainId, up: Boolean(r?.enabled) });
+    });
+    return () => {
+      live = false;
+    };
+  }, [network.chainId]);
+  const relayUp = relayStatus?.chainId === network.chainId && relayStatus.up && relayPreferred();
 
   const wallet = pickEmbeddedWallet(wallets);
   const embeddedConnected = Boolean(
@@ -155,7 +179,10 @@ function Sheet({ signedIn }: { signedIn: boolean }) {
       onEmbeddedSheetRequest((req) => {
         setDismissed(false);
         setError(null);
-        if (req === "funding") setFunding(true);
+        if (req === "funding") {
+          setFunding(true);
+          setFundingAsked(true);
+        }
       }),
     []
   );
@@ -165,6 +192,8 @@ function Sheet({ signedIn }: { signedIn: boolean }) {
     backup.seen();
     setDismissed(true);
     setShowAddress(false);
+    // Add funds from the menu lasts until the sheet closes: a later claim still goes back to its payment
+    setFundingAsked(false);
   };
 
   const nameProblem = walletNameProblem(name);
@@ -225,6 +254,7 @@ function Sheet({ signedIn }: { signedIn: boolean }) {
       updatesEmail={signInEmail}
       updates={updates}
       onUpdates={setUpdates}
+      claimNext={claimFirstAfterWallet({ waiting: claimWaitingNow, relayUp, fundingAsked })}
     />
   );
 }
@@ -369,6 +399,7 @@ export function WalletSheet({
   updatesEmail = null,
   updates = false,
   onUpdates,
+  claimNext = false,
 }: {
   step: "unreadable" | "create" | "creating" | "failed" | "funding" | "backup";
   name: string;
@@ -387,6 +418,8 @@ export function WalletSheet({
   updatesEmail?: string | null;
   updates?: boolean;
   onUpdates?: (on: boolean) => void;
+  /** A payment waits in the claim box on this page: funding goes back to it. */
+  claimNext?: boolean;
 }) {
   const { network } = useNetwork();
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
@@ -399,7 +432,15 @@ export function WalletSheet({
   if (!mounted) return null;
   const where = networkName(network);
   const title =
-    step === "funding" ? "Add funds" : step === "backup" ? "Back up your private balance" : step === "unreadable" ? "Your wallet" : "Create your wallet";
+    step === "funding"
+      ? claimNext
+        ? "Your wallet is ready"
+        : "Add funds"
+      : step === "backup"
+        ? "Back up your private balance"
+        : step === "unreadable"
+          ? "Your wallet"
+          : "Create your wallet";
 
   return createPortal(
     <div
@@ -456,6 +497,7 @@ export function WalletSheet({
             onLeave={onClose}
             backup={backup}
             onBackup={onBackup}
+            claimNext={claimNext}
           />
         ) : step === "backup" ? (
           <div className="mt-2">
@@ -635,6 +677,7 @@ function FundingStep({
   onLeave,
   backup,
   onBackup,
+  claimNext = false,
 }: {
   address: string | undefined;
   where: string;
@@ -646,7 +689,35 @@ function FundingStep({
   onLeave: () => void;
   backup: BackupView | null;
   onBackup: (how: "passkey-create" | "passkey-use" | "signature") => void;
+  claimNext?: boolean;
 }) {
+  // Signed in to claim a link: one way on, back to that payment. Add funds stays in the wallet menu.
+  if (claimNext) {
+    return (
+      <div className="mt-2">
+        <p className="text-[13.5px] leading-relaxed text-mute">
+          Your wallet is ready on {where}. Your payment is waiting: claim it next.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            onLeave();
+            goToClaim();
+          }}
+          disabled={backup?.kind === "busy"}
+          className="btn btn-ink btn-lg btn-block mt-5"
+        >
+          Back to your payment
+        </button>
+        {backup && (
+          <div className="mt-5 border-t border-line pt-4">
+            <BackupPart view={backup} onBackup={onBackup} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const fees = TEMPO_FEE_CHAIN_IDS.has(chainId)
     ? "Network fees come out of the stablecoin you send."
     : SPONSOR_CHAINS.has(chainId)
