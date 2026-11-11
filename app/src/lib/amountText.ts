@@ -44,3 +44,10 @@ export function amountTextError(input: string, decimals?: number): string | null
   const r = readAmountText(input, decimals);
   return r.ok ? null : r.error;
 }
+
+/** "1250.5" → "1,250.5" without losing any decimals. */
+export function formatRequestAmount(amount: string): string {
+  const [int, frac] = amount.split(".");
+  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return frac ? `${grouped}.${frac}` : grouped;
+}
