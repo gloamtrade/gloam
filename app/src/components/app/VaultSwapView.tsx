@@ -81,6 +81,7 @@ import { useNetwork } from "./NetworkProvider";
 import { RelayGasNotice } from "./RelayGasNotice";
 import { SuccessModal } from "./SuccessModal";
 import { TokenLogo } from "./TokenLogo";
+import { TokenCheckCard } from "./TokenCheckCard";
 import { WalletMenu } from "./WalletMenu";
 import { ADD_FIRST, vaultActionSearch } from "@/lib/vaultHub";
 import { BRIDGE_DESTINATIONS, bridgeVisible } from "@/lib/bridge";
@@ -1089,6 +1090,7 @@ export function VaultSwapView() {
 
       <aside className="min-w-0 space-y-4">
         <ExplorerCard />
+        <TokenCheckCard chainId={network.chainId} asset={toAsset} />
         <PrivacyNotes venue={venue} />
       </aside>
 

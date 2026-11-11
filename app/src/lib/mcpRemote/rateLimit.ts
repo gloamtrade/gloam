@@ -36,11 +36,11 @@ const WINDOW_SEC = 60;
  *
  * The pages poll some public reads every few seconds, and a shared count cost
  * each poll a Redis call: the vote totals (vote-read) and ballot export
- * (vote-ballots), token prices (token-marks) and a bridge's progress
- * (bridge-status). Each answer is the same for whoever asks (a bridge's
- * progress for whoever holds its request id), and what it reads is held in
- * memory a while (ballots, final counts, live balances, prices), so these are
- * counted per instance too.
+ * (vote-ballots), token prices (token-marks), the swap card's token check
+ * (token-insight) and a bridge's progress (bridge-status). Each answer is the
+ * same for whoever asks (a bridge's progress for whoever holds its request id),
+ * and what it reads is held in memory a while (ballots, final counts, live
+ * balances, prices, token checks), so these are counted per instance too.
  */
 const LOCAL_BUCKETS = new Set([
   "req",
@@ -61,6 +61,7 @@ const LOCAL_BUCKETS = new Set([
   "vote-read",
   "vote-ballots",
   "token-marks",
+  "token-insight",
   "bridge-status",
   "csp-report",
 ]);
