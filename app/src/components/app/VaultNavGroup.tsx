@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useNetwork } from "./NetworkProvider";
 import { useAppAccount } from "@/lib/demo";
+import { FRESH_WALLET_PATH, GAS_STATION_CHAIN_ID } from "@/lib/gasStation";
 import { swapOpenTo, vaultSwapRouter } from "@/lib/vaultSwap";
 import { vaultActionFromParams, vaultActionsFor, type VaultActionId } from "@/lib/vaultNav";
 
@@ -20,7 +21,8 @@ export function navActiveFill(size: "desktop" | "sheet") {
  * Vault in the app nav, with its actions listed under it: Add privately, Pay
  * privately, Receive, Swap and Cash out (plus Trade and Public send where the
  * network has them). Each is a link to that part of the Vault, and the one on
- * screen is marked, so every money move is one look away.
+ * screen is marked, so every money move is one look away. On Robinhood Chain
+ * mainnet, Fresh wallet (its own page, not a Vault tab) follows Agent top-ups.
  */
 export function VaultNavGroup({
   icon,
@@ -64,8 +66,17 @@ function VaultNavList({
     swap: settled && vaultSwapRouter(network.chainId) !== null && swapOpenTo(address),
     stocks: settled && Boolean(network.stocks),
   });
+  const rows: { id: VaultActionId | "fresh-wallet"; label: string; href: string }[] = [...actions];
+  // Same wait for the network, so Fresh wallet never flashes in and out either.
+  if (settled && network.chainId === GAS_STATION_CHAIN_ID) {
+    rows.splice(rows.findIndex((a) => a.id === "topups") + 1, 0, { id: "fresh-wallet", label: "Fresh wallet", href: FRESH_WALLET_PATH });
+  }
   const inVault = pathname === "/app/vault";
-  const current: VaultActionId | null = inVault ? vaultActionFromParams(tab, mode, actions) : null;
+  const current: VaultActionId | "fresh-wallet" | null = inVault
+    ? vaultActionFromParams(tab, mode, actions)
+    : pathname === FRESH_WALLET_PATH
+      ? "fresh-wallet"
+      : null;
   // The Vault's overview (no action in the URL) is the Vault row itself.
   const onOverview = inVault && current === null;
   const rowH = size === "sheet" ? "h-10" : "h-9";
@@ -80,7 +91,7 @@ function VaultNavList({
         className={`flex h-10 items-center gap-3 rounded-xl px-3 text-[14px] transition-colors ${
           onOverview
             ? `${navActiveFill(size)} font-medium text-foreground`
-            : inVault
+            : current !== null
               ? "font-medium text-foreground"
               : "text-mute hover:bg-surface/70 hover:text-foreground"
         }`}
@@ -89,7 +100,7 @@ function VaultNavList({
         Vault
       </IntentLink>
       <ul className="mt-0.5 flex flex-col gap-0.5">
-        {actions.map((a) => {
+        {rows.map((a) => {
           const active = current === a.id;
           return (
             <li key={a.id}>
