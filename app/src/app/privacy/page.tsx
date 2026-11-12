@@ -4,6 +4,7 @@ import Link from "next/link";
 import { LegalLayout } from "@/components/LegalLayout";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+import { rpcProxyNetworkNames } from "@/lib/rpcProxy";
 
 export const metadata: Metadata = { title: "Privacy Policy" };
 
@@ -71,8 +72,8 @@ export default function PrivacyPage() {
       <p>
         Your browser talks to each network&apos;s RPC nodes and explorers
         directly. They see your IP address and the addresses you look up, under
-        their own policies. On Robinhood Chain, Tempo and Elysium mainnet, if
-        the network&apos;s RPC does not answer your browser, the app sends those
+        their own policies. On the {rpcProxyNetworkNames()} mainnets, if the
+        network&apos;s RPC does not answer your browser, the app sends those
         reads (balances, your wallet&apos;s history) through our server
         instead, which passes them on to that network&apos;s RPC. Our server
         does not log these requests or the addresses in them; it counts them

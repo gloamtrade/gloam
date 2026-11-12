@@ -14,6 +14,7 @@
  * wallet_addEthereumChain. It takes only the read methods below, never a send,
  * and the list never asks it for anything else.
  */
+import { joinNames } from "./mainnet";
 import { NETWORK_KEYS, getNetwork, type NetworkKey } from "./networks";
 
 export const RPC_PROXY_PATH = "/api/rpc";
@@ -24,6 +25,11 @@ const PROXIED_KEYS: readonly NetworkKey[] = ["robinhood-mainnet", "tempo-mainnet
 /** Chain ids the proxy serves: the mainnets above that are live in this build. */
 export function rpcProxyChainIds(): number[] {
   return PROXIED_KEYS.filter((k) => NETWORK_KEYS.includes(k)).map((k) => getNetwork(k).chainId);
+}
+
+/** Their names for copy: "Robinhood Chain, Tempo and Elysium" while all three are live. */
+export function rpcProxyNetworkNames(): string {
+  return joinNames(PROXIED_KEYS.filter((k) => NETWORK_KEYS.includes(k)).map((k) => getNetwork(k).label));
 }
 
 /** The read calls the proxy passes on. Nothing that sends, signs or opens a filter. */
