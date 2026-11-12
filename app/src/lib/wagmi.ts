@@ -11,6 +11,7 @@ import { tempoFeeAware } from "./feeSponsor";
 import { tempoWalletConnector } from "./tempoWallet";
 import { lazyWalletConnect } from "./walletConnect";
 import { rpcListTransport } from "./rpcList";
+import { rpcProxyUrl } from "./rpcProxy";
 
 const walletConnectFn = lazyWalletConnect();
 
@@ -94,14 +95,18 @@ export const wagmiConfig = createConfig({
     ...(walletConnectFn ? [tempoFeeAware(walletConnectFn)] : []),
   ],
   // Each chain's public RPCs in order (lib/rpcList): one that is down is passed
-  // over for a while instead of failing every read.
+  // over for a while instead of failing every read. Robinhood Chain, Tempo and
+  // Elysium mainnet have one public RPC each, so in the browser gloam.trade's own
+  // RPC proxy comes after it (lib/rpcProxy): when that one host is blocked or
+  // refuses someone's IP, balances still load. Reads only, never a send. On the
+  // server rpcProxyUrl is null and the list is the public RPC alone.
   transports: {
     // Robinhood Chain's public RPC answers JSON-RPC batches: the reads after a wallet
     // connects (balances, allowances, vault state) go out together instead of one by one.
     [robinhoodTestnet.id]: rpcListTransport(robinhoodTestnet.rpcUrls.default.http, { batch: { wait: 16 } }),
     [tempoTestnet.id]: rpcListTransport(tempoTestnet.rpcUrls.default.http),
-    [robinhood.id]: rpcListTransport(robinhood.rpcUrls.default.http, { batch: { wait: 16 } }),
-    [tempoMainnet.id]: rpcListTransport(tempoMainnet.rpcUrls.default.http),
+    [robinhood.id]: rpcListTransport(robinhood.rpcUrls.default.http, { batch: { wait: 16 }, retryCount: 2 }, { proxy: rpcProxyUrl(robinhood.id) }),
+    [tempoMainnet.id]: rpcListTransport(tempoMainnet.rpcUrls.default.http, { retryCount: 2 }, { proxy: rpcProxyUrl(tempoMainnet.id) }),
     [baseTestnet.id]: rpcListTransport(baseTestnet.rpcUrls.default.http, { batch: { wait: 16 }, retryCount: 2 }),
     [baseMainnet.id]: rpcListTransport(baseMainnet.rpcUrls.default.http, { batch: { wait: 16 }, retryCount: 2 }),
     // Until Ethereum is a Gloam network, the origin-chain entry below replaces this one.
@@ -109,7 +114,9 @@ export const wagmiConfig = createConfig({
     // Ethereum Sepolia: the list for the head, old logs and state from its history RPC (lib/readTransport)
     [ethereumTestnet.id]: readTransport(getNetwork("ethereum"), { batch: { wait: 16 }, retryCount: 2 }),
     // Elysium, once it is a network: its one RPC from lib/elysium.ts.
-    ...(NETWORK_KEYS.includes("elysium-mainnet") ? { [elysiumMainnet.id]: rpcListTransport(elysiumMainnet.rpcUrls.default.http, { batch: { wait: 16 }, retryCount: 2 }) } : {}),
+    ...(NETWORK_KEYS.includes("elysium-mainnet")
+      ? { [elysiumMainnet.id]: rpcListTransport(elysiumMainnet.rpcUrls.default.http, { batch: { wait: 16 }, retryCount: 2 }, { proxy: rpcProxyUrl(elysiumMainnet.id) }) }
+      : {}),
     // Elysium testnet: Kinetiq's RPC, then Conduit's. Only used once it is a network (registered above).
     [elysiumTestnet.id]: rpcListTransport(elysiumTestnet.rpcUrls.default.http, { batch: { wait: 16 }, retryCount: 2 }),
     ...Object.fromEntries(originChains.map((c) => [c.id, http()])),

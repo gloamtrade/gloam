@@ -58,8 +58,8 @@ Ethereum Sepolia (`11155111`) is the same: `ETHEREUM_SEPOLIA_POOL` in the same f
 
 | Variable (server only) | Value |
 | --- | --- |
-| `GLOAM_RPC_URL_4663` | A private Robinhood Chain mainnet RPC. The server tries it first, then the public `https://rpc.mainnet.chain.robinhood.com` |
-| `GLOAM_RPC_URL_4217` | A private Tempo mainnet RPC. The server tries it first, then the public `https://rpc.tempo.xyz` |
+| `GLOAM_RPC_URL_4663` | A private Robinhood Chain mainnet RPC. The server tries it first, then the public `https://rpc.mainnet.chain.robinhood.com`. A browser that cannot reach the public RPC reads through the server too (`/api/rpc/4663`, reads only, rate limited per IP), so this RPC also takes those reads |
+| `GLOAM_RPC_URL_4217` | A private Tempo mainnet RPC. The server tries it first, then the public `https://rpc.tempo.xyz`. Browser reads fall back to it the same way (`/api/rpc/4217`) |
 | `GLOAM_RPC_URL_8453`, `GLOAM_RPC_URL_84532` | Private Base and Base Sepolia RPCs. The fallback is publicnode (`https://base-rpc.publicnode.com`, `https://base-sepolia-rpc.publicnode.com`), since Base's own public RPCs refuse wide `eth_getLogs` reads |
 | `GLOAM_RPC_URL_1` | A private archive Ethereum RPC, **required**: the public ones serve only recent logs or a few blocks a read. The fallback is MEV Blocker (`https://rpc.mevblocker.io`) |
 | `GLOAM_RELAY_MAX_GAS_GWEI_<chainId>` | The relay's gas ceiling on that chain, in gwei; `off` turns it off. Unset: 3 on Ethereum (`1`), none elsewhere. Over it the relay sends nothing (`gas_high`) and scheduled cash outs wait |

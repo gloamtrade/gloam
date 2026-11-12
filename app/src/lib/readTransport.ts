@@ -15,6 +15,9 @@
  * transaction, stays on the head list. Every other network reads through the
  * list alone, as before.
  *
+ * `opts.proxy` (browser only) adds gloam.trade's RPC proxy for the chain after
+ * the head list (lib/rpcProxy): asked only when the public RPCs fail, for reads.
+ *
  * The routing itself is the SDK's (splitReadTransport), so the app, the SDK
  * and the MCP split reads the same way. Both sides are this app's own viem
  * transports, never the SDK's copy, so errors keep the classes app code checks

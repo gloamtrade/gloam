@@ -7,7 +7,11 @@
  * the vault, which is all the explorer shows of them too.
  *
  * Runs in the browser against the chain's public RPC, the same one the app
- * already reads balances from; the address goes nowhere else. Logs are read in
+ * already reads balances from. Where that is the chain's only public RPC
+ * (Robinhood Chain, Tempo, Elysium) and it fails for this browser (a blocked
+ * host, a refused IP), the reads go through gloam.trade's own RPC proxy instead
+ * (lib/rpcProxy), which passes them on and logs neither the requests nor the
+ * address. The address goes nowhere else. Logs are read in
  * the chain's own spans through the transparency reader's gate (a range error
  * halves the span), newest rows kept, and cached for the tab so a refresh only
  * reads the blocks since.
@@ -99,7 +103,7 @@ export function readWalletActivity(
   const k = cacheKey(key, n.pool, address);
   const running = inflight.get(k);
   if (running) return running;
-  const p = read(key, address, k, client ?? clientFor(n)).finally(() => inflight.delete(k));
+  const p = read(key, address, k, client ?? clientFor(n, { proxyFallback: true })).finally(() => inflight.delete(k));
   inflight.set(k, p);
   return p;
 }
