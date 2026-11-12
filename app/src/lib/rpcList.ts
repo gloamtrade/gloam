@@ -26,6 +26,10 @@
  * the first that is not resting, and never on to another. A copy of a send
  * the first node may have taken could only revert or come back as a nonce
  * clash that hides it (lib/relay/server reads that failure as maybe_sent).
+ *
+ * `proxy` (browser only): gloam.trade's own RPC proxy for the chain
+ * (lib/rpcProxy), asked after every public RPC and only for the read methods
+ * it serves. It never takes a send. It rests like any other RPC.
  */
 import {
   BaseError,
@@ -39,6 +43,7 @@ import {
   type Transport,
 } from "viem";
 import { NO_LOG_RPCS, NO_SEND_RPCS } from "./networks";
+import { RPC_PROXY_MAX_BATCH, RPC_PROXY_METHODS } from "./rpcProxy";
 
 /** How long an RPC that failed as a node is passed over. */
 export const REST_MS = 30_000;
@@ -98,16 +103,30 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export type RpcListOptions = {
   /** "one": a send goes to exactly one RPC (the first not resting), never on to another. */
   sendTo?: "one";
+  /** gloam.trade's RPC proxy for this chain (lib/rpcProxy), asked last. Null or absent: none. */
+  proxy?: string | null;
 };
 
-/** The RPCs a request may go to, in the order they are asked. */
-export function rpcOrder(list: readonly string[], method: string, now = Date.now()): number[] {
-  const all = list.map((_, i) => i);
+/**
+ * The RPCs a request may go to, in the order they are asked. `proxy`, when
+ * it is in the list, is asked only for the read methods it serves.
+ */
+export function rpcOrder(list: readonly string[], method: string, now = Date.now(), proxy: string | null = null): number[] {
+  const serves = (i: number) => list[i] !== proxy || RPC_PROXY_METHODS.has(method);
+  const all = list.map((_, i) => i).filter(serves);
   const barred = method === "eth_getLogs" ? NO_LOG_RPCS : SEND_METHODS.includes(method) ? NO_SEND_RPCS : null;
   const able = barred ? all.filter((i) => !barred.has(list[i]!)) : all;
   const pool = able.length ? able : all;
   const awake = pool.filter((i) => !isResting(list[i]!, now));
   return awake.length ? awake : pool;
+}
+
+/** The proxy's http config: a batch never bigger than the proxy takes. */
+function proxyConfig(config: HttpTransportConfig): HttpTransportConfig {
+  const batch = config.batch;
+  if (!batch) return config;
+  const own = typeof batch === "object" ? batch : {};
+  return { ...config, batch: { ...own, batchSize: Math.min(own.batchSize ?? RPC_PROXY_MAX_BATCH, RPC_PROXY_MAX_BATCH) } };
 }
 
 /**
@@ -116,12 +135,14 @@ export function rpcOrder(list: readonly string[], method: string, now = Date.now
  * (timeout, batch); its `retryCount` and `retryDelay` apply to the list.
  */
 export function rpcListTransport(urls: readonly string[], config: HttpTransportConfig = {}, opts: RpcListOptions = {}): Transport {
-  const list = [...new Set(urls.filter(Boolean))];
-  if (list.length === 0) throw new Error("rpcListTransport needs at least one RPC");
+  const publicList = [...new Set(urls.filter(Boolean))];
+  if (publicList.length === 0) throw new Error("rpcListTransport needs at least one RPC");
+  const proxy = opts.proxy && !publicList.includes(opts.proxy) ? opts.proxy : null;
+  const list = proxy ? [...publicList, proxy] : publicList;
   if (list.length === 1 && !opts.sendTo) return http(list[0], config);
   const { retryCount, retryDelay = 150, ...each } = config;
   const passes = 1 + (retryCount ?? 0);
-  const inners = list.map((u) => http(u, { ...each, retryCount: 0 }));
+  const inners = list.map((u) => http(u, { ...(u === proxy ? proxyConfig(each) : each), retryCount: 0 }));
   return (params) => {
     const ts = inners.map((t) => t({ ...params, retryCount: 0 }));
     const ask = async (i: number, args: Parameters<EIP1193RequestFn>[0], options?: Parameters<EIP1193RequestFn>[1]) => {
@@ -135,7 +156,7 @@ export function rpcListTransport(urls: readonly string[], config: HttpTransportC
     const request: EIP1193RequestFn = async (args, options) => {
       if (opts.sendTo === "one" && SEND_METHODS.includes(args.method)) {
         // exactly one RPC, once: its answer or its error is final
-        return ask(rpcOrder(list, args.method)[0]!, args, options) as never;
+        return ask(rpcOrder(list, args.method, Date.now(), proxy)[0]!, args, options) as never;
       }
       let last: unknown;
       // the first answer about the request is the one passed on (a range error a
@@ -143,7 +164,7 @@ export function rpcListTransport(urls: readonly string[], config: HttpTransportC
       let answer: unknown = null;
       for (let pass = 0; pass < passes; pass++) {
         if (pass > 0) await sleep(retryDelay * 2 ** (pass - 1));
-        for (const i of rpcOrder(list, args.method)) {
+        for (const i of rpcOrder(list, args.method, Date.now(), proxy)) {
           try {
             return (await ask(i, args, options)) as never;
           } catch (e) {

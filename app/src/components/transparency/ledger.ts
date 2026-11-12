@@ -30,6 +30,7 @@ import { erc20BalanceOfAbi, isDollarStable, shieldTokensFor, supportsNativeShiel
 import { hasUiMultiplier, holdableTokens } from "@/lib/vaultAssets";
 import { getLogsSafe } from "@/lib/logRange";
 import { readTransport } from "@/lib/readTransport";
+import { rpcProxyUrl } from "@/lib/rpcProxy";
 
 export type ActivityKind = "deposit" | "transfer" | "cashout" | "trade";
 
@@ -155,19 +156,28 @@ const MEMO_TOPICS = new Set([
 
 // ------------------------------------------------------------------ clients
 
-const clients = new Map<number, PublicClient>();
+const clients = new Map<string, PublicClient>();
 
-export function clientFor(n: GloamNetwork): PublicClient {
-  const hit = clients.get(n.chainId);
+/**
+ * The read client for a network. The ledger itself reads public nodes only, as
+ * the transparency page says. `proxyFallback` (a wallet's own history, in
+ * lib/walletActivity) adds gloam.trade's RPC proxy after them where the chain
+ * has one public RPC (lib/rpcProxy), so a blocked RPC host does not leave the
+ * history empty. In the browser only; on the server there is no proxy.
+ */
+export function clientFor(n: GloamNetwork, opts: { proxyFallback?: boolean } = {}): PublicClient {
+  const proxy = opts.proxyFallback ? rpcProxyUrl(n.chainId) : null;
+  const key = `${n.chainId}:${proxy ? "proxy" : "direct"}`;
+  const hit = clients.get(key);
   if (hit) return hit;
   const c = createPublicClient({
     chain: n.chain,
     // The chain's public RPCs in order (lib/rpcList), and old logs from the
     // network's history RPC where they keep only recent ones (lib/readTransport);
     // 429s, 5xx and timeouts are retried with exponential backoff (0.5s, 1s, 2s, 4s).
-    transport: readTransport(n, { timeout: 20_000, retryCount: 4, retryDelay: 500 }),
+    transport: readTransport(n, { timeout: 20_000, retryCount: 4, retryDelay: 500 }, { proxy }),
   });
-  clients.set(n.chainId, c);
+  clients.set(key, c);
   return c;
 }
 
