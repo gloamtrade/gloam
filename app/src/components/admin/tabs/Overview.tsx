@@ -40,6 +40,7 @@ function MoneyCards({ side, go }: { side: Side; go: Go }) {
   const moved1 = rev ? rev.depositVolume.d1 + rev.cashoutVolume.d1 : null;
   const movedFoot: { label: string; value: number | null }[] = [
     { label: `Total, ${since.toLowerCase()}`, value: moved },
+    { label: "Last 24 hours", value: moved1 },
     { label: "In", value: rev ? rev.depositVolume.all : null },
     { label: "Out", value: rev ? rev.cashoutVolume.all : null },
     { label: "Last 7 days", value: moved7 },
@@ -49,7 +50,7 @@ function MoneyCards({ side, go }: { side: Side; go: Go }) {
       <MetricCard
         className="sm:col-span-2 xl:col-span-4"
         title="Money moved"
-        sub={`In and out, ${window.toLowerCase()}${moved1 != null ? `, ${fmtUsd(moved1)} in the last 24 hours` : ""}`}
+        sub={`In and out, ${window.toLowerCase()}`}
         delta={weekChange(days.map((d) => d.depositUsd + d.cashoutUsd))}
         onOpen={() => go("revenue")}
         openLabel="Revenue"
@@ -62,9 +63,9 @@ function MoneyCards({ side, go }: { side: Side; go: Go }) {
           />
         }
         foot={
-          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-6">
             {movedFoot.map((f, i) => (
-              <div key={f.label} className="min-w-0">
+              <div key={f.label} className={`min-w-0 ${i === 0 ? "col-span-2 sm:col-span-4 xl:col-span-2" : ""}`}>
                 <dt className="truncate text-[10px] font-medium uppercase tracking-[0.09em] text-faint">{f.label}</dt>
                 {f.value == null ? (
                   <dd className="gl-skeleton mt-2 h-[26px] w-20" />
