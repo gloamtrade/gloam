@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "Privacy Policy" };
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="November 10, 2026">
+    <LegalLayout title="Privacy Policy" updated="November 12, 2026">
       <p>
         This Privacy Policy describes what information Gloam (&ldquo;we,&rdquo;
         &ldquo;us&rdquo;) handles when you use gloam.trade, the Gloam app, the
@@ -71,7 +71,12 @@ export default function PrivacyPage() {
       <p>
         Your browser talks to each network&apos;s RPC nodes and explorers
         directly. They see your IP address and the addresses you look up, under
-        their own policies. When the app shows your public wallet&apos;s recent
+        their own policies. On Robinhood Chain, Tempo and Elysium mainnet, if
+        the network&apos;s RPC does not answer your browser, the app sends those
+        reads (balances, your wallet&apos;s history) through our server
+        instead, which passes them on to that network&apos;s RPC. Our server
+        does not log these requests or the addresses in them; it counts them
+        per IP address for rate limits. When the app shows your public wallet&apos;s recent
         activity, our server asks that network&apos;s explorer for that
         address: the Robinhood Chain testnet explorer, or the Robinhood Chain
         mainnet explorer when you are on mainnet.
