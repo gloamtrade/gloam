@@ -30,11 +30,12 @@ export const GLOAM_OWNER: Address = "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8"
  * VaultOwnerGuard (contracts/src/VaultOwnerGuard.sol): the contract each mainnet
  * vault's ownership moves to. It forwards deposit limit and fee changes and the
  * sweep of stray native coin, and nothing else, so a vault it holds can never
- * get a new proof checker or a new owner. null until its address is final; set it before the first handover
+ * get a new proof checker or a new owner. Set before the first handover
  * (DEPLOY.md, owner guard), so a vault it holds reads as listed while the others
- * are still on GLOAM_OWNER.
+ * are still on GLOAM_OWNER. The same address on Tempo, Ethereum, Base and
+ * Robinhood Chain (CREATE2, salt gloam.vault-owner-guard.v1).
  */
-export const GLOAM_OWNER_GUARD: Address | null = null;
+export const GLOAM_OWNER_GUARD: Address | null = "0x183e915113cbeF42Bc15a342EC48307e184ECEAB";
 
 /**
  * The treasury: the vaults' fee recipient (cash-out fees go here since 24
