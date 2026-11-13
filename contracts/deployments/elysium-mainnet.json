@@ -30,7 +30,11 @@
     "UnshieldVerifierFinal": "0xD9f1c6e9fe4ffb1d4000f0eA921eE65F10bC725a",
     "UnshieldIVerifierFinal": "0x13b1A2C8b822e1Bd031D53A03E106B3632d3E91C",
     "TransferVerifierFinal": "0xA0c65bcb9417e07DCd1b1F97F0761B73A73823f6",
-    "TransferIVerifierFinal": "0x0c350Dd2D7988E3c837431954Ea8994C3C877e07"
+    "TransferIVerifierFinal": "0x0c350Dd2D7988E3c837431954Ea8994C3C877e07",
+    "GloamPayMemo": "0xB99DB19CdEAF3779013a75F2Cb7a13d0eecd075a",
+    "GloamPayMemoDeployBlock": 6033047,
+    "GloamPayMemoDeployTx": "0x26c16f0053f7d7bdb037481b52df97db1c128ded3d9776606571d08cd0c5e786",
+    "GloamPayMemoNote": "Deployed by Cloak (0xBCB87773362387812532a1403d8F75D4E13F259d) from GloamPayMemo, unchanged: runtime code hash 0xf24e84ff514b7b8e3eba03c4b7ac70bbeb8b799b5fd3006d552a34362cf5edae, the same as the boards on Robinhood Chain, Tempo, Base and Ethereum. No owner."
   },
   "assets": {
     "USDC": {

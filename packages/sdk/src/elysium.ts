@@ -10,8 +10,8 @@
  * USDC address were published at launch. Until every value is in, Elysium
  * mainnet does not exist for the SDK: elysiumMainnetConfig() returns null,
  * gloamNetworks() leaves it out, and the builders refuse its chain id instead
- * of guessing a pool. All of them are in since launch day, 9 November 2026,
- * except the memo board (none deployed yet).
+ * of guessing a pool. All of them are in since launch day, 9 November 2026;
+ * the memo board since 13 November 2026.
  *
  * FILLED IN ON LAUNCH DAY (DEPLOY-ELYSIUM.md):
  *   rpcUrl, explorerUrl, usdc (and usdcDecimals if it is not 6) by hand, from
@@ -56,8 +56,11 @@ export const ELYSIUM_MAINNET: ElysiumMainnetInput = {
   usdcDecimals: 6,
   pool: "0x89d3042390204f57b8b4F8949D3c2203E4002164",
   deployBlock: 3248495n,
-  payMemo: null,
-  payMemoBlock: null,
+  // Payment-message board deployed by Cloak on 13 Nov 2026 from GloamPayMemo, unchanged: the
+  // same runtime code hash as our boards on Robinhood Chain, Tempo, Base and Ethereum
+  // (0xf24e84ff...cf5edae). No owner, no admin, never logs the poster, so any app can share it.
+  payMemo: "0xB99DB19CdEAF3779013a75F2Cb7a13d0eecd075a",
+  payMemoBlock: 6033047n,
 };
 
 /** Elysium mainnet's chain id (0x1863d), from Kinetiq's docs. */

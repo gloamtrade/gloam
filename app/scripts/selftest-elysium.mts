@@ -166,7 +166,11 @@ if (MODE === "off" || MODE === "coming") {
   ok(e.chain.rpcUrls.default.http[0] === want.rpc, "on: its RPC");
   ok(e.pool === want.pool && e.deployBlock === want.block, "on: its pool and block");
   ok(e.explorerTx("0xab") === `${want.explorer}/tx/0xab`, "on: explorer links");
-  ok(e.payMemo === null, "on: no memo board until it is filled in");
+  if (MODE === "default") {
+    ok(e.payMemo?.address === "0xB99DB19CdEAF3779013a75F2Cb7a13d0eecd075a" && e.payMemo?.deployBlock === 6033047n, "default: the shared memo board");
+  } else {
+    ok(e.payMemo?.address === SDK_ELYSIUM_MAINNET.payMemo && e.payMemo?.deployBlock === SDK_ELYSIUM_MAINNET.payMemoBlock, "on: the SDK's memo board unless overridden");
+  }
   ok(nets.isNetworkWritable(e), "on: writable");
   ok(nets.ceremonyForChain(CHAIN_ID) === "production", "on: proofs use the final keys");
   const usdc = tokens.shieldTokensFor(CHAIN_ID);
