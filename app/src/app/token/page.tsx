@@ -45,7 +45,7 @@ const HOLDER_VOTE = VOTES.some((v) => v.published);
 export const metadata: Metadata = {
   title: "$GLOAM",
   description:
-    "$GLOAM is the Gloam token on Robinhood Chain. Holders steer Gloam, Gloam currently puts half of its fees toward buying it back, and you can hold it privately in the Robinhood Chain mainnet pool.",
+    "$GLOAM is the Gloam token on Robinhood Chain. Holders steer Gloam, Gloam currently puts half of its protocol fees toward buying it back, and you can hold it privately in the Robinhood Chain mainnet pool.",
   alternates: { canonical: "/token" },
   openGraph: {
     title: "$GLOAM, the Gloam token",
@@ -80,7 +80,7 @@ const USES: Use[] = [
   {
     n: "02",
     title: "Buybacks",
-    body: `On mainnet, direct deposits and private payments are free and cash-outs carry ${fee}. Gloam currently puts half of its fees toward buying $GLOAM from the market, a treasury decision that can change or stop. From the next round, half of what is bought is burned and half goes to the Gloam treasury.`,
+    body: `On mainnet, direct deposits and private payments are free and cash-outs carry ${fee}. Gloam currently puts half of its protocol fees toward buying $GLOAM from the market, a treasury decision that can change or stop. From the next round, half of what is bought is burned and half goes to the Gloam treasury.`,
     when: "Fees live on mainnet",
   },
   {
@@ -110,7 +110,7 @@ const QUESTIONS: Question[] = [
   },
   {
     q: "Then how is the team paid?",
-    a: `By the product, not the token. On mainnet a cash-out carries ${fee}: Gloam's fees run the team and the service, and for now half of them go toward buybacks. Orynth also pays a small creator fee on trades. Payroll and API fees come later.`,
+    a: `By the product, not the token. On mainnet a cash-out carries ${fee}: Gloam's protocol fees (the cash-out and swap fees) run the team and the service, and for now half of them go toward buybacks. Orynth also pays a small creator fee on trades. Payroll and API fees come later.`,
   },
   {
     q: "Burned or kept?",
@@ -432,7 +432,7 @@ function BuybacksSection({ live }: { live: TokenLive }) {
       <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1fr_2fr]">
         <SectionHead label="Buybacks" title="Buybacks and burns">
           <p>
-            Gloam currently puts half of its fees toward buying $GLOAM from the market. That&apos;s a treasury decision,
+            Gloam currently puts half of its protocol fees toward buying $GLOAM from the market. That&apos;s a treasury decision,
             not a promise to holders, and it can change or stop. From the next round, half of what is bought is burned
             and half goes to the treasury.
           </p>
