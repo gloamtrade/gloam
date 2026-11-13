@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+Security fix. If you check payment receipts with `checkPaymentReceipt`, upgrade.
+
+- **Testnet receipts are refused by default.** Up to 0.7.0, `checkPaymentReceipt` returned `ok: true` for a receipt from any Gloam network, testnets included. Base Sepolia and Ethereum Sepolia share the mainnet vault address and production keys, and the Robinhood Chain and Tempo testnets run development keys, so a checker that built its chain client from `record.chainId` could credit free or made-up test value as a real payment. The `vault` check now fails on a testnet chain unless you pass `allowTestnet: true`.
+- `ReceiptCheckResult` gains `network` (the record's Gloam network key, or null) and `testnet` (true, false, or null for an unknown chain).
+- Build the chain client from the chains you accept, not from the record's chain id.
+
 ## 0.7.0 (10 November 2026)
 
 Security release. If you sell anything over x402 with `@gloamtrade/sdk` 0.6.0 or older, upgrade.

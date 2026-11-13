@@ -439,7 +439,8 @@ export async function dryRun(opts: { circuitsDir?: string; quiet?: boolean } = {
   // 8. The city puts the leaf in tonight's root, and anyone holding the record checks it.
   const city = cityCommits(record);
   log(`8. Nightly root ${city.root} (${city.leaves.length} leaves), leaf in root: ${city.inRoot}`);
-  const check = await checkPaymentReceipt(record, { verifySnark: p.verifyReceipt, client: vault.reader() });
+  // The dry run models Robinhood Chain testnet, so it opts in to test value. A real city leaves allowTestnet off.
+  const check = await checkPaymentReceipt(record, { verifySnark: p.verifyReceipt, client: vault.reader(), allowTestnet: true });
   log("   Record check (chain reads answered by the local vault):");
   if (!opts.quiet) printChecks(check);
   log(`   As a Gloam proof for gloam.trade/verify: ${short(paymentProofText(record))}`);
@@ -573,7 +574,8 @@ async function liveRun() {
   if (!paymentPath) throw new Error("The payment is not in the synced tree yet. Retry the receipt in a moment.");
   const record = await buildPaymentReceipt({ plan: pay.receiptPlan, path: paymentPath, txHash, prove: p.receipt });
   console.log(`Receipt leaf: ${record.leaf}`);
-  const check = await checkPaymentReceipt(record, { verifySnark: p.verifyReceipt, client: pub });
+  // Accept test value only when this run is itself on the testnet (GLOAM_NETWORK=robinhood).
+  const check = await checkPaymentReceipt(record, { verifySnark: p.verifyReceipt, client: pub, allowTestnet: net.testnet });
   printChecks(check);
   const city = cityCommits(record);
   console.log(`Nightly root ${city.root}, leaf in root: ${city.inRoot}`);

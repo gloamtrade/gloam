@@ -636,7 +636,7 @@ paymentReceiptLeaf({ chainId, pool, txHash, publicSignals }): Hex
 verifyPaymentReceiptLeaf(leaf, fields): boolean
 
 // anyone: leaf, fields, context, vault, snark, chain, root, payment
-checkPaymentReceipt(record, { leaf?, verifySnark?, client?, now? }): Promise<ReceiptCheckResult>
+checkPaymentReceipt(record, { leaf?, verifySnark?, client?, now?, allowTestnet? }): Promise<ReceiptCheckResult>  // { ok, expired, network, testnet, checks }; testnet records fail unless allowTestnet
 verifyGroth16(vkey, publicSignals, proof): Promise<boolean>
 paymentProofText(record): string            // gloampay1:… for /verify and the partner API
 
