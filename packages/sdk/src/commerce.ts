@@ -64,7 +64,7 @@ import {
   type PublicClient,
 } from "viem";
 import { buildPrivateSendIntent, type PrivateSendIntent } from "./builders.js";
-import { FIELD_PRIME, NATIVE_ASSET, RH_MAINNET_CHAIN_ID, networkForChainId, poolForChainId } from "./constants.js";
+import { FIELD_PRIME, NATIVE_ASSET, RH_MAINNET_CHAIN_ID, networkForChainId, poolForChainId, type GloamNetworkKey } from "./constants.js";
 import { payMemoBoardFor } from "./incoming.js";
 import type { PoseidonMerklePath } from "./merkle.js";
 import { fieldToHex } from "./poseidon.js";
@@ -404,6 +404,14 @@ export interface ReceiptCheckResult {
   ok: boolean;
   /** Past expiresAt. Not part of `ok`: an old record in a root stays true, but gloam.trade/verify fails an expired proof. */
   expired: boolean;
+  /** The Gloam network the record's chain id resolves to (its key, e.g. "base-mainnet" or "base"), or null for a chain Gloam does not run on. */
+  network: GloamNetworkKey | null;
+  /**
+   * True when that network is a Gloam testnet, false on a mainnet, null when the chain is unknown.
+   * Testnet value is free (faucet tokens) or, on the dev-key testnets, can be made up, so a testnet
+   * record is never `ok` unless the check was called with `allowTestnet: true`.
+   */
+  testnet: boolean | null;
   checks: ReceiptCheck[];
 }
 
@@ -445,7 +453,8 @@ const sameField = (hex: string, field: bigint) => {
  *   leaf     the leaf recomputes from the record (compare it with the leaf in your root)
  *   fields   the plain fields (asset, commitment, amounts) match the public signals
  *   context  the reader label, expiry, chain and vault are the ones sealed into the proof
- *   vault    the pool is Gloam's vault on that chain
+ *   vault    the pool is Gloam's vault on that chain, and that chain is a mainnet
+ *            (a testnet record fails here unless you pass `allowTestnet: true`)
  *   snark    the Groth16 proof verifies (needs `verifySnark`, e.g. snarkjs with receipt_vkey.json)
  *   chain    the reader is on the record's chain (needs `client`)
  *   root     the vault has had the proof's root (isKnownRoot; needs `client`)
@@ -453,6 +462,13 @@ const sameField = (hex: string, field: bigint) => {
  *            created this note as the payment output, not change (needs `client`)
  *
  * Pass `leaf` to compare against the leaf you hold rather than the record's own.
+ *
+ * Testnet records: Base Sepolia and Ethereum Sepolia share the mainnet vault address
+ * and keys, and the Robinhood Chain and Tempo testnets run development keys, so a
+ * receipt from any Gloam testnet can be real proof of a payment worth nothing. The
+ * `vault` check fails on a testnet chain unless `allowTestnet` is true; `network` and
+ * `testnet` in the result say which chain the record is from either way. Build your
+ * chain client from your own list of chains you accept, not from the record.
  */
 export async function checkPaymentReceipt(
   record: PaymentReceiptRecord,
@@ -461,13 +477,18 @@ export async function checkPaymentReceipt(
     verifySnark?: (publicSignals: string[], proof: unknown) => Promise<boolean>;
     client?: ReceiptChainReader;
     now?: number;
+    /** Accept records from Gloam testnets (test value only). Default false: a testnet record is never `ok`. */
+    allowTestnet?: boolean;
   } = {}
 ): Promise<ReceiptCheckResult> {
   const checks: ReceiptCheck[] = [];
   const add = (id: ReceiptCheck["id"], state: ReceiptCheckState, detail: string) => checks.push({ id, state, detail });
   const now = opts.now ?? Math.floor(Date.now() / 1000);
   const expired = !(Number.isSafeInteger(record.expiresAt) && now <= record.expiresAt);
-  const done = (): ReceiptCheckResult => ({ ok: checks.length === 8 && checks.every((c) => c.state === "pass"), expired, checks });
+  const net = Number.isSafeInteger(record.chainId) ? networkForChainId(record.chainId) : undefined;
+  const network = net ? net.key : null;
+  const testnet = net ? net.testnet : null;
+  const done = (): ReceiptCheckResult => ({ ok: checks.length === 8 && checks.every((c) => c.state === "pass"), expired, network, testnet, checks });
 
   const leaf = opts.leaf ?? record.leaf;
   const leafOk = verifyPaymentReceiptLeaf(leaf, record);
@@ -507,9 +528,18 @@ export async function checkPaymentReceipt(
     contextOk ? `Made for "${record.verifier}", sealed with its expiry, chain and vault.` : "The label, expiry, chain or vault was changed after the proof was made."
   );
 
-  const net = networkForChainId(record.chainId);
-  const official = Boolean(net && typeof record.pool === "string" && net.pool.toLowerCase() === record.pool.toLowerCase());
-  add("vault", official ? "pass" : "fail", official ? `Gloam's vault on chain ${record.chainId}.` : "Not Gloam's vault on that chain.");
+  const vaultMatch = Boolean(net && typeof record.pool === "string" && net.pool.toLowerCase() === record.pool.toLowerCase());
+  const testnetRefused = vaultMatch && net!.testnet && opts.allowTestnet !== true;
+  const official = vaultMatch && !testnetRefused;
+  add(
+    "vault",
+    official ? "pass" : "fail",
+    official
+      ? `Gloam's vault on chain ${record.chainId}${net!.testnet ? " (a testnet: test value only)" : ""}.`
+      : testnetRefused
+        ? `Chain ${record.chainId} is a Gloam testnet. Pass allowTestnet to accept test payments.`
+        : "Not Gloam's vault on that chain."
+  );
 
   if (opts.verifySnark) {
     const valid = s !== null && (await opts.verifySnark(record.publicSignals.map(String), record.proof).catch(() => false));

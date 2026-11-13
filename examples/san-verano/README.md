@@ -124,7 +124,7 @@ says which passed:
 | `leaf` | The leaf recomputes from the record. Pass `leaf` to compare against the one in your root. |
 | `fields` | The asset and amounts written in the record match the proof. |
 | `context` | The label, expiry, chain and vault are the ones sealed into the proof. |
-| `vault` | The record names Gloam's vault on that chain. |
+| `vault` | The record names Gloam's vault on that chain, and the chain is a mainnet. A testnet record fails here unless you pass `allowTestnet: true` (the dry run and a testnet run do; a real city never should). |
 | `snark` | The proof verifies against the receipt checking key (`verifyGroth16` with `receipt_vkey.json`; mainnet uses the final keys, `circuits/final/receipt_vkey.json`). |
 | `chain` | Your client reads the record's chain. |
 | `root` | The vault has had the proof's root (`isKnownRoot`; the vault keeps every root it ever had). |

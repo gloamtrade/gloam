@@ -47,6 +47,7 @@ import {
   RH_USDG,
   SEALED_VAULT,
   GLOAM_PAY_MEMO,
+  networkForChainId,
   mainnetNetwork,
 } from "../dist/index.js";
 
@@ -223,6 +224,33 @@ const paymentIndex = await tree.insert(hexToField(pay.paymentNote.commitment));
 await tree.insert(hexToField(pay.changeNote.commitment));
 const txHash = "0x" + "5a".repeat(32);
 
+// Testnet records are test value. These run without the circuit files: the vault check
+// and the network fields come before any proof or chain read.
+{
+  const skel = (chainId, pool) => ({
+    v: 1, kind: "payment", chainId, pool, verifier: "x", expiresAt: 4102444800, asset: NATIVE_ASSET,
+    commitment: "0x" + "00".repeat(32), amount: null, minAmount: "1", txHash: "0x" + "ab".repeat(32),
+    proof: null, publicSignals: [], leaf: "0x" + "00".repeat(32),
+  });
+  const vaultOf = (r) => r.checks.find((c) => c.id === "vault");
+  const baseSepolia = await checkPaymentReceipt(skel(84532, VAULT));
+  assert(!baseSepolia.ok && vaultOf(baseSepolia).state === "fail" && /84532 is a Gloam testnet/.test(vaultOf(baseSepolia).detail), "Base Sepolia (mainnet vault address, final keys): refused by default");
+  assert(baseSepolia.testnet === true && baseSepolia.network === "base", "Base Sepolia: the result says testnet and names it");
+  const baseSepoliaOk = await checkPaymentReceipt(skel(84532, VAULT), { allowTestnet: true });
+  assert(vaultOf(baseSepoliaOk).state === "pass" && /testnet/.test(vaultOf(baseSepoliaOk).detail) && baseSepoliaOk.testnet === true, "Base Sepolia with allowTestnet: the vault check passes, still marked testnet");
+  const ethSepolia = networkForChainId(11155111);
+  const sep = await checkPaymentReceipt(skel(11155111, ethSepolia.pool));
+  assert(vaultOf(sep).state === "fail" && sep.testnet === true && sep.network === "ethereum", "Ethereum Sepolia: refused by default");
+  const devKeys = await checkPaymentReceipt(skel(RH_TESTNET_CHAIN_ID, SEALED_VAULT));
+  assert(vaultOf(devKeys).state === "fail" && devKeys.testnet === true && devKeys.network === "robinhood", "Robinhood Chain testnet (dev keys): refused by default");
+  const baseMain = await checkPaymentReceipt(skel(8453, VAULT));
+  assert(vaultOf(baseMain).state === "pass" && baseMain.testnet === false && baseMain.network === "base-mainnet", "Base mainnet: the vault check passes, not a testnet");
+  const baseMainOpt = await checkPaymentReceipt(skel(8453, VAULT), { allowTestnet: true });
+  assert(vaultOf(baseMainOpt).state === "pass" && !/testnet/.test(vaultOf(baseMainOpt).detail), "allowTestnet changes nothing for a mainnet record");
+  const unknown = await checkPaymentReceipt(skel(999, VAULT));
+  assert(vaultOf(unknown).state === "fail" && unknown.network === null && unknown.testnet === null, "an unknown chain: no network, testnet null");
+}
+
 const circuits = join(dirname(fileURLToPath(import.meta.url)), "../../../app/public/circuits");
 let proved = 0;
 if (existsSync(join(circuits, "receipt_final.zkey")) && existsSync(join(circuits, "receipt.wasm"))) {
@@ -269,41 +297,46 @@ if (existsSync(join(circuits, "receipt_final.zkey")) && existsSync(join(circuits
   });
   const state = (r, id) => r.checks.find((c) => c.id === id).state;
 
-  const full = await checkPaymentReceipt(record, { verifySnark, client: chain() });
+  const full = await checkPaymentReceipt(record, { verifySnark, client: chain(), allowTestnet: true });
   assert(full.ok && full.checks.length === 8 && !full.expired, `a good record passes every check (${JSON.stringify(full.checks.filter((c) => c.state !== "pass"))})`);
-  const offline = await checkPaymentReceipt(record, { verifySnark });
+  assert(full.testnet === true && full.network === "robinhood", "allowTestnet: the result still says the record is from a testnet");
+  // A testnet record is test value: never ok unless the caller opts in.
+  const testDefault = await checkPaymentReceipt(record, { verifySnark, client: chain() });
+  assert(!testDefault.ok && state(testDefault, "vault") === "fail" && /testnet/.test(testDefault.checks.find((c) => c.id === "vault").detail), "a testnet record fails the vault check by default");
+  assert(state(testDefault, "root") === "skipped" && testDefault.testnet === true && testDefault.network === "robinhood", "and is not read on chain, and the result names its testnet");
+  const offline = await checkPaymentReceipt(record, { verifySnark, allowTestnet: true });
   assert(!offline.ok && state(offline, "snark") === "pass" && state(offline, "root") === "skipped", "offline: the proof checks, the chain checks are skipped, so not ok");
-  const bare = await checkPaymentReceipt(record);
+  const bare = await checkPaymentReceipt(record, { allowTestnet: true });
   assert(!bare.ok && state(bare, "leaf") === "pass" && state(bare, "snark") === "skipped", "no snark check given: never ok");
-  const later = await checkPaymentReceipt(record, { verifySnark, client: chain(), now: expiresAt + 1 });
+  const later = await checkPaymentReceipt(record, { verifySnark, client: chain(), now: expiresAt + 1, allowTestnet: true });
   assert(later.ok && later.expired, "past its expiry the record still checks, and says it is expired");
 
-  const otherLeaf = await checkPaymentReceipt(record, { verifySnark, client: chain(), leaf: VECTOR });
+  const otherLeaf = await checkPaymentReceipt(record, { verifySnark, client: chain(), leaf: VECTOR, allowTestnet: true });
   assert(!otherLeaf.ok && state(otherLeaf, "leaf") === "fail", "a leaf from another record fails");
-  const edited = await checkPaymentReceipt({ ...record, minAmount: "1" }, { verifySnark, client: chain() });
+  const edited = await checkPaymentReceipt({ ...record, minAmount: "1" }, { verifySnark, client: chain(), allowTestnet: true });
   // The leaf binds the signals; the plain fields are checked against them.
   assert(!edited.ok && state(edited, "fields") === "fail" && state(edited, "leaf") === "pass", "an edited plain minimum fails the fields check");
   const relabeled = { ...record, verifier: "someone else" };
-  const relabel = await checkPaymentReceipt({ ...relabeled, leaf: paymentReceiptLeaf(relabeled) }, { verifySnark, client: chain() });
+  const relabel = await checkPaymentReceipt({ ...relabeled, leaf: paymentReceiptLeaf(relabeled) }, { verifySnark, client: chain(), allowTestnet: true });
   assert(!relabel.ok && state(relabel, "context") === "fail", "a new label fails the context check");
   const forged = record.publicSignals.slice();
   forged[3] = "1";
   const forgedRec = { ...record, minAmount: "1", publicSignals: forged };
-  const forge = await checkPaymentReceipt({ ...forgedRec, leaf: paymentReceiptLeaf(forgedRec) }, { verifySnark, client: chain() });
+  const forge = await checkPaymentReceipt({ ...forgedRec, leaf: paymentReceiptLeaf(forgedRec) }, { verifySnark, client: chain(), allowTestnet: true });
   assert(!forge.ok && state(forge, "snark") === "fail", "edited signals with a fresh leaf fail the proof");
-  const wrongChain = await checkPaymentReceipt(record, { verifySnark, client: chain({ chainId: 4663 }) });
+  const wrongChain = await checkPaymentReceipt(record, { verifySnark, client: chain({ chainId: 4663 }), allowTestnet: true });
   assert(!wrongChain.ok && state(wrongChain, "chain") === "fail", "a client on another chain fails");
-  const noRoot = await checkPaymentReceipt(record, { verifySnark, client: chain({ rootKnown: false }) });
+  const noRoot = await checkPaymentReceipt(record, { verifySnark, client: chain({ rootKnown: false }), allowTestnet: true });
   assert(!noRoot.ok && state(noRoot, "root") === "fail", "a root the vault never had fails");
-  const asChange = await checkPaymentReceipt(record, { verifySnark, client: chain({ commitments: [pay.changeNote.commitment, pay.paymentNote.commitment] }) });
+  const asChange = await checkPaymentReceipt(record, { verifySnark, client: chain({ commitments: [pay.changeNote.commitment, pay.paymentNote.commitment] }), allowTestnet: true });
   assert(!asChange.ok && state(asChange, "payment") === "fail" && /change/.test(asChange.checks.find((c) => c.id === "payment").detail), "the change side of a transfer is not a payment");
-  const reverted = await checkPaymentReceipt(record, { verifySnark, client: chain({ status: "reverted" }) });
+  const reverted = await checkPaymentReceipt(record, { verifySnark, client: chain({ status: "reverted" }), allowTestnet: true });
   assert(!reverted.ok && state(reverted, "payment") === "fail", "a reverted transaction fails");
   const otherTx = { ...record, txHash: "0x" + "77".repeat(32) };
-  const missing = await checkPaymentReceipt({ ...otherTx, leaf: paymentReceiptLeaf(otherTx) }, { verifySnark, client: chain() });
+  const missing = await checkPaymentReceipt({ ...otherTx, leaf: paymentReceiptLeaf(otherTx) }, { verifySnark, client: chain(), allowTestnet: true });
   assert(!missing.ok && state(missing, "payment") === "fail", "a transaction the chain does not have fails");
   const offVault = { ...record, pool: VAULT };
-  const off = await checkPaymentReceipt({ ...offVault, leaf: paymentReceiptLeaf(offVault) }, { verifySnark, client: chain() });
+  const off = await checkPaymentReceipt({ ...offVault, leaf: paymentReceiptLeaf(offVault) }, { verifySnark, client: chain(), allowTestnet: true });
   assert(!off.ok && state(off, "vault") === "fail" && state(off, "root") === "skipped", "a record naming another vault fails before any chain read");
 
   const text = paymentProofText(record);

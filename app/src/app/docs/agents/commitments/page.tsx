@@ -16,7 +16,7 @@ const CHECKS: { id: string; confirms: string; needs: string }[] = [
   { id: "leaf", confirms: "The leaf recomputes from the record.", needs: "Nothing" },
   { id: "fields", confirms: "The asset and amounts written in the record match the proof.", needs: "Nothing" },
   { id: "context", confirms: "The label, expiry, chain and vault are the ones sealed into the proof.", needs: "Nothing" },
-  { id: "vault", confirms: "The record names Gloam's vault on that chain.", needs: "Nothing" },
+  { id: "vault", confirms: "The record names Gloam's vault on that chain, and the chain is a mainnet. A testnet record fails here unless you pass allowTestnet.", needs: "Nothing" },
   { id: "snark", confirms: "The zero-knowledge proof verifies against the receipt checking key.", needs: "verifySnark" },
   { id: "chain", confirms: "The client reads the record's chain.", needs: "client" },
   { id: "root", confirms: "The vault has had the proof's root. The vault keeps every root it ever had.", needs: "client" },
@@ -190,6 +190,14 @@ record.leaf   // the bytes32 to put in tonight's root
         all eight ran and passed. Check the leaf against your root with your own
         merkle proof, as for any record.
       </p>
+      <p>
+        A record from a Gloam testnet is never <code>ok</code> by default. Test value
+        is free, and Base Sepolia and Ethereum Sepolia share the mainnet vault address,
+        so a testnet receipt can look like a real one. The result names the record&apos;s{" "}
+        <code>network</code> and says whether it is a <code>testnet</code>; pass{" "}
+        <code>allowTestnet: true</code> only while you test. Build your chain client from
+        the chains you accept, not from the record&apos;s chain id.
+      </p>
       <table>
         <thead>
           <tr>
@@ -214,11 +222,18 @@ record.leaf   // the bytes32 to put in tonight's root
         <code>{`import { checkPaymentReceipt, verifyGroth16 } from "@gloamtrade/sdk";
 import receiptVkey from "./receipt_vkey.json";   // gloam.trade/circuits/final/receipt_vkey.json on mainnet
 
+// The chains you accept, mainnets only. Never build the client from record.chainId alone.
+const ACCEPT = { 8453: baseClient, 4663: robinhoodClient };
+const client = ACCEPT[record.chainId];
+if (!client) throw new Error("We don't take payments on that chain.");
+
 const result = await checkPaymentReceipt(record, {
   leaf: leafFromYourRoot,
   verifySnark: (signals, proof) => verifyGroth16(receiptVkey, signals, proof),
   client,                                          // a viem PublicClient on the record's chain
-});`}</code>
+});
+// result.ok is false for a testnet record unless you pass allowTestnet: true.
+// result.network and result.testnet say which chain it came from.`}</code>
       </pre>
       <p>
         A record is also a Gloam proof of payment:{" "}

@@ -583,9 +583,11 @@ const record = await buildPaymentReceipt({
 
 const result = await checkPaymentReceipt(record, {
   verifySnark: (signals, proof) => verifyGroth16(receiptVkey, signals, proof),
-  client,
-}); // result.ok, result.checks
+  client, // a client on a chain YOU accept: pick it from your own list, never from record.chainId alone
+}); // result.ok, result.network, result.testnet, result.checks
 ```
+
+Testnet records are never `ok` by default. Test value is free, and Base Sepolia and Ethereum Sepolia share the mainnet vault address and keys, so a testnet receipt can look like a real payment. The `vault` check fails for a testnet chain unless you pass `allowTestnet: true` (for your own tests only); `result.network` and `result.testnet` name the record's chain either way.
 
 The leaf, so a Solidity contract or any other language can recompute it:
 
@@ -788,7 +790,7 @@ cleanPaymentNote(s), PAYMENT_NOTE_MAX                         // the app's note 
 buildPrivatePaymentWithReceipt(p): Promise<PrivatePaymentWithReceipt>  // private send to a tag + the receipt plan
 buildPaymentReceipt({ plan, path, txHash, prove }): Promise<PaymentReceiptRecord>
 paymentReceiptLeaf(fields): Hex / verifyPaymentReceiptLeaf(leaf, fields): boolean
-checkPaymentReceipt(record, { leaf?, verifySnark?, client?, now? }): Promise<ReceiptCheckResult>
+checkPaymentReceipt(record, { leaf?, verifySnark?, client?, now?, allowTestnet? }): Promise<ReceiptCheckResult>  // { ok, expired, network, testnet, checks }; a testnet record fails unless allowTestnet
 verifyGroth16(vkey, publicSignals, proof): Promise<boolean>    // off-chain proof check
 paymentProofText(record)                                       // gloampay1:… for /verify
 agentSigningAllowlist({ chainId?, assets? }): AgentSigningEntry[]

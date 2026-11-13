@@ -245,11 +245,17 @@ for (const [key, ceremony, zkey] of cases) {
 
     // All eight checks: leaf, fields, context, vault, snark, chain, root and that this transaction made this payment.
     const verifySnark = (signals: string[], proof: unknown) => verifyGroth16(vkey, signals, proof);
-    const check = await checkPaymentReceipt(record, { leaf: receipt.leaf!, verifySnark, client });
+    // Testnet cases opt in to test value; by default a testnet receipt is never ok. Mainnet needs no opt-in.
+    const check = await checkPaymentReceipt(record, { leaf: receipt.leaf!, verifySnark, client, allowTestnet: net.testnet });
     assert.ok(check.ok, JSON.stringify(check.checks.filter((c) => c.state !== "pass")));
     assert.equal(check.expired, false);
+    assert.equal(check.testnet, net.testnet, "the result says whether the record is from a testnet");
+    assert.equal(check.network, net.key);
+    const byDefault = await checkPaymentReceipt(record, { leaf: receipt.leaf!, verifySnark, client });
+    assert.equal(byDefault.ok, !net.testnet, net.testnet ? "without allowTestnet a testnet receipt is refused" : "a mainnet receipt needs no opt-in");
+    assert.equal(byDefault.checks.find((c) => c.id === "vault")?.state, net.testnet ? "fail" : "pass");
 
-    const relabelled = await checkPaymentReceipt({ ...record, verifier: "someone-else" }, { verifySnark, client });
+    const relabelled = await checkPaymentReceipt({ ...record, verifier: "someone-else" }, { verifySnark, client, allowTestnet: true });
     assert.equal(relabelled.ok, false);
     assert.equal(relabelled.checks.find((c) => c.id === "context")?.state, "fail", "the check id is sealed into the proof");
   });
