@@ -22,7 +22,7 @@ export const metadata: Metadata = {
 /** The long reads on the site that explain Gloam itself. */
 const EXPLAINED: { href: string; label: string; line: string }[] = [
   { href: "/mainnet", label: "Mainnet launch", line: `Gloam live on ${liveMainnetNames()} mainnet` },
-  { href: "/token", label: "The $GLOAM token", line: "What it does, how fees buy it back, and what comes next" },
+  { href: "/token", label: "The $GLOAM token", line: "What it does, how buybacks work, and what comes next" },
   { href: "/docs/compare", label: "How Gloam compares", line: "Against Zama, Arcium, Tempo Zones, Helius Privacy and Railgun" },
   { href: "/whitepaper", label: "Whitepaper", line: "Thesis, architecture, cryptography and roadmap" },
   { href: "/docs/privacy-model", label: "What stays private", line: "What an explorer still shows, and what stays hidden" },
