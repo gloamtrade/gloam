@@ -114,7 +114,7 @@ const QUESTIONS: Question[] = [
   },
   {
     q: "Burned or kept?",
-    a: "From the next round, half of every buyback is burned and half goes to the Gloam treasury. The first two rounds were burned in full because the founder topped them up. Burned tokens sit at the burn address and can never move.",
+    a: "From the next round, half of every buyback is burned and half goes to the Gloam treasury. The first three rounds were burned in full because the founder topped them up. Burned tokens sit at the burn address and can never move.",
   },
   {
     q: "Can I check all this myself?",
