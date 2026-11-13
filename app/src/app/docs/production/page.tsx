@@ -128,8 +128,9 @@ export default function DocsProductionPage() {
         <li>
           <strong>Fees.</strong> Direct deposits and private payments are free. A
           cash out costs {CASH_OUT_FEE_PERCENT}. Money bridged in from another chain pays the
-          bridge&apos;s fees. Half of Gloam&apos;s fees buy back $GLOAM; half of
-          that is burned and half goes to the treasury.
+          bridge&apos;s fees. Gloam currently puts half of its protocol fees toward $GLOAM
+          buybacks, a treasury decision that can change; half of what is bought is
+          burned and half goes to the treasury.
         </li>
       </ul>
 

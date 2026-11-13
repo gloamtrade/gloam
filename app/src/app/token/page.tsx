@@ -45,11 +45,11 @@ const HOLDER_VOTE = VOTES.some((v) => v.published);
 export const metadata: Metadata = {
   title: "$GLOAM",
   description:
-    "$GLOAM is the Gloam token on Robinhood Chain. Holders steer Gloam, half of Gloam's fees buy it back, and you can hold it privately in the Robinhood Chain mainnet pool.",
+    "$GLOAM is the Gloam token on Robinhood Chain. Holders steer Gloam, Gloam currently puts half of its protocol fees toward buying it back, and you can hold it privately in the Robinhood Chain mainnet pool.",
   alternates: { canonical: "/token" },
   openGraph: {
     title: "$GLOAM, the Gloam token",
-    description: "Governance, buybacks from Gloam's fees, private holding and first access. Live on Robinhood Chain.",
+    description: "Governance, discretionary buybacks, private holding and first access. Live on Robinhood Chain.",
     images: ["/media/gloam-token-poster.jpg"],
   },
   // without this, /token takes the site's X card, and Telegram showed that instead of the poster
@@ -80,7 +80,7 @@ const USES: Use[] = [
   {
     n: "02",
     title: "Buybacks",
-    body: `On mainnet, direct deposits and private payments are free and cash-outs carry ${fee}. Half of Gloam's fees buy $GLOAM from the market. From the next round, half of what is bought is burned and half goes to the Gloam treasury.`,
+    body: `On mainnet, direct deposits and private payments are free and cash-outs carry ${fee}. Gloam currently puts half of its protocol fees toward buying $GLOAM from the market, a treasury decision that can change or stop. From the next round, half of what is bought is burned and half goes to the Gloam treasury.`,
     when: "Fees live on mainnet",
   },
   {
@@ -102,7 +102,7 @@ const USES: Use[] = [
 const QUESTIONS: Question[] = [
   {
     q: "What is it for, besides governance?",
-    a: "Buybacks tie it to how much Gloam gets used, you can hold it privately in the Robinhood Chain mainnet vault, and holders get new features first.",
+    a: "You can hold it privately in the Robinhood Chain mainnet vault, holders get new features first, and Gloam runs buybacks from its treasury when the fees allow.",
   },
   {
     q: "How much does the team hold?",
@@ -110,7 +110,7 @@ const QUESTIONS: Question[] = [
   },
   {
     q: "Then how is the team paid?",
-    a: `By the product, not the token. On mainnet a cash-out carries ${fee}: half of Gloam's fees run the team and the service, half buy back $GLOAM. Orynth also pays a small creator fee on trades. Payroll and API fees come later.`,
+    a: `By the product, not the token. On mainnet a cash-out carries ${fee}: Gloam's protocol fees (the cash-out and swap fees) run the team and the service, and for now half of them go toward buybacks. Orynth also pays a small creator fee on trades. Payroll and API fees come later.`,
   },
   {
     q: "Burned or kept?",
@@ -150,7 +150,7 @@ const PHASES: Phase[] = [
     items: [
       `Gloam live on ${liveMainnetNames()} mainnet`,
       "Shield $GLOAM in the Robinhood Chain pool: the deposit limits sit above the 500,000 supply, so they don't cap a deposit",
-      `Fees on: direct deposits and payments free, ${fee} on cash-outs, and half of Gloam's fees set to buy back $GLOAM`,
+      `Fees on: direct deposits and payments free, ${fee} on cash-outs, and half of Gloam's fees currently put toward $GLOAM buybacks`,
       { text: "First buybacks done, every round burned. See the log", href: "#buybacks" },
     ],
   },
@@ -432,7 +432,8 @@ function BuybacksSection({ live }: { live: TokenLive }) {
       <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1fr_2fr]">
         <SectionHead label="Buybacks" title="Buybacks and burns">
           <p>
-            Half of Gloam&apos;s fees buy $GLOAM from the market. From the next round, half of what is bought is burned
+            Gloam currently puts half of its protocol fees toward buying $GLOAM from the market. That&apos;s a treasury decision,
+            not a promise to holders, and it can change or stop. From the next round, half of what is bought is burned
             and half goes to the treasury.
           </p>
           <p>A buyback runs when the fees are worth a real one. There is no fixed schedule.</p>
@@ -844,8 +845,9 @@ export default async function TokenPage() {
         <section className="mx-auto max-w-[1240px] px-6 pb-20 sm:pb-28">
           <p className="max-w-[72ch] text-[13px] leading-relaxed text-mute">
             No promises on price. $GLOAM is a governance and utility token. It is
-            not a share in Gloam and not a claim on its revenue: buybacks are
-            how Gloam uses part of its fees, not a payout to holders. Nothing here is financial advice. Read the{" "}
+            not a share in Gloam, and holding it gives no right to Gloam&apos;s fees, revenue
+            or profits. Buybacks are a discretionary use of Gloam&apos;s treasury that can change or
+            stop at any time, not a payout to holders. Nothing here is financial advice. Read the{" "}
             <Link href="/disclosures" className="text-foreground underline decoration-line-strong underline-offset-4 transition-colors hover:decoration-foreground">
               risk disclosures
             </Link>
