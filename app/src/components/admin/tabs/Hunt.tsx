@@ -40,7 +40,7 @@ export function HuntTab() {
   const [prize, prizeSub] = PRIZE_TEXT[data.prize] ?? PRIZE_TEXT.unknown;
   const steps = r
     ? [
-        { k: "Found the hidden page", v: r.page, sub: "piece 1, from the page source" },
+        { k: "Found the hidden page", v: r.page, sub: "the door after piece 1" },
         { k: "Solved the riddle", v: r.riddle, sub: "piece 2, on the hidden page" },
         { k: "Asked Glim", v: r.glim, sub: "piece 3, with the passphrase" },
         { k: "Got the prize link", v: r.mcp, sub: "MCP key with pieces 1 to 3" },
@@ -53,7 +53,7 @@ export function HuntTab() {
       <StatStrip
         cols={5}
         items={[
-          { label: "Found the hidden page", value: r ? n(r.page) : "None", sub: "from the page source, piece 1" },
+          { label: "Found the hidden page", value: r ? n(r.page) : "None", sub: "the door after piece 1" },
           { label: "Solved the riddle", value: r ? n(r.riddle) : "None", sub: "on the hidden page, piece 2" },
           { label: "Asked Glim", value: r ? n(r.glim) : "None", sub: "with the passphrase, piece 3" },
           { label: "Got the prize link", value: r ? n(r.mcp) : "None", sub: "MCP key with pieces 1 to 3" },
@@ -63,7 +63,7 @@ export function HuntTab() {
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
         <Panel title="How far people got" sub={r ? `${n(solved)} of 3 clues solved by someone so far` : "No one has started yet"}>
           {r ? <BarChart rows={steps.map((s) => ({ ...s, pct: (s.v / max) * 100 }))} /> : <p className="text-[14px] text-mute">None yet</p>}
-          <Note>Counts are distinct people per step, estimated, from a one-way hash: no addresses or accounts are kept.</Note>
+          <Note>Counts are distinct people per step in this hunt, estimated, from a one-way hash: no addresses or accounts are kept. A new hidden page starts a new count.</Note>
         </Panel>
         <Panel title="Setup" sub={`Store: ${data.backend}`}>
           <ul className="divide-y divide-line rounded-[14px] border border-line">
