@@ -43,7 +43,9 @@
  * Progress is counted per step as distinct people, in a HyperLogLog (Redis
  * PFADD): each person goes in as a one-way keyed hash of their network address
  * or Telegram account, and the sketch keeps neither, only an estimate of how
- * many went in.
+ * many went in. Each hunt counts on its own: the keys carry a short hash of
+ * the hidden page's path (HUNT_PATH_2), which every new hunt changes, so a new
+ * round starts from zero and the last one's counts stay where they were.
  */
 import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { kv, kvBackend } from "@/lib/partnersKv";
@@ -339,20 +341,26 @@ export function huntSubject(kind: "ip" | "tg", id: string | number): string {
   return createHmac("sha256", `gloam-hunt|${secret}`).update(`${kind}|${id}`).digest("hex").slice(0, 32);
 }
 
+/** This hunt's own counter key for a step: one set of counts per hidden page, so each round starts from zero. */
+function stepKey(step: HuntStep): string {
+  const round = createHash("sha256").update(env("HUNT_PATH_2").replace(/^\/+|\/+$/g, "")).digest("hex").slice(0, 12);
+  return `${KEY_PREFIX}${round}:reached:${step}`;
+}
+
 /** Counts a person as having reached a step. Never throws; a store that is down just misses the count. */
 export async function countHuntStep(step: HuntStep, subject: string): Promise<void> {
   if (!huntEnabled() || kvBackend() === "none") return;
   try {
-    await kv([["PFADD", `${KEY_PREFIX}reached:${step}`, subject]]);
+    await kv([["PFADD", stepKey(step), subject]]);
   } catch {
     /* a missed count is fine */
   }
 }
 
-/** How many distinct people reached each step (estimates), or null when there is no store. */
+/** How many distinct people reached each step of this hunt (estimates), or null when there is no store. */
 export async function readHuntProgress(): Promise<Record<HuntStep, number> | null> {
   if (kvBackend() === "none") return null;
-  const r = await kv(HUNT_STEPS.map((s) => ["PFCOUNT", `${KEY_PREFIX}reached:${s}`]));
+  const r = await kv(HUNT_STEPS.map((s) => ["PFCOUNT", stepKey(s)]));
   return Object.fromEntries(HUNT_STEPS.map((s, i) => [s, Number(r[i]) || 0])) as Record<HuntStep, number>;
 }
 
