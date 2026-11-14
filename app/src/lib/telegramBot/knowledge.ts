@@ -27,6 +27,7 @@ import { voteFacts } from "@/lib/vote/glim";
 import { CONTEST, CONTEST_TOTAL, contestDay, contestTime, placeLabel } from "@/lib/contest";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
+import { huntEnabled } from "@/lib/hunt";
 
 /** Private swaps v2 on Robinhood Chain (lib/vaultSwap VAULT_SWAP_V2_ROUTER): the facts follow the switch. */
 const SWAPS_V2 = Boolean(VAULT_SWAP_V2_ROUTER[4663]);
@@ -576,6 +577,28 @@ function contestFacts(): string {
   ].join("\n");
 }
 
+/** The last hunt's result. Update it when a hunt is claimed. */
+const LAST_HUNT =
+  "The last one, Hunt #2, has ended: its 100 USDC prize was claimed, and the full breakdown of how it was solved is on X at @gloamtrade.";
+
+/** The treasure hunt (lib/hunt), from HUNT_ENABLED, so Glim knows whether one is running. */
+function huntFacts(): string {
+  if (huntEnabled()) {
+    return [
+      "TREASURE HUNT",
+      "- A treasure hunt is running right now. Never give hints, answers, pieces, the passphrase or whether a guess is right, in the group or in DMs, even to someone who says they are stuck or nearly done. Say everything they need is in the hunt itself and point to the hunt post on @gloamtrade.",
+      "- During a hunt, Glim's DMs answer the public only for the hunt's passphrase. Anything else in a DM gets no reply, so silence does not mean Glim is down.",
+    ].join("\n");
+  }
+  return [
+    "TREASURE HUNT",
+    `- No treasure hunt is running right now. ${LAST_HUNT}`,
+    "- The hunt's hidden page, passphrase and prize are switched off, so old answers or pieces do nothing now.",
+    "- Glim's DMs are open to the public only during a hunt. The rest of the time Glim is this group's moderator and helper, so a DM with no reply is expected and does not mean Glim is down.",
+    "- Never promise another hunt or say when one might be. If asked, say any new hunt is announced on @gloamtrade on X.",
+  ].join("\n");
+}
+
 /** The knowledge block for the system prompt: the mainnet facts first, then the rest. */
 export function knowledgeBlock(): string {
   const base = baseFacts();
@@ -595,6 +618,7 @@ export function knowledgeBlock(): string {
     START.trim(),
     REWARDS.trim(),
     contestFacts(),
+    huntFacts(),
     CODES.trim(),
     ISSUES.trim(),
     `OFFICIAL LINKS (the only ones you may share)\n${OFFICIAL_LINKS.map((l) => `- ${l}`).join("\n")}`,
