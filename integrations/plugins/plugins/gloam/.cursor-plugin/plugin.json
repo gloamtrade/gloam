@@ -1,7 +1,7 @@
 {
   "name": "gloam",
   "displayName": "Gloam",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Private stablecoin payments for agents on Tempo, Robinhood Chain, Base, Ethereum and Elysium, live on mainnet: pay x402 and MPP resources, shield, get paid, with onchain spending limits.",
   "author": {
     "name": "Gloam",

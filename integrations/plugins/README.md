@@ -8,7 +8,7 @@ Code, Codex and Cursor.
 
 | Plugin | What it adds |
 | --- | --- |
-| [`gloam`](./plugins/gloam) | The Gloam MCP server (`npx -y @gloamtrade/mcp@0.9.0`, stdio) and two skills: `gloam` (pay, get paid and check limits safely) and `gloam-setup` (connect, and give the agent a capped Tempo access key) |
+| [`gloam`](./plugins/gloam) | The Gloam MCP server (`npx -y @gloamtrade/mcp@0.9.1`, stdio) and two skills: `gloam` (pay, get paid and check limits safely) and `gloam-setup` (connect, and give the agent a capped Tempo access key) |
 
 ## Install
 
@@ -50,7 +50,7 @@ Or in any `mcpServers` config (Gemini CLI: `~/.gemini/settings.json`):
 { "mcpServers": { "gloam": { "command": "npx", "args": ["-y", "@gloamtrade/mcp"] } } }
 ```
 
-The plugin pins the server to `@gloamtrade/mcp@0.9.0`, so a new server version reaches agents only
+The plugin pins the server to `@gloamtrade/mcp@0.9.1`, so a new server version reaches agents only
 through a plugin update. The plain commands above take the latest version.
 
 ### Or connect by URL, nothing installed
@@ -132,7 +132,7 @@ registry/gloam/server.json          Official MCP Registry entry (npm package, st
      `io.github.cryptoduke01` namespace with GitHub and run `mcp-publisher publish` from `registry/gloam`.
 
 Bump `version` in the three `plugin.json` manifests, `plugin.json`, `registry/gloam/server.json`
-and the pinned `@gloamtrade/mcp@0.9.0` in `.mcp.json`, `mcp.json` and the skill together with every
+and the pinned `@gloamtrade/mcp@0.9.1` in `.mcp.json`, `mcp.json` and the skill together with every
 server release, patch releases included. `pnpm --filter @gloamtrade/mcp test` fails while a pin here
 or in `registry/server.json` differs from the version in `mcp/package.json`.
 

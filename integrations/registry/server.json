@@ -3,7 +3,7 @@
   "name": "io.github.cryptoduke01/gloam",
   "title": "Gloam",
   "description": "Private stablecoin payments for people and AI agents on mainnet, hosted or local with limits.",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "websiteUrl": "https://gloam.trade/docs/agents",
   "repository": {
     "url": "https://github.com/gloamtrade/gloam",
@@ -20,7 +20,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@gloamtrade/mcp",
-      "version": "0.9.0",
+      "version": "0.9.1",
       "transport": {
         "type": "stdio"
       },

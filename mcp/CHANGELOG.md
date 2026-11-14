@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1 (14 November 2026)
+
+- Built with `@gloamtrade/sdk` 0.7.1: Elysium mainnet's payment-message board is in the network data, and the SDK's `checkPaymentReceipt` refuses testnet receipts unless `allowTestnet` is passed ([advisory](https://github.com/gloamtrade/gloam/blob/main/SECURITY.md#advisories)). No tool's behavior changes.
+
 ## 0.9.0 (10 November 2026)
 
 Security release. If your agent sells anything over x402 and checks payments with `gloam_verify_payment` on `@gloamtrade/mcp` 0.8.0 or older, upgrade.
