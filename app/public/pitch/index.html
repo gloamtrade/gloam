@@ -172,6 +172,13 @@ body.welcoming { overflow: hidden; }
 .pitem b { font-weight: 500; }
 .pitem span { color: var(--mute); }
 .pitem .st { color: var(--green); font-weight: 500; white-space: nowrap; }
+.chain img { margin-bottom: 10px; }
+.pgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.pc { display: flex; align-items: center; gap: 20px; background: var(--surface); border-radius: 22px; padding: 22px 24px; min-height: 112px; }
+.pc .pm { flex: none; display: flex; align-items: center; }
+.pc b { display: block; font-weight: 500; font-size: 28px; letter-spacing: -0.01em; }
+.pc span { display: block; font-size: 21px; line-height: 1.35; color: var(--mute); margin-top: 4px; }
+.logos { display: flex; align-items: center; gap: 14px; }
 </style>
 </head>
 <body class="welcoming">
@@ -214,7 +221,7 @@ body.welcoming { overflow: hidden; }
   <h1 class="h1">Private money<br>on public chains.</h1>
   <p class="lede" style="margin-top:40px;max-width:40ch">Private stablecoin payments for people, teams and AI agents. Private by default, provable on demand.</p>
   <div class="grow"></div>
-  <div class="foot"><span>Live on Robinhood Chain, Tempo, Base, Ethereum and Elysium</span><span>gloam.trade</span></div>
+  <div class="foot" style="align-items:center"><span class="logos">Live on <img src="/brand/chains/4663.png" alt="" width="34" height="34" style="border-radius:8px;display:block"><img src="/brand/chains/4217.png" alt="" width="34" height="34" style="border-radius:8px;display:block"><img src="/brand/chains/8453.png" alt="" width="34" height="34" style="border-radius:8px;display:block"><img src="/brand/chains/1.png" alt="" width="34" height="34" style="border-radius:8px;display:block"><img src="/brand/chains/elysium.png" alt="" width="34" height="34" style="border-radius:8px;display:block"></span><span>gloam.trade</span></div>
 </section></div>
 <aside class="notes"><b>Say:</b> Hi, I'm Duke, and I'm building Gloam. Stablecoins are becoming how businesses and AI agents pay each other, and every one of those payments is public. Gloam makes them private, and lets the payer prove exactly what someone needs to see. It's live today on five mainnets: Robinhood Chain, Tempo, Base, Ethereum and Elysium.</aside>
 <!-- 2 the problem -->
@@ -405,25 +412,25 @@ body.welcoming { overflow: hidden; }
 <div class="frame"><section class="s light" aria-label="Traction">
   <p class="eyebrow">Traction</p>
   <h2 class="h2" style="margin-top:40px">Live on five mainnets.</h2>
-  <div class="cols c5" style="margin-top:56px">
-    <div class="chain"><b>Robinhood Chain</b><span>Since 21 Oct</span></div>
-    <div class="chain"><b>Tempo</b><span>Since 21 Oct</span></div>
-    <div class="chain"><b>Base</b><span>Since 26 Oct</span></div>
-    <div class="chain"><b>Ethereum</b><span>Since 26 Oct</span></div>
-    <div class="chain"><b>Elysium</b><span>Since 9 Nov</span></div>
+  <div class="cols c5" style="margin-top:48px">
+    <div class="chain"><img src="/brand/chains/4663.png" alt="" width="56" height="56" style="border-radius:14px;display:block"><b>Robinhood Chain</b><span>Since 21 Oct</span></div>
+    <div class="chain"><img src="/brand/chains/4217.png" alt="" width="56" height="56" style="border-radius:14px;display:block"><b>Tempo</b><span>Since 21 Oct</span></div>
+    <div class="chain"><img src="/brand/chains/8453.png" alt="" width="56" height="56" style="border-radius:14px;display:block"><b>Base</b><span>Since 26 Oct</span></div>
+    <div class="chain"><img src="/brand/chains/1.png" alt="" width="56" height="56" style="border-radius:14px;display:block"><b>Ethereum</b><span>Since 26 Oct</span></div>
+    <div class="chain"><img src="/brand/chains/elysium.png" alt="" width="56" height="56" style="border-radius:14px;display:block"><b>Elysium</b><span>Since 9 Nov</span></div>
   </div>
   <div class="grow"></div>
   <div class="cols c4">
-    <div class="rule" style="gap:16px"><p class="big" style="color:var(--green)">$31.5K</p><p>moved in and out of the vaults, not counting private payments</p></div>
+    <div class="rule" style="gap:16px"><p class="big" style="color:var(--green)">555</p><p>wallets have used Gloam since launch</p></div>
+    <div class="rule" style="gap:16px"><p class="big">$31.5K</p><p>moved in and out of the vaults, not counting private payments</p></div>
     <div class="rule" style="gap:16px"><p class="big">492</p><p>private transfers</p></div>
-    <div class="rule" style="gap:16px"><p class="big">169</p><p>active wallets</p></div>
-    <div class="rule" style="gap:16px"><p class="big">Top 10</p><p>privacy protocol on DefiLlama by revenue</p></div>
+    <div class="rule" style="gap:16px"><p class="big">8th</p><p>privacy protocol on DefiLlama by daily revenue</p></div>
   </div>
   <div class="grow"></div>
   <p style="font-size:28px">116 deposits, 231 cash-outs and $3.4K held right now. <span class="mute">Private payment amounts stay hidden, so they are not in the $31.5K.</span></p>
-  <div class="foot"><span>Mainnet, 21 Oct to 14 Nov 2026 · gloam.trade/transparency · DefiLlama privacy, 14 Nov: 8th by 24h, 9th by 7-day revenue, of 19</span><span>14</span></div>
+  <div class="foot"><span>Mainnet, 21 Oct to 14 Nov 2026 · gloam.trade/transparency · DefiLlama privacy category, 24-hour revenue, 14 Nov</span><span>14</span></div>
 </section></div>
-<aside class="notes"><b>Say:</b> We launched on Robinhood Chain and Tempo mainnet on 21 October, added Base and Ethereum on the 26th and Elysium on 9 November. Since launch, 31,500 dollars has moved in and out of the vaults, and that doesn't count private payments, because their amounts are hidden. There have been 492 private transfers from 169 active wallets. On DefiLlama we're already in the top ten privacy protocols by revenue: eighth by daily revenue and ninth over the week, out of nineteen. Anyone can check our numbers live at gloam.trade/transparency, read straight from the chain.</aside>
+<aside class="notes"><b>Say:</b> We launched on Robinhood Chain and Tempo mainnet on 21 October, added Base and Ethereum on the 26th and Elysium on 9 November. Since launch, 555 different wallets have used Gloam, and 31,500 dollars has moved in and out of the vaults. That doesn't count private payments, because their amounts are hidden. There have been 492 private transfers, and on DefiLlama we're the eighth privacy protocol by daily revenue. Anyone can check our numbers live at gloam.trade/transparency, read straight from the chain.</aside>
 <!-- 15 the wedge: ai agents -->
 <div class="frame"><section class="s dark glow" aria-label="The wedge: AI agents">
   <p class="eyebrow">The wedge: AI agents</p>
@@ -441,32 +448,16 @@ body.welcoming { overflow: hidden; }
 <!-- 16 distribution and partners -->
 <div class="frame"><section class="s light" aria-label="Distribution and partners">
   <p class="eyebrow">Distribution and partners</p>
-  <h2 class="h2" style="margin-top:40px">Distribution through apps, not ads.</h2>
+  <h2 class="h2" style="margin-top:40px">Nine apps live with Gloam.</h2>
   <div class="grow"></div>
-  <div class="cols c2" style="gap:96px;align-items:start">
-    <div>
-      <p class="tag" style="margin-bottom:18px">Live with Gloam</p>
-      <div class="plist">
-        <div class="pitem"><b>Raeto</b><span>Private agent funding</span></div>
-        <div class="pitem"><b>Motion</b><span>"Fund privately" in their trading app</span></div>
-        <div class="pitem"><b>Oak Agent Kit</b><span>Private payments from your AI assistant</span></div>
-        <div class="pitem"><b>Blocktronics</b><span>Token grades inside private swaps</span></div>
-        <div class="pitem"><b>Turnkey</b><span>Email and passkey wallets, enterprise plan</span></div>
-      </div>
-    </div>
-    <div>
-      <p class="tag" style="margin-bottom:18px">Channels</p>
-      <div class="plist">
-        <div class="pitem"><b>Official MCP Registry</b><span class="st">Listed</span></div>
-        <div class="pitem"><b>DefiLlama</b><span class="st">Listed</span></div>
-        <div class="pitem"><b>SDK, MCP server, Partner API</b><span class="st">Live</span></div>
-        <div class="pitem"><b>Claude connector and plugin</b><span class="st">Submitted</span></div>
-      </div>
-    </div>
+  <div class="pgrid"><div class="pc"><div class="pm"><svg width="56" height="56" viewBox="240 240 540 540"><path d="M700 497A200 200 0 1 1 643.9 358.1" fill="none" stroke="#0b0c0e" stroke-width="76" stroke-linecap="round"/><circle cx="500" cy="497" r="61" fill="#0b0c0e"/><circle cx="709" cy="367" r="57" fill="#2E6B47"/></svg></div><div><b>Raeto</b><span>Private agent funding</span></div></div><div class="pc"><div class="pm"><svg width="56" height="56" viewBox="0 0 64 64"><defs><radialGradient id="aw" cx="38%" cy="32%" r="75%"><stop offset="0" stop-color="#2A2E37"/><stop offset="1" stop-color="#0D0F14"/></radialGradient></defs><circle cx="32" cy="32" r="32" fill="url(#aw)"/><g fill="none" stroke="#fff" stroke-width="2.1"><circle cx="31.2" cy="31.2" r="22.5"/><circle cx="32.9" cy="32.9" r="17.6"/><circle cx="34.5" cy="34.5" r="13"/><circle cx="36" cy="36" r="8.8"/><circle cx="37.3" cy="37.3" r="5"/></g><circle cx="38.4" cy="38.4" r="2" fill="#fff"/></svg></div><div><b>Agent Wormhole</b><span>Agent payments checked before they go</span></div></div><div class="pc"><div class="pm"><img src="/brand/partners/zedkr-mark.png" alt="" height="56" style="display:block"></div><div><b>Zedkr</b><span>Shop Amazon and eBay privately</span></div></div><div class="pc"><div class="pm"><svg width="56" height="56" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#000"/><path d="M10.88 14.72 L32 32 L10.88 49.28 Z M35.21 14.72 L56.33 32 L35.21 49.28 Z" fill="#F2F4FF"/></svg></div><div><b>Motion</b><span>Fund a trading wallet privately</span></div></div><div class="pc"><div class="pm"><img src="/brand/partners/veya-wordmark.png" alt="VEYA" height="30" style="display:block;margin:13px 0"></div><div><span>Budget checks before an agent pays</span></div></div><div class="pc"><div class="pm"><svg width="56" height="56" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#141414"/><polyline points="13,36 21,36 26,17 33,45" fill="none" stroke="#F4F1EA" stroke-width="3.6" stroke-linejoin="miter" stroke-linecap="square"/><rect x="32.5" y="42.6" width="17" height="4.4" fill="#C0392B"/></svg></div><div><b>Killfloor</b><span>AI agents pay each other privately</span></div></div><div class="pc"><div class="pm"><svg width="56" height="56" viewBox="0 0 64 64"><rect width="64" height="64" rx="10" fill="#FFCE00"/><g fill="#111"><path d="M32 9 49 41h-10L32 27.5 25 41H15Z"/><rect x="27.5" y="33" width="9" height="8" rx="1.5"/><rect x="11" y="46" width="42" height="7" rx="1.5"/></g></svg></div><div><b>Autonomo</b><span>Agents pay for APIs privately</span></div></div><div class="pc"><div class="pm"><img src="/brand/partners/oak-mark.png" alt="" width="56" height="56" style="display:block;border-radius:50%"></div><div><b>Oak</b><span>Private payments from your AI assistant</span></div></div><div class="pc"><div class="pm"><svg width="56" height="56" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#fff"/><rect x="0.8" y="0.8" width="62.4" height="62.4" rx="13.2" fill="none" stroke="#000" stroke-opacity="0.18" stroke-width="1.6"/><g transform="translate(14 14) scale(1.6364)"><rect width="10" height="10" rx="3" fill="#5151FC"/><rect x="12" width="10" height="10" rx="3" fill="#FFC0FF"/><rect y="12" width="10" height="10" rx="3" fill="#ABFF5A"/><rect x="12" y="12" width="10" height="10" rx="5" fill="#000"/></g></svg></div><div><b>Blocktronics</b><span>Token checks before a private swap</span></div></div></div>
+  <div class="grow"></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:40px;font-size:26px">
+    <span class="logos"><span class="mute">Built with</span><b style="font-weight:500">Turnkey</b><span class="mute">wallets</span><img src="/brand/partners/relay.svg" alt="Relay" height="30" style="margin-left:18px"><span class="mute">bridging</span></span>
+    <span class="mute">Official MCP Registry · DefiLlama · SDK and Partner API · Claude connector submitted</span>
   </div>
-  <div class="grow"></div>
 </section></div>
-<aside class="notes"><b>Say:</b> We grow through apps, not ads. Raeto funds agents privately. Motion has a fund-privately-with-Gloam button in their trading app. Oak Agent Kit brings private payments to AI assistants. Blocktronics grades tokens inside our private swaps. Turnkey runs our email and passkey wallets on an enterprise plan. And builders find us through the official MCP Registry, DefiLlama, our SDK and partner API, with the Claude connector submitted.</aside>
+<aside class="notes"><b>Say:</b> Distribution comes through apps, not ads. Nine apps are live with Gloam: Raeto funds agents privately, Agent Wormhole and VEYA check agent payments before they go, Zedkr lets people shop Amazon and eBay from a private balance, Motion funds trading wallets privately, Killfloor and Autonomo have agents paying privately, Oak brings private payments to AI assistants, and Blocktronics checks tokens before a private swap. Turnkey runs our wallets and Relay our bridging. Builders find us through the official MCP Registry, DefiLlama, our SDK and partner API, and the Claude connector is submitted.</aside>
 <!-- 17 business model -->
 <div class="frame"><section class="s grey" aria-label="Business model">
   <p class="eyebrow">Business model</p>
@@ -478,17 +469,16 @@ body.welcoming { overflow: hidden; }
     <div class="card" style="gap:20px"><p class="tag">Next</p><p class="big" style="font-size:96px">B2B</p><h3>Apps, payroll, enterprise</h3><p>Partner API fees (built, not charged yet), payroll runs and enterprise plans.</p></div>
   </div>
   <div class="grow"></div>
-  <p style="font-size:30px">Protocol fees fund weekly $GLOAM buybacks. <span class="mute">1,144.9 $GLOAM burned in three so far.</span></p>
-  <div class="foot"><span>Buybacks on 31 Oct, 6 Nov and 13 Nov 2026, all burned. Log at gloam.trade/token.</span><span>17</span></div>
+  <p style="font-size:30px">Deposits and private payments stay free. <span class="mute">We earn when money moves out or changes token.</span></p>
 </section></div>
-<aside class="notes"><b>Say:</b> We get paid when money leaves the vault: 0.5 percent on every cash-out and private swap, on all five chains, paid to the treasury. Getting in and paying privately is free, so money has a reason to stay private. Next is business revenue: partner API fees, which are built but not charged yet, payroll runs and enterprise plans. Protocol fees fund weekly $GLOAM buybacks, and the three so far burned 1,144.9 tokens.</aside>
+<aside class="notes"><b>Say:</b> We get paid when money leaves the vault: 0.5 percent on every cash-out and private swap, on all five chains, paid to the treasury. Getting in and paying privately is free, so money has a reason to stay private. Next is business revenue: partner API fees, which are built but not charged yet, payroll runs and enterprise plans.</aside>
 <!-- 18 go to market -->
 <div class="frame"><section class="s light" aria-label="Go to market">
   <p class="eyebrow">Go to market</p>
   <h2 class="h2" style="margin-top:40px">Land with apps and agents.</h2>
   <div class="grow"></div>
   <div class="rows">
-    <div class="row"><span class="n">01</span><h3>Land</h3><p>Apps and agent platforms that already move stablecoins. Four are live with us today.</p></div>
+    <div class="row"><span class="n">01</span><h3>Land</h3><p>Apps and agent platforms that already move stablecoins. Nine are live with us today.</p></div>
     <div class="row"><span class="n">02</span><h3>Expand</h3><p>Payroll and business payments for the teams behind them.</p></div>
     <div class="row"><span class="n">03</span><h3>Distribute</h3><p>Through builders: SDK, MCP, x402 and our MPP method, where agents already look.</p></div>
     <div class="row"><span class="n">04</span><h3>Chains</h3><p>Each new chain brings its community. Five mainnets so far, HYPE and KNTQ on Elysium.</p></div>
@@ -496,7 +486,7 @@ body.welcoming { overflow: hidden; }
   </div>
   <div class="grow"></div>
 </section></div>
-<aside class="notes"><b>Say:</b> We land with apps and agent platforms that already move stablecoins. Four are live with us today. Then we expand into payroll and business payments for the teams behind them. We distribute through builders, with the SDK, MCP, x402 and our MPP method, where agents already look for tools. Each new chain brings its own community: we're on five mainnets, with HYPE and KNTQ on Elysium. And our testers became users, with Glim, our AI helper, answering in Telegram around the clock.</aside>
+<aside class="notes"><b>Say:</b> We land with apps and agent platforms that already move stablecoins. Nine are live with us today. Then we expand into payroll and business payments for the teams behind them. We distribute through builders, with the SDK, MCP, x402 and our MPP method, where agents already look for tools. Each new chain brings its own community: we're on five mainnets, with HYPE and KNTQ on Elysium. And our testers became users, with Glim, our AI helper, answering in Telegram around the clock.</aside>
 <!-- 19 recognition -->
 <div class="frame"><section class="s grey glow" aria-label="Recognition">
   <p class="eyebrow">Recognition</p>
