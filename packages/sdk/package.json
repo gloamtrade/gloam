@@ -1,6 +1,6 @@
 {
   "name": "@gloamtrade/sdk",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "type": "module",
   "description": "Gloam SDK: shielded balances, private payments, and selective disclosure on Robinhood Chain, Tempo, Base, Ethereum and Elysium. The private path other apps and agents plug into.",
   "license": "MIT",

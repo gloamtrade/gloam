@@ -45,6 +45,14 @@ Thank you for looking. Please report privately; don't open a public issue or pos
 
 ## Advisories
 
+### Payment receipts from testnets accepted as real (14 November 2026, Low)
+
+- **Affected:** `@gloamtrade/sdk <= 0.7.0`, for anyone who checks payment receipts with `checkPaymentReceipt` and accepts receipts from more than one chain. No funds in Gloam's vaults were at risk, and gloam.trade and the Gloam API do not use this check.
+- **What went wrong:** `checkPaymentReceipt` returned `ok: true` for a receipt from any Gloam network, testnets included, and its result did not say which. Base Sepolia and Ethereum Sepolia run the mainnet vault address and the final keys, and the Robinhood Chain and Tempo testnets run development keys, so a checker that built its chain client from the receipt's own chain id could credit free or made-up test value as a real payment.
+- **Fixed in:** `@gloamtrade/sdk` **0.7.1** (and `@gloamtrade/mcp` **0.9.1**, built with it). The `vault` check fails on a testnet chain unless the caller passes `allowTestnet: true`, and the result carries `network` and `testnet`.
+- **What to do:** upgrade (`npm i @gloamtrade/sdk@^0.7.1`) and build your chain client from the chains you accept, not from `record.chainId`.
+- **Credit:** an independent security team.
+
 ### x402 payments not bound to their payee (10 November 2026, Medium)
 
 - **Affected:** `@gloamtrade/sdk <= 0.6.0` and `@gloamtrade/mcp <= 0.8.0`, for anyone who sells over x402 with them (`settleGloamPayment`, `verifyGloamPayment`, or the MCP server's `gloam_verify_payment`).
@@ -59,5 +67,6 @@ With thanks to the researchers who have reported issues responsibly.
 
 - **[@mylifechangefa1](https://x.com/mylifechangefa1)** (GitHub [EFCCWEB3](https://github.com/EFCCWEB3)): SSRF in the MCP server's `gloam_fetch_paid`. The private-address guard classified an IPv4-in-IPv6 address by its text, so an IPv4-mapped address written in hex (e.g. `::ffff:7f00:1`), long form, NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`) slipped past it and could reach loopback or cloud-metadata services on a self-hosted server. Affected `@gloamtrade/mcp <= 0.3.0`; fixed in **0.3.1** (classify by the address bytes), with the resolved IP pinned in the connector against DNS rebinding in **0.3.2**, and credential and payment headers dropped on cross-origin redirects in **0.3.3**.
 - **An independent researcher:** x402 payments not bound to their payee, so a sealed ticket copied from the public payment board passed as a payment. Affected `@gloamtrade/sdk <= 0.6.0` and `@gloamtrade/mcp <= 0.8.0`; fixed in **0.7.0** and **0.9.0** ([advisory](#advisories)).
+- **An independent security team:** `checkPaymentReceipt` accepted receipts from Gloam testnets as real payments, with no testnet signal. Affected `@gloamtrade/sdk <= 0.7.0`; fixed in **0.7.1** ([advisory](#advisories)).
 
 The Kann Audits report and its scope: [gloam.trade/security](https://gloam.trade/security). Past reviews and their findings: [`contracts/audit/REMEDIATION.md`](./contracts/audit/REMEDIATION.md).

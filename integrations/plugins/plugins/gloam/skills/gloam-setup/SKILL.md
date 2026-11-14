@@ -41,7 +41,7 @@ leaves the owner.
 2. Run, with their values:
 
    ```bash
-   npx -y @gloamtrade/mcp@0.9.0 authorize-access-key --network tempo-mainnet --owner <their address> --generate --limit 10 --period 1d --expires 30d
+   npx -y @gloamtrade/mcp@0.9.1 authorize-access-key --network tempo-mainnet --owner <their address> --generate --limit 10 --period 1d --expires 30d
    ```
 
    This makes the agent key, saves it to `~/.gloam/agent.env` with a note-store key and matching
@@ -58,7 +58,7 @@ leaves the owner.
 5. When the user says it is sent, check it (read-only):
 
    ```bash
-   npx -y @gloamtrade/mcp@0.9.0 authorize-access-key --check --network tempo-mainnet --owner <their address>
+   npx -y @gloamtrade/mcp@0.9.1 authorize-access-key --check --network tempo-mainnet --owner <their address>
    ```
 
    Relay every warning. Ready means authorized, limited, scoped and no standing pool allowance.

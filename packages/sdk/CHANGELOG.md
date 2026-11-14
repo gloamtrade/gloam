@@ -1,12 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.7.1 (14 November 2026)
 
 Security fix. If you check payment receipts with `checkPaymentReceipt`, upgrade.
 
 - **Testnet receipts are refused by default.** Up to 0.7.0, `checkPaymentReceipt` returned `ok: true` for a receipt from any Gloam network, testnets included. Base Sepolia and Ethereum Sepolia share the mainnet vault address and production keys, and the Robinhood Chain and Tempo testnets run development keys, so a checker that built its chain client from `record.chainId` could credit free or made-up test value as a real payment. The `vault` check now fails on a testnet chain unless you pass `allowTestnet: true`.
 - `ReceiptCheckResult` gains `network` (the record's Gloam network key, or null) and `testnet` (true, false, or null for an unknown chain).
 - Build the chain client from the chains you accept, not from the record's chain id.
+- **Elysium mainnet's payment-message board:** `0xB99DB19CdEAF3779013a75F2Cb7a13d0eecd075a` from block `6033047` (`payMemoBoardFor(99901)`, `ELYSIUM_MAINNET.payMemo`). It was deployed by Cloak from `GloamPayMemo` unchanged (same runtime code as the boards on the other chains, no owner), so payments on Elysium can now post a memo the payee finds. The board is refused as a cash-out address there, as on the other chains.
+- Advisory: [SECURITY.md](https://github.com/gloamtrade/gloam/blob/main/SECURITY.md#advisories).
 
 ## 0.7.0 (10 November 2026)
 
