@@ -233,6 +233,18 @@ export function MoveView() {
     refresh: refreshTree,
   } = useShieldTree();
 
+  // A note's tree path. The page's own tree can be missing (a read that failed or is still
+  // loading) or behind a note that just landed, so before giving up read the path fresh
+  // from the chain, which retries on its own (lib/cashOutSplit freshPath).
+  const notePath = async (n: LocalNote): Promise<PoseidonMerklePath | null> => {
+    const known = n.leafIndex != null ? await pathForLeaf(n.leafIndex) : null;
+    if (known) return known as PoseidonMerklePath;
+    setStatus("Reading your private balance…");
+    const fresh = await freshPath(n.commitment, networkOfNote(n) ?? network).catch(() => null);
+    if (fresh) void refreshTree();
+    return fresh?.path ?? null;
+  };
+
   // ?mode=receive|cashout opens a specific action (e.g. "Cash out" links).
   const searchParams = useSearchParams();
   const [mode, setMode] = useState<Mode>(() => moveModeFromParam(searchParams.get("mode")));
@@ -1271,7 +1283,7 @@ export function MoveView() {
       let path: PoseidonMerklePath | null;
       const plan = spendPlanFor(selected, amount);
       if (plan !== "direct") {
-        const startPath = await pathForLeaf(selected.leafIndex!);
+        const startPath = await notePath(selected);
         if (!startPath) throw new Error("Could not read your private balance. Refresh and try again.");
         target = await splitForCashOut({
           note: selected,
@@ -1295,7 +1307,7 @@ export function MoveView() {
         refreshNotes();
         path = (await freshPath(target.commitment, network))?.path ?? null;
       } else {
-        path = (await pathForLeaf(selected.leafIndex!)) as PoseidonMerklePath | null;
+        path = await notePath(selected);
       }
       if (!path) throw new Error("Could not read your private balance. Refresh and try again.");
       // To another chain: a fresh price for exactly what the vault will pay, right before the
@@ -1697,7 +1709,7 @@ export function MoveView() {
         throw new Error("That Gloam address is incomplete or mistyped. Copy it again from their Receive page.");
       }
 
-      const path = await pathForLeaf(selected.leafIndex!);
+      const path = await notePath(selected);
       if (!path) throw new Error("Could not read your private balance. Refresh and try again.");
 
       setStatus("Proving your payment privately…");
