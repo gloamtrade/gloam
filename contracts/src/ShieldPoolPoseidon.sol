@@ -75,6 +75,15 @@ contract ShieldPoolPoseidon is ShieldPoolCore {
      */
     constructor(address poseidon2_, address verifier_) ShieldPoolCore(poseidon2_, verifier_) {}
 
+    /// @dev Setup can only end on a pool that is ready to go live, the same gate as
+    ///      ShieldPoolPayments: both proof verifiers wired and deposit limits on.
+    ///      turnOnDepositLimits() is setup-only and not timelockable, so a pool that
+    ///      left setup with limits off could never turn them on.
+    function _checkReadyToEndSetup() internal view override {
+        if (address(verifier) == address(0) || address(shieldVerifier) == address(0)) revert VerifierNotSet();
+        if (!depositLimitsOn) revert DepositLimitsOff();
+    }
+
     function setSealedSwapVerifier(address verifier_) external onlyOwner onlySetup {
         _setSealedSwapVerifier(verifier_);
     }

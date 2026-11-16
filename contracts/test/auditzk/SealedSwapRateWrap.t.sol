@@ -53,6 +53,14 @@ contract SealedSwapIVerifierCurrent is IVerifier {
     }
 }
 
+/// Deposit verifier for this PoC's setup only: the deposits are not what is
+/// under test, so any shieldBound() proof passes.
+contract WrapDepositVerifier is IVerifier {
+    function verify(bytes calldata, uint256[] calldata) external pure returns (bool) {
+        return true;
+    }
+}
+
 /**
  * Audit ZK-1 PoC: the sealedSwap rate product wraps the BN254 field even with the
  * 128-bit range checks, because on an oracle-bound pair the caller chooses the
@@ -100,19 +108,24 @@ contract SealedSwapRateWrapTest is Test {
         pool.setPriceFeed(tokenB, address(new WrapFeed(190e8)));
         pool.setOracleConfig(address(0), 0, 1 days, 100);
         pool.setOracleRatePair(tokenA, tokenB, true);
+        // what endSetup() requires: a deposit verifier and deposit limits on
+        pool.setShieldVerifier(address(new WrapDepositVerifier()));
+        pool.turnOnDepositLimits();
+        pool.setDepositLimit(tokenA, type(uint128).max, type(uint128).max);
+        pool.setDepositLimit(tokenB, type(uint128).max, type(uint128).max);
         pool.endSetup();
 
         // idx0: attacker deposits 1 wei of A.  idx1: victim deposits 1000 B.
         MockERC20(tokenA).mint(ATTACKER, 1);
         vm.startPrank(ATTACKER);
         MockERC20(tokenA).approve(address(pool), 1);
-        pool.shield(tokenA, 1, j.readBytes32(".cIn"));
+        pool.shieldBound(tokenA, 1, j.readBytes32(".cIn"), "");
         vm.stopPrank();
         uint256 victimAmt = j.readUint(".victimAmt");
         MockERC20(tokenB).mint(VICTIM, victimAmt);
         vm.startPrank(VICTIM);
         MockERC20(tokenB).approve(address(pool), victimAmt);
-        pool.shield(tokenB, victimAmt, j.readBytes32(".cVictim"));
+        pool.shieldBound(tokenB, victimAmt, j.readBytes32(".cVictim"), "");
         vm.stopPrank();
 
         // Attacker: sealed swap of 1 wei A at the wrapped (ratio-correct) rates.

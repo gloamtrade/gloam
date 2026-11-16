@@ -374,6 +374,7 @@ contract DepositLimitsTest is Test {
 
     function test_swap_pool_gets_limits_too() public {
         ShieldPoolPoseidon swapPool = new ShieldPoolPoseidon(_deployPoseidon(), address(acceptV));
+        swapPool.setShieldVerifier(address(acceptV));
         swapPool.turnOnDepositLimits();
         swapPool.setDepositLimit(address(usd), PER, TOTAL);
         swapPool.endSetup();
@@ -381,7 +382,7 @@ contract DepositLimitsTest is Test {
         usd.approve(address(swapPool), type(uint256).max);
         vm.prank(user);
         vm.expectRevert(ShieldPoolCore.OverDepositLimit.selector);
-        swapPool.shield(address(usd), uint256(PER) + 1, bytes32(uint256(1)));
+        swapPool.shieldBound(address(usd), uint256(PER) + 1, bytes32(uint256(1)), "");
         // and its swap setters still go through the timelock
         swapPool.queueChange(abi.encodeCall(ShieldPoolPoseidon.setSealedSwapVerifier, (address(0))));
     }

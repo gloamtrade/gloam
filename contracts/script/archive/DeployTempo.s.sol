@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Script, console2} from "forge-std/Script.sol";
+import {console2} from "forge-std/Script.sol";
 import {ShieldPoolPoseidon} from "../../src/ShieldPoolPoseidon.sol";
+import {PoolDepositLimits} from "../PoolDepositLimits.sol";
 import {ShieldVerifier} from "../../src/verifiers/ShieldVerifier.sol";
 import {ShieldIVerifier} from "../../src/verifiers/ShieldIVerifier.sol";
 import {UnshieldVerifier} from "../../src/verifiers/UnshieldVerifier.sol";
@@ -29,6 +30,7 @@ import {DualProofVerifier} from "../../src/verifiers/DualProofVerifier.sol";
  *   2. export POSEIDON2=0x...     # PoseidonT3 address from step 1
  *   3. export DEPLOYER_PK=0x...   # funded Tempo deployer (gas is paid in USD)
  *   4. export RPC_URL=https://rpc.moderato.tempo.xyz
+ *   5. optional: LIMIT_ASSETS / LIMIT_PER_DEPOSIT / LIMIT_TOTAL (script/PoolDepositLimits.sol)
  *
  * Run:
  *   forge script script/archive/DeployTempo.s.sol:DeployTempo --rpc-url $RPC_URL --broadcast
@@ -36,7 +38,7 @@ import {DualProofVerifier} from "../../src/verifiers/DualProofVerifier.sol";
  * After: record the pool address + its deploy block, set them in the `tempo`
  * entry of app/src/lib/networks.ts, and flip its status from "planned" to "live".
  */
-contract DeployTempo is Script {
+contract DeployTempo is PoolDepositLimits {
     function run() external {
         uint256 pk = vm.envUint("DEPLOYER_PK");
         address poseidon2 = vm.envAddress("POSEIDON2");
@@ -60,6 +62,8 @@ contract DeployTempo is Script {
         // verifier is set; sealedSwap stays off (verifier unset) pending H1.
         ShieldPoolPoseidon pool = new ShieldPoolPoseidon(poseidon2, address(dual));
         pool.setShieldVerifier(address(shieldI));
+        // Limits on before setup ends (endSetup() refuses otherwise), assets from env.
+        _turnOnDepositLimits(pool);
 
         // FINAL STEP: end setup mode. Irreversible. From here on the owner has no
         // instant power over proofs, pricing, or asset flows: every verifier / rate
@@ -74,6 +78,7 @@ contract DeployTempo is Script {
         console2.log("DualProofVerifier", address(dual));
         console2.log("ShieldIVerifier", address(shieldI));
         console2.log("sealedSwapVerifier (must be 0)", address(pool.sealedSwapVerifier()));
+        console2.log("depositLimitsOn (must be true)", pool.depositLimitsOn());
         console2.log("setupMode (must be false)", pool.setupMode());
         console2.log("Next: set pool + deploy block in app/src/lib/networks.ts tempo, flip status to live");
 

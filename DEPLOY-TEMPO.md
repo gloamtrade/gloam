@@ -17,7 +17,10 @@ Tempo has none of Gloam's on-chain deps, so this is a full-stack deploy:
 2. Raw Groth16 verifiers (shield, unshield, transfer) and their IVerifier adapters.
 3. The `DualProofVerifier` (unshield + transfer).
 4. The hardened `ShieldPoolPoseidon`, wired to the dual verifier, with the shield
-   verifier set so deposits go through `shieldBound()`.
+   verifier set so deposits go through `shieldBound()`, and deposit limits on
+   (the pool will not end setup without them). List assets with `LIMIT_ASSETS`,
+   `LIMIT_PER_DEPOSIT` and `LIMIT_TOTAL` (see `contracts/script/PoolDepositLimits.sol`);
+   with none, deposits stay closed until a limit clears the 3-day timelock.
 5. sealedSwap is left OFF (verifier unset), same as Robinhood.
 
 Live surface after deploy: shield, private send, cash out, selective disclosure.

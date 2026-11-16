@@ -705,9 +705,12 @@ contract WithdrawFeeTest is Test {
     function test_swap_pool_gets_the_fee_too() public {
         ShieldPoolPoseidon swapPool = new ShieldPoolPoseidon(poseidon2, address(acceptV));
         swapPool.setWithdrawFee(25, recipient);
+        swapPool.setShieldVerifier(address(acceptV));
+        swapPool.turnOnDepositLimits();
+        swapPool.setDepositLimit(address(0), type(uint128).max, type(uint128).max);
         swapPool.endSetup();
         vm.prank(user);
-        swapPool.shield{value: 4 ether}(address(0), 4 ether, bytes32(uint256(0x91)));
+        swapPool.shieldBound{value: 4 ether}(address(0), 4 ether, bytes32(uint256(0x91)), "");
         bytes32 root = swapPool.currentRoot();
         swapPool.unshield(hex"00", root, bytes32(uint256(0x92)), address(0), to, 4 ether);
         assertEq(to.balance, 4 ether - 0.01 ether);
