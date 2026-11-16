@@ -477,23 +477,32 @@ The sealed ticket is the same format the Gloam app uses for paying a receive tag
 
 New in 0.6.0. Some x402 gateways pay out to a public address (a creator's splitter) in USDG on Robinhood Chain. Scheme `gloam-cashout` lets the paying agent stay private there: it cashes out of its private balance straight to the gateway's `payTo`. The chain shows USDG leaving the Gloam vault to `payTo`. It does not show the agent's wallet (the relay sends it) or which deposit funded it.
 
-- **The 402** lists `{ scheme: "gloam-cashout", network: "eip155:4663", asset: USDG, payTo, amount: G, quoteId }` in `accepts`. G is gross: `ceil(price * 10000 / (10000 - bps)) + tag`, with `bps` the vault's live `withdrawFeeBps()` and a tag of 1 to 9999 unique per quote. The vault keeps `floor(G * bps / 10000)`; `payTo` gets the rest, at least the price.
+- **The 402** lists `{ scheme: "gloam-cashout", network: "eip155:4663", asset: USDG, payTo, amount: G, quoteId }` in `accepts`. G is gross: `ceil(price * 10000 / (10000 - bps)) + tag`, with `bps` the vault's live `withdrawFeeBps()` and a tag of 1 to 9999. The vault keeps `floor(G * bps / 10000)`; `payTo` gets the rest, at least the price.
 - **The agent** cashes out exactly G to `payTo` and retries with `X-PAYMENT` = base64 JSON `{ scheme, txHash, quoteId }`. `maxAmount` is required.
 - **The gateway** runs `verifyGloamCashout` and keeps its own store of used tx hashes.
+- **G must be unique among your open quotes to a `payTo`.** The chain shows a cash out of G to `payTo`, not the `quoteId`, so a payment matches every open quote with the same `payTo` and G, and the first to present it is served. A unique tag is not enough: at 50 bps, price 10000 with tag 7 and price 5000 with tag 5032 both give G = 10058, and a fee change can collide the same way. Pick tags with `reserveCashoutGross`, which claims `cashoutGrossKey(payTo, G)` in your store and skips any G already held, and hold that key until the quote is served or its window has passed. Pass `openQuoteIds` to `verifyGloamCashout` so a G held by more than one quote is refused (`ambiguous_quote`).
 
 ```ts
-import { findGloamCashoutRequirement, payGloamCashout, quoteGross, buildGloamCashoutRequirement, verifyGloamCashout } from "@gloamtrade/sdk";
+import { findGloamCashoutRequirement, payGloamCashout, reserveCashoutGross, cashoutGrossKey, buildGloamCashoutRequirement, verifyGloamCashout } from "@gloamtrade/sdk";
 
 // Agent: a note of exactly G (split a larger one first, or use GloamAgent.payX402Cashout, which does).
 const req = findGloamCashoutRequirement(res.headers, await res.text());
 const paid = await payGloamCashout({ requirement: req!, maxAmount: 1_010_000n, note: { secretHex, amountWei: G, path }, prove: unshieldProver, client });
 await fetch(url, { headers: { "X-PAYMENT": paid.header } });
 
-// Gateway: quote, then check the payment.
-const q = await quoteGross(price, tag);                                   // reads withdrawFeeBps live
+// Gateway: quote with a G that no other open quote to this splitter holds.
+const open = new Map<string, string>(); // cashoutGrossKey(payTo, G) -> quoteId (or Redis SET key quoteId NX)
+const q = await reserveCashoutGross({ payTo: splitter, price, reserve: (key) => !open.has(key) && !!open.set(key, quoteId) }); // reads withdrawFeeBps live
 const entry = buildGloamCashoutRequirement({ payTo: splitter, gross: q.gross, quoteId });
-const v = await verifyGloamCashout({ txHash, quote: { payTo: splitter, gross: q.gross, price, issuedAt, windowSec: 300 } });
-if (v.ok && markUsed(txHash)) serve();                                     // the txHash store is yours
+
+// Paid retry: find the quote by the header's quoteId, then check it against the ids open at its key.
+const holder = open.get(cashoutGrossKey(splitter, q.gross));
+const v = await verifyGloamCashout({
+  txHash,
+  quote: { payTo: splitter, gross: q.gross, price, issuedAt, windowSec: 300, quoteId },
+  openQuoteIds: holder ? [holder] : [],
+});
+if (v.ok && markUsed(txHash)) { open.delete(q.key); serve(); } // the txHash store is yours; free keys of expired quotes too
 ```
 
 With both `gloam-private` and `gloam-cashout` offered, `chooseGloamX402Scheme` keeps `gloam-private` unless the caller prefers `gloam-cashout`; with only `gloam-cashout` (alone or next to `exact`), it picks `gloam-cashout`. `gloamCashoutProblem` refuses a wrong network, asset or vault, a `payTo` a cash out cannot reach, a zero or fractional amount, a missing `quoteId`, a missing or exceeded `maxAmount`, and an expired quote.
@@ -747,8 +756,10 @@ gloamCashoutProblem(req, { maxAmount }) / assertGloamCashoutPayable  // refusals
 buildGloamCashoutIntent(p) / payGloamCashout(p)              // agent: unshield exactly G to payTo, header back
 encodeGloamCashoutHeader / decodeGloamCashoutHeader          // X-PAYMENT: base64 JSON { scheme, txHash, quoteId }
 cashoutGross(price, tag, bps) / quoteGross(price, tag, opts?) // gateway: G, at the live fee
+reserveCashoutGross({ payTo, price, reserve, bps? })         // gateway: a tag whose G no open quote to payTo holds
+cashoutGrossKey(payTo, gross)                                // gateway: the store key, one open quote per key
 buildGloamCashoutRequirement(p)                              // gateway: the accepts entry
-verifyGloamCashout({ txHash, quote, rpcUrl?, client? })      // gateway: receipt, logs, window (not replay)
+verifyGloamCashout({ txHash, quote, openQuoteIds?, rpcUrl?, client? }) // gateway: one open quote at G, receipt, logs, window (not replay)
 ```
 
 `buildGloamPayment` does not broadcast: the agent signs and broadcasts the returned `intent.exec` itself, staying self-custodial, then sets `payload.txHash`. `verifyGloamPayment` confirms the payment note binds the required amount and asset, is the payment output of the transfer, and settles through the right pool. It never makes a payment final: its result carries `final: false` and a plain `finality` notice. `settleGloamPayment` runs it, checks the binding, and sweeps.

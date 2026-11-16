@@ -335,7 +335,16 @@ export const GET = protectWithGloam({
           <strong>G is gross.</strong>{" "}
           <code>G = ceil(price * 10000 / (10000 - bps)) + tag</code>, where{" "}
           <code>bps</code> is the vault&apos;s live <code>withdrawFeeBps()</code>{" "}
-          (50 today) and <code>tag</code> is 1 to 9999, unique per open quote.
+          (50 today) and <code>tag</code> is 1 to 9999.
+        </li>
+        <li>
+          <strong>G is unique among your open quotes to a payTo.</strong> The
+          chain shows a cash out of G to <code>payTo</code>, not the quote id,
+          so a payment matches every open quote with the same G. A unique tag
+          is not enough: at 50 bps, price 10000 with tag 7 and price 5000 with
+          tag 5032 both give 10058. Pick the tag with{" "}
+          <code>reserveCashoutGross</code>, which skips any G another open
+          quote to that <code>payTo</code> holds.
         </li>
         <li>
           <strong>The vault takes its fee.</strong> The vault at{" "}
@@ -344,9 +353,9 @@ export const GET = protectWithGloam({
           <code>payTo</code>. That is always at least the price.
         </li>
         <li>
-          <code>quoteGross(price, tag)</code> in <code>@gloamtrade/sdk</code>{" "}
-          reads the fee and returns G. Read it per quote: the fee can change
-          on a 3-day timelock.
+          <code>reserveCashoutGross</code> in <code>@gloamtrade/sdk</code>{" "}
+          reads the fee, picks the tag and returns G. Read the fee per quote:
+          it can change on a 3-day timelock.
         </li>
       </ul>
       <h3>The payment</h3>
@@ -368,8 +377,12 @@ export const GET = protectWithGloam({
         <code>gloam-cashout</code>.
       </p>
       <h3>The gateway check</h3>
-      <p>Serve the resource only when all five pass:</p>
+      <p>Serve the resource only when all six pass:</p>
       <ul>
+        <li>
+          The quote, found by the header&apos;s <code>quoteId</code>, is the
+          only open quote at its <code>payTo</code> and G.
+        </li>
         <li>The receipt exists on chain 4663 and succeeded.</li>
         <li>
           It has an <code>Unshielded</code> log from the vault, for USDG, to{" "}
@@ -388,7 +401,9 @@ export const GET = protectWithGloam({
       </ul>
       <p>
         <code>verifyGloamCashout</code> in <code>@gloamtrade/sdk</code> runs the
-        first four. This is the same check with viem, to copy:
+        first five when you pass <code>openQuoteIds</code>, the ids your store
+        holds at <code>cashoutGrossKey(payTo, G)</code>. This is the receipt
+        check with viem, to copy:
       </p>
       <pre>
         <code>{`import { createPublicClient, http, parseAbiItem, toEventSelector, pad, type Address, type Hex } from "viem";
@@ -408,6 +423,7 @@ export async function verifyGloamCashout(args: {
   rpcUrl?: string;
 }): Promise<{ ok: boolean; reason: string | null }> {
   const { txHash, quote } = args;
+  // 0. Before this: the quote is the only open quote at its payTo and G in your store.
   const client = createPublicClient({ transport: http(args.rpcUrl ?? "https://rpc.mainnet.chain.robinhood.com") });
   if ((await client.getChainId()) !== 4663) return { ok: false, reason: "wrong_chain" };
   const receipt = await client.getTransactionReceipt({ hash: txHash }).catch(() => null);
@@ -440,8 +456,8 @@ export async function verifyGloamCashout(args: {
       </pre>
       <p>
         <code>buildGloamCashoutRequirement</code> makes the{" "}
-        <code>accepts</code> entry, and <code>quoteGross</code> prices it. Both
-        are in the{" "}
+        <code>accepts</code> entry, and <code>reserveCashoutGross</code> prices
+        it with a G no other open quote holds. Both are in the{" "}
         <a href={`${REPO}/packages/sdk#private-payer-public-payee-gloam-cashout`} target="_blank" rel="noreferrer">
           SDK README
         </a>
