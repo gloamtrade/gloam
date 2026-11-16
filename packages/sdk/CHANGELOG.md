@@ -1,23 +1,24 @@
 # Changelog
 
-## Unreleased
+## 0.7.1 (16 November 2026)
 
-Hardening for gateways that take x402 `gloam-cashout` payments.
+Security fixes. If you check payment receipts with `checkPaymentReceipt`, or run a gateway that takes x402 `gloam-cashout` payments, upgrade.
+
+**Payment receipts**
+
+- **Testnet receipts are refused by default.** Up to 0.7.0, `checkPaymentReceipt` returned `ok: true` for a receipt from any Gloam network, testnets included. Base Sepolia and Ethereum Sepolia share the mainnet vault address and production keys, and the Robinhood Chain and Tempo testnets run development keys, so a checker that built its chain client from `record.chainId` could credit free or made-up test value as a real payment. The `vault` check now fails on a testnet chain unless you pass `allowTestnet: true`.
+- `ReceiptCheckResult` gains `network` (the record's Gloam network key, or null) and `testnet` (true, false, or null for an unknown chain).
+- Build the chain client from the chains you accept, not from the record's chain id.
+- **Elysium mainnet's payment-message board:** `0xB99DB19CdEAF3779013a75F2Cb7a13d0eecd075a` from block `6033047` (`payMemoBoardFor(99901)`, `ELYSIUM_MAINNET.payMemo`). It was deployed by Cloak from `GloamPayMemo` unchanged (same runtime code as the boards on the other chains, no owner), so payments on Elysium can now post a memo the payee finds. The board is refused as a cash-out address there, as on the other chains.
+
+**Gateways that take `gloam-cashout` payments**
 
 - **G must be unique among a gateway's open quotes to a `payTo`, not just the tag.** The chain shows a cash out of G to `payTo` and nothing else, so a cash out matches every open quote with the same `payTo` and G. A tag unique per quote does not give that: at 50 bps, price 10000 with tag 7 and price 5000 with tag 5032 both give G = 10058, and a fee change can collide the same way. The docs said a unique tag was enough; they now say G.
 - New `reserveCashoutGross({ payTo, price, reserve, bps?, client?, rpcUrl?, startTag? })`: picks a tag whose G no open quote to `payTo` holds, across prices and fee rates, by claiming `cashoutGrossKey(payTo, G)` through your store's atomic `reserve` (a Map set-if-absent, or Redis `SET NX`). Reads the fee live when `bps` is not given.
 - New `cashoutGrossKey(payTo, gross)`: the store key, one open quote per key.
 - `verifyGloamCashout` takes `openQuoteIds` (your store's ids at that key) and `quote.quoteId`. With them, `ok` is false unless the quote is the only one open at its `payTo` and G: `ambiguous_quote` when another quote holds the same G, `quote_not_open` when this one is not held there. Without them it behaves as before.
 
-## 0.7.1 (14 November 2026)
-
-Security fix. If you check payment receipts with `checkPaymentReceipt`, upgrade.
-
-- **Testnet receipts are refused by default.** Up to 0.7.0, `checkPaymentReceipt` returned `ok: true` for a receipt from any Gloam network, testnets included. Base Sepolia and Ethereum Sepolia share the mainnet vault address and production keys, and the Robinhood Chain and Tempo testnets run development keys, so a checker that built its chain client from `record.chainId` could credit free or made-up test value as a real payment. The `vault` check now fails on a testnet chain unless you pass `allowTestnet: true`.
-- `ReceiptCheckResult` gains `network` (the record's Gloam network key, or null) and `testnet` (true, false, or null for an unknown chain).
-- Build the chain client from the chains you accept, not from the record's chain id.
-- **Elysium mainnet's payment-message board:** `0xB99DB19CdEAF3779013a75F2Cb7a13d0eecd075a` from block `6033047` (`payMemoBoardFor(99901)`, `ELYSIUM_MAINNET.payMemo`). It was deployed by Cloak from `GloamPayMemo` unchanged (same runtime code as the boards on the other chains, no owner), so payments on Elysium can now post a memo the payee finds. The board is refused as a cash-out address there, as on the other chains.
-- Advisory: [SECURITY.md](https://github.com/gloamtrade/gloam/blob/main/SECURITY.md#advisories).
+- Advisories: [SECURITY.md](https://github.com/gloamtrade/gloam/blob/main/SECURITY.md#advisories).
 
 ## 0.7.0 (10 November 2026)
 

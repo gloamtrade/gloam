@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.9.1 (14 November 2026)
+## 0.9.1 (16 November 2026)
 
 - Built with `@gloamtrade/sdk` 0.7.1: Elysium mainnet's payment-message board is in the network data, and the SDK's `checkPaymentReceipt` refuses testnet receipts unless `allowTestnet` is passed ([advisory](https://github.com/gloamtrade/gloam/blob/main/SECURITY.md#advisories)). No tool's behavior changes.
+- The SDK's `gloam-cashout` gateway fix in 0.7.1 does not change this server: it pays cash-out quotes and runs no gateway.
 
 ## 0.9.0 (10 November 2026)
 
