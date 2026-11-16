@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Hardening for gateways that take x402 `gloam-cashout` payments.
+
+- **G must be unique among a gateway's open quotes to a `payTo`, not just the tag.** The chain shows a cash out of G to `payTo` and nothing else, so a cash out matches every open quote with the same `payTo` and G. A tag unique per quote does not give that: at 50 bps, price 10000 with tag 7 and price 5000 with tag 5032 both give G = 10058, and a fee change can collide the same way. The docs said a unique tag was enough; they now say G.
+- New `reserveCashoutGross({ payTo, price, reserve, bps?, client?, rpcUrl?, startTag? })`: picks a tag whose G no open quote to `payTo` holds, across prices and fee rates, by claiming `cashoutGrossKey(payTo, G)` through your store's atomic `reserve` (a Map set-if-absent, or Redis `SET NX`). Reads the fee live when `bps` is not given.
+- New `cashoutGrossKey(payTo, gross)`: the store key, one open quote per key.
+- `verifyGloamCashout` takes `openQuoteIds` (your store's ids at that key) and `quote.quoteId`. With them, `ok` is false unless the quote is the only one open at its `payTo` and G: `ambiguous_quote` when another quote holds the same G, `quote_not_open` when this one is not held there. Without them it behaves as before.
+
 ## 0.7.1 (14 November 2026)
 
 Security fix. If you check payment receipts with `checkPaymentReceipt`, upgrade.

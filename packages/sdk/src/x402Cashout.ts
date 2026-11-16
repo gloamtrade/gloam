@@ -14,17 +14,23 @@
  *                        asset: USDG, payTo: <0x splitter>, amount: G,
  *                        quoteId: <secret per-402 id>, maxTimeoutSeconds? }
  *   G (gross)          ceil(price * 10000 / (10000 - bps)) + tag, where bps is
- *                      the vault's live withdrawFeeBps() and tag is 1 to 9999,
- *                      unique per quote. The vault keeps floor(G * bps / 10000)
- *                      and sends the rest, at least the price, to payTo.
+ *                      the vault's live withdrawFeeBps() and tag is 1 to 9999.
+ *                      G itself must be unique among the gateway's open quotes
+ *                      to that payTo (reserveCashoutGross picks such a tag). A
+ *                      tag unique per quote is not enough: two prices or two
+ *                      fee rates can give the same G. The vault keeps
+ *                      floor(G * bps / 10000) and sends the rest, at least the
+ *                      price, to payTo.
  *   the payment        a vault unshield of exactly G to payTo, which emits
  *                      Unshielded(nullifier, USDG, payTo, G)
  *   X-PAYMENT          base64 JSON { scheme: "gloam-cashout", txHash, quoteId }
  *
- * The gateway checks the receipt (verifyGloamCashout): the Unshielded log from
- * the vault with amount G, the USDG Transfer from the vault to payTo of at
- * least the price, a block time inside the quote window, and that it has not
- * seen the txHash before (its own store).
+ * The gateway looks the quote up by quoteId and checks the receipt
+ * (verifyGloamCashout): no other open quote shares the quote's payTo and G,
+ * the Unshielded log from the vault with amount G, the USDG Transfer from the
+ * vault to payTo of at least the price, a block time inside the quote window,
+ * and that it has not seen the txHash before (its own store). The chain does
+ * not carry the quoteId, so (payTo, G) is what ties a cash out to one quote.
  *
  * Nothing secret leaves the payer: the header carries a public tx hash and the
  * gateway's own quoteId. Never the note, a key or the private balance.
@@ -51,7 +57,7 @@ export const GLOAM_CASHOUT_ASSET: Address = getAddress(RH_MAINNET_USDG);
 export const GLOAM_CASHOUT_DECIMALS = 6;
 /** The Gloam vault on Robinhood Chain mainnet. The unshield, and so the Unshielded log, comes from here. */
 export const GLOAM_CASHOUT_VAULT: Address = getAddress(MAINNET_POOLS[4663].pool!);
-/** The per-quote tag added to the gross amount runs from 1 to this. */
+/** The tag added to the gross amount runs from 1 to this. */
 export const GLOAM_CASHOUT_TAG_MAX = 9999;
 
 /** One gloam-cashout entry in a 402's `accepts`, as read (parseGloamCashoutRequirement). */
@@ -306,8 +312,12 @@ export function decodeGloamCashoutHeader(h: string): GloamCashoutPayment {
 
 /**
  * G for a price: ceil(price * 10000 / (10000 - bps)) + tag. The vault keeps
- * floor(G * bps / 10000), so payTo gets at least the price. tag is 1 to 9999
- * and unique per open quote, so a cash out of G points at one quote.
+ * floor(G * bps / 10000), so payTo gets at least the price. tag is 1 to 9999.
+ *
+ * A unique tag does not make G unique: at 50 bps, price 10000 with tag 7 and
+ * price 5000 with tag 5032 both give 10058. The chain carries G, not the
+ * quoteId, so keep G unique among your open quotes to a payTo: pick tags with
+ * reserveCashoutGross, which skips any G already held.
  */
 export function cashoutGross(price: bigint, tag: number | bigint, bps: number): bigint {
   if (price <= 0n) throw new Error("price must be positive");
@@ -330,9 +340,11 @@ export interface GloamCashoutQuoteAmounts {
 }
 
 /**
- * G for a price at the vault's fee right now (withdrawFeeBps, read live). Pass
- * a client on Robinhood Chain, an rpcUrl, or neither for the public RPC. The fee
- * can change on a 3-day timelock, so read it per quote, not once.
+ * G for a price and a tag you already hold, at the vault's fee right now
+ * (withdrawFeeBps, read live). Pass a client on Robinhood Chain, an rpcUrl, or
+ * neither for the public RPC. The fee can change on a 3-day timelock, so read
+ * it per quote, not once. To pick the tag, use reserveCashoutGross: it keeps G
+ * unique among your open quotes to a payTo.
  */
 export async function quoteGross(
   price: bigint,
@@ -346,7 +358,72 @@ export async function quoteGross(
   return { gross, feeBps, fee, payeeReceives: gross - fee, tag: BigInt(tag) };
 }
 
-/** The 402 accepts entry for a quote (gateway side). quoteId is yours: keep it secret, one per 402. */
+/**
+ * The store key for an open quote: its payTo (any case) and G. A gateway holds
+ * at most one open quote per key, because a cash out of G to payTo is all the
+ * chain shows, and it must point at exactly one quote.
+ */
+export function cashoutGrossKey(payTo: string, gross: bigint | string): string {
+  if (!isAddress(String(payTo), { strict: false })) throw new Error("payTo must be a 0x address");
+  const g = BigInt(gross);
+  if (g <= 0n) throw new Error("gross must be positive");
+  return `${GLOAM_CASHOUT_SCHEME}:${payTo.toLowerCase()}:${g.toString()}`;
+}
+
+export interface ReserveCashoutGrossParams {
+  /** The splitter the quote pays. */
+  payTo: string;
+  /** The price: payTo receives at least this. */
+  price: bigint;
+  /**
+   * Claim `key` (cashoutGrossKey of payTo and G) for this quote in one atomic
+   * step: return true when it was free and is now held, false when another open
+   * quote holds it. Only `true` counts as claimed (map Redis "OK" to true). In
+   * memory, a Map set-if-absent; with Redis, SET key quoteId NX with an expiry.
+   * Hold the key until the quote is paid and served, or until its window
+   * (issuedAt + windowSec) has passed.
+   */
+  reserve: (key: string, gross: bigint, tag: bigint) => boolean | Promise<boolean>;
+  /** The vault's fee in bps. Default: read live (withdrawFeeBps), as quoteGross does. */
+  bps?: number;
+  client?: FeeReader;
+  rpcUrl?: string;
+  /** The first tag to try, 1 to 9999. Default random; the rest follow in order, wrapping. */
+  startTag?: number;
+}
+
+/**
+ * Gateway side: pick a tag for a new quote so that its G is not held by any
+ * other open quote to the same payTo, across every price and fee rate, and
+ * reserve it. Tries each tag at most once, starting at startTag, and asks
+ * `reserve` to claim (payTo, G); the first claim that succeeds wins. Throws when
+ * every tag at this price is held. Returns the amounts (as quoteGross) and the
+ * store key to release when the quote closes.
+ */
+export async function reserveCashoutGross(p: ReserveCashoutGrossParams): Promise<GloamCashoutQuoteAmounts & { key: string }> {
+  if (!isAddress(String(p.payTo), { strict: false })) throw new Error("payTo must be a 0x address");
+  if (typeof p.price !== "bigint" || p.price <= 0n) throw new Error("price must be a positive bigint");
+  if (typeof p.reserve !== "function") throw new Error("reserve is required: it claims (payTo, G) in your store");
+  const feeBps = p.bps ?? (await readCashOutFeeBps(p.client ?? rhClient(p.rpcUrl), GLOAM_CASHOUT_VAULT));
+  const start = p.startTag ?? (crypto.getRandomValues(new Uint32Array(1))[0]! % GLOAM_CASHOUT_TAG_MAX) + 1;
+  if (!Number.isInteger(start) || start < 1 || start > GLOAM_CASHOUT_TAG_MAX) throw new Error(`startTag must be 1 to ${GLOAM_CASHOUT_TAG_MAX}`);
+  for (let i = 0; i < GLOAM_CASHOUT_TAG_MAX; i++) {
+    const tag = BigInt(((start - 1 + i) % GLOAM_CASHOUT_TAG_MAX) + 1);
+    const gross = cashoutGross(p.price, tag, feeBps);
+    const key = cashoutGrossKey(p.payTo, gross);
+    if ((await p.reserve(key, gross, tag)) === true) {
+      const fee = cashOutFee(gross, feeBps);
+      return { gross, feeBps, fee, payeeReceives: gross - fee, tag, key };
+    }
+  }
+  throw new Error(`Every tag at this price is held by an open quote to ${p.payTo}. Close or expire some quotes first.`);
+}
+
+/**
+ * The 402 accepts entry for a quote (gateway side). quoteId is yours: keep it
+ * secret, one per 402. Take gross from reserveCashoutGross, so no other open
+ * quote to payTo has the same G.
+ */
 export function buildGloamCashoutRequirement(p: {
   payTo: Address;
   gross: bigint;
@@ -489,6 +566,8 @@ export interface GloamCashoutQuote {
   issuedAt: number;
   /** How long it stays payable, in seconds. The block that mined the cash out must fall in [issuedAt, issuedAt + windowSec]. */
   windowSec: number;
+  /** The quote's id, from the payment header. Required with openQuoteIds. */
+  quoteId?: string;
 }
 
 /** The reads verifyGloamCashout makes. A viem PublicClient on Robinhood Chain fits. */
@@ -497,6 +576,8 @@ export type GloamCashoutReader = Pick<PublicClient, "getTransactionReceipt" | "g
 export type GloamCashoutVerifyCode =
   | "bad_tx_hash"
   | "bad_quote"
+  | "quote_not_open"
+  | "ambiguous_quote"
   | "wrong_chain"
   | "not_found"
   | "reverted"
@@ -531,20 +612,33 @@ export const GLOAM_CASHOUT_REPLAY_NOTE =
 
 /**
  * Gateway side: check a gloam-cashout payment against the quote it answers.
+ *   0. with openQuoteIds: the quote is the only open quote at its payTo and G
  *   1. the receipt exists on Robinhood Chain and succeeded
  *   2. it has Unshielded(nullifier, USDG, payTo, G) emitted by the Gloam vault
  *      (a log with that shape from any other contract does not count)
  *   3. it has a USDG Transfer from the vault to payTo of at least the price
  *   4. the block time is inside [issuedAt, issuedAt + windowSec]
- * ok is true only when all four pass. It does NOT check that the txHash is
+ * ok is true only when all of them pass. It does NOT check that the txHash is
  * unused: that store is yours (see `replay`). Pass a client, an rpcUrl, or
  * neither for the public Robinhood Chain RPC.
+ *
+ * The chain carries G, not the quoteId, so a cash out matches every open quote
+ * with the same payTo and G. Allocate G with reserveCashoutGross, and pass
+ * openQuoteIds (your store's ids at cashoutGrossKey(payTo, G)) so a G held by
+ * more than one quote is refused rather than given to whoever presents first.
  */
 export async function verifyGloamCashout(args: {
   txHash: Hex;
   quote: GloamCashoutQuote;
   rpcUrl?: string;
   client?: GloamCashoutReader;
+  /**
+   * The ids of every quote your store holds open at cashoutGrossKey(quote.payTo,
+   * quote.gross). When passed, ok is false unless it is exactly quote.quoteId:
+   * quote_not_open when the quote is not among them, ambiguous_quote when
+   * another quote holds the same payTo and G.
+   */
+  openQuoteIds?: readonly string[];
 }): Promise<GloamCashoutVerdict> {
   const { txHash, quote } = args;
   const base = { txHash, replay: GLOAM_CASHOUT_REPLAY_NOTE };
@@ -562,6 +656,14 @@ export async function verifyGloamCashout(args: {
   if (gross <= 0n || price <= 0n || price > gross) return fail("bad_quote", "The quote needs 0 < price <= gross.");
   if (!Number.isFinite(quote.issuedAt) || !Number.isFinite(quote.windowSec) || quote.windowSec <= 0) {
     return fail("bad_quote", "The quote needs issuedAt (unix seconds) and a positive windowSec.");
+  }
+  if (args.openQuoteIds !== undefined) {
+    if (typeof quote.quoteId !== "string" || !quote.quoteId) return fail("bad_quote", "Pass quote.quoteId with openQuoteIds.");
+    const ids = new Set(args.openQuoteIds);
+    if (!ids.has(quote.quoteId)) return fail("quote_not_open", "This quote is not open at its payTo and G in your store.");
+    if (ids.size > 1) {
+      return fail("ambiguous_quote", `${ids.size} open quotes share this payTo and G, so a cash out of G cannot be tied to one of them. Allocate G with reserveCashoutGross.`);
+    }
   }
   const client = args.client ?? (rhClient(args.rpcUrl) as unknown as GloamCashoutReader);
   const chainId = await client.getChainId();

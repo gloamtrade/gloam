@@ -18,8 +18,10 @@ import {
   assertGloamCashoutPayable,
   buildGloamCashoutIntent,
   buildGloamCashoutRequirement,
+  GLOAM_CASHOUT_TAG_MAX,
   cashOutFee,
   cashoutGross,
+  cashoutGrossKey,
   chooseGloamX402Scheme,
   decodeGloamCashoutHeader,
   encodeGloamCashoutHeader,
@@ -30,6 +32,7 @@ import {
   parseGloamCashoutRequirement,
   payGloamCashout,
   quoteGross,
+  reserveCashoutGross,
   verifyGloamCashout,
   x402AcceptsOf,
 } from "../dist/index.js";
@@ -268,6 +271,78 @@ const transferLog = ({ token = GLOAM_CASHOUT_ASSET, from = GLOAM_CASHOUT_VAULT, 
   assert((await verifyGloamCashout({ txHash: "0x1234", quote, client: mock() })).code === "bad_tx_hash", "bad hash");
   assert((await failCode(mock(), { ...quote, price: G + 1n })) === "bad_quote", "price above gross");
   assert((await failCode(mock(), { ...quote, windowSec: 0 })) === "bad_quote", "no window");
+}
+
+// 8) G is what the chain shows, so it must be unique among open quotes to a payTo.
+{
+  // A unique tag is not enough: two prices give the same G.
+  const GX = cashoutGross(10_000n, 7, 50);
+  assert(GX === 10_058n && cashoutGross(5_000n, 5032, 50) === GX, "price 10000 tag 7 and price 5000 tag 5032 share G at 50 bps");
+  assert(cashoutGrossKey(SPLITTER.toUpperCase().replace("0X", "0x"), GX) === cashoutGrossKey(SPLITTER, GX.toString()), "the key ignores payTo case and G's type");
+  assert(cashoutGrossKey(SPLITTER, GX) !== cashoutGrossKey(OTHER, GX), "another payTo is another key");
+  await throwsCode(() => cashoutGrossKey("splitter.eth", GX), "0x address", "the key needs an address");
+
+  // reserveCashoutGross skips a G another open quote holds, across prices and fee rates.
+  const open = new Map(); // cashoutGrossKey -> quoteId
+  const reserveAs = (quoteId) => (key) => (open.has(key) ? false : (open.set(key, quoteId), true));
+  const a = await reserveCashoutGross({ payTo: SPLITTER, price: 10_000n, bps: 50, startTag: 7, reserve: reserveAs("qa") });
+  assert(a.tag === 7n && a.gross === GX && a.key === cashoutGrossKey(SPLITTER, GX) && open.get(a.key) === "qa", "the first quote gets tag 7");
+  const b = await reserveCashoutGross({ payTo: SPLITTER, price: 5_000n, bps: 50, startTag: 5032, reserve: reserveAs("qb") });
+  assert(b.gross !== GX && b.tag === 5033n && b.payeeReceives >= 5_000n && b.fee === cashOutFee(b.gross, 50), "a second price skips the G the first quote holds");
+  const c = await reserveCashoutGross({ payTo: OTHER, price: 5_000n, bps: 50, startTag: 5032, reserve: reserveAs("qc") });
+  assert(c.gross === GX, "another payTo can use the same G");
+  // A fee change between quotes: 25 bps, price 10031, tag 1 also lands on 10058.
+  assert(cashoutGross(10_031n, 1, 25) === GX, "a fee change can collide too");
+  const d = await reserveCashoutGross({ payTo: SPLITTER, price: 10_031n, bps: 25, startTag: 1, reserve: reserveAs("qd") });
+  assert(d.gross !== GX && d.feeBps === 25, "and is skipped");
+  // Many quotes at mixed prices and fees to one payTo never share G.
+  for (let i = 0; i < 300; i++) {
+    await reserveCashoutGross({ payTo: SPLITTER, price: [5_000n, 10_000n, 10_031n, 1_000_000n][i % 4], bps: i % 3 ? 50 : 25, reserve: reserveAs(`q${i}`) });
+  }
+  const grossTo = [...open.keys()].filter((k) => k.includes(SPLITTER.toLowerCase()));
+  assert(grossTo.length === 303 && new Set(open.values()).size === open.size, "303 open quotes to one payTo, each at its own G");
+  // An async store (Redis SET NX) works the same.
+  const held = new Set([cashoutGrossKey(SPLITTER, cashoutGross(1n, 1, 0))]);
+  const e = await reserveCashoutGross({ payTo: SPLITTER, price: 1n, bps: 0, startTag: 1, reserve: async (k) => (held.has(k) ? false : (held.add(k), true)) });
+  assert(e.tag === 2n && e.gross === 3n, "an async reserve skips a held G");
+  // The fee is read live when bps is not given.
+  const fake = { readContract: async ({ functionName }) => (functionName === "withdrawFeeBps" ? 50 : null) };
+  const f = await reserveCashoutGross({ payTo: OTHER, price: PRICE, client: fake, startTag: 37, reserve: () => true });
+  assert(f.gross === G && f.feeBps === 50, "reads withdrawFeeBps like quoteGross");
+  // Every tag held: refused, after trying each tag once.
+  let tries = 0;
+  await throwsCode(() => reserveCashoutGross({ payTo: SPLITTER, price: PRICE, bps: 50, reserve: () => (tries++, false) }), "Every tag", "no free tag is refused");
+  assert(tries === GLOAM_CASHOUT_TAG_MAX, "each tag tried once");
+  await throwsCode(() => reserveCashoutGross({ payTo: SPLITTER, price: PRICE, bps: 50, reserve: (k) => new Map().set(k, "always") }), "Every tag", "only true counts as claimed, not a truthy Map");
+  await throwsCode(() => reserveCashoutGross({ payTo: SPLITTER, price: PRICE, bps: 50, startTag: 0, reserve: () => true }), "startTag", "startTag 0 is refused");
+  await throwsCode(() => reserveCashoutGross({ payTo: SPLITTER, price: 0n, bps: 50, reserve: () => true }), "price", "price 0 is refused");
+  await throwsCode(() => reserveCashoutGross({ payTo: SPLITTER, price: PRICE, bps: 50 }), "reserve is required", "no store, no quote");
+  const rnd = await reserveCashoutGross({ payTo: SPLITTER, price: PRICE, bps: 50, reserve: () => true });
+  assert(rnd.tag >= 1n && rnd.tag <= BigInt(GLOAM_CASHOUT_TAG_MAX), "a random start tag is in range");
+
+  // The verifier: one cash out of G, two open quotes at the same payTo and G.
+  const txHash = `0x${"9a".repeat(32)}`;
+  const issuedAt = 1_800_000_000;
+  const logs = [unshieldLog({ amount: GX }), transferLog({ value: GX - cashOutFee(GX, 50) })];
+  const client = { getChainId: async () => 4663, getTransactionReceipt: async () => ({ status: "success", blockNumber: 900n, logs }), getBlock: async () => ({ timestamp: BigInt(issuedAt + 30) }) };
+  const qa = { payTo: SPLITTER, gross: GX, price: 10_000n, issuedAt, windowSec: 300, quoteId: "qa" };
+  const qb = { payTo: SPLITTER, gross: GX, price: 5_000n, issuedAt, windowSec: 300, quoteId: "qb" };
+  // Without the store's view, the receipt alone fits both quotes: that is why G must be unique.
+  assert((await verifyGloamCashout({ txHash, quote: qa, client })).ok && (await verifyGloamCashout({ txHash, quote: qb, client })).ok, "the receipt alone matches both quotes");
+  const both = ["qa", "qb"];
+  assert((await verifyGloamCashout({ txHash, quote: qa, client, openQuoteIds: both })).code === "ambiguous_quote", "two open quotes at one G: refused for the first");
+  assert((await verifyGloamCashout({ txHash, quote: qb, client, openQuoteIds: both })).code === "ambiguous_quote", "and for the second");
+  assert((await verifyGloamCashout({ txHash, quote: qb, client, openQuoteIds: ["qa"] })).code === "quote_not_open", "a quote not open at that G is refused");
+  assert((await verifyGloamCashout({ txHash, quote: { ...qa, quoteId: undefined }, client, openQuoteIds: ["qa"] })).code === "bad_quote", "openQuoteIds needs quote.quoteId");
+  assert((await verifyGloamCashout({ txHash, quote: qa, client, openQuoteIds: [] })).code === "quote_not_open", "no open quote at that G");
+  const only = await verifyGloamCashout({ txHash, quote: qa, client, openQuoteIds: ["qa", "qa"] });
+  assert(only.ok && only.code === null, "the only open quote at its G passes");
+  // With quotes from reserveCashoutGross, each G has one quote, so the payment matches only its own.
+  const idsAt = (q) => [...open.entries()].filter(([k]) => k === cashoutGrossKey(q.payTo, q.gross)).map(([, id]) => id);
+  const qaOpen = { payTo: SPLITTER, gross: a.gross, price: 10_000n, issuedAt, windowSec: 300, quoteId: "qa" };
+  const qbOpen = { payTo: SPLITTER, gross: b.gross, price: 5_000n, issuedAt, windowSec: 300, quoteId: "qb" };
+  assert((await verifyGloamCashout({ txHash, quote: qaOpen, client, openQuoteIds: idsAt(qaOpen) })).ok, "the tx pays its own quote");
+  assert((await verifyGloamCashout({ txHash, quote: qbOpen, client, openQuoteIds: idsAt(qbOpen) })).code === "wrong_amount", "and cannot be claimed for the other price");
 }
 
 console.log(`x402 gloam-cashout selftest: ${checks} checks passed.`);
