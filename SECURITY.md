@@ -45,6 +45,14 @@ Thank you for looking. Please report privately; don't open a public issue or pos
 
 ## Advisories
 
+### A gloam-cashout payment could match another open quote (16 November 2026, Medium)
+
+- **Affected:** `@gloamtrade/sdk` 0.6.0 to 0.7.0, for gateways that take x402 `gloam-cashout` payments with `verifyGloamCashout` and keep more than one quote open to the same `payTo`. No gateway run by Gloam uses the scheme, and no funds in Gloam's vaults were at risk.
+- **What went wrong:** a cash out pays the quote's `payTo` exactly G, the price grossed up for the vault's fee plus a tag. The docs said a tag unique per quote made G point at one quote, but two open quotes with different prices or fee rates could share the same G. Whoever held the other quote could present the real payer's cash out first and be served, and the real payer was then refused as a replay.
+- **Fixed in:** `@gloamtrade/sdk` **0.7.1**. `reserveCashoutGross` picks a tag whose G no other open quote to that `payTo` holds, through the gateway store's atomic reserve, and `verifyGloamCashout` refuses a cash out that matches more than one open quote when given the store's open quote ids.
+- **What to do:** gateways, upgrade (`npm i @gloamtrade/sdk@^0.7.1`), allocate quotes with `reserveCashoutGross`, and pass `openQuoteIds` to `verifyGloamCashout`.
+- **Credit:** Hey Research Lab ([@HeyResearch](https://x.com/HeyResearch)).
+
 ### Payment receipts from testnets accepted as real (14 November 2026, Low)
 
 - **Affected:** `@gloamtrade/sdk <= 0.7.0`, for anyone who checks payment receipts with `checkPaymentReceipt` and accepts receipts from more than one chain. No funds in Gloam's vaults were at risk, and gloam.trade and the Gloam API do not use this check.
@@ -68,6 +76,7 @@ With thanks to the researchers who have reported issues responsibly.
 - **[@mylifechangefa1](https://x.com/mylifechangefa1)** (GitHub [EFCCWEB3](https://github.com/EFCCWEB3)): SSRF in the MCP server's `gloam_fetch_paid`. The private-address guard classified an IPv4-in-IPv6 address by its text, so an IPv4-mapped address written in hex (e.g. `::ffff:7f00:1`), long form, NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`) slipped past it and could reach loopback or cloud-metadata services on a self-hosted server. Affected `@gloamtrade/mcp <= 0.3.0`; fixed in **0.3.1** (classify by the address bytes), with the resolved IP pinned in the connector against DNS rebinding in **0.3.2**, and credential and payment headers dropped on cross-origin redirects in **0.3.3**.
 - **An independent researcher:** x402 payments not bound to their payee, so a sealed ticket copied from the public payment board passed as a payment. Affected `@gloamtrade/sdk <= 0.6.0` and `@gloamtrade/mcp <= 0.8.0`; fixed in **0.7.0** and **0.9.0** ([advisory](#advisories)).
 - **1nc0gn170 | Rektproof Security ([@1nc0gSec](https://x.com/1nc0gSec)):** `checkPaymentReceipt` accepted receipts from Gloam testnets as real payments, with no testnet signal. Affected `@gloamtrade/sdk <= 0.7.0`; fixed in **0.7.1** ([advisory](#advisories)).
+- **Hey Research Lab ([@HeyResearch](https://x.com/HeyResearch), GitHub [hey-research-lab](https://github.com/hey-research-lab)):** eight private reports since October, from ENS resolution per chain and proof-of-funds privacy to relay budgets, recovery and the `gloam-cashout` quote collision fixed in **0.7.1**. Their advisories are published on the repository's [Security](https://github.com/gloamtrade/gloam/security/advisories) tab.
 - **ashev33** (GitHub [wiwi2204](https://github.com/wiwi2204)): a review of the swap routers, the relay, partner accounting and the API. Fixed from it in #223: a partner count is taken back when its transaction reverts, vote holder records are kept only for real holders or voters, admin routes check the request's origin, and rate limits read the client IP from Vercel's edge headers first.
 - **mehmet484 ([GitHub](https://github.com/cezo484)):** a `ShieldPoolPoseidon` pool could end setup with deposit limits off and no way to switch them on later. No live vault was affected: every mainnet vault runs `ShieldPoolPayments` with limits on. Fixed in source on 16 November 2026: the pool now refuses to end setup without limits, and the deploy scripts turn them on first. The same report noted that posts made straight to the payment-message board skip the relay's caps, now covered in the threat model.
 
