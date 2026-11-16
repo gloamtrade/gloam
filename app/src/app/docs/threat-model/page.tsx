@@ -28,6 +28,11 @@ const ACTORS: { who: string; can: string; cannot: string }[] = [
     cannot: "Change a cash out's recipient or amount, which the proof binds, change what a swap delivers or where, learn a note secret, or move money.",
   },
   {
+    who: "Anyone posting to the payment board",
+    can: "Post any message under any payment from their own wallet, up to the board's 8 KB limit, as often as they pay gas for. The relay's caps (2 KB a message, and limits per sender, per payment and per IP address) only cover messages the relay sends. The board has no owner and keeps every message, so junk makes your inbox scan read and try more of them.",
+    cannot: "Make a message count as a payment. The app and the SDK count one only when its code opens the commitment it names, and that note is in the vault and unspent. Anything else is skipped.",
+  },
+  {
     who: "The swap routers",
     can: V2
       ? "Take one note out of the vault for a swap, trade it on their allowed venues, and send what the trade did not use to the treasury. They have no upgrade. On Robinhood Chain the router's owner can add a pool with 3 days of public notice and take one off at once, and nothing else."

@@ -31,6 +31,7 @@ contract NoMiddlemenTest is Test {
 
     ShieldPoolPoseidon pool;
     TLMockVerifier rejectV; // pool's proof verifier: rejects everything
+    TLMockVerifier shieldV; // deposit verifier wired before endSetup (accepts)
     MockERC20 token;
     address poseidon2;
 
@@ -56,6 +57,7 @@ contract NoMiddlemenTest is Test {
         vm.warp(1_900_000_000);
         poseidon2 = _deployPoseidon();
         rejectV = new TLMockVerifier(false);
+        shieldV = new TLMockVerifier(true);
         pool = new ShieldPoolPoseidon(poseidon2, address(rejectV));
         token = new MockERC20();
         vm.deal(user, 100 ether);
@@ -104,6 +106,7 @@ contract NoMiddlemenTest is Test {
     }
 
     function test_endSetup_flips_mode_and_emits() public {
+        _wire();
         vm.expectEmit(true, false, false, true, address(pool));
         emit SetupEnded(owner);
         pool.endSetup();
@@ -122,7 +125,7 @@ contract NoMiddlemenTest is Test {
     }
 
     function test_direct_setters_revert_after_setup() public {
-        pool.endSetup();
+        _endSetup();
         address v = address(new TLMockVerifier(true));
 
         vm.expectRevert(ChangeTimelock.TimelockRequired.selector);
@@ -143,7 +146,7 @@ contract NoMiddlemenTest is Test {
         // nothing changed
         assertEq(address(pool.verifier()), address(rejectV));
         assertEq(address(pool.sealedSwapVerifier()), address(0));
-        assertEq(address(pool.shieldVerifier()), address(0));
+        assertEq(address(pool.shieldVerifier()), address(shieldV));
     }
 
     function test_non_owner_setters_still_NotOwner() public {
@@ -165,7 +168,7 @@ contract NoMiddlemenTest is Test {
     // ─────────────────────────────────────────────────────────────────────────
 
     function test_queue_execute_verifier_change() public {
-        pool.endSetup();
+        _endSetup();
         TLMockVerifier v2 = new TLMockVerifier(true);
         bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(v2)));
         bytes32 id = keccak256(call_);
@@ -197,7 +200,7 @@ contract NoMiddlemenTest is Test {
         TLMockVerifier ok = new TLMockVerifier(true);
         pool.setSealedSwapVerifier(address(ok));
         pool.setSwapRate(address(0), assetB, 1, 1, true);
-        pool.endSetup();
+        _endSetup();
 
         bytes memory call_ = abi.encodeCall(
             ShieldPoolPoseidon.setSwapRate,
@@ -207,7 +210,7 @@ contract NoMiddlemenTest is Test {
 
         // Seed a root; old 1:1 rate still the only accepted one before eta.
         vm.prank(user);
-        pool.shield{value: 1 ether}(address(0), 1 ether, bytes32(uint256(0xD00D)));
+        pool.shieldBound{value: 1 ether}(address(0), 1 ether, bytes32(uint256(0xD00D)), "");
         bytes32 root = pool.currentRoot();
         vm.expectRevert(ShieldPoolPoseidon.RateNotAllowed.selector);
         pool.sealedSwap(
@@ -243,7 +246,7 @@ contract NoMiddlemenTest is Test {
     }
 
     function test_queue_execute_oracle_changes() public {
-        pool.endSetup();
+        _endSetup();
         bytes memory f1 = abi.encodeCall(ShieldPoolPoseidon.setPriceFeed, (address(0), address(0xF1)));
         bytes memory f2 = abi.encodeCall(ShieldPoolPoseidon.setPriceFeed, (assetB, address(0xF2)));
         bytes memory cfg = abi.encodeCall(
@@ -278,22 +281,23 @@ contract NoMiddlemenTest is Test {
     }
 
     function test_timelocked_shield_verifier_stays_one_way() public {
-        pool.endSetup();
-        TLMockVerifier sv = new TLMockVerifier(true);
-        bytes memory first = abi.encodeCall(ShieldPoolCore.setShieldVerifier, (address(sv)));
-        bytes memory second = abi.encodeCall(ShieldPoolCore.setShieldVerifier, (address(0xBAD)));
-        pool.queueChange(first);
-        (, uint256 eta) = pool.queueChange(second);
+        // Setup only ends with the shield verifier wired, so the timelock can
+        // neither repoint it nor clear it.
+        _endSetup();
+        bytes memory repoint = abi.encodeCall(ShieldPoolCore.setShieldVerifier, (address(0xBAD)));
+        bytes memory clear = abi.encodeCall(ShieldPoolCore.setShieldVerifier, (address(0)));
+        pool.queueChange(repoint);
+        (, uint256 eta) = pool.queueChange(clear);
         vm.warp(eta);
-        pool.executeChange(first);
-        assertEq(address(pool.shieldVerifier()), address(sv));
         vm.expectRevert(ShieldPoolCore.ShieldVerifierAlreadySet.selector);
-        pool.executeChange(second);
-        assertEq(address(pool.shieldVerifier()), address(sv));
+        pool.executeChange(repoint);
+        vm.expectRevert(ShieldPoolCore.ShieldVerifierAlreadySet.selector);
+        pool.executeChange(clear);
+        assertEq(address(pool.shieldVerifier()), address(shieldV));
     }
 
     function test_execute_before_eta_reverts() public {
-        pool.endSetup();
+        _endSetup();
         bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         (, uint256 eta) = pool.queueChange(call_);
 
@@ -307,7 +311,7 @@ contract NoMiddlemenTest is Test {
     }
 
     function test_execute_after_grace_reverts() public {
-        pool.endSetup();
+        _endSetup();
         bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         (, uint256 eta) = pool.queueChange(call_);
 
@@ -327,7 +331,7 @@ contract NoMiddlemenTest is Test {
     }
 
     function test_execute_at_last_grace_second_works() public {
-        pool.endSetup();
+        _endSetup();
         bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         (, uint256 eta) = pool.queueChange(call_);
         vm.warp(eta + 14 days);
@@ -336,7 +340,7 @@ contract NoMiddlemenTest is Test {
     }
 
     function test_cancel_works() public {
-        pool.endSetup();
+        _endSetup();
         bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         (bytes32 id, uint256 eta) = pool.queueChange(call_);
 
@@ -356,7 +360,7 @@ contract NoMiddlemenTest is Test {
     }
 
     function test_non_owner_cannot_queue_execute_cancel() public {
-        pool.endSetup();
+        _endSetup();
         bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (attacker));
 
         vm.prank(attacker);
@@ -376,7 +380,7 @@ contract NoMiddlemenTest is Test {
     }
 
     function test_queued_call_cannot_execute_twice() public {
-        pool.endSetup();
+        _endSetup();
         bytes memory call_ = abi.encodeCall(
             ShieldPoolPoseidon.setSwapRate,
             (address(0), assetB, 1, 1, true)
@@ -396,7 +400,7 @@ contract NoMiddlemenTest is Test {
     }
 
     function test_cannot_requeue_live_change() public {
-        pool.endSetup();
+        _endSetup();
         bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         (, uint256 eta) = pool.queueChange(call_);
         vm.warp(eta - 1 hours);
@@ -406,7 +410,7 @@ contract NoMiddlemenTest is Test {
     }
 
     function test_queue_rejects_non_setter_calls() public {
-        pool.endSetup();
+        _endSetup();
         bytes[] memory bad = new bytes[](10);
         bad[0] = abi.encodeCall(ShieldPoolCore.transferOwnership, (attacker));
         bad[1] = abi.encodeCall(ShieldPoolCore.sweepStrayNative, (attacker));
@@ -430,7 +434,7 @@ contract NoMiddlemenTest is Test {
     }
 
     function test_queue_rejects_non_canonical_length() public {
-        pool.endSetup();
+        _endSetup();
         bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         vm.expectRevert(ChangeTimelock.BadChangeLength.selector);
         pool.queueChange(bytes.concat(call_, hex"00"));
@@ -439,7 +443,7 @@ contract NoMiddlemenTest is Test {
     }
 
     function test_new_owner_inherits_queue_old_owner_loses_it() public {
-        pool.endSetup();
+        _endSetup();
         bytes memory call_ = abi.encodeCall(ShieldPoolCore.setVerifier, (address(0xB0B)));
         (, uint256 eta) = pool.queueChange(call_);
         address newOwner = address(0xBEEF);
@@ -487,7 +491,7 @@ contract NoMiddlemenTest is Test {
     /// rejects everything, so any drain would have to be an owner privilege.)
     function test_owner_cannot_reduce_deposited_via_any_function() public {
         _seedDeposits();
-        pool.endSetup();
+        _endSetup();
         address v = address(new TLMockVerifier(true));
 
         // sweep: nothing unbacked to take
@@ -534,7 +538,7 @@ contract NoMiddlemenTest is Test {
     /// deposited[] and balance untouched.
     function testFuzz_owner_arbitrary_call_cannot_move_funds(bytes calldata data) public {
         _seedDeposits();
-        pool.endSetup();
+        _endSetup();
         (bool ok, ) = address(pool).call(data);
         ok;
         _assertFundsIntact();
@@ -548,7 +552,7 @@ contract NoMiddlemenTest is Test {
         uint256 amt
     ) public {
         _seedDeposits();
-        pool.endSetup();
+        _endSetup();
         bytes4[12] memory sels = [
             ShieldPoolCore.setVerifier.selector,
             ShieldPoolPoseidon.setSealedSwapVerifier.selector,
@@ -583,6 +587,20 @@ contract NoMiddlemenTest is Test {
     // ─────────────────────────────────────────────────────────────────────────
     // helpers
     // ─────────────────────────────────────────────────────────────────────────
+
+    /// Wire what endSetup() requires: the shield verifier and deposit limits on,
+    /// with native and the token listed (no cap that matters here).
+    function _wire() internal {
+        pool.setShieldVerifier(address(shieldV));
+        pool.turnOnDepositLimits();
+        pool.setDepositLimit(address(0), type(uint128).max, type(uint128).max);
+        pool.setDepositLimit(address(token), type(uint128).max, type(uint128).max);
+    }
+
+    function _endSetup() internal {
+        _wire();
+        pool.endSetup();
+    }
 
     function _seedDeposits() internal {
         vm.prank(user);

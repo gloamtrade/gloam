@@ -821,6 +821,8 @@ contract VaultOwnerGuardTest is GuardFixture {
         address poseidon = _deployPoseidon();
         vm.startPrank(oldOwner);
         ShieldPoolPoseidon p = new ShieldPoolPoseidon(poseidon, address(spendV));
+        p.setShieldVerifier(address(spendV));
+        p.turnOnDepositLimits();
         p.endSetup();
         bytes memory swapV = abi.encodeCall(ShieldPoolPoseidon.setSealedSwapVerifier, (address(evil)));
         bytes memory rate = abi.encodeCall(ShieldPoolPoseidon.setSwapRate, (address(usd), address(1), 1, 1, true));

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Script, console2} from "forge-std/Script.sol";
+import {console2} from "forge-std/Script.sol";
 import {ShieldPoolPoseidon} from "../../src/ShieldPoolPoseidon.sol";
+import {PoolDepositLimits} from "../PoolDepositLimits.sol";
 
 /**
  * Deploy ONLY the pool, reusing verifiers already deployed by DeployTempo.
@@ -16,6 +17,7 @@ import {ShieldPoolPoseidon} from "../../src/ShieldPoolPoseidon.sol";
  *   export POSEIDON2=0x...          # Poseidon2 from deploy-poseidon.mjs
  *   export DUAL_VERIFIER=0x...      # DualProofVerifier from DeployTempo
  *   export SHIELD_IVERIFIER=0x...   # ShieldIVerifier from DeployTempo
+ *   export LIMIT_ASSETS=0x...       # optional deposit limits, see script/PoolDepositLimits.sol
  *   forge script script/archive/DeployTempoPool.s.sol:DeployTempoPool --rpc-url $RPC_URL --broadcast \
  *     --gas-estimate-multiplier 105
  *
@@ -23,7 +25,7 @@ import {ShieldPoolPoseidon} from "../../src/ShieldPoolPoseidon.sol";
  * per byte. The hardened pool (timelocked admin) estimates ~27.9M on Tempo, so
  * the old 112 multiplier (31.3M) would exceed the cap; 105 gives ~29.3M.
  */
-contract DeployTempoPool is Script {
+contract DeployTempoPool is PoolDepositLimits {
     function run() external {
         uint256 pk = vm.envUint("DEPLOYER_PK");
         address poseidon2 = vm.envAddress("POSEIDON2");
@@ -33,6 +35,8 @@ contract DeployTempoPool is Script {
 
         ShieldPoolPoseidon pool = new ShieldPoolPoseidon(poseidon2, dual);
         pool.setShieldVerifier(shieldI);
+        // Limits on before setup ends (endSetup() refuses otherwise), assets from env.
+        _turnOnDepositLimits(pool);
 
         // FINAL STEP: end setup mode. Irreversible. From here on the owner has no
         // instant power over proofs, pricing, or asset flows: every verifier / rate
@@ -46,6 +50,7 @@ contract DeployTempoPool is Script {
         console2.log("verifier (dual)", address(pool.verifier()));
         console2.log("shieldVerifier", address(pool.shieldVerifier()));
         console2.log("sealedSwapVerifier (must be 0)", address(pool.sealedSwapVerifier()));
+        console2.log("depositLimitsOn (must be true)", pool.depositLimitsOn());
         console2.log("setupMode (must be false)", pool.setupMode());
 
         vm.stopBroadcast();

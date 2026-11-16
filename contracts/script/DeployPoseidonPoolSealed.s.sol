@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {console2} from "forge-std/Script.sol";
 import {ShieldPoolPoseidon} from "../src/ShieldPoolPoseidon.sol";
 import {SealedSwapGuard} from "./SealedSwapGuard.sol";
+import {PoolDepositLimits} from "./PoolDepositLimits.sol";
 
 /**
  * Deploy a Poseidon vault WITH the sealed swap verifier wired.
@@ -20,6 +21,10 @@ import {SealedSwapGuard} from "./SealedSwapGuard.sol";
  * Ends with endSetup(), after which every verifier/rate/oracle change needs the
  * 3-day timelock. So the shield verifier (C1 fix) is wired here too: ending setup
  * without it would leave the unbound shield() path open for at least 3 days.
+ * Deposit limits are turned on before endSetup() as well: turnOnDepositLimits()
+ * is setup-only, and the pool refuses to end setup without it. List assets with
+ * LIMIT_ASSETS / LIMIT_PER_DEPOSIT / LIMIT_TOTAL (script/PoolDepositLimits.sol);
+ * with none, deposits stay closed until a limit clears the timelock.
  * Swap rates are NOT set here; add setSwapRate(...) calls before endSetup() if the
  * pool should launch with a pair enabled.
  *
@@ -29,6 +34,7 @@ import {SealedSwapGuard} from "./SealedSwapGuard.sol";
  *   export DUAL_VERIFIER=0x...           # current DualProofVerifier
  *   export SEALED_SWAP_IVERIFIER=0x...   # adapter for the NEW sealedSwap circuit
  *   export SHIELD_IVERIFIER=0x...        # ShieldIVerifier on the same chain
+ *   export LIMIT_ASSETS=0x...            # optional, with LIMIT_PER_DEPOSIT and LIMIT_TOTAL
  *   export RPC_URL=https://rpc.testnet.chain.robinhood.com
  *   forge script script/DeployPoseidonPoolSealed.s.sol:DeployPoseidonPoolSealed \
  *     --rpc-url $RPC_URL --broadcast
@@ -38,7 +44,7 @@ import {SealedSwapGuard} from "./SealedSwapGuard.sol";
  *   NEXT_PUBLIC_SHIELD_DEPLOY_BLOCK=<block>
  * Or update app/src/lib/config.ts TESTNET_POSEIDON_POOL defaults.
  */
-contract DeployPoseidonPoolSealed is SealedSwapGuard {
+contract DeployPoseidonPoolSealed is SealedSwapGuard, PoolDepositLimits {
     function run() external {
         _requireSealedSwapAck();
 
@@ -53,6 +59,8 @@ contract DeployPoseidonPoolSealed is SealedSwapGuard {
         ShieldPoolPoseidon pool = new ShieldPoolPoseidon(poseidon2, dual);
         pool.setSealedSwapVerifier(sealedSwapI);
         pool.setShieldVerifier(shieldI);
+        // Limits on before setup ends (endSetup() refuses otherwise), assets from env.
+        _turnOnDepositLimits(pool);
 
         // FINAL STEP: end setup mode. Irreversible. From here on the owner has no
         // instant power over proofs, pricing, or asset flows: every verifier / rate
@@ -65,6 +73,7 @@ contract DeployPoseidonPoolSealed is SealedSwapGuard {
         console2.log("verifier (dual)", address(pool.verifier()));
         console2.log("sealedSwapVerifier", address(pool.sealedSwapVerifier()));
         console2.log("shieldVerifier", address(pool.shieldVerifier()));
+        console2.log("depositLimitsOn (must be true)", pool.depositLimitsOn());
         console2.log("setupMode (must be false)", pool.setupMode());
         console2.log("Update app: NEXT_PUBLIC_POSEIDON_SHIELD_POOL + deploy block");
 

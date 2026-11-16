@@ -23,12 +23,15 @@ User wallet
 GloamPayMemo: encrypted payment memos for discovery. Holds no funds.
 ```
 
+`GloamPayMemo` is an open log with no owner: anyone can post any memo under any commitment, up to `MAX_MEMO` (8192 bytes), and nothing is removed. The relay posts at most 2048 bytes and rate-limits per sender, per payment and per IP address, but a post sent straight to the board skips those caps. A memo moves no value. Clients treat it as a hint only: the app and the SDK (`scanIncomingPayments`) count one only when its sealed note opens the commitment it names and that note is in the vault and unspent, read at one block.
+
 Mainnet runs `ShieldPoolPayments`: the same surface without `sealedSwap`, plus deposit limits and a cash-out fee.
 
 ## Owner powers
 
 - **No admin withdraw.** No function moves note-backed funds; notes leave only through a proof-gated `unshield()` to the recipient bound in the proof. `sweepStrayNative()` can only take native currency above `deposited[address(0)] + feesOwed[address(0)]`, i.e. ETH sent straight to the contract that backs no note and is no owed fee.
 - **Timelocked rule changes.** Setters that affect proof validity, pricing or asset flows (`setVerifier`, `setSealedSwapVerifier`, `setShieldVerifier`, `setSwapRate`, `setPriceFeed`, `setOracleConfig`, `setOracleRatePair`) run directly only during setup. `setupMode()` is `false` on every live pool, mainnet and testnet, so every change goes `queueChange` → public `CHANGE_DELAY` (3 days) → `executeChange` within a 14-day grace window. The owner wallet can still swap verifiers this way; the delay is what gives users time to see it and cash out.
+- **Setup ends only when the pool is wired.** `endSetup()` on `ShieldPoolPayments` and `ShieldPoolPoseidon` reverts unless both proof verifiers are set and deposit limits are on. `turnOnDepositLimits()` is setup-only and is not a timelocked change, so this is the one point where it can be enforced.
 - **Owner guard** (`src/VaultOwnerGuard.sol`). The contract each mainnet vault's ownership moves to, one way. From the moment it accepts a vault, only `setDepositLimit` and `setWithdrawFee` go through the timelock there, plus `lowerDepositLimit`, `lowerWithdrawFee` and `sweepStrayNative`; `setVerifier`, `setShieldVerifier` and `transferOwnership` can never run again. Until then the bullet above holds. Runbook and trade-off: the owner guard section of [`DEPLOY.md`](../DEPLOY.md). The Elysium vault has been owned by one since its deploy; the other four mainnet vaults are still owned by the wallet below.
 - **Two-step ownership** (`transferOwnership` + `acceptOwnership`). On testnet the owner is a single wallet. On mainnet the owner is one wallet (`0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8`); a multisig is planned. Cash-out fees go to the treasury `0xB3900ac9350903218e4c7597bAb0f008F01B30B8` since 24 October 2026.
 
