@@ -17,7 +17,7 @@ export const CONTEST = {
   /** Entries open (UTC). Early entries are taken; this is the date the page gives. */
   opensAt: "2026-11-09T00:00:00Z",
   /** The last moment an entry is taken (UTC). After it the form is closed. */
-  closesAt: "2026-11-16T23:59:59Z",
+  closesAt: "2026-11-16T23:00:00Z",
   /** Winners are announced on @gloamtrade by this day (UTC). */
   winnersBy: "2026-11-19T00:00:00Z",
   /** Video length, in minutes. */
