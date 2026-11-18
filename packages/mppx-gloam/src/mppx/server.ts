@@ -19,8 +19,10 @@
 import type { Address } from "viem";
 import { Errors, Method, Receipt } from "mppx";
 import {
-  assetDecimals,
+  chargeDecimals,
   chargeTerms,
+  noDefaultCurrencyMessage,
+  noPoolMessage,
   officialPool,
   resolveNetwork,
   GloamChargeError,
@@ -58,11 +60,15 @@ export function toMppxError(e: unknown, challengeId?: string): Error {
 export declare namespace gloam {
   type Parameters = GloamChargeServerConfig &
     Method.ComposableHooks<typeof charge> & {
-      /** "tempo" (default), "robinhood", a "-mainnet" key, "base" / "base-mainnet" once their pools are in, or a chain id. */
+      /** "tempo" (default), "robinhood", a "-mainnet" key, "base" / "base-mainnet" once their pools are in, "bnb-mainnet" once BNB Chain's is, or a chain id. */
       network?: GloamChargeNetwork | number;
-      /** Token address; default the network's first asset (PathUSD on Tempo testnet, native ETH on Robinhood Chain testnet). */
+      /** Token address; default the network's first asset (USDT on BNB Chain, PathUSD on Tempo testnet, native ETH on Robinhood Chain testnet). Required for a chain id the SDK has no network for. */
       currency?: Address;
-      /** Decimals of `currency`, to read route amounts. Default 6 for PathUSD, 18 for ETH. */
+      /**
+       * Decimals of `currency`, to read route amounts. Leave it out: a listed
+       * asset always counts in its own (PathUSD 6, ETH 18, USDT and USDC on BNB
+       * Chain 18), and a value that disagrees throws. Only for a token Gloam does not list.
+       */
       decimals?: number;
     };
 }
@@ -86,10 +92,11 @@ export function gloam(parameters: gloam.Parameters): GloamServerMethod {
   assertKeepsFreshNotes(config);
   const net = resolveNetwork(network);
   const pool = officialPool(net.chainId, config.pools);
-  if (!pool) throw new Error(`There is no Gloam pool on chain ${net.chainId}.`);
+  if (!pool) throw new Error(noPoolMessage(net.chainId));
   const modes = config.modes ?? GLOAM_MODES;
   const asset = currency ?? net.currency;
-  const assetDec = decimals ?? assetDecimals(asset);
+  if (asset === undefined) throw new Error(noDefaultCurrencyMessage(net.chainId));
+  const assetDec = chargeDecimals(asset, net.chainId, decimals);
   if (assetDec === undefined) throw new Error(`Pass decimals for currency ${asset}.`);
   // validate and broadcast receive the same credential object; carry the opened payment between them.
   const validated = new WeakMap<object, ValidatedGloamCharge>();

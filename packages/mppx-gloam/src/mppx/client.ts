@@ -6,7 +6,9 @@
  *
  *   const mppx = Mppx.create({
  *     polyfill: false,
- *     methods: [gloam({ getNote, prove, submit, beforeSubmit, policy: { maxAmountWei: 50_000n } })],
+ *     // maxAmountWei is in the asset's base units: 50_000n is 0.05 of a 6-decimal stablecoin,
+ *     // but USDT and USDC on BNB Chain have 18, so size it with parseUnits("0.05", decimals).
+ *     methods: [gloam({ getNote, prove, submit, beforeSubmit, policy: { maxAmountWei: parseUnits("0.05", 6) } })],
  *   })
  *   const res = await mppx.fetch("https://api.example.com/answer")
  *
