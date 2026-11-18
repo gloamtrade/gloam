@@ -347,7 +347,8 @@ if (!CONFIGURED) {
       assert.equal(vault.deployBlock, pool.deployBlock);
       assert.deepEqual(
         e.rows.filter((r) => r.role !== "payment_messages" && r.role !== "swap_router").map((r) => r.role),
-        ["vault", "owner", "fee_recipient", "relayer", "deployer"]
+        // the owner wallet, then the owner guard once it is set (dir.GLOAM_OWNER_GUARD)
+        ["vault", "owner", ...(dir.GLOAM_OWNER_GUARD ? ["owner"] : []), "fee_recipient", "relayer", "deployer"]
       );
       const csv = dir.directoryCsv(dir.contractDirectory());
       assert.ok(csv.includes(`,${id},mainnet,vault,Vault,ShieldPoolPayments,${vault.address},${pool.deployBlock},${explorer}/address/${vault.address},app`), key);
