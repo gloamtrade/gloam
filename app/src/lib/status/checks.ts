@@ -119,24 +119,24 @@ function proxiedNetworks(): GloamNetwork[] {
 export const networkPartId = (chainId: number) => `network:${chainId}`;
 export const relayPartId = (chainId: number) => `relay:${chainId}`;
 
-/** Every part the page lists, in its order within each group. */
+/** Every part the page lists, in its order within each group (the groups' order is lib/status/model GROUPS). */
 export function statusParts(): StatusPart[] {
   const nets = statusNetworks();
   const proxied = proxiedNetworks();
   return [
-    ...PAGES.map((p) => ({ id: p.id, name: p.name, group: "platform" as const })),
-    { id: "database", name: "Database", group: "platform", note: "Upstash Redis" },
-    { id: "api", name: "Partner API", group: "api" },
+    ...nets.map((n) => ({ id: relayPartId(n.chainId), name: `Relay on ${networkName(n)}`, group: "payments" as const, chainId: n.chainId })),
+    ...nets.map((n) => ({ id: networkPartId(n.chainId), name: networkName(n), group: "networks" as const, chainId: n.chainId })),
+    { id: "bridge", name: "Relay bridge", group: "api", note: "relay.link" },
     { id: "leaves", name: "Vault leaves", group: "api", note: "What claims, payments and balances read" },
     ...(proxied.length
       ? [{ id: "rpc-proxy", name: "RPC proxy", group: "api" as const, note: joinNames(proxied.map((n) => networkName(n))) }]
       : []),
-    ...nets.map((n) => ({ id: relayPartId(n.chainId), name: `Relay on ${networkName(n)}`, group: "payments" as const, chainId: n.chainId })),
-    ...nets.map((n) => ({ id: networkPartId(n.chainId), name: networkName(n), group: "networks" as const, chainId: n.chainId })),
-    { id: "bridge", name: "Relay bridge", group: "integrations", note: "relay.link" },
-    { id: "mcp", name: "Hosted MCP", group: "integrations" },
+    { id: "mcp", name: "Hosted MCP", group: "api" },
+    { id: "api", name: "Partner API", group: "api" },
     { id: "glim", name: "Glim", group: "integrations", note: "Telegram bot" },
     { id: "turnkey", name: "Turnkey", group: "integrations", note: "Email and passkey wallets" },
+    ...PAGES.map((p) => ({ id: p.id, name: p.name, group: "platform" as const })),
+    { id: "database", name: "Database", group: "platform", note: "Upstash Redis" },
   ];
 }
 

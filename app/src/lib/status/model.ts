@@ -10,15 +10,15 @@
 
 export type Health = "operational" | "degraded" | "down";
 
-export type GroupId = "platform" | "api" | "payments" | "networks" | "integrations";
+export type GroupId = "payments" | "networks" | "api" | "integrations" | "platform";
 
-/** The page's groups, in its order. */
+/** The page's groups, in its order: money first, the site last. */
 export const GROUPS: { id: GroupId; name: string }[] = [
-  { id: "platform", name: "Platform" },
-  { id: "api", name: "API" },
   { id: "payments", name: "Payments and relay" },
   { id: "networks", name: "Networks" },
-  { id: "integrations", name: "Bridge and integrations" },
+  { id: "api", name: "Bridge and API" },
+  { id: "integrations", name: "Integrations" },
+  { id: "platform", name: "Platform" },
 ];
 
 /** One part of Gloam, as the page lists it. */
