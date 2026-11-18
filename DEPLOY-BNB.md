@@ -211,9 +211,11 @@ From `contracts/` in a fresh worktree of `main` (with `pnpm install` done, and
    ```bash
    ACCEPT_CONTROLLER_TX=0x... ./bnb-mainnet-after-deploy.sh
    ```
-   Reads only. Stops at the first thing off: every deploy transaction from the deployer and
-   successful, setup ended, limits on, fee and treasury, the guard owns the vault and refuses
-   `setVerifier`, the Safe is the controller with its three signers and threshold 2, the
+   Run it only after step 7: it stops, and writes nothing, until the Safe is the guard's
+   controller with no handover pending. Reads only. Stops at the first thing off: every deploy
+   transaction from the deployer and successful, setup ended, limits on, fee and treasury, the
+   guard owns the vault and refuses `setVerifier`, the Safe is the controller with its three
+   signers and threshold 2, the
    verifiers hold the final keys, each asset's limit in its own decimals, BDX is the OFT, and
    the vault, verifiers and adapters byte for byte Elysium's. If all is right it writes
    `deployments/bnb-mainnet.json` and the pool, block and memo board into

@@ -4,8 +4,12 @@
 #   RPC_URL=... DEPLOYER=0x... ./bnb-mainnet-after-deploy.sh
 # Optional:
 #   GUARD_CONTROLLER=0x...      the controller the deploy named (default: the Gloam Owner Safe)
-#   ACCEPT_CONTROLLER_TX=0x...  once GUARD_CONTROLLER has called acceptController() on the guard;
+#   ACCEPT_CONTROLLER_TX=0x...  GUARD_CONTROLLER's acceptController() on the guard (step 7);
 #                               it is checked and recorded
+# It stops unless the guard's controller is GUARD_CONTROLLER with no handover pending: run it
+# after the Safe accepts the guard (step 7), never before, so the pool is only switched on in
+# packages/sdk/src/bnb.ts once the deployer no longer runs the guard. A controller other than
+# the Safe also needs BNB_ALLOW_OTHER_CONTROLLER=1.
 #   BNB_STABLE_LIMITS, BNB_NATIVE_LIMITS, BNB_BDX_LIMITS   if the deploy used other limits than the
 #                               defaults (see bnb-mainnet-env.sh); each is checked against the chain
 # It reads the deploy back from the chain and stops at the first thing that is not as the
@@ -139,18 +143,15 @@ same "$(call "$GUARD" 'vault()(address)')" "$POOL" || fail "the guard names anot
 ok "the vault is owned by its guard $GUARD: no proof checker can be replaced, ownership cannot move"
 CONTROLLER=$(cast to-check-sum-address "$(call "$GUARD" 'controller()(address)')")
 PENDING=$(cast to-check-sum-address "$(call "$GUARD" 'pendingController()(address)')")
-if same "$GUARD_CONTROLLER" "$DEPLOYER"; then
-  same "$CONTROLLER" "$DEPLOYER" && same "$PENDING" "$ZERO" || fail "the guard's controller is $CONTROLLER (pending $PENDING), not the deployer."
-  ok "guard controller is the deployer, as named"
-elif same "$CONTROLLER" "$GUARD_CONTROLLER"; then
-  same "$PENDING" "$ZERO" || fail "the guard has another controller handover pending ($PENDING)."
-  ok "guard controller is $GUARD_CONTROLLER, accepted"
-else
-  same "$CONTROLLER" "$DEPLOYER" || fail "the guard's controller is $CONTROLLER, neither the deployer nor GUARD_CONTROLLER."
-  same "$PENDING" "$GUARD_CONTROLLER" || fail "the guard offers its controller seat to $PENDING, not GUARD_CONTROLLER."
-  [ -z "${ACCEPT_CONTROLLER_TX:-}" ] || fail "ACCEPT_CONTROLLER_TX is set but GUARD_CONTROLLER has not accepted yet."
-  echo "note  GUARD_CONTROLLER $GUARD_CONTROLLER has not called acceptController() yet (step 7). Until then the deployer runs the guard: limits and the fee only."
+# Nothing is written until the guard is in GUARD_CONTROLLER's hands (the Safe), with no handover pending.
+same "$GUARD_CONTROLLER" "$SAFE" || [ "${BNB_ALLOW_OTHER_CONTROLLER:-0}" = 1 ] || fail "GUARD_CONTROLLER is $GUARD_CONTROLLER, not the Gloam Owner Safe $SAFE. Set BNB_ALLOW_OTHER_CONTROLLER=1 only if that was the plan."
+same "$GUARD_CONTROLLER" "$DEPLOYER" && fail "GUARD_CONTROLLER is the deployer: the guard must be handed to the Safe before BNB Chain is switched on."
+if same "$CONTROLLER" "$DEPLOYER" && same "$PENDING" "$GUARD_CONTROLLER"; then
+  fail "GUARD_CONTROLLER $GUARD_CONTROLLER has not called acceptController() on the guard yet (step 7). Run this again once it has."
 fi
+same "$CONTROLLER" "$GUARD_CONTROLLER" || fail "the guard's controller is $CONTROLLER, not GUARD_CONTROLLER $GUARD_CONTROLLER."
+same "$PENDING" "$ZERO" || fail "the guard has another controller handover pending ($PENDING)."
+ok "guard controller is $GUARD_CONTROLLER, accepted, nothing pending"
 if same "$GUARD_CONTROLLER" "$SAFE"; then
   owners=$(call "$SAFE" 'getOwners()(address[])' | tr -d ' ')
   thr=$(call "$SAFE" 'getThreshold()(uint256)')
@@ -278,4 +279,4 @@ ok "$NAME filled in: the pool and its block${MEMO:+, and the memo board,} in $SD
 echo
 git --no-pager diff --stat -- "$SDK_BNB" 2>/dev/null || true
 echo
-echo "Next: step 7 (the Safe accepts the guard, if not done), step 9 (verify the source), then the switch-on PR."
+echo "Next: step 9 (verify the source), then the switch-on PR."
