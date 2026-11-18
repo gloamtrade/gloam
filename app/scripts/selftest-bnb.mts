@@ -53,6 +53,12 @@ if (MODE === "on" || MODE === "badpool") process.env.NEXT_PUBLIC_BNB_LIVE_SINCE 
 const HEAD = 135_000_000n;
 const PRUNED_FROM = HEAD - 220_000n;
 const VAULT_LOG_BLOCK = 134_300_010n;
+/** A second vault log just inside what publicnode keeps: a range from before it straddles the edge. */
+const VAULT_LOG_BLOCK_2 = PRUNED_FROM + 10n;
+/** Keyed RPCs that keep every log but take at most this many blocks a read: one says so with -32602, one with -32005. */
+const KEYED_RANGE = 10_000n;
+/** While true, publicnode fails every call as a node (HTTP 500). */
+let publicDown = false;
 const asked: { url: string; method: string; params: unknown[] }[] = [];
 const hex = (n: bigint) => `0x${n.toString(16)}`;
 function answer(url: string, method: string, params: unknown[]): unknown {
@@ -62,27 +68,34 @@ function answer(url: string, method: string, params: unknown[]): unknown {
     const f = params[0] as { address?: string; fromBlock?: string; toBlock?: string };
     const from = BigInt(f.fromBlock ?? "0x0");
     const to = f.toBlock ? BigInt(f.toBlock) : HEAD;
-    const keepsFrom = url.includes("/api/rpc/56") || url.includes("archive.example") ? 0n : PRUNED_FROM;
+    const keepsFrom = /\/api\/rpc\/56|archive\.example|capped/.test(url) ? 0n : PRUNED_FROM;
     if (to < keepsFrom) return [];
     if (String(f.address).toLowerCase() === USDT.toLowerCase()) {
       return [{ address: USDT, blockNumber: hex(from), blockHash: `0x${"11".repeat(32)}`, transactionHash: `0x${"22".repeat(32)}`, transactionIndex: "0x0", logIndex: "0x0", data: "0x", topics: [], removed: false }];
     }
-    if (VAULT_LOG_BLOCK >= from && VAULT_LOG_BLOCK <= to && VAULT_LOG_BLOCK >= keepsFrom) {
-      return [{ address: POOL, blockNumber: hex(VAULT_LOG_BLOCK), blockHash: `0x${"33".repeat(32)}`, transactionHash: `0x${"44".repeat(32)}`, transactionIndex: "0x0", logIndex: "0x0", data: "0x", topics: [], removed: false }];
-    }
-    return [];
+    return [VAULT_LOG_BLOCK, VAULT_LOG_BLOCK_2]
+      .filter((b) => b >= from && b <= to && b >= keepsFrom)
+      .map((b) => ({ address: POOL, blockNumber: hex(b), blockHash: `0x${"33".repeat(32)}`, transactionHash: `0x${"44".repeat(32)}`, transactionIndex: "0x0", logIndex: "0x0", data: "0x", topics: [], removed: false }));
   }
   throw new Error(`fake RPC: ${method} not expected`);
 }
 globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
   const url = String(input instanceof Request ? input.url : input);
-  if (!/bsc-rpc\.publicnode\.com|bsc-dataseed\.bnbchain\.org|\/api\/rpc\/56|archive\.example/.test(url)) {
+  if (!/bsc-rpc\.publicnode\.com|bsc-dataseed\.bnbchain\.org|\/api\/rpc\/56|archive\.example|capped\.example|capped32005\.example/.test(url)) {
     throw new Error(`selftest-bnb: no network calls allowed (${url})`);
   }
+  if (publicDown && url.includes("publicnode")) return new Response("upstream down", { status: 500 });
   const body = JSON.parse(init?.body ?? "null");
   const one = (b: { id: number; method: string; params?: unknown[] }) => {
     asked.push({ url, method: b.method, params: b.params ?? [] });
     if (b.method === "eth_getLogs" && url.includes("bsc-dataseed")) return { jsonrpc: "2.0", id: b.id, error: { code: -32005, message: "limit exceeded" } };
+    if (b.method === "eth_getLogs" && url.includes("capped")) {
+      const f = (b.params ?? [])[0] as { fromBlock: string; toBlock: string };
+      if (BigInt(f.toBlock) - BigInt(f.fromBlock) + 1n > KEYED_RANGE) {
+        const error = url.includes("capped32005") ? { code: -32005, message: "limit exceeded" } : { code: -32602, message: "eth_getLogs is limited to a 10,000 block range" };
+        return { jsonrpc: "2.0", id: b.id, error };
+      }
+    }
     return { jsonrpc: "2.0", id: b.id, result: answer(url, b.method, b.params ?? []) };
   };
   const out = Array.isArray(body) ? body.map(one) : one(body);
@@ -234,6 +247,39 @@ if (MODE === "on") {
   const browser = createPublicClient({ chain: e.chain, transport: readTransport(e, { retryCount: 0 }, { proxy: "https://www.gloam.trade/api/rpc/56" }) });
   const viaProxy = (await browser.request(vaultLogs as never)) as { blockNumber: string }[];
   ok(viaProxy.length === 1 && asked.some((a) => a.url.includes("/api/rpc/56") && a.method === "eth_getLogs"), "on: the browser gets the old log through the proxy");
+
+  // A range straddling the oldest block publicnode keeps: it answers only the newer log.
+  // Never passed as the whole range: the server without a key fails loudly, the browser asks the proxy.
+  const straddle = { method: "eth_getLogs", params: [{ address: POOL, fromBlock: hex(VAULT_LOG_BLOCK - 10n), toBlock: hex(VAULT_LOG_BLOCK_2) }] } as const;
+  resetRpcChecks();
+  await assert.rejects(createPublicClient({ chain: e.chain, transport: serverTransport(e, { retryCount: 0 }) }).request(straddle as never), /no logs at block/);
+  checks++;
+  const straddled = (await browser.request(straddle as never)) as unknown[];
+  ok(straddled.length === 2, "on: a straddling range comes back whole through the proxy, never as its newer half");
+
+  // GLOAM_RPC_URL_56 on a plan that takes 10,000 blocks a read. Its refusal reaches the caller, so
+  // the walk splits the range, instead of the public RPC answering [] for blocks it dropped.
+  for (const host of ["capped", "capped32005"]) {
+    process.env.GLOAM_RPC_URL_56 = `https://${host}.example/bsc`;
+    resetRpcChecks();
+    const capped = createPublicClient({ chain: e.chain, transport: serverTransport(e, { retryCount: 0 }) });
+    const wide = await capped.request(vaultLogs as never).then(
+      (r) => r as unknown[],
+      (err: unknown) => err as Error
+    );
+    ok(wide instanceof Error && /10,000 block range|limit exceeded/.test(String((wide as { details?: string }).details ?? wide.message)), `on: ${host}: a range the keyed RPC refuses is refused, never read as [] from the public RPC`);
+    const before = asked.length;
+    const narrow = (await capped.request({ method: "eth_getLogs", params: [{ address: POOL, fromBlock: hex(134_300_000n), toBlock: hex(134_309_999n) }] } as never)) as unknown[];
+    ok(narrow.length === 1 && asked.slice(before).some((a) => a.url.includes(host) && a.method === "eth_getLogs"), `on: ${host}: the split range is read from the keyed RPC (not passed over)`);
+  }
+  delete process.env.GLOAM_RPC_URL_56;
+  resetRpcChecks();
+
+  // The browser with publicnode down: log reads go to the proxy through the check, as before.
+  publicDown = true;
+  const viaProxyDown = (await browser.request(vaultLogs as never)) as unknown[];
+  publicDown = false;
+  ok(viaProxyDown.length === 1, "on: with publicnode down the browser reads the old log through the proxy");
 }
 
 if (MODE === "off") {

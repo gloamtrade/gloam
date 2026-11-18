@@ -23,15 +23,20 @@
  * (lib/rpcList): one that is down is passed over for a while, and a send
  * still goes to exactly one node.
  *
- * A network with a `logCanary` (BNB Chain) is read through the SDK's
- * guardPrunedLogs around all of it: its public RPCs keep about a day of logs
- * and answer an empty list for older blocks, so an empty answer about old blocks
- * is checked against the canary's logs, and a pruned one (the public RPC, or a
- * GLOAM_RPC_URL_56 that is not an archive plan) fails loudly, never as "no events".
+ * A network with a `logCanary` (BNB Chain) checks each side on its own with
+ * the SDK's guardPrunedLogs: its public RPCs keep little history and answer an
+ * empty list (or only the newer part of a range) for older blocks, so a log
+ * answer about old blocks is checked against the canary's logs on the RPC that
+ * gave it. A log read goes to the private RPC alone unless it failed as a node:
+ * a refusal of the range (too wide, too many logs) is thrown, so the walk splits
+ * it, instead of the public RPC answering with less history. A pruned answer
+ * (the public RPC, or a GLOAM_RPC_URL_56 that is not an archive plan) fails
+ * loudly, never as "no events".
  */
-import { fallback, http, type HttpTransportConfig, type Transport } from "viem";
-import { guardPrunedLogs, type LogCanary } from "@gloamtrade/sdk";
+import { fallback, http, type EIP1193RequestFn, type HttpTransportConfig, type Transport } from "viem";
+import { PrunedLogsError, guardPrunedLogs, type LogCanary } from "@gloamtrade/sdk";
 import type { GloamNetwork } from "./networks";
+import { isRangeError } from "./logRange";
 import { SEND_METHODS, nodeFailed, resetRpcRest, rpcListTransport } from "./rpcList";
 import { readTransport } from "./readTransport";
 
@@ -119,7 +124,7 @@ function answersFor(url: string, chainId: number, config: HttpTransportConfig): 
  * transport only) takes a send while the private RPC has not answered: nothing
  * reached it, so the send still goes out once, through the public RPC.
  */
-function checkedPrivate(url: string, chainId: number, config: HttpTransportConfig, sendInstead?: Transport): Transport {
+function checkedPrivate(url: string, chainId: number, config: HttpTransportConfig, sendInstead?: Transport, keepOnLogRange = false): Transport {
   // asked once per call: a node that hangs costs one timeout, then it is passed over
   const inner = http(url, { ...config, retryCount: 0 });
   const key = `${chainId} ${url}`;
@@ -138,8 +143,10 @@ function checkedPrivate(url: string, chainId: number, config: HttpTransportConfi
         try {
           return await t.request(args);
         } catch (e) {
-          // checked, then failed as a node: passed over like one that never answered
-          if (nodeFailed(e)) {
+          // checked, then failed as a node: passed over like one that never answered. A log
+          // range it refuses (some say "limit exceeded") is about the range, not the node,
+          // where the walk splits it: kept, so the smaller ranges come back here.
+          if (nodeFailed(e) && !(keepOnLogRange && args.method === "eth_getLogs" && isRangeError(e))) {
             passOver(key);
             const status = (e as { status?: number })?.status ?? null;
             console.warn("gloam_rpc_private_failed", JSON.stringify({ chainId, method: args.method, status }));
@@ -159,25 +166,55 @@ function checkedPrivate(url: string, chainId: number, config: HttpTransportConfi
  * also takes `retryCount` from `config` then, instead of its own default of 3.
  */
 export function serverTransport(net: Net, config: HttpTransportConfig = {}, opts: { sendOnce?: boolean } = {}): Transport {
-  if (net.logCanary) {
-    // one check around the whole thing (private RPC and public list), not one per side
-    return guardPrunedLogs<Transport>(serverTransport({ ...net, logCanary: null }, config, opts), net.logCanary);
-  }
   const urls = net.chain.rpcUrls.default.http;
   const priv = privateRpc(net);
+  const canary = net.logCanary ?? null;
   // The public side reads the way the browser does (lib/readTransport): the
   // chain's public RPCs in order for the head, and old logs and state from the
   // network's history RPC where it has one. A send goes to one head RPC only.
+  // With a logCanary, readTransport checks the public side's log answers itself.
   if (!priv || priv === urls[0]) return readTransport(net, config, opts.sendOnce ? { sendTo: "one" } : {});
   // the fallback retries the pair as a whole; each side asks each of its RPCs once a pass
   const once = { ...config, retryCount: 0 };
   if (!opts.sendOnce) {
-    return fallback([checkedPrivate(priv, net.chainId, config), readTransport(net, once)], { retryCount: config.retryCount });
+    const own = checkedPrivate(priv, net.chainId, config, undefined, canary !== null);
+    const backup = readTransport(net, once);
+    return canary ? logsOneSideAtATime(own, backup, canary, config.retryCount) : fallback([own, backup], { retryCount: config.retryCount });
   }
   // sendInstead only ever takes a send: one head RPC
-  const own = checkedPrivate(priv, net.chainId, config, rpcListTransport(urls, once, { sendTo: "one" }));
+  const own = checkedPrivate(priv, net.chainId, config, rpcListTransport(urls, once, { sendTo: "one" }), canary !== null);
   // The backup never gets a raw send. Its exclusion has to show on the transport
   // fallback reads (config.methods), which the history split carries over from the head list.
   const backup = readTransport(net, { ...once, methods: { exclude: SEND_METHODS } });
-  return fallback([own, backup], { retryCount: config.retryCount });
+  return canary ? logsOneSideAtATime(own, backup, canary, config.retryCount) : fallback([own, backup], { retryCount: config.retryCount });
+}
+
+/**
+ * The private/public pair for a network with a logCanary (BNB Chain). Every
+ * method but eth_getLogs goes through the usual fallback. A log read goes to
+ * the private RPC, its answer checked against the canary on that same RPC; it
+ * goes on to the public side (checked against its own canary there) only when
+ * the private RPC failed as a node or is not in use. A range the private RPC
+ * refuses is thrown for the walk to split, and a pruned answer from it is
+ * thrown too: one check around both sides would let the public RPC's empty
+ * answer pass on the private RPC's canary.
+ */
+function logsOneSideAtATime(own: Transport, backup: Transport, canary: LogCanary, retryCount?: number): Transport {
+  const ownChecked = guardPrunedLogs<Transport>(own, canary);
+  const pair = fallback([own, backup], { retryCount });
+  return (params) => {
+    const p = pair(params);
+    const o = ownChecked(params);
+    const b = backup(params);
+    const request = (async (args, options) => {
+      if (args.method !== "eth_getLogs") return p.request(args, options);
+      try {
+        return await o.request(args, options);
+      } catch (e) {
+        if (e instanceof PrunedLogsError || isRangeError(e)) throw e;
+        return b.request(args, options);
+      }
+    }) as EIP1193RequestFn;
+    return { ...o, config: { ...o.config, request }, request } as ReturnType<Transport>;
+  };
 }

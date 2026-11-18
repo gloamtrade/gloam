@@ -18,13 +18,17 @@
  * `opts.proxy` (browser only) adds gloam.trade's RPC proxy for the chain after
  * the head list (lib/rpcProxy): asked only when the public RPCs fail, for reads.
  *
- * A network with a `logCanary` (BNB Chain, whose public RPCs keep about a day of
- * logs and answer an empty list for older blocks) reads through the SDK's
- * guardPrunedLogs: an empty answer about old blocks is checked against the
- * canary's logs there, and when the RPC turns out to have dropped them the read
- * goes to `opts.archive` (an RPC that keeps every log), else to the proxy, which
- * reads through the server's keyed RPC; with neither it fails loudly
- * (PrunedLogsError) instead of passing as "nothing happened".
+ * A network with a `logCanary` (BNB Chain, whose public RPCs keep little
+ * history and answer an empty list, or only the newer part of a range, for older
+ * blocks) reads its logs through the SDK's guardPrunedLogs: a log answer about
+ * old blocks is checked against the canary's logs on the RPC that gave it, and
+ * when that RPC turns out to have dropped them (or fails) the read goes to
+ * `opts.archive` (an RPC that keeps every log), else to the proxy, which reads
+ * through the server's keyed RPC; with neither it fails loudly (PrunedLogsError)
+ * instead of passing as "nothing happened". Log reads there never go on to the
+ * proxy inside the list: the canary has to be answered by the RPC that answered
+ * the read, so the proxy is asked through the check instead. Every other method
+ * keeps the list with the proxy after it.
  *
  * The routing itself is the SDK's (splitReadTransport), so the app, the SDK
  * and the MCP split reads the same way. Both sides are this app's own viem
@@ -34,7 +38,7 @@
  * keep a raw send off a backup.
  */
 import { guardPrunedLogs, splitReadTransport, type LogCanary } from "@gloamtrade/sdk";
-import { http, type HttpTransportConfig, type Transport } from "viem";
+import { http, type EIP1193RequestFn, type HttpTransportConfig, type Transport } from "viem";
 import type { GloamNetwork } from "./networks";
 import { rpcListTransport, type RpcListOptions } from "./rpcList";
 
@@ -44,18 +48,32 @@ export function readTransport(
   opts: RpcListOptions & { archive?: string | null } = {}
 ): Transport {
   const { archive, ...listOpts } = opts;
-  const head = rpcListTransport(net.chain.rpcUrls.default.http, config, listOpts);
-  const read = !net.historyRpc
-    ? head
-    : splitReadTransport<Transport>({
-        fresh: head,
-        // one RPC, not the list: the head RPCs cannot serve these old blocks
-        history: http(net.historyRpc.url, config),
-        recentBlocks: net.historyRpc.recentBlocks,
-      });
+  const build = (o: RpcListOptions): Transport => {
+    const head = rpcListTransport(net.chain.rpcUrls.default.http, config, o);
+    return !net.historyRpc
+      ? head
+      : splitReadTransport<Transport>({
+          fresh: head,
+          // one RPC, not the list: the head RPCs cannot serve these old blocks
+          history: http(net.historyRpc.url, config),
+          recentBlocks: net.historyRpc.recentBlocks,
+        });
+  };
+  const read = build(listOpts);
   if (!net.logCanary) return read;
   const old = archive ?? listOpts.proxy ?? null;
-  return guardPrunedLogs<Transport>(read, net.logCanary, { archive: old ? http(old, config) : null });
+  const logs = guardPrunedLogs<Transport>(listOpts.proxy ? build({ ...listOpts, proxy: null }) : read, net.logCanary, {
+    archive: old ? http(old, config) : null,
+    // the proxy used to come after the public RPCs in the list: it still answers when they fail
+    archiveOnError: old !== null,
+  });
+  if (!listOpts.proxy) return logs;
+  return (params) => {
+    const l = logs(params);
+    const r = read(params);
+    const request = ((args, options) => (args.method === "eth_getLogs" ? l : r).request(args, options)) as EIP1193RequestFn;
+    return { ...l, config: { ...l.config, request }, request } as ReturnType<Transport>;
+  };
 }
 
 /**

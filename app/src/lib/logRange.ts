@@ -25,6 +25,11 @@ export function isRateLimit(e: unknown): boolean {
   return status === 429 || /429|too many requests|rate ?limit/i.test(errText(e));
 }
 
+/** A log read the node refused as too wide or too big: an answer about the range, which a walk splits on. */
+export function isRangeError(e: unknown): boolean {
+  return !isRateLimit(e) && RANGE_ERROR.test(errText(e));
+}
+
 /**
  * getLogs for one range: retries transient failures, halves the range when the
  * node says it is too wide. Generic so typed event logs (getLogs with `events`)
