@@ -133,8 +133,6 @@ const STATE_WORDS: Record<PieceState, string> = {
 export function PiecesCard({
   pieces,
   asset,
-  amount,
-  avoiding,
   tailMatch,
   run,
   onReroll,
@@ -142,9 +140,10 @@ export function PiecesCard({
 }: {
   pieces: bigint[];
   asset: string;
-  amount: bigint;
+  /** Kept for callers; the card no longer spells out the total. */
+  amount?: bigint;
   /** What the pieces stay clear of, in words ("money you added"), or null when there is nothing to avoid. */
-  avoiding: string | null;
+  avoiding?: string | null;
   tailMatch: boolean;
   run: PieceProgress[] | null;
   onReroll?: () => void;
@@ -154,15 +153,29 @@ export function PiecesCard({
   return (
     <div className="rounded-[16px] bg-sealed-soft px-4 py-4 sm:px-5">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[13px] font-medium text-sealed">{`In ${pieces.length} pieces`}</p>
-        {onReroll && !run && (
-          <button
-            type="button"
-            onClick={onReroll}
-            className="-my-2 -mr-2 inline-flex min-h-10 items-center rounded-full px-2 text-[13px] text-mute transition-colors hover:text-foreground"
-          >
-            Other sizes
-          </button>
+        <p className="text-[13px] font-medium text-sealed">{`${pieces.length} pieces`}</p>
+        {!run && (onReroll || (tailMatch && onRound)) && (
+          <span className="-my-2 -mr-2 flex items-center">
+            {tailMatch && onRound && (
+              <button
+                type="button"
+                onClick={onRound}
+                title="One piece keeps the cents of money you added. Rounding leaves them in your balance."
+                className="inline-flex min-h-10 items-center rounded-full px-2 text-[13px] font-medium text-foreground transition-colors hover:text-sealed"
+              >
+                Round it
+              </button>
+            )}
+            {onReroll && (
+              <button
+                type="button"
+                onClick={onReroll}
+                className="inline-flex min-h-10 items-center rounded-full px-2 text-[13px] text-mute transition-colors hover:text-foreground"
+              >
+                Other sizes
+              </button>
+            )}
+          </span>
         )}
       </div>
       {run ? (
@@ -190,21 +203,6 @@ export function PiecesCard({
             </li>
           ))}
         </ul>
-      )}
-      <p className="mt-3 text-[12.5px] leading-relaxed text-soft">
-        {avoiding ? `None of them matches ${avoiding}. ` : ""}
-        {`Together they make exactly ${formatAssetLabel(amount, asset)}.`}
-      </p>
-      {tailMatch && !run && (
-        <p className="mt-2 text-[12.5px] leading-relaxed text-soft">
-          One piece keeps the cents of money you added, which can tie it back.{" "}
-          {onRound && (
-            <button type="button" onClick={onRound} className="font-medium text-foreground underline underline-offset-4">
-              Round it
-            </button>
-          )}{" "}
-          to leave them in your balance.
-        </p>
       )}
     </div>
   );

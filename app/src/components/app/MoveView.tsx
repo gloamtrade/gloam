@@ -1138,17 +1138,9 @@ export function MoveView() {
   const piecesReady = pieceTargets.length > 0 && pieceTargets.every(Boolean);
   const distinctTargets = new Set(pieceTargets.filter(Boolean).map((a) => a!.toLowerCase())).size;
   // Honest about what splitting can't hide: pieces that meet at one address add up there.
-  const whereLine = !planActive
-    ? null
-    : pieceTargets.some((a) => a && tiedToYou(a))
-      ? "Splitting can't hide a wallet that is tied to you: pieces that land there can still be linked back."
-      : !perPiece
-        ? `All ${planPieceList.length} pieces land at the same address, so anyone looking at it can add them up. A busy address, like an exchange deposit address, hides that better.`
-        : !piecesReady
-          ? "Paste an address for each piece. Fresh ones that never touched Gloam are best."
-          : distinctTargets < planPieceList.length
-            ? "Some pieces land at the same address, so they can be added up there."
-            : "Each piece lands at its own address, which makes them harder to add up.";
+  // Only when it matters: a piece landing at a wallet tied to you can be linked back.
+  const whereLine =
+    planActive && pieceTargets.some((a) => a && tiedToYou(a)) ? "This wallet is tied to you, so the pieces can be linked back." : null;
 
   // Does money sent to this address get swept out? Read in the background; a
   // failed read is no warning, never a blocked cash out.
@@ -3412,14 +3404,14 @@ export function MoveView() {
                         onRound={roundCashOut}
                       />
                       <div>
-                        <p className="text-[12.5px] leading-relaxed text-mute">{whereLine}</p>
+                        {whereLine && <p className="text-[12.5px] leading-relaxed text-warn">{whereLine}</p>}
                         <button
                           type="button"
                           disabled={working}
                           onClick={() => setPerPiece((v) => !v)}
                           className="-my-1 inline-flex min-h-10 items-center text-[13px] font-medium text-foreground underline underline-offset-4 disabled:opacity-50"
                         >
-                          {perPiece ? "Send them all to one address" : "Use a different address for each piece"}
+                          {perPiece ? "One address for all" : "A different address per piece"}
                         </button>
                         {perPiece && (
                           <div className="mt-2 space-y-3">
