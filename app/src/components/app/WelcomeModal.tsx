@@ -8,6 +8,7 @@ import { useModalFocus } from "@/hooks/useModalFocus";
 import { readDemo } from "@/lib/demoFlag";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { keptClaimLink } from "@/lib/claimLinkStore";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 /** The key the welcome is dismissed under (the mainnet welcome's; the older testnet one is no longer read). */
 const SHOWN_KEY = "gloam_mainnet_welcome_v1";
@@ -93,7 +94,7 @@ export function WelcomeModal() {
             </h2>
             <p className="mt-3 text-[15px] leading-relaxed text-mute">
               Private money on {liveMainnetNames()} mainnet.
-              The testnet stays open for trying things first.
+              {SHOW_TESTNETS && " The testnet stays open for trying things first."}
             </p>
           </div>
         </div>
@@ -102,18 +103,27 @@ export function WelcomeModal() {
           <p className="text-[15px] text-foreground">Quick start</p>
           <ol className="mt-2">
             {[
-              <>Connect a wallet and pick a network. The menu marks each one Mainnet or Testnet.</>,
-              <>
-                On testnet, claim test funds if you need them. The{" "}
-                <IntentLink
-                  href="/docs/testnet"
-                  className="font-medium text-foreground underline decoration-line-strong underline-offset-4 hover:decoration-foreground"
-                  onClick={dismiss}
-                >
-                  testnet guide
-                </IntentLink>{" "}
-                shows how.
-              </>,
+              SHOW_TESTNETS ? (
+                <>Connect a wallet and pick a network. The menu marks each one Mainnet or Testnet.</>
+              ) : (
+                <>Connect a wallet and pick a network.</>
+              ),
+              // the testnets out of view (lib/showTestnets): no test-funds step
+              ...(SHOW_TESTNETS
+                ? [
+                    <>
+                      On testnet, claim test funds if you need them. The{" "}
+                      <IntentLink
+                        href="/docs/testnet"
+                        className="font-medium text-foreground underline decoration-line-strong underline-offset-4 hover:decoration-foreground"
+                        onClick={dismiss}
+                      >
+                        testnet guide
+                      </IntentLink>{" "}
+                      shows how.
+                    </>,
+                  ]
+                : []),
               <>
                 <span className="font-medium text-foreground">Add money</span>{" "}
                 to your private balance, pay or send it, then cash out when you
@@ -161,11 +171,11 @@ export function WelcomeModal() {
             Enter the app
           </button>
           <IntentLink
-            href="/docs/testnet"
+            href={SHOW_TESTNETS ? "/docs/testnet" : "/docs"}
             onClick={dismiss}
             className="btn btn-quiet h-[44px] px-[20px] sm:h-12 sm:px-6 sm:text-[15px]"
           >
-            Testnet guide
+            {SHOW_TESTNETS ? "Testnet guide" : "Read the docs"}
           </IntentLink>
         </div>
       </div>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { IntentLink } from "@/components/IntentLink";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 /**
  * The docs map: sidebar groups, top tabs, and the helpers that decide what is
@@ -22,7 +23,8 @@ export const DOCS_NAV: DocNavGroup[] = [
     items: [
       { href: "/docs", label: "Overview" },
       { href: "/docs/quickstart", label: "Quickstart" },
-      { href: "/docs/testnet", label: "Practice on testnet" },
+      // only while people see the testnets (lib/showTestnets); the page stays at its address
+      ...(SHOW_TESTNETS ? [{ href: "/docs/testnet", label: "Practice on testnet" }] : []),
       { href: "/docs/product", label: "What ships when" },
     ],
   },

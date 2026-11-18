@@ -4,6 +4,7 @@ import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 export const metadata: Metadata = {
   title: "Private payroll",
@@ -67,13 +68,18 @@ export default function DocsPayrollPage() {
       <ol>
         <li>
           <strong>Fund your wallet.</strong> On mainnet, hold USDG on Robinhood
-          Chain, or USDC.e, pathUSD, USDT0 or OUSD on Tempo. To practice first
-          on testnet, claim test USDG from the{" "}
-          <a href="https://faucet.paxos.com/" target="_blank" rel="noreferrer">
-            Paxos faucet
-          </a>{" "}
-          on Robinhood Chain, or use the faucet button in the app for PathUSD on
-          Tempo. See <Link href="/docs/testnet">practice on testnet</Link>.
+          Chain, or USDC.e, pathUSD, USDT0 or OUSD on Tempo.
+          {/* the testnets only while people see them (lib/showTestnets) */}
+          {SHOW_TESTNETS && (
+            <>
+              {" "}To practice first on testnet, claim test USDG from the{" "}
+              <a href="https://faucet.paxos.com/" target="_blank" rel="noreferrer">
+                Paxos faucet
+              </a>{" "}
+              on Robinhood Chain, or use the faucet button in the app for PathUSD on
+              Tempo. See <Link href="/docs/testnet">practice on testnet</Link>.
+            </>
+          )}
         </li>
         <li>
           <strong>Add it privately.</strong> In{" "}

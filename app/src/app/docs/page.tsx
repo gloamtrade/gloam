@@ -6,6 +6,7 @@ import { PoolPicture } from "@/components/docs/FlowDiagram";
 import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { ELYSIUM_ENABLED } from "@/lib/elysium";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 /** The mainnets with a pool in, as words: "Robinhood Chain and Tempo" until Base and Ethereum are in. */
 const MAINNETS = liveMainnetNames();
@@ -56,18 +57,20 @@ export default function DocsOverviewPage() {
       <PoolPicture title="One picture" />
 
       <h2 id="try">Try it (2 minutes)</h2>
-      <p>
-        Want to test it on testnet first? Follow the{" "}
-        <Link href="/docs/testnet">
-          <strong>testnet guide</strong>
-        </Link>
-        .
-      </p>
+      {/* the testnet guide only while people see the testnets (lib/showTestnets) */}
+      {SHOW_TESTNETS && (
+        <p>
+          Want to test it on testnet first? Follow the{" "}
+          <Link href="/docs/testnet">
+            <strong>testnet guide</strong>
+          </Link>
+          .
+        </p>
+      )}
       <ol>
         <li>
           Open <AppLink href="/app">/app</AppLink>, connect a wallet, and pick a
-          network: a mainnet ({MAINNETS}), or a testnet to try it
-          first.
+          network: {SHOW_TESTNETS ? <>a mainnet ({MAINNETS}), or a testnet to try it first.</> : <>{MAINNETS}.</>}
         </li>
         <li>
           <AppLink href="/app/vault?tab=shield">Add privately</AppLink>: move a
@@ -158,9 +161,11 @@ export default function DocsOverviewPage() {
         <li>
           <Link href="/docs/chain">Networks: mainnet and testnet</Link>
         </li>
-        <li>
-          <Link href="/docs/testnet">Practice on testnet</Link>
-        </li>
+        {SHOW_TESTNETS && (
+          <li>
+            <Link href="/docs/testnet">Practice on testnet</Link>
+          </li>
+        )}
         <li>
           <Link href="/docs/encryption">How shield works</Link>
         </li>

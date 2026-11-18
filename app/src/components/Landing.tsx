@@ -5,6 +5,7 @@ import { Footer } from "@/components/Footer";
 import { SealedField } from "@/components/ui/SealedField";
 import { FlowField } from "@/components/ui/FlowField";
 import { liveMainnetNames } from "@/lib/mainnet";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { CursorReveal } from "@/components/ui/CursorReveal";
 import { SealStream } from "@/components/landing/SealStream";
 import { PayrollLive } from "@/components/landing/PayrollLive";
@@ -240,7 +241,7 @@ export function Landing() {
               </h2>
               <p className="mx-auto mt-4 max-w-[52ch] text-[17px] leading-[1.6] text-mute sm:text-[19px]">
                 Add money privately, pay anyone, and prove what you hold without
-                showing the number. Live on {liveMainnetNames()} mainnet, and on testnet.
+                showing the number. Live on {liveMainnetNames()} mainnet{SHOW_TESTNETS ? ", and on testnet" : ""}.
               </p>
             </div>
             <LiveProduct />

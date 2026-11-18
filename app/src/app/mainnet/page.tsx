@@ -7,6 +7,7 @@ import { FlowField } from "@/components/ui/FlowField";
 import { MAINNET_LAUNCH_LABEL, liveMainnetNames } from "@/lib/mainnet";
 import { swapMainnets } from "@/lib/vaultSwap";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 /** The mainnets with a pool in, as words: Base and Ethereum join once theirs are (lib/mainnet.ts). */
 const MAINNETS = liveMainnetNames();
@@ -82,16 +83,23 @@ export default function MainnetPage() {
         <section className="mx-auto max-w-[1240px] px-6 pb-8">
           <div className="flex flex-col items-start gap-4 border-t border-line pt-10 sm:flex-row sm:items-center sm:justify-between">
             <p className="max-w-[46ch] text-[15px] leading-relaxed text-soft">
-              The testnet stays open for trying things first.
+              {/* the testnets only while people see them (lib/showTestnets) */}
+              {SHOW_TESTNETS ? "The testnet stays open for trying things first." : "New to Gloam? The docs walk you through it."}
             </p>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
               <AppLink href="/app" className="gl-arrowlink">
-                {/* /app opens on mainnet; the testnet is one pick away in its network menu */}
+                {/* /app opens on mainnet; the testnet is one pick away in its network menu while it is shown */}
                 Open the app <span aria-hidden>→</span>
               </AppLink>
-              <Link href="/docs/testnet" className="gl-arrowlink">
-                Testnet guide <span aria-hidden>→</span>
-              </Link>
+              {SHOW_TESTNETS ? (
+                <Link href="/docs/testnet" className="gl-arrowlink">
+                  Testnet guide <span aria-hidden>→</span>
+                </Link>
+              ) : (
+                <Link href="/docs" className="gl-arrowlink">
+                  Read the docs <span aria-hidden>→</span>
+                </Link>
+              )}
             </div>
           </div>
         </section>

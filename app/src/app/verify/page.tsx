@@ -28,6 +28,7 @@ import { ContractsSection } from "@/components/verify/ContractsSection";
 import { OwnershipStatement } from "@/components/verify/OwnershipStatement";
 import { CheckMark } from "@/components/verify/VerifyBits";
 import { GLOAM_OWNER } from "@/lib/contractDirectory";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 type Result =
   | { kind: "idle" }
@@ -156,7 +157,7 @@ function MakeYourOwn({ from }: { from: "link" | "page" }) {
         Make your own proof
       </AppLink>
       <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
-        Add money privately, then prove only what you choose. You can try it on testnet first.
+        Add money privately, then prove only what you choose.{SHOW_TESTNETS && " You can try it on testnet first."}
       </p>
     </div>
   );
