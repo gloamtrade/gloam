@@ -280,6 +280,23 @@ if (MODE === "on") {
   const viaProxyDown = (await browser.request(vaultLogs as never)) as unknown[];
   publicDown = false;
   ok(viaProxyDown.length === 1, "on: with publicnode down the browser reads the old log through the proxy");
+
+  // The proxy on 56 reads the server's paid archive RPC: only the app's own log reads.
+  const { checkCall } = await import("../src/lib/rpcProxyServer");
+  const call = (filter: Record<string, unknown>) => checkCall({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [filter] }, e);
+  const refused = (r: ReturnType<typeof call>) => ("reply" in r ? (r.reply.error?.message ?? "") : null);
+  const span = (a: bigint, b: bigint) => ({ fromBlock: hex(a), toBlock: hex(b) });
+  const WALLET = `0x${"0".repeat(24)}${"ab".repeat(20)}`;
+  const TRANSFER = `0x${"dd".repeat(32)}`;
+  ok(refused(call({ address: POOL, ...span(134_300_000n, 134_349_999n) })) === null, "proxy: the vault over logRange blocks");
+  ok(/maximum block range is 50000/.test(refused(call({ address: POOL, ...span(134_300_000n, 134_350_000n) })) ?? ""), "proxy: the vault over more is refused as a range a walk splits");
+  ok(refused(call({ address: POOL, fromBlock: hex(134_300_000n), toBlock: "latest" })) === null, "proxy: the vault up to latest (the tree's tail read)");
+  ok(refused(call({ address: USDT, ...span(134_300_000n, 134_300_002n) })) === null, "proxy: the canary's three blocks");
+  ok(/maximum block range is 3/.test(refused(call({ address: USDT, ...span(134_300_000n, 134_300_003n) })) ?? ""), "proxy: USDT over more, with no wallet, is refused");
+  ok(refused(call({ address: [USDT, USDC, BDX], topics: [TRANSFER, null, WALLET], ...span(134_300_000n, 134_349_999n) })) === null, "proxy: listed tokens narrowed to a wallet (activity)");
+  ok(/only the Gloam vault/.test(refused(call({ address: "0x" + "12".repeat(20), ...span(134_300_000n, 134_300_001n) })) ?? ""), "proxy: any other contract is refused");
+  ok(/only the Gloam vault/.test(refused(call({ address: [POOL, "0x" + "12".repeat(20)], ...span(134_300_000n, 134_300_001n) })) ?? ""), "proxy: a list with another contract is refused");
+  ok(refused(checkCall({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [{ address: "0x" + "12".repeat(20), ...span(1n, 9_000_000n) }] }, nets.getNetwork("base-mainnet"))) === null, "proxy: other networks keep their rules");
 }
 
 if (MODE === "off") {
