@@ -4,6 +4,7 @@ import { SDK_VERSION } from "@gloamtrade/sdk";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { Playground } from "./Playground";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 export const metadata: Metadata = {
   title: "SDK playground",
@@ -38,9 +39,12 @@ export default function SdkPlaygroundPage() {
             <Link href="/docs/privacy-model" className="gl-arrowlink">
               What stays private <span aria-hidden>→</span>
             </Link>
-            <Link href="/docs/testnet" className="gl-arrowlink">
-              Run it on testnet <span aria-hidden>→</span>
-            </Link>
+            {/* the testnet guide only while people see the testnets (lib/showTestnets) */}
+            {SHOW_TESTNETS && (
+              <Link href="/docs/testnet" className="gl-arrowlink">
+                Run it on testnet <span aria-hidden>→</span>
+              </Link>
+            )}
           </div>
         </div>
       </main>

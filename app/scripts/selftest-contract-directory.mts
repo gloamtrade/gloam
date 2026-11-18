@@ -46,6 +46,7 @@ const { VAULT_SWAP_ROUTERS, swapV3Live } = await import("../src/lib/vaultSwap");
 /** Elysium mainnet is listed, after Ethereum, while NEXT_PUBLIC_ELYSIUM_ENABLED is on (as production builds it). */
 const { ELYSIUM_FLAG } = await import("../src/lib/elysium");
 const ELYSIUM_ROW = ELYSIUM_FLAG ? 1 : 0;
+const { SHOW_TESTNETS } = await import("../src/lib/showTestnets");
 
 let checks = 0;
 function check(name: string, fn: () => void) {
@@ -89,7 +90,8 @@ const RH_TESTNET_READ: import("../src/lib/contractDirectory").VaultRead = {
   sendVerifier: null,
 };
 
-const entries = dir.contractDirectory();
+// Every network, the testnets too: /verify lists them only while NEXT_PUBLIC_SHOW_TESTNETS is on (checked below).
+const entries = dir.contractDirectory(true);
 const byKey = Object.fromEntries(entries.map((e) => [e.key, e]));
 
 // ---------------------------------------------------------------- both runs
@@ -116,6 +118,20 @@ check("every network is listed once, mainnets first in Gloam's order", () => {
       "Base Sepolia testnet",
       "Ethereum Sepolia",
     ]
+  );
+});
+
+check("with the testnets hidden (lib/showTestnets) /verify lists the mainnets alone; the default follows the flag", () => {
+  const hidden = dir.contractDirectory(false);
+  assert.deepEqual(
+    hidden.map((e) => e.key),
+    entries.filter((e) => e.kind === "mainnet").map((e) => e.key)
+  );
+  assert.ok(hidden.every((e) => e.kind === "mainnet" && !e.network.testnet));
+  assert.ok(!dir.directoryCsv(hidden).split("\r\n").slice(1).some((l) => l.includes(",testnet,")), "no testnet row in the CSV");
+  assert.deepEqual(
+    dir.contractDirectory().map((e) => e.key),
+    dir.contractDirectory(SHOW_TESTNETS).map((e) => e.key)
   );
 });
 

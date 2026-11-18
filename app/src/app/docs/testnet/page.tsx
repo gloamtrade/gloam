@@ -17,11 +17,15 @@ const GOOGLE_SEPOLIA_FAUCET_URL = "https://cloud.google.com/application/web3/fau
 const POW_SEPOLIA_FAUCET_URL = "https://sepolia-faucet.pk910.de/";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 export const metadata: Metadata = {
   title: "Practice on testnet",
   description:
     "Practice with Gloam on testnet before you use mainnet: wallet setup, faucet, shield, private pay, cash out, demo video, and troubleshooting on Robinhood Chain testnet, Tempo Moderato, Base Sepolia and Ethereum Sepolia.",
+  // While the testnets are out of view (lib/showTestnets) the guide stays at its
+  // address, for older links and blog posts, but out of search and the sitemap.
+  ...(SHOW_TESTNETS ? {} : { robots: { index: false } }),
 };
 
 export default function DocsTestnetPage() {

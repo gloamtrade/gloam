@@ -6,6 +6,7 @@ import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { mainnetPool } from "@/lib/mainnet";
 import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_LIVE_SINCE } from "@/lib/elysium";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 /** Base and Ethereum mainnet show as live once their pools are in (lib/mainnet.ts). */
 const BASE_LIVE = mainnetPool(8453) !== null;
@@ -50,10 +51,12 @@ export default function DocsProductPage() {
           <strong>Networks</strong>, {" "}
           <Link href="/docs/chain">gloam.trade/docs/chain</Link>
         </li>
-        <li>
-          <strong>Practice on testnet</strong>, {" "}
-          <Link href="/docs/testnet">gloam.trade/docs/testnet</Link>
-        </li>
+        {SHOW_TESTNETS && (
+          <li>
+            <strong>Practice on testnet</strong>, {" "}
+            <Link href="/docs/testnet">gloam.trade/docs/testnet</Link>
+          </li>
+        )}
         <li>
           <strong>Whitepaper</strong>, gloam.trade/whitepaper
         </li>

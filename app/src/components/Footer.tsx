@@ -4,6 +4,7 @@ import { AppLink } from "./AppLink";
 import { FooterUpdates } from "./FooterUpdates";
 import { Mark } from "./Logo";
 import { ThemeSegmented } from "./ThemeToggle";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 const groups: {
   title: string;
@@ -17,7 +18,8 @@ const groups: {
       { href: "/app/payroll", label: "Payroll" },
       { href: "/app/vault", label: "Private balance" },
       { href: "/app/disclose", label: "Prove" },
-      { href: "/docs/testnet", label: "Testnet guide" },
+      // only while people see the testnets (lib/showTestnets)
+      ...(SHOW_TESTNETS ? [{ href: "/docs/testnet", label: "Testnet guide" }] : []),
       { href: "/testers", label: "Become a tester" },
       { href: "/contest", label: "Video contest" },
     ],

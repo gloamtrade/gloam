@@ -14,6 +14,7 @@ import { useNetwork } from "./NetworkProvider";
 import { FeeRiseNotice } from "./FeeRiseNotice";
 import { StocksLiveNotice } from "./StocksLiveNotice";
 import { TestFundsNotice } from "./TestFundsNotice";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { VaultNavGroup, VaultNavGroupStatic, navActiveFill } from "./VaultNavGroup";
 
 type NavItem = {
@@ -374,9 +375,11 @@ export function AppShell({
                   : `Gloam on ${network.label} testnet. Not investment, legal or tax advice.`}
             </p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <IntentLink href="/docs/testnet" className="hover:text-foreground">
-                Testnet guide
-              </IntentLink>
+              {SHOW_TESTNETS && (
+                <IntentLink href="/docs/testnet" className="hover:text-foreground">
+                  Testnet guide
+                </IntentLink>
+              )}
               <IntentLink href="/app/settings#help" className="hover:text-foreground">
                 Help
               </IntentLink>

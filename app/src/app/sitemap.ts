@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 const SITE = "https://www.gloam.trade";
 
@@ -46,7 +47,8 @@ const PAGES: { path: string; priority: number }[] = [
   { path: "/docs/bridge", priority: 0.6 },
   { path: "/docs/fresh-wallet", priority: 0.6 },
   { path: "/docs/chain", priority: 0.6 },
-  { path: "/docs/testnet", priority: 0.6 },
+  // the testnet guide only while people see the testnets (lib/showTestnets)
+  ...(SHOW_TESTNETS ? [{ path: "/docs/testnet", priority: 0.6 }] : []),
   { path: "/docs/privacy-model", priority: 0.6 },
   { path: "/docs/threat-model", priority: 0.6 },
   { path: "/docs/compare", priority: 0.6 },

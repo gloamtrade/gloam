@@ -5,7 +5,7 @@
  * Plain logic with no React, so scripts/selftest-stocks-notice.mts runs the script
  * against NetworkProvider's own reading of the network.
  */
-import { DEFAULT_NETWORK_KEY, NETWORK_KEYS, getNetwork } from "./networks";
+import { DEFAULT_NETWORK_KEY, SHOWN_NETWORK_KEYS, getNetwork } from "./networks";
 
 /** Set to "1" in localStorage once the notice is closed in this browser. */
 export const STOCKS_NOTICE_KEY = "gloam.notice.stocks-live.v1";
@@ -20,11 +20,11 @@ export const NETWORK_STORAGE_KEY = "gloam.network";
  * Runs right after the notice in the page, before the app's JavaScript: shows it
  * when this browser will show it, so it is part of the first paint and nothing
  * under it moves later. The network is read the way NetworkProvider reads it (the
- * one picked here, else the first mainnet, lib/networks defaultNetworkKey), then
- * the notice's rules: not closed here, not a testnet, not already on the Swap.
- * Anything it can't read leaves the notice hidden.
+ * one picked here while people can pick it, else the first mainnet, lib/networks
+ * shownKeyOrDefault), then the notice's rules: not closed here, not a testnet,
+ * not already on the Swap. Anything it can't read leaves the notice hidden.
  */
-export function stocksNoticeRevealScript(keys: readonly string[] = NETWORK_KEYS): string {
+export function stocksNoticeRevealScript(keys: readonly string[] = SHOWN_NETWORK_KEYS): string {
   const testnets = keys.filter((k) => getNetwork(k as never).testnet);
   const fallback = keys.find((k) => !getNetwork(k as never).testnet) ?? DEFAULT_NETWORK_KEY;
   const j = JSON.stringify;

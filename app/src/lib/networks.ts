@@ -40,6 +40,7 @@ import {
 } from "./config";
 import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, mainnetPool } from "./mainnet";
 import { ELYSIUM, ELYSIUM_CHAIN_ID, ELYSIUM_LOG_RANGE, ELYSIUM_TESTNET } from "./elysium";
+import { SHOW_TESTNETS } from "./showTestnets";
 
 export type NetworkKey =
   | "robinhood"
@@ -680,7 +681,8 @@ export function setShownNetworkKey(key: NetworkKey): void {
 /**
  * The active network for non-React code (lib functions that cannot use the
  * useNetwork hook): the one NetworkProvider shows, else the localStorage key
- * the selector writes, else defaultNetworkKey(). SSR and blocked-storage safe.
+ * the selector writes (while people can pick it, as NetworkProvider reads it),
+ * else defaultNetworkKey(). SSR and blocked-storage safe.
  * React components should prefer useNetwork().
  */
 export function getActiveNetwork(): GloamNetwork {
@@ -688,7 +690,7 @@ export function getActiveNetwork(): GloamNetwork {
   if (shownKey && isNetworkKey(shownKey) && isNetworkWritable(NETWORKS[shownKey])) return NETWORKS[shownKey];
   try {
     const v = window.localStorage.getItem(ACTIVE_NETWORK_STORAGE_KEY);
-    if (isNetworkKey(v)) {
+    if (isShownNetworkKey(v)) {
       const n = NETWORKS[v];
       // Never resolve to a non-writable network for lib/write code.
       if (isNetworkWritable(n)) return n;
@@ -731,6 +733,42 @@ export function allNetworks(): GloamNetwork[] {
 export function isNetworkKey(v: string | null | undefined): v is NetworkKey {
   return typeof v === "string" && (NETWORK_KEYS as string[]).includes(v);
 }
+
+/**
+ * The networks people can pick (lib/showTestnets): all of them while
+ * NEXT_PUBLIC_SHOW_TESTNETS is on, else the mainnets alone. The testnets stay
+ * in NETWORK_KEYS either way, so the API, relay, proofs and a claim link on a
+ * testnet keep working; only the menus and pickers leave them out.
+ */
+export const SHOWN_NETWORK_KEYS: NetworkKey[] = SHOW_TESTNETS || MAINNET_KEYS.length === 0 ? NETWORK_KEYS : MAINNET_KEYS;
+
+/** A network people can pick right now (a hidden testnet is not one). */
+export function isShownNetworkKey(v: string | null | undefined): v is NetworkKey {
+  return typeof v === "string" && (SHOWN_NETWORK_KEYS as string[]).includes(v);
+}
+
+/** The networks people can pick, for a menu: allNetworks() without the hidden testnets. */
+export function shownNetworks(): GloamNetwork[] {
+  return allNetworks().filter((n) => isShownNetworkKey(n.key));
+}
+
+/**
+ * The network a saved choice opens on (this browser's last pick, or a ?chain=
+ * in the address): that one while people can pick it, else defaultNetworkKey(),
+ * quietly. A testnet saved before the testnets were hidden lands on mainnet.
+ */
+export function shownKeyOrDefault(v: string | null | undefined): NetworkKey {
+  return isShownNetworkKey(v) ? v : defaultNetworkKey();
+}
+
+/**
+ * The network a page paints before this browser's choice is read, the same on
+ * the server and in the first render: DEFAULT_NETWORK_KEY, or the first mainnet
+ * while the testnets are hidden, so no testnet label flashes.
+ */
+export const FIRST_PAINT_NETWORK_KEY: NetworkKey = isShownNetworkKey(DEFAULT_NETWORK_KEY)
+  ? DEFAULT_NETWORK_KEY
+  : (SHOWN_NETWORK_KEYS[0] ?? DEFAULT_NETWORK_KEY);
 
 /** A network can take real shield/spend writes only when live with a pool. */
 export function isNetworkWritable(n: GloamNetwork): boolean {

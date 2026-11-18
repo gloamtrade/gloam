@@ -8,6 +8,7 @@ import { CodeBlock, CopyButton } from "@/components/ui/CodeBlock";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { RaetoMark } from "@/components/LivePartners";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 export const metadata: Metadata = {
   title: "Agents",
@@ -204,10 +205,17 @@ export default function AgentsPage() {
             <div className="relative max-w-[640px]">
               <h2 className="t-display-l text-foreground">Start in 10 minutes</h2>
               <p className="mt-5 max-w-[50ch] text-[17px] leading-[1.6] text-mute">
-                Three steps, each useful on its own. Start on the testnet with{" "}
-                <span className="text-foreground">robinhood</span> in place of{" "}
-                <span className="text-foreground">robinhood-mainnet</span>, then
-                move to mainnet with small limits.
+                {/* the testnets only while people see them (lib/showTestnets) */}
+                {SHOW_TESTNETS ? (
+                  <>
+                    Three steps, each useful on its own. Start on the testnet with{" "}
+                    <span className="text-foreground">robinhood</span> in place of{" "}
+                    <span className="text-foreground">robinhood-mainnet</span>, then
+                    move to mainnet with small limits.
+                  </>
+                ) : (
+                  <>Three steps, each useful on its own. Start on mainnet with small limits.</>
+                )}
               </p>
             </div>
             <ol className="relative mt-12 divide-y divide-line border-t border-line">

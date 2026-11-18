@@ -8,11 +8,12 @@ import { VercelAnalytics } from "@/components/VercelAnalytics";
 import { DEVICE_BOOT_SCRIPT } from "@/lib/device";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { THEME_BOOT_SCRIPT } from "@/lib/theme";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import "./globals.css";
 
 const siteTitle = "Gloam · Private money on public chains";
 // Fixed at build time: names every mainnet with a pool in (lib/mainnet.ts).
-const siteDescription = `Private stablecoin payments for people, teams and agents. Hold, pay and run payroll without putting amounts or balances on the public record, and prove only what someone needs to see. On ${liveMainnetNames()} mainnet, and on testnets to try it first.`;
+const siteDescription = `Private stablecoin payments for people, teams and agents. Hold, pay and run payroll without putting amounts or balances on the public record, and prove only what someone needs to see. On ${liveMainnetNames()} mainnet${SHOW_TESTNETS ? ", and on testnets to try it first" : ""}.`;
 
 /**
  * The live host is www (the apex redirects there), so absolute URLs in link

@@ -1,16 +1,17 @@
 "use client";
 
 /**
- * Sidebar network switch. Lists every Gloam network and lets the user pick the
- * active one. Live networks are selectable; `planned` ones render disabled with
- * a "Soon" badge, so the multichain roadmap is visible and honest without
- * offering a chain that cannot take writes yet. It auto-enables a network the
- * moment `networks.ts` marks it live. Full width of its container: the sidebar
- * on desktop (where the list flies out to the right so the notes have room),
- * the sheet on mobile (where it drops down).
+ * Sidebar network switch. Lists every Gloam network people can pick (the
+ * mainnets alone while the testnets are hidden, lib/showTestnets) and lets the
+ * user pick the active one. Live networks are selectable; `planned` ones
+ * render disabled with a "Soon" badge, so the multichain roadmap is visible
+ * and honest without offering a chain that cannot take writes yet. It
+ * auto-enables a network the moment `networks.ts` marks it live. Full width of
+ * its container: the sidebar on desktop (where the list flies out to the right
+ * so the notes have room), the sheet on mobile (where it drops down).
  */
 import { useEffect, useRef, useState } from "react";
-import { MAINNET_ENABLED, allNetworks, isNetworkWritable } from "@/lib/networks";
+import { MAINNET_ENABLED, isNetworkWritable, shownNetworks } from "@/lib/networks";
 import { useNetwork } from "./NetworkProvider";
 import { TokenLogo } from "./TokenLogo";
 import type { GloamNetwork } from "@/lib/networks";
@@ -34,7 +35,16 @@ export function NetworkSelector() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  const nets = allNetworks();
+  const nets = shownNetworks();
+  // With the testnets hidden there is no Testnet group, not an empty one.
+  const groups = (
+    MAINNET_ENABLED
+      ? [
+          { title: "Mainnet", hint: "", list: nets.filter((n) => !n.testnet) },
+          { title: "Testnet", hint: "", list: nets.filter((n) => n.testnet) },
+        ]
+      : [{ title: "Network", hint: "", list: nets }]
+  ).filter((group) => group.list.length > 0);
 
   useEffect(() => {
     if (!open) return;
@@ -115,13 +125,7 @@ export function NetworkSelector() {
           aria-label="Select network"
           className="absolute left-0 right-0 top-full z-50 mt-2 rounded-[18px] border border-line bg-panel p-1.5 shadow-pop [.gl-sidebar_&]:left-full [.gl-sidebar_&]:right-auto [.gl-sidebar_&]:top-0 [.gl-sidebar_&]:ml-5 [.gl-sidebar_&]:mt-0 [.gl-sidebar_&]:w-[300px]"
         >
-          {(MAINNET_ENABLED
-            ? [
-                { title: "Mainnet", hint: "", list: nets.filter((n) => !n.testnet) },
-                { title: "Testnet", hint: "", list: nets.filter((n) => n.testnet) },
-              ]
-            : [{ title: "Network", hint: "", list: nets }]
-          ).map((group, gi) => (
+          {groups.map((group, gi) => (
             <div key={group.title} className={gi > 0 ? "mt-1 border-t border-line pt-1" : ""}>
               <p className="flex items-baseline justify-between px-2.5 pb-1 pt-2">
                 <span className="t-eyebrow">{group.title}</span>

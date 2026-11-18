@@ -3,13 +3,14 @@ import { preconnect } from "react-dom";
 import { Web3Provider } from "@/components/app/Web3Provider";
 import { AppThemeScope } from "@/components/app/AppThemeScope";
 import { liveMainnetNames } from "@/lib/mainnet";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 export const metadata: Metadata = {
   title: {
     default: "App",
     template: "%s · Gloam",
   },
-  description: `The Gloam app: a private balance, private payments, payroll and proofs on ${liveMainnetNames()} mainnet, and on the testnets.`,
+  description: `The Gloam app: a private balance, private payments, payroll and proofs on ${liveMainnetNames()} mainnet${SHOW_TESTNETS ? ", and on the testnets" : ""}.`,
 };
 
 export default function ProductLayout({
