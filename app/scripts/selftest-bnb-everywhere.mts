@@ -259,6 +259,14 @@ if (MODE !== "on") {
   const mpp = await tool("gloam_mpp_how_to", { network: "bnb-mainnet", role: "both" });
   ok(!mpp.isError && mpp.text.includes("BNB_MAINNET.usdt.address") && mpp.text.includes("50_000_000_000_000_000n"), "on: the MPP snippet uses BNB Chain's USDT in 18 decimals");
   ok(!/RH_MAINNET_USDG/.test(mpp.text), "on: never Robinhood Chain's USDG for BNB Chain");
+  // A cap counts base units: pinned to USDT on this chain, or 5 * 10^16 would also allow 0.05 BNB or 50,000,000 BDX.
+  const payOnly = await tool("gloam_mpp_how_to", { network: "bnb-mainnet", role: "pay" });
+  const payCode = String((JSON.parse(payOnly.text) as { pay?: { code?: string } }).pay?.code ?? "");
+  ok(
+    payCode.includes("maxAmountWei: 50_000_000_000_000_000n, currencies: [BNB_MAINNET.usdt.address], chainIds: [net.chainId]") &&
+      payCode.includes('relayIntent, BNB_MAINNET } from "@gloamtrade/sdk"'),
+    "on: the payer's cap is pinned to BNB Chain's USDT and chain, and the pay snippet imports BNB_MAINNET"
+  );
 }
 
 if (MODE === "unset") {

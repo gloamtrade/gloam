@@ -856,11 +856,12 @@ const MPP_TAIL = {
  * config objects, anything else from the app's token list, each in its own
  * decimals (18 for USDT on BNB Chain), never 6 by default.
  */
-function nativeStableLine(n: GloamNetwork): { import: string; line: string; decimals: number; symbol: string } {
+function nativeStableLine(n: GloamNetwork): McpAsset {
   if (n.family === "bnb") {
     return {
       import: "BNB_MAINNET",
       line: "      currency: BNB_MAINNET.usdt.address, decimals: BNB_MAINNET.usdt.decimals, // USDT, 18 decimals on BNB Chain; or BNB_MAINNET.usdc",
+      currency: "BNB_MAINNET.usdt.address",
       decimals: 18,
       symbol: "USDT",
     };
@@ -868,20 +869,25 @@ function nativeStableLine(n: GloamNetwork): { import: string; line: string; deci
   const t = shieldTokensFor(n.chainId).find((x) => x.kind === "stablecoin");
   const dec = t?.decimals ?? 18;
   if (n.family === "elysium") {
-    return { import: "ELYSIUM_MAINNET", line: "      currency: ELYSIUM_MAINNET.usdc!, decimals: ELYSIUM_MAINNET.usdcDecimals, // USDC on Elysium", decimals: dec, symbol: "USDC" };
+    return { import: "ELYSIUM_MAINNET", line: "      currency: ELYSIUM_MAINNET.usdc!, decimals: ELYSIUM_MAINNET.usdcDecimals, // USDC on Elysium", currency: "ELYSIUM_MAINNET.usdc!", decimals: dec, symbol: "USDC" };
   }
-  return { import: "", line: `      currency: "${t?.address ?? ""}", decimals: ${dec}, // ${t?.symbol ?? "a stablecoin"} on ${n.label}`, decimals: dec, symbol: t?.symbol ?? "" };
+  return { import: "", line: `      currency: "${t?.address ?? ""}", decimals: ${dec}, // ${t?.symbol ?? "a stablecoin"} on ${n.label}`, currency: `"${t?.address ?? ""}"`, decimals: dec, symbol: t?.symbol ?? "" };
 }
+
+/** A chain's MPP asset in the snippets: its SDK import, the charge's currency line, and the expression the payer's policy pins. */
+type McpAsset = { import: string; line: string; currency: string; decimals: number; symbol: string };
 
 /**
  * The payer's spending cap in the snippet: 0.05 of the asset in its own
- * decimals. At 6 decimals that is the line every 6-decimal chain has always had.
+ * decimals, pinned to that one asset on that one chain. A cap is a count of
+ * base units, so without the pin it would let a server charge the same count
+ * of anything: on BNB Chain, 0.05 USDT's 5 * 10^16 is also 0.05 BNB and
+ * 50,000,000 BDX (9 decimals).
  */
-function policyLine(asset: { decimals: number; symbol: string }): string {
-  if (asset.decimals === 6) return "policy: { maxAmountWei: 50_000n },                  // refuse anything bigger, before proving";
+function policyLine(asset: McpAsset): string {
   const v = (5n * 10n ** BigInt(Math.max(asset.decimals, 2))) / 100n;
   const lit = `${v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, "_")}n`;
-  return `policy: { maxAmountWei: ${lit} }, // 0.05 ${asset.symbol} in its ${asset.decimals} decimals: refuse anything bigger, before proving`;
+  return `policy: { maxAmountWei: ${lit}, currencies: [${asset.currency}], chainIds: [net.chainId] }, // at most 0.05 ${asset.symbol} (${asset.decimals} decimals), in that token on this chain only: anything else is refused before proving`;
 }
 
 /**
@@ -900,19 +906,20 @@ function mppHowToMainnet(role: "pay" | "charge" | "both", network: NetworkKey): 
   // "Base testnet" for Base Sepolia, "Ethereum Sepolia", "Tempo mainnet" and so on for the mainnets.
   const where = n.testnet ? networkName(n) : `${name} mainnet`;
   // Each chain's own first stablecoin, in its own decimals: never another chain's, never 6 by default.
-  const asset: { import: string; line: string; decimals: number; symbol: string } =
+  const named = (name: string, line: string, symbol: string): McpAsset => ({ import: name, line, currency: name, decimals: 6, symbol });
+  const asset: McpAsset =
     family === "tempo"
-      ? { import: "TEMPO_USDCE", line: "      currency: TEMPO_USDCE, decimals: 6,                 // or TEMPO_PATHUSD, TEMPO_USDT0, TEMPO_OUSD", decimals: 6, symbol: "USDC.e" }
+      ? named("TEMPO_USDCE", "      currency: TEMPO_USDCE, decimals: 6,                 // or TEMPO_PATHUSD, TEMPO_USDT0, TEMPO_OUSD", "USDC.e")
       : family === "base"
         ? n.testnet
-          ? { import: "BASE_SEPOLIA_USDC", line: "      currency: BASE_SEPOLIA_USDC, decimals: 6,           // or BASE_SEPOLIA_EURC", decimals: 6, symbol: "USDC" }
-          : { import: "BASE_USDC", line: "      currency: BASE_USDC, decimals: 6,                   // or BASE_EURC, BASE_USDT", decimals: 6, symbol: "USDC" }
+          ? named("BASE_SEPOLIA_USDC", "      currency: BASE_SEPOLIA_USDC, decimals: 6,           // or BASE_SEPOLIA_EURC", "USDC")
+          : named("BASE_USDC", "      currency: BASE_USDC, decimals: 6,                   // or BASE_EURC, BASE_USDT", "USDC")
         : family === "ethereum"
           ? n.testnet
-            ? { import: "ETHEREUM_SEPOLIA_USDC", line: "      currency: ETHEREUM_SEPOLIA_USDC, decimals: 6,       // or ETHEREUM_SEPOLIA_PYUSD, _USDG, _EURC", decimals: 6, symbol: "USDC" }
-            : { import: "ETHEREUM_USDC", line: "      currency: ETHEREUM_USDC, decimals: 6,               // or ETHEREUM_USDT, ETHEREUM_USDG, ETHEREUM_PYUSD", decimals: 6, symbol: "USDC" }
+            ? named("ETHEREUM_SEPOLIA_USDC", "      currency: ETHEREUM_SEPOLIA_USDC, decimals: 6,       // or ETHEREUM_SEPOLIA_PYUSD, _USDG, _EURC", "USDC")
+            : named("ETHEREUM_USDC", "      currency: ETHEREUM_USDC, decimals: 6,               // or ETHEREUM_USDT, ETHEREUM_USDG, ETHEREUM_PYUSD", "USDC")
           : family === "robinhood"
-            ? { import: "RH_MAINNET_USDG", line: "      currency: RH_MAINNET_USDG, decimals: 6,             // or GLOAM_TOKEN, RH_MAINNET_PONS, RH_MAINNET_CASHCAT with decimals: 18", decimals: 6, symbol: "USDG" }
+            ? named("RH_MAINNET_USDG", "      currency: RH_MAINNET_USDG, decimals: 6,             // or GLOAM_TOKEN, RH_MAINNET_PONS, RH_MAINNET_CASHCAT with decimals: 18", "USDG")
             : nativeStableLine(n);
   const getter = n.testnet ? "testnetNetwork" : "mainnetNetwork";
   const sdkVersion = "0.7.1";
@@ -962,7 +969,7 @@ export async function handler(request: Request) {
     ],
     code: `import { Mppx } from "mppx/client";
 import { gloam } from "@gloamtrade/mppx-gloam/client";
-import { artifactProver, circuitArtifactUrls, ${getter}, relayIntent } from "@gloamtrade/sdk";
+import { artifactProver, circuitArtifactUrls, ${getter}, relayIntent${asset.import ? `, ${asset.import}` : ""} } from "@gloamtrade/sdk";
 
 ${netLines}
 const mppx = Mppx.create({

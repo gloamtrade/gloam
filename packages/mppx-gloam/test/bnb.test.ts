@@ -118,6 +118,25 @@ if (!FILLED && !LIVE) {
     assert.throws(() => buildGloamChargeRequest({ amountWei: 1n, recipient: payee.tag, network: 56, currency: USDC, decimals: 6 }), /18 decimals, not 6/);
   });
 
+  test("a payer's cap on BNB Chain pinned to USDT on 56 refuses 0.05 BNB and 50,000,000 BDX", async () => {
+    const { assertPayable } = await import("../src/client.js");
+    const cap = parseUnits("0.05", 18);
+    // the policy the remote MCP's gloam_mpp_how_to writes for BNB Chain
+    const policy = { maxAmountWei: cap, currencies: [USDT], chainIds: [56] };
+    const charge = (currency: Address, amount: bigint, decimals: number) => ({
+      amount: amount.toString(),
+      currency,
+      recipient: payee.tag,
+      methodDetails: { chainId: 56, pool, decimals },
+    });
+    assert.doesNotThrow(() => assertPayable(charge(USDT, cap, 18), policy), "0.05 USDT is paid");
+    assert.throws(() => assertPayable(charge(USDT, cap + 1n, 18), policy), /over the payer's limit/);
+    assert.throws(() => assertPayable(charge(NATIVE, cap, 18), policy), /not allowed by this payer/, "0.05 BNB, the same base units");
+    assert.throws(() => assertPayable(charge(BDX, cap, 9), policy), /not allowed by this payer/, "5 * 10^16 BDX base units is 50,000,000 BDX");
+    // what the cap alone used to allow
+    assert.doesNotThrow(() => assertPayable(charge(BDX, cap, 9), { maxAmountWei: cap }));
+  });
+
   test("the paywall reads a 0.25 price on BNB Chain as 0.25 USDT, not 0.25 * 10^-12", async () => {
     const mock = mockPool(pool as Address);
     const paywall = createGloamPaywall({
