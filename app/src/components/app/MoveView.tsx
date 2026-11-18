@@ -167,10 +167,8 @@ import { AddTokenToWallet } from "./AddTokenToWallet";
 import { CrossChainCashOutStatus, CrossChainPicker, CrossChainQuoteCard } from "./CrossChainCashOut";
 import {
   cashOutNet,
-  crossChainDestination,
   crossChainDestinations,
   crossChainProblem,
-  relayOrderUrl,
   requestCrossChainQuote,
   requoteStillFine,
   type CrossChainQuote,
@@ -4104,15 +4102,8 @@ export function MoveView() {
               )}
             </>
           ) : (
-            <p>
-              {xSent
-                ? `The vault paid Relay, and Relay sends ${xSent.destination.symbol} on ${xSent.destination.chain}.`
-                : cashOutDest === "other"
-                  ? "The money is on its way to that address."
-                  : "The money is back in your wallet."}{" "}
-              The amount and the address it went to are public on the explorer, so only cash out when you
-              need it in the open.
-            </p>
+            // A cash out sent now is public. Scheduled private ones don't end here.
+            <span className="inline-flex items-center rounded-full bg-surface px-3 py-1 text-[13px] text-soft">Public cash out</span>
           )
         }
         primaryHref={txHash ? network.explorerTx(txHash) : undefined}
@@ -4122,10 +4113,7 @@ export function MoveView() {
           paidPrivately ? (
             <PrivatePayShare chainId={network.chainId} networkLabel={network.label} testnet={network.testnet} />
           ) : successTitle === "Cashed out" && xSent ? (
-            <CrossChainCashOutStatus
-              quote={xSent}
-              explorerTx={crossChainDestination(xSent.destination.id)?.explorerTx ?? relayOrderUrl}
-            />
+            <CrossChainCashOutStatus quote={xSent} fromChain={network.label} />
           ) : successTitle === "Cashed out" && cashedOut ? (
             <AddTokenToWallet chainId={network.chainId} asset={cashedOut.asset} to={cashedOut.to} />
           ) : undefined
