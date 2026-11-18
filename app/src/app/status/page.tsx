@@ -89,7 +89,7 @@ function emptyDays(history: History | null, nowMs: number): DayTally[] {
 
 function ChainMark({ chainId }: { chainId: number }) {
   return (
-    <span className="relative h-[18px] w-[18px] shrink-0 overflow-hidden rounded-full">
+    <span className="relative mt-[2px] h-[18px] w-[18px] shrink-0 overflow-hidden rounded-full">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={chainLogoSrc(chainId)} alt="" width={18} height={18} className="h-full w-full object-cover dark:hidden" />
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -113,9 +113,9 @@ function PartRow({ part, tallies }: { part: PartCheck; tallies: DayTally[] }) {
     <li className="py-6 first:pt-0 last:pb-0">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h3 className="flex items-center gap-2.5 text-[16px] font-medium leading-snug">
+          <h3 className="flex items-start gap-2.5 text-[16px] font-medium leading-snug">
             {part.chainId !== undefined ? <ChainMark chainId={part.chainId} /> : null}
-            <span className="min-w-0 truncate">{part.name}</span>
+            <span className="min-w-0 text-pretty">{part.name}</span>
           </h3>
           {part.reason ? <p className="mt-1.5 text-[14px] leading-snug text-soft">{part.reason}</p> : null}
           {sub ? <p className="mt-1 text-[13px] leading-snug text-mute">{sub}</p> : null}
