@@ -22,6 +22,7 @@ import {
   mainnetPool,
 } from "@/lib/mainnet";
 import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET } from "@/lib/elysium";
+import { BNB, BNB_LIVE_SINCE } from "@/lib/bnb";
 import { VAULT_SWAP_V2_ROUTER, swapV3Live } from "@/lib/vaultSwap";
 import { voteFacts } from "@/lib/vote/glim";
 import { CONTEST, CONTEST_TOTAL, contestDay, contestTime, placeLabel } from "@/lib/contest";
@@ -386,6 +387,23 @@ export function elysiumFacts(): string | null {
 }
 
 /**
+ * What Glim knows about BNB Chain, only while it is on (NEXT_PUBLIC_BNB_ENABLED
+ * and its pool, lib/bnb.ts). Off, Glim says nothing about BNB Chain at all: no
+ * "coming", no date, no plan. The RPC is the public one, never a keyed one.
+ */
+export function bnbFacts(): string | null {
+  const b = BNB;
+  if (!b) return null;
+  return [
+    "BNB CHAIN (overrides any line below that names fewer mainnets)",
+    `- BNB Chain mainnet (chain ID ${b.chainId}): live since ${BNB_LIVE_SINCE}. It is BNB Smart Chain. The vault takes USDT and USDC with no deposit limit, BNB (the gas coin) with no limit, and BDX: 100,000 per deposit and 2,000,000 in total. USDT and USDC have 18 decimals on BNB Chain, not 6 as on the other chains; the app reads each token's own, so amounts are typed as usual. Gas on BNB Chain is paid in BNB, not ETH. Same ${CASH_OUT_FEE_PERCENT} cash-out fee as the other mainnets, same final keys.`,
+    `- BDX on BNB Chain is Beldex's token on its canonical LayerZero contract, ${b.bdx.address}, the same address as on Base and Ethereum. Gloam has no partnership with BNB Chain, Binance or Beldex; never say or suggest one.`,
+    "- BNB Chain's vault is owned by a guard contract from the day it was deployed: nobody, the Gloam team included, can ever change its proof checkers. A 2 of 3 multisig runs the guard. Limits and the fee still change only with three days of public notice, and can be lowered at once.",
+    `- There are no private swaps on BNB Chain yet, and Bring money over does not land in its vault yet; never give a date. In the network selector it shows as BNB Chain, with Mainnet beside it. Details, if someone adds the chain by hand: RPC ${b.rpcUrls[0]}, chain ID ${b.chainId}, currency BNB, explorer ${b.explorerUrl}.`,
+  ].join("\n");
+}
+
+/**
  * Elysium testnet (99801), only while NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED is on
  * and its pool is in (lib/elysium.ts). Null otherwise.
  */
@@ -400,7 +418,9 @@ const LAUNCH_DAY = MAINNET_CHAINS.find((c) => c.chainId === 4663)!.liveSince;
 
 /** The mainnets that joined after the 21 October launch, with a pool in: "Base", "Base and Ethereum". */
 export function laterMainnets(): string[] {
-  return [mainnetPool(8453) ? "Base" : null, mainnetPool(1) ? "Ethereum" : null, ELYSIUM ? "Elysium" : null].filter((n): n is string => n !== null);
+  return [mainnetPool(8453) ? "Base" : null, mainnetPool(1) ? "Ethereum" : null, ELYSIUM ? "Elysium" : null, BNB ? "BNB Chain" : null].filter(
+    (n): n is string => n !== null,
+  );
 }
 
 /** Clauses as a list, the way liveMainnetsSummary writes one: "A", "A, and B", "A, B, and C". */
@@ -468,7 +488,7 @@ function mainnetLiveFacts(): string {
   const usdc = usdcMainnets();
   const lines = [
     "MAINNET IS LIVE (this overrides any line below that says the app is testnet only, that mainnet is coming, or that names fewer mainnets)",
-    `- Gloam is live on ${liveMainnetsSummary()}. It went live on mainnet on Wednesday 21 October 2026 at 13:00 UTC, on ${launchNames()}.${joined} The vault has the same address on every mainnet; it is listed on gloam.trade/docs/chain, so point there instead of writing it out. Say so plainly when asked, and point to gloam.trade/app.`,
+    `- Gloam is live on ${liveMainnetsSummary()}. It went live on mainnet on Wednesday 21 October 2026 at 13:00 UTC, on ${launchNames()}.${joined} ${BNB ? "The vault has one address on Robinhood Chain, Tempo, Base and Ethereum, and its own on each newer chain" : "The vault has the same address on every mainnet"}; it is listed on gloam.trade/docs/chain, so point there instead of writing it out. Say so plainly when asked, and point to gloam.trade/app.`,
     ...(rh
       ? ["- Robinhood Chain mainnet (chain ID 4663): the vault takes USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO (ETH, AI and ORBIO opened on 3 November 2026, and AI and ORBIO also swap privately with USDG). GRIFT is listed too and opens once its deposit limit lands through the public three-day timelock: the app offers it only once the vault takes it. Details, if someone adds the chain by hand: RPC https://rpc.mainnet.chain.robinhood.com, chain ID 4663, currency ETH, explorer RobinScan https://robin.etherscan.io (a transaction is at robin.etherscan.io/tx/ and its hash, an address at robin.etherscan.io/address/ and the address)."]
       : []),
@@ -605,12 +625,14 @@ export function knowledgeBlock(): string {
   const ethereum = ethereumFacts();
   const sepolia = ethereumSepoliaFacts();
   const elysium = elysiumFacts();
+  const bnb = bnbFacts();
   const block = [
     about().trim(),
     ...(base ? [base] : []),
     ...(ethereum ? [ethereum] : []),
     ...(sepolia ? [sepolia] : []),
     ...(elysium ? [elysium] : []),
+    ...(bnb ? [bnb] : []),
     TOKEN.trim(),
     ...[voteFacts()].filter((v): v is string => v !== null),
     CRYPTO_TALK.trim(),

@@ -79,9 +79,11 @@ export function ProveLayout({ children, aside }: { children: ReactNode; aside: R
 
 /* ---------- assets ---------- */
 
-/** The native coin's real mark, the same one Portfolio and every token list show: HYPE on Elysium, ETH elsewhere. */
+/** The native coin's real mark, the same one Portfolio and every token list show: HYPE on Elysium, BNB on BNB Chain, ETH elsewhere. */
 function NativeMark({ symbol, size }: { symbol: string; size: number }) {
-  return symbol === "HYPE" ? <TokenLogo id="hype" symbol="HYPE" size={size} /> : <TokenLogo id="eth" symbol="ETH" size={size} />;
+  if (symbol === "HYPE") return <TokenLogo id="hype" symbol="HYPE" size={size} />;
+  if (symbol === "BNB") return <TokenLogo id="bnb" symbol="BNB" size={size} />;
+  return <TokenLogo id="eth" symbol="ETH" size={size} />;
 }
 
 export function AssetMark({ id, symbol, size = 28 }: { id: string | null; symbol: string; size?: number }) {

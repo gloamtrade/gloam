@@ -19,6 +19,7 @@
 
 import { parseAbi, parseEventLogs, type AbiEvent, type Address, type Hex, type Log, type PublicClient } from "viem";
 import { isElysiumFamilyChainId } from "./elysium";
+import { isBnbChainId } from "./bnb";
 
 export const POOL_INSERT_ABI = parseAbi([
   "event Shielded(bytes32 indexed commitment, address indexed asset, uint256 amount, uint256 leafIndex, address indexed from)",
@@ -160,6 +161,9 @@ export function walkTuning(chainId: number, logRange: bigint): WalkTuning {
   if (chainId === 1) return { span: logRange, parallel: 3, spacingMs: 120 };
   // Elysium (Arbitrum Orbit, behind its flag): its RPC's own range (lib/elysium), spaced like Base.
   if (isElysiumFamilyChainId(chainId)) return { span: logRange, parallel: 3, spacingMs: 120 };
+  // BNB Chain (behind its flag): publicnode's 50,000 blocks a read, or the keyed RPC's own
+  // cap (a range error splits it). Each empty old read also costs a canary read (lib/bnb).
+  if (isBnbChainId(chainId)) return { span: logRange, parallel: 2, spacingMs: 120 };
   // Ethereum Sepolia: publicnode at the head, Tenderly's gateway for blocks older than
   // 9,000 (lib/readTransport); both take 50,000 blocks a read.
   if (chainId === 11155111) return { span: logRange, parallel: 3, spacingMs: 120 };

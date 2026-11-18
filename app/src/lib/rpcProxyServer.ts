@@ -9,6 +9,10 @@
  *    RPC_PROXY_MAX_BODY bytes and RPC_PROXY_MAX_BATCH calls;
  *  - only the read methods in RPC_PROXY_METHODS, never a send;
  *  - a log read names the contracts it reads, as every read the app makes does;
+ *  - on BNB Chain (a network with a logCanary, whose server RPC is a paid archive
+ *    plan) a log read names only the vault, its memo board, its listed tokens and
+ *    the canary, over at most the network's logRange blocks; a token read that no
+ *    wallet topic narrows (the canary check) over at most the canary's few blocks;
  *  - each call in a batch counts towards a per-IP limit, and the calls that
  *    pass it towards one limit for everyone, so the proxy is no free public RPC.
  *
@@ -25,6 +29,7 @@ import { BaseError, HttpRequestError, RpcRequestError, toHex, type EIP1193Reques
 import { readCappedBody } from "./cspReport";
 import { addRateCount, clientIp } from "./mcpRemote/rateLimit";
 import { NETWORK_KEYS, getNetwork, type GloamNetwork, type NetworkKey } from "./networks";
+import { shieldTokensFor } from "./tokens";
 import { RPC_PROXY_MAX_BATCH, RPC_PROXY_MAX_BODY, RPC_PROXY_METHODS, rpcProxyChainIds } from "./rpcProxy";
 import { serverTransport } from "./serverRpc";
 
@@ -94,8 +99,44 @@ function namesContracts(filter: unknown): boolean {
   return Array.isArray(a) && a.length > 0 && a.length <= MAX_LOG_ADDRESSES && a.every((x) => typeof x === "string" && ADDRESS.test(x));
 }
 
+const numberedBlock = (v: unknown): bigint | null => (typeof v === "string" && /^0x[0-9a-fA-F]{1,16}$/.test(v) ? BigInt(v) : null);
+
+/**
+ * Why a log read is refused on a network with a logCanary (BNB Chain), or null.
+ * There the proxy reads through the server's paid archive RPC, which the relay
+ * and the leaf list need too, so it takes only the reads the app makes: the
+ * vault and its board over at most `logRange` blocks, a listed token narrowed
+ * to a wallet (an activity read) over as many, and a token read that no wallet
+ * narrows (the pruned-logs canary) over at most the canary's blocks. A range
+ * refusal says "maximum block range is N", which a log walk splits on.
+ */
+export function bnbLogReadProblem(filter: unknown, net: Pick<GloamNetwork, "chainId" | "pool" | "payMemo" | "logRange" | "logCanary">): RpcError | null {
+  const canary = net.logCanary;
+  if (!canary) return null;
+  const f = filter as { address?: unknown; fromBlock?: unknown; toBlock?: unknown; topics?: unknown; blockHash?: unknown };
+  const addresses = (typeof f.address === "string" ? [f.address] : (f.address as string[])).map((a) => a.toLowerCase());
+  const vault = [net.pool, net.payMemo?.address].filter((a): a is `0x${string}` => Boolean(a)).map((a) => a.toLowerCase());
+  const tokens = [...shieldTokensFor(net.chainId).map((t) => t.address), canary.address].map((a) => a.toLowerCase());
+  if (!addresses.every((a) => vault.includes(a) || tokens.includes(a))) {
+    return { code: -32602, message: "eth_getLogs here reads only the Gloam vault, its memo board and its listed tokens" };
+  }
+  if (typeof f.blockHash === "string") return null;
+  const from = numberedBlock(f.fromBlock);
+  const to = numberedBlock(f.toBlock);
+  const span = from !== null && to !== null ? to - from + 1n : null;
+  const onToken = addresses.some((a) => tokens.includes(a));
+  if (!onToken) {
+    return span !== null && span > net.logRange ? { code: -32602, message: `block range too large: maximum block range is ${net.logRange}` } : null;
+  }
+  const topics = Array.isArray(f.topics) ? f.topics : [];
+  const byWallet = topics.slice(1, 3).some((t) => t !== null && t !== undefined);
+  const most = byWallet ? net.logRange : canary.blocks;
+  if (span === null || span > most) return { code: -32602, message: `block range too large: maximum block range is ${most}` };
+  return null;
+}
+
 /** One call checked against the rules above: the call to make, or the error to answer. */
-export function checkCall(item: unknown): { call: RpcCall } | { reply: RpcReply } {
+export function checkCall(item: unknown, net?: Pick<GloamNetwork, "chainId" | "pool" | "payMemo" | "logRange" | "logCanary">): { call: RpcCall } | { reply: RpcReply } {
   if (!item || typeof item !== "object" || Array.isArray(item)) return { reply: fail(null, INVALID_REQUEST) };
   const o = item as { id?: unknown; method?: unknown; params?: unknown };
   const id = typeof o.id === "number" || typeof o.id === "string" ? o.id : null;
@@ -105,6 +146,10 @@ export function checkCall(item: unknown): { call: RpcCall } | { reply: RpcReply 
   if (!Array.isArray(params) || params.length > MAX_PARAMS) return { reply: fail(id, { code: -32602, message: "Invalid params" }) };
   if (o.method === "eth_getLogs" && !namesContracts(params[0])) {
     return { reply: fail(id, { code: -32602, message: "eth_getLogs needs an address" }) };
+  }
+  if (o.method === "eth_getLogs" && net) {
+    const problem = bnbLogReadProblem(params[0], net);
+    if (problem) return { reply: fail(id, problem) };
   }
   return { call: { id, method: o.method, params } };
 }
@@ -224,7 +269,7 @@ export async function rpcProxyResponse(req: Request, chainId: string): Promise<N
     return answer(replies, parsed.batch, 429, { "Retry-After": String(rate.retryAfterSec) });
   }
 
-  const checked = parsed.items.map(checkCall);
+  const checked = parsed.items.map((item) => checkCall(item, net));
   const calls = checked.flatMap((c) => ("call" in c ? [c.call] : []));
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<null>((resolve) => {

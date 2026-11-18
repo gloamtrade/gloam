@@ -35,7 +35,8 @@ import {
 } from "viem";
 import { getNetwork, NETWORK_KEYS, networkName, type GloamNetwork, type NetworkKey } from "./networks";
 import { erc20BalanceOfAbi, isDollarStable, shieldTokensFor, supportsNativeShield } from "./tokens";
-import { loadEthUsd, loadHypeUsd, loadLiveMarkets } from "./live-quotes";
+import { loadBnbUsd, loadEthUsd, loadHypeUsd, loadLiveMarkets } from "./live-quotes";
+import { BNB_ENABLED } from "./bnb";
 import { cacheGetJson, cacheSetJson, lastDays, utcDay } from "./tractionStore";
 import { serverTransport } from "@/lib/serverRpc";
 import { readCreatorFees, type CreatorFees } from "./creatorFees";
@@ -496,6 +497,8 @@ export type Prices = {
   ethUsd: number | null;
   /** HYPE, Elysium's native coin (CoinGecko "hyperliquid"); missing or null leaves it unpriced, never at ETH's price. */
   hypeUsd?: number | null;
+  /** BNB, BNB Chain's native coin (CoinGecko "binancecoin"), read only while BNB Chain is on; never at ETH's price. */
+  bnbUsd?: number | null;
   marks: Map<string, number>;
   stocks: "live" | "unpriced";
 };
@@ -614,21 +617,23 @@ async function loadListedTokenMarks(): Promise<Map<string, number>> {
  */
 export async function loadPrices(): Promise<Prices> {
   if (priceCache && Date.now() - priceCache.at < PRICE_TTL_MS) return priceCache;
-  const stored = await cacheGetJson<{ at: number; ethUsd: number | null; hypeUsd?: number | null; marks: [string, number][]; stocks?: Prices["stocks"] }>(PRICE_KEY);
-  if (stored && Date.now() - stored.at < PRICE_TTL_MS) {
+  const stored = await cacheGetJson<{ at: number; ethUsd: number | null; hypeUsd?: number | null; bnbUsd?: number | null; marks: [string, number][]; stocks?: Prices["stocks"] }>(PRICE_KEY);
+  if (stored && Date.now() - stored.at < PRICE_TTL_MS && (!BNB_ENABLED || stored.bnbUsd !== undefined)) {
     priceCache = {
       at: stored.at,
       ethUsd: stored.ethUsd,
       hypeUsd: stored.hypeUsd ?? null,
+      ...(BNB_ENABLED ? { bnbUsd: stored.bnbUsd ?? null } : {}),
       marks: new Map(stored.marks),
       stocks: stored.stocks ?? (stored.marks.length ? "live" : "unpriced"),
     };
     return priceCache;
   }
   const marketsRead = withTimeout(loadLiveMarkets(), 25_000, [] as LiveMarkets);
-  const [ethUsd, hypeUsd, markets, gloamUsd, swapMarks, listedMarks] = await Promise.all([
+  const [ethUsd, hypeUsd, bnbUsd, markets, gloamUsd, swapMarks, listedMarks] = await Promise.all([
     withTimeout(loadEthUsd(), 15_000, null),
     withTimeout(loadHypeUsd(), 15_000, null),
+    BNB_ENABLED ? withTimeout(loadBnbUsd(), 15_000, null) : Promise.resolve(null),
     marketsRead,
     withTimeout(loadGloamUsd(), 10_000, null),
     withTimeout(loadSwapTokenMarks(marketsRead), 25_000, new Map<string, number>()),
@@ -660,13 +665,21 @@ export async function loadPrices(): Promise<Prices> {
     at: Date.now(),
     ethUsd: ethUsd ?? prev?.ethUsd ?? null,
     hypeUsd: hypeUsd ?? prev?.hypeUsd ?? null,
+    ...(BNB_ENABLED ? { bnbUsd: bnbUsd ?? prev?.bnbUsd ?? null } : {}),
     marks: kept,
     stocks: stocksLive ? "live" : "unpriced",
   };
-  if (ethUsd != null || hypeUsd != null || marks.size || gloamUsd != null || swapMarks.size || listedMarks.size) {
+  if (ethUsd != null || hypeUsd != null || bnbUsd != null || marks.size || gloamUsd != null || swapMarks.size || listedMarks.size) {
     await cacheSetJson(
       PRICE_KEY,
-      { at: priceCache.at, ethUsd: priceCache.ethUsd, hypeUsd: priceCache.hypeUsd, marks: [...priceCache.marks], stocks: priceCache.stocks },
+      {
+        at: priceCache.at,
+        ethUsd: priceCache.ethUsd,
+        hypeUsd: priceCache.hypeUsd,
+        ...(BNB_ENABLED ? { bnbUsd: priceCache.bnbUsd ?? null } : {}),
+        marks: [...priceCache.marks],
+        stocks: priceCache.stocks,
+      },
       PRICE_TTL_MS / 1000
     );
   }
@@ -676,8 +689,9 @@ export async function loadPrices(): Promise<Prices> {
 export function usdOf(n: GloamNetwork, asset: string, units: number, info: AssetInfo, prices: Prices): number | null {
   if (info.stable) return units;
   if (asset === NATIVE) {
-    // the chain's own coin at its own price: ETH, or HYPE on Elysium
-    const p = n.primaryAsset.symbol === "ETH" ? prices.ethUsd : n.primaryAsset.symbol === "HYPE" ? prices.hypeUsd : null;
+    // the chain's own coin at its own price: ETH, HYPE on Elysium, BNB on BNB Chain
+    const sym = n.primaryAsset.symbol;
+    const p = sym === "ETH" ? prices.ethUsd : sym === "HYPE" ? prices.hypeUsd : sym === "BNB" ? (prices.bnbUsd ?? null) : null;
     return p != null ? units * p : null;
   }
   // WETH is an ERC-20, but one token is one ETH.
@@ -1218,7 +1232,10 @@ export function counted(n: Pick<GloamNetwork, "testnet">, s: ScanState): ScanSta
 
 /** The CoinGecko id that prices `asset` in the past; null for a dollar stablecoin, a euro coin, or a token with none. */
 function geckoId(n: GloamNetwork, asset: string): string | null {
-  if (asset === NATIVE) return n.primaryAsset.symbol === "ETH" ? "ethereum" : n.primaryAsset.symbol === "HYPE" ? "hyperliquid" : null;
+  if (asset === NATIVE) {
+    const sym = n.primaryAsset.symbol;
+    return sym === "ETH" ? "ethereum" : sym === "HYPE" ? "hyperliquid" : sym === "BNB" ? "binancecoin" : null;
+  }
   const t = holdableTokens(n.chainId).find((x) => x.address.toLowerCase() === asset);
   if (!t || t.kind === "stablecoin") return null;
   return t.coingecko ?? null;

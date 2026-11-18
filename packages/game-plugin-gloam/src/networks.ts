@@ -9,8 +9,11 @@
  * ("robinhood-mainnet"). Tempo and the Robinhood Chain testnet work too, and
  * Ethereum. Elysium mainnet ("elysium-mainnet": USDC only, gas in HYPE) works
  * with an SDK that has its values (0.7.0 or later), and its testnet ("elysium",
- * 99801) once its pool is in. A network whose pool
- * this SDK version does not have is refused, never guessed.
+ * 99801) once its pool is in. BNB Chain mainnet ("bnb-mainnet": USDT and USDC
+ * with 18 decimals, BNB, BDX; gas in BNB) works with an SDK that has its pool;
+ * its public RPCs keep about a day of logs, so give it an RPC that keeps them
+ * all (GLOAM_RPC_URL_56). A network whose pool this SDK version does not have
+ * is refused, never guessed.
  */
 import { getGloamNetwork, type GloamAsset, type GloamNetwork, type GloamNetworkKey } from "@gloamtrade/sdk";
 import type { Address } from "viem";
@@ -26,6 +29,7 @@ export const NETWORK_KEYS: readonly NetworkKey[] = [
   "tempo",
   "ethereum-mainnet",
   "ethereum",
+  "bnb-mainnet",
   "elysium-mainnet",
   "elysium",
 ];
@@ -54,6 +58,9 @@ export function resolveNetwork(key: string, opts: { rpc?: string; env?: Record<s
     throw new Error(`"${key}" is not a Gloam network. Use one of: ${NETWORK_KEYS.join(", ")}.`);
   }
   const net = getGloamNetwork(key);
+  if (!net && key === "bnb-mainnet") {
+    throw new Error(`BNB Chain mainnet is not live in this version of @gloamtrade/sdk yet. Update the package once it is, or pick one of: ${NETWORK_KEYS.filter((k) => getGloamNetwork(k)).join(", ")}.`);
+  }
   if (!net && (key === "elysium-mainnet" || key === "elysium")) {
     const which = key === "elysium" ? "Elysium testnet" : "Elysium mainnet";
     throw new Error(`${which} is not live in this version of @gloamtrade/sdk yet. Update the package once it is, or pick one of: ${NETWORK_KEYS.filter((k) => getGloamNetwork(k)).join(", ")}.`);

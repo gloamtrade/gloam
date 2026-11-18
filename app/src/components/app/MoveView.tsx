@@ -2541,7 +2541,7 @@ export function MoveView() {
   // every token the chain knows, so a note a swap brought in (WETH, a stock token) shows its logo too
   const shieldTokens = knownTokens(network.chainId);
   const logoIdFor = (asset: string): string | null => {
-    // the chain's own coin: HYPE on Elysium, ETH elsewhere
+    // the chain's own coin: HYPE on Elysium, BNB on BNB Chain, ETH elsewhere
     if (isNativeAsset(asset)) return nativeTokenFor(network.chainId).id;
     return (
       shieldTokens.find((t) => t.address.toLowerCase() === asset.toLowerCase())?.id ??

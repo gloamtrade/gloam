@@ -8,6 +8,8 @@ type ApiResponse = {
   ethUsd?: number | null;
   /** HYPE in USD, Elysium's gas coin. */
   hypeUsd?: number | null;
+  /** BNB in USD, BNB Chain's gas coin (only while BNB Chain is on). */
+  bnbUsd?: number | null;
   meta?: {
     liveCount: number;
     total: number;
@@ -46,6 +48,7 @@ export function useEthPrice() {
   return {
     ethUsd: q.data?.ethUsd ?? null,
     hypeUsd: q.data?.hypeUsd ?? null,
+    bnbUsd: q.data?.bnbUsd ?? null,
     isLoading: q.isLoading,
   };
 }

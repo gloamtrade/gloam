@@ -146,6 +146,25 @@ contract RedeployGuardTest is Test {
         }
     }
 
+    /// BNB Chain's file is in before its deploy and names no vault: only the deployer's own
+    /// nonces are checked until bnb-mainnet-after-deploy.sh writes the vault into it.
+    function test_bnb_record_before_its_deploy() public {
+        (string memory file, address vault) = h.record(56);
+        assertEq(file, "deployments/bnb-mainnet.json");
+        assertEq(vault, address(0), "no vault recorded yet");
+        vm.chainId(56);
+        h.requireFirstDeploy(address(0));
+        h.requireFirstDeploy(deployer);
+        // the deployer makes a vault-shaped contract at its nonce 0: refused from then on
+        vm.prank(deployer);
+        VaultShaped made = new VaultShaped();
+        vm.expectRevert(_deployerRefusal(address(made), 0));
+        h.requireFirstDeploy(deployer);
+        // BNB's testnet (97) is not a mainnet: never checked
+        (file, vault) = h.record(97);
+        assertEq(bytes(file).length, 0);
+    }
+
     /// A testnet is never checked: rehearsals there run again on purpose.
     function test_testnets_are_not_checked() public {
         vm.chainId(84532);

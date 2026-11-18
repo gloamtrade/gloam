@@ -17,7 +17,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { tempo, tempoModerato } from "viem/chains";
 import { Account as TempoAccount } from "viem/tempo";
-import { splitReadTransport } from "@gloamtrade/sdk";
+import { guardPrunedLogs, splitReadTransport } from "@gloamtrade/sdk";
 import { MCP_NETWORKS, type McpNetwork } from "./networks.js";
 import { noteBroadcast } from "./walletSend.js";
 
@@ -181,12 +181,16 @@ export function getSigner(net: McpNetwork = MCP_NETWORKS.robinhood, env: Env = p
  * A read-only client for a network, for chain reads when this server has no
  * signer (e.g. a payee that sweeps through the relay). Reads go to the RPC at
  * the chain head, old logs and state to the network's history RPC where it has one.
+ * On a network with a logCanary (BNB Chain) an empty log read about old blocks
+ * is checked first, and fails loudly when the RPC turns out to keep no logs
+ * that old (PrunedLogsError), instead of reading as "no events".
  */
 export function getPublicClient(net: McpNetwork = MCP_NETWORKS.robinhood) {
   // this package's own http on both sides, so errors stay this viem's classes
   const fresh = http(net.rpc);
-  const transport = net.historyRpc
+  const read = net.historyRpc
     ? splitReadTransport<HttpTransport>({ fresh, history: http(net.historyRpc.url), recentBlocks: net.historyRpc.recentBlocks })
     : fresh;
+  const transport = net.logCanary ? guardPrunedLogs<HttpTransport>(read, net.logCanary) : read;
   return createPublicClient({ chain: chainFor(net), ccipRead: false, transport });
 }

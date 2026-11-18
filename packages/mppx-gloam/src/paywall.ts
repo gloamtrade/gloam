@@ -12,8 +12,9 @@
 
 import { parseUnits, type Address } from "viem";
 import {
-  assetDecimals,
   buildGloamChargeRequest,
+  chargeDecimals,
+  noDefaultCurrencyMessage,
   resolveNetwork,
   isGloamChargeChallenge,
   parseGloamChargeRequest,
@@ -50,9 +51,14 @@ export interface GloamPaywallConfig {
   realm?: string;
   /** "tempo-mainnet" or "robinhood-mainnet" (mainnet), "tempo" or "robinhood" (testnet), or a chain id; "base-mainnet", "base" and "ethereum" once their pools are in, "elysium-mainnet" and "elysium" (Elysium testnet) once the SDK has Elysium's values. Default "tempo". */
   network?: GloamChargeNetwork | number;
-  /** Token address; default the network's first stablecoin (USDC.e on Tempo mainnet, USDG on Robinhood Chain mainnet, USDC on Base, PathUSD on Tempo testnet), native ETH on Robinhood Chain testnet. */
+  /** Token address; default the network's first stablecoin (USDC.e on Tempo mainnet, USDG on Robinhood Chain mainnet, USDC on Base, USDT on BNB Chain, PathUSD on Tempo testnet), native ETH on Robinhood Chain testnet. */
   currency?: Address;
-  /** Decimals of `currency`, to read display amounts. Default: the asset's own (6 for the stablecoins, 18 for ETH and GLOAM). */
+  /**
+   * Decimals of `currency`, to read display amounts. Leave it out: a listed
+   * asset always counts in its own (6 for most stablecoins, 18 for USDT and
+   * USDC on BNB Chain, 18 for the gas coins and GLOAM), and a value that
+   * disagrees throws. Needed only for a token Gloam does not list.
+   */
   decimals?: number;
   /** Seconds a challenge stays valid. Default 600: a push payment proves and confirms before it is presented. */
   expiresIn?: number;
@@ -76,8 +82,10 @@ export type GloamPaywallResult =
 export function createGloamPaywall(config: GloamPaywallConfig) {
   assertKeepsFreshNotes(config.server);
   const net = resolveNetwork(config.network);
-  const known = config.decimals ?? assetDecimals(config.currency ?? net.currency);
-  if (known === undefined) throw new Error(`Pass decimals for currency ${config.currency}.`);
+  const currency = config.currency ?? net.currency;
+  if (currency === undefined) throw new Error(noDefaultCurrencyMessage(net.chainId));
+  const known = chargeDecimals(currency, net.chainId, config.decimals);
+  if (known === undefined) throw new Error(`Pass decimals for currency ${currency}.`);
   const decimals: number = known;
 
   function termsFor(o: GloamChargeOptions): GloamChargeRequest {

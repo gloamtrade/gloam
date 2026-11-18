@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ELYSIUM_ENABLED } from "@/lib/elysium";
+import { BNB_ENABLED } from "@/lib/bnb";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Footer } from "@/components/Footer";
@@ -191,6 +192,8 @@ export default function SecurityPage() {
             on Robinhood Chain, Tempo, Base and Ethereum.
             {ELYSIUM_ENABLED &&
               " Elysium's vault went live after the review. It is built from the same reviewed files, and its owner is a VaultOwnerGuard from the deploy, which the review did not cover."}
+            {BNB_ENABLED &&
+              " BNB Chain's vault went live after the review too, built from the same reviewed files and owned the same way."}
           </p>
           <Link href="/verify#contracts" className="gl-arrowlink mt-5">
             Check the contracts <span aria-hidden>→</span>

@@ -29,6 +29,8 @@ export const PUBLIC_MEMPOOL_CHAINS: readonly number[] = [
   // Robinhood Chain, which does not). Relay-sent link payments still count there.
   99901,
   99801,
+  // BNB Chain: a public mempool, like Ethereum's. Only relay-sent link payments count there.
+  56,
 ];
 
 export const LINK_CODE_LENGTH = 20;

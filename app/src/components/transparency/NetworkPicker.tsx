@@ -20,6 +20,7 @@ const LOGOS: Record<ChainFamily, string> = {
   base: "/brand/networks/base.svg",
   ethereum: "/brand/networks/ethereum.svg",
   elysium: "/brand/networks/elysium.png",
+  bnb: "/brand/networks/bnb.png",
 };
 
 const sideOf = (k: NetworkKey): Side => (getNetwork(k).testnet ? "testnet" : "mainnet");

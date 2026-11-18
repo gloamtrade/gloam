@@ -34,6 +34,8 @@ export const STABLE_PRESETS = ["25", "50", "100", "250", "500", "1000"] as const
 export const ETH_PRESETS = ["0.01", "0.05", "0.1", "0.5"] as const;
 /** Round amounts offered for HYPE, Elysium's native coin (one deposit is up to 12). */
 export const HYPE_PRESETS = ["1", "2", "5", "10"] as const;
+/** Round amounts offered for BNB, BNB Chain's native coin. */
+export const BNB_PRESETS = ["0.05", "0.1", "0.5", "1"] as const;
 
 /** What the checks read of a note. */
 export type PrivacyNote = Pick<LocalNote, "id" | "chainId" | "pool" | "asset" | "amountWei" | "createdAt" | "from" | "source">;
@@ -67,7 +69,10 @@ export type PresetAmount = {
 /** Which round amounts suit an asset on a chain, from the app's token list. */
 export function presetsFor(chainId: number, asset: string): { values: readonly string[]; decimals: number } {
   const a = asset.toLowerCase();
-  if (a === zeroAddress) return { values: nativeTokenFor(chainId).id === "hype" ? HYPE_PRESETS : ETH_PRESETS, decimals: 18 };
+  if (a === zeroAddress) {
+    const id = nativeTokenFor(chainId).id;
+    return { values: id === "hype" ? HYPE_PRESETS : id === "bnb" ? BNB_PRESETS : ETH_PRESETS, decimals: 18 };
+  }
   const t = knownTokens(chainId).find((x) => x.address.toLowerCase() === a);
   if (!t) return { values: [], decimals: 18 };
   if (t.kind === "stablecoin") return { values: STABLE_PRESETS, decimals: t.decimals };

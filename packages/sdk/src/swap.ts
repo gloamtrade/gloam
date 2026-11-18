@@ -32,8 +32,8 @@
  * The switches here are read on every call, so a test (or a fork) that fills one in
  * sees it at once. A switch only turns on the address pinned for that chain.
  *
- * Elysium (mainnet and testnet) has no swap router: private swaps are not on Elysium yet, and a
- * swap asked for there is refused by name (planVaultSwap).
+ * Elysium (mainnet and testnet) and BNB Chain have no swap router: private swaps are not on
+ * either yet, and a swap asked for there is refused by name (planVaultSwap).
  */
 import {
   concatHex,
@@ -49,6 +49,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { ELYSIUM_TESTNET_CHAIN_ID, elysiumChainId } from "./elysium.js";
+import { BNB_MAINNET_CHAIN_ID } from "./bnb.js";
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -1335,6 +1336,7 @@ export async function planVaultSwap(client: PublicClient, chainId: number, p: Sw
   if (!r) {
     const id = elysiumChainId();
     if ((id !== null && chainId === id) || chainId === ELYSIUM_TESTNET_CHAIN_ID) throw new Error("Private swaps are not on Elysium yet.");
+    if (chainId === BNB_MAINNET_CHAIN_ID) throw new Error("Private swaps are not on BNB Chain yet.");
     throw new Error("Private swaps are not live on this network yet.");
   }
   if (!isSwapAsset(chainId, p.assetIn, r.address) || !isSwapAsset(chainId, p.assetOut, r.address)) {

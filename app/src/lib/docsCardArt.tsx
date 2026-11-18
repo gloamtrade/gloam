@@ -144,6 +144,7 @@ const CHAIN_PILLS: Record<string, [label: string, mono: string]> = {
   Base: ["Base", "B"],
   Ethereum: ["Ethereum", "E"],
   Elysium: ["Elysium", "EL"],
+  "BNB Chain": ["BNB Chain", "BNB"],
 };
 
 /** The mainnets with a pool in, as card pills (lib/mainnet.ts). */

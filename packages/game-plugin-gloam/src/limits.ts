@@ -214,6 +214,10 @@ export function resolveLimits(agent: string, raw: unknown, source: string, netwo
     let symbol: string;
     if (listed) {
       ({ address, decimals, symbol } = listed);
+      // A listed asset counts in its own decimals: 6 for USDT on BNB Chain (18 there) would cap a trillionth of what was meant.
+      if (entry.decimals !== undefined && entry.decimals !== decimals) {
+        throw new Error(`${symbol} on ${networkName(net.chainId)} has ${decimals} decimals, not ${entry.decimals}. Leave "decimals" out for an asset the vault lists.`);
+      }
     } else if (isAddress(k)) {
       if (entry.decimals === undefined) throw new Error(`Asset ${k} is not one the ${net.label} vault lists; add "decimals" for it.`);
       address = k;

@@ -14,6 +14,7 @@ import type { VaultSwapRefundInfo } from "./vaultSwap";
 import type { DelayWindow } from "./relay/scheduled";
 import { scanDeposits } from "./depositScan";
 import { isElysiumFamilyChainId } from "./elysium";
+import { BNB_GAS_PRICE_FALLBACK, isBnbChainId } from "./bnb";
 import {
   activeHashScheme,
   activePoolAddress,
@@ -271,9 +272,16 @@ export const APPROVE_GAS_LIMIT = 120_000n;
  * has not seen the approval yet: the estimate reverts and the wallet shows an RPC
  * error before anything is sent. With the limit given, the wallet skips the
  * estimate. A 7 USDC deposit there measured about 1.15M gas (limit 1.9M).
+ *
+ * BNB Chain takes them too, for the same reason: blocks every 0.45 s and public
+ * RPCs behind load balancers, so a wallet's estimate right after the approval can
+ * reach a node a block behind. On a fork of BNB Chain (test/fork/BnbMainnetFork.t.sol)
+ * the vault's very first deposit, the dearest one, used about 1.69M gas (limit 1.9M),
+ * a private send about 1.89M (limit 2.4M). Gas is about 0.05 gwei there, so the
+ * headroom costs nothing: a wallet pays for the gas used.
  */
 export function gasFor(chainId: number, limit: bigint): bigint | undefined {
-  return chainId === 46630 || chainId === 4663 || isElysiumFamilyChainId(chainId) ? limit : undefined;
+  return chainId === 46630 || chainId === 4663 || isElysiumFamilyChainId(chainId) || isBnbChainId(chainId) ? limit : undefined;
 }
 
 /** The least a native deposit leaves in the wallet for its gas: 0.00005, the fixed buffer every chain kept before. */
@@ -298,7 +306,14 @@ const ELYSIUM_GAS_PRICE_FALLBACK = 500_000_000n;
  * assumes its 0.5 gwei base fee and every other chain keeps the floor, as before.
  */
 export function nativeGasReserve(chainId: number, gasPrice?: bigint | null): bigint {
-  const price = gasPrice && gasPrice > 0n ? gasPrice : isElysiumFamilyChainId(chainId) ? ELYSIUM_GAS_PRICE_FALLBACK : 0n;
+  const price =
+    gasPrice && gasPrice > 0n
+      ? gasPrice
+      : isElysiumFamilyChainId(chainId)
+        ? ELYSIUM_GAS_PRICE_FALLBACK
+        : isBnbChainId(chainId)
+          ? BNB_GAS_PRICE_FALLBACK
+          : 0n;
   const need = SHIELD_BOUND_GAS_LIMIT * price * 3n;
   return need > NATIVE_GAS_FLOOR ? need : NATIVE_GAS_FLOOR;
 }
@@ -479,11 +494,15 @@ export function formatAssetAmount(raw: bigint | string, asset: string, maxFrac =
 
 /**
  * Decimal places for a total or a balance in a summary (payroll runs, caps,
- * schedules): cents for the 6-decimal stablecoins, 6 places for an 18-decimal
- * coin such as ETH, where 0.01 is already a real amount (0.004 ETH read
- * "<0.01").
+ * schedules): cents for a stablecoin, whatever its decimals (USDT and USDC
+ * have 18 on BNB Chain, 6 elsewhere), 6 places for anything else with more
+ * than 6 decimals, such as ETH, where 0.01 is already a real amount (0.004 ETH
+ * read "<0.01"). Decided by what the token is, never by its decimals alone.
  */
 export function summaryDecimals(asset: string): number {
+  if (isNativeAsset(asset)) return 6;
+  const t = knownForActive().find((x) => x.address.toLowerCase() === asset.toLowerCase());
+  if (t?.kind === "stablecoin") return 2;
   return assetDecimals(asset) > 6 ? 6 : 2;
 }
 

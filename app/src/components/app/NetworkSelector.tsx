@@ -24,6 +24,7 @@ function assetLine(n: GloamNetwork): string {
   if (n.key === "ethereum-mainnet") return "USDC, USDT, USDG, PYUSD, EURC and ETH";
   if (n.key === "elysium-mainnet") return "USDC";
   if (n.key === "elysium") return "Test USDC";
+  if (n.key === "bnb-mainnet") return "USDT, USDC, BNB and BDX";
   if (n.key === "robinhood") return "Test ETH, stablecoins and stocks";
   if (n.key === "base") return "Test USDC, EURC and ETH";
   if (n.key === "ethereum") return "Test USDC, USDG, PYUSD, EURC and ETH";
@@ -84,7 +85,7 @@ export function NetworkSelector() {
         }`}
       >
         {settled ? (
-          <TokenLogo id={network.family} symbol={network.label} size={34} />
+          <TokenLogo id={network.family} symbol={network.label} size={34} network />
         ) : (
           <span className="h-[34px] w-[34px] shrink-0 rounded-full bg-surface-2" aria-hidden />
         )}
@@ -151,7 +152,7 @@ export function NetworkSelector() {
                       writable ? "hover:bg-surface" : "cursor-not-allowed opacity-60"
                     } ${active ? "bg-surface" : ""}`}
                   >
-                    <TokenLogo id={n.family} symbol={n.label} size={30} />
+                    <TokenLogo id={n.family} symbol={n.label} size={30} network />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[14px] font-medium leading-tight text-foreground">
                         {n.label}

@@ -18,6 +18,7 @@ import { getAddress, isAddressEqual, parseAbi, zeroAddress, type Address, type P
 import { getNetwork, isNetworkKey, networkName, type GloamNetwork, type NetworkKey } from "./networks";
 import { swapRoutersOn } from "./vaultSwap";
 import { ELYSIUM_FLAG, ELYSIUM_TESTNET_FLAG } from "./elysium";
+import { BNB_FLAG } from "./bnb";
 import { SHOW_TESTNETS } from "./showTestnets";
 
 /**
@@ -57,6 +58,26 @@ export const GLOAM_DEPLOYER: Address = "0x891E74a11abC5D0eC2EE855B2BD521fF9D18F4
 
 /** The Poseidon hash library every mainnet-pool vault uses. */
 export const MAINNET_POSEIDON_T3: Address = "0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4";
+
+/**
+ * Vaults born guarded, from a deployer of their own, so their addresses differ
+ * from the four first mainnets': the deployer, the PoseidonT3 it made and the
+ * VaultOwnerGuard that owns the vault from its deploy (contracts/deployments).
+ * Only BNB Chain reads from here today; Elysium keeps its rows as they are.
+ * BNB Chain's are the planned addresses from deployer 0xec99...6b60 at nonce 0
+ * (contracts/deployments/bnb-mainnet.json "plan", checked on an anvil fork by
+ * contracts/bnb-mainnet-rehearsal.sh); the read-back on deploy day rewrites that
+ * file, and selftest-bnb-everywhere fails if these and the file disagree.
+ */
+export const BORN_GUARDED: Partial<Record<GloamNetwork["family"], { deployer: Address; poseidon: Address; guard: Address; controller: Address }>> = {
+  bnb: {
+    deployer: "0xec9993765e249e8e9DC677B7BCB61F78b31c6b60",
+    poseidon: "0x62c435CE6886fa91e3b0e91500c6dC9219723457",
+    guard: "0x633B24cf4C48CF68cB815BC87C110c47E218B4af",
+    // The Gloam Owner Safe (2 of 3), replayed on BNB Chain at its address on the other chains.
+    controller: "0x8E74b2b85b40f36771f92392b42BBaeacDC75507",
+  },
+};
 
 /** CHANGE_DELAY in the vault: a rule change waits this long in public. */
 export const CHANGE_DELAY_SECONDS = 3n * 24n * 60n * 60n;
@@ -114,6 +135,8 @@ const MAINNET_ORDER: readonly NetworkKey[] = [
   "ethereum-mainnet",
   // Only while its flag is on (lib/elysium): with the flag off it is not named at all.
   ...(ELYSIUM_FLAG ? (["elysium-mainnet"] as const) : []),
+  // BNB Chain, only while its flag is on (lib/bnb, off by default): listed as next until its pool is in.
+  ...(BNB_FLAG ? (["bnb-mainnet"] as const) : []),
 ];
 const TESTNET_ORDER: readonly NetworkKey[] = [
   "robinhood",
@@ -180,7 +203,39 @@ function appRows(n: GloamNetwork): DirectoryRow[] {
       source: "app",
     });
   }
-  if (n.paymentsPool && n.family === "elysium") {
+  const own = BORN_GUARDED[n.family];
+  if (n.paymentsPool && own) {
+    // Born guarded from its own deployer: the guard owns the vault, the Safe runs the guard.
+    rows.push(
+      {
+        role: "owner",
+        name: "Owner guard",
+        contract: "VaultOwnerGuard",
+        what: "Has owned this vault since its deploy. Forwards deposit limit and fee changes and the sweep of coin sent by mistake, nothing else, so its proof checkers and ownership can never change.",
+        address: own.guard,
+        deployBlock: null,
+        source: "app",
+      },
+      {
+        role: "owner",
+        name: "Guard controller",
+        contract: null,
+        what: "The Gloam Owner Safe, 2 of 3. Runs the guard: rule changes wait 3 days in public. Can lower a limit or the fee at once. Has no function to withdraw a balance.",
+        address: own.controller,
+        deployBlock: null,
+        source: "app",
+      },
+      {
+        role: "fee_recipient",
+        name: "Treasury",
+        contract: null,
+        what: "Receives the cash-out fee.",
+        address: GLOAM_TREASURY,
+        deployBlock: null,
+        source: "app",
+      }
+    );
+  } else if (n.paymentsPool && n.family === "elysium") {
     // Elysium's vault was born guarded: its owner is a VaultOwnerGuard made by the
     // deploy itself (its address is in the live read above and in
     // contracts/deployments/elysium-mainnet.json), never the owner wallet.
@@ -242,8 +297,8 @@ function appRows(n: GloamNetwork): DirectoryRow[] {
       role: "deployer",
       name: "Deployer",
       contract: null,
-      what: "Created these contracts and handed the vault to the owner.",
-      address: GLOAM_DEPLOYER,
+      what: own ? "Created these contracts and handed the vault to its guard in the same run." : "Created these contracts and handed the vault to the owner.",
+      address: own?.deployer ?? GLOAM_DEPLOYER,
       deployBlock: null,
       source: "app",
     });
@@ -440,8 +495,9 @@ export function vaultChecks(n: GloamNetwork, r: VaultRead): VaultCheck[] {
       detail: `The vault's delay is ${formatDelay(r.changeDelay)}.`,
     },
   ];
+  const own = BORN_GUARDED[n.family];
   if (n.paymentsPool) {
-    checks.push(ownerCheck(r.owner));
+    checks.push(ownerCheck(r.owner, own?.guard ?? GLOAM_OWNER_GUARD));
   }
   checks.push({
     label: "No handover pending",
@@ -460,10 +516,15 @@ export function vaultChecks(n: GloamNetwork, r: VaultRead): VaultCheck[] {
             ? `Cash-out fee ${formatBps(r.withdrawFeeBps)}.`
             : `Fees go to ${getAddress(r.feeRecipient)}.`,
     });
+    const poseidon = own?.poseidon ?? MAINNET_POSEIDON_T3;
     checks.push({
       label: "Hash library as listed",
-      ok: isAddressEqual(r.poseidon, MAINNET_POSEIDON_T3),
-      detail: isAddressEqual(r.poseidon, MAINNET_POSEIDON_T3) ? "PoseidonT3, the same on every mainnet vault." : `The vault uses ${getAddress(r.poseidon)}.`,
+      ok: isAddressEqual(r.poseidon, poseidon),
+      detail: isAddressEqual(r.poseidon, poseidon)
+        ? own
+          ? "PoseidonT3, the same code as on every mainnet vault, made by this vault's own deployer."
+          : "PoseidonT3, the same on every mainnet vault."
+        : `The vault uses ${getAddress(r.poseidon)}.`,
     });
   }
   return checks;

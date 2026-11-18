@@ -37,6 +37,9 @@ const USDC = "0x00000000000000000000000000000000000E1a5c";
 const RPC = "https://rpc.elysium.example/v1";
 
 for (const k of Object.keys(process.env)) if (k.startsWith("NEXT_PUBLIC_ELYSIUM_")) delete process.env[k];
+// BNB Chain stays off here: its own flag would add a sixth mainnet after Elysium (selftest-bnb and
+// selftest-bnb-everywhere check the lists with both on).
+for (const k of Object.keys(process.env)) if (k.startsWith("NEXT_PUBLIC_BNB_")) delete process.env[k];
 // Off only when the flag says so; "default" and "bad" leave it unset, as a preview build would.
 if (MODE === "off") process.env.NEXT_PUBLIC_ELYSIUM_ENABLED = "0";
 // Another mainnet's id fails loudly too, now that Elysium's (99901) is known.

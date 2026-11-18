@@ -6,7 +6,8 @@
  * Tempo, Base, Ethereum and Elysium on mainnet (the ceremony's final keys), and
  * their testnets (dev keys on the Robinhood Chain and Tempo testnets; Base
  * Sepolia and Ethereum Sepolia run the mainnet pool and keys; Elysium's testnet
- * appears once its pool is filled in). Each is a separate
+ * appears once its pool is filled in; BNB Chain mainnet appears once its
+ * pool is filled in, src/bnb.ts). Each is a separate
  * deployment of the same shielded-pool design: pick a network
  * (mainnetNetwork("tempo"), gloamNetworks(), or GLOAM_NETWORKS for the
  * testnets), pass its `chainId` and `poolAddress`, and prove with
@@ -61,6 +62,7 @@ export * from "./privacy.js";
 export * from "./constants.js";
 export * from "./mainnet.js";
 export * from "./elysium.js";
+export * from "./bnb.js";
 export * from "./poseidon.js";
 export * from "./note.js";
 export * from "./merkle.js";

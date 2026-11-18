@@ -308,8 +308,12 @@ export class GloamAgent {
     const chain: Chain = { ...this.network.chain, rpcUrls: { default: { http: [this.network.rpc] } } };
     // A network whose public RPC keeps only recent history reads old logs from its history RPC, unless a private RPC was set.
     const historyRpc = this.network.rpc === this.network.rpcUrl ? this.network.historyRpc : null;
+    // BNB Chain's public RPCs answer an empty list for logs they no longer keep: its reads
+    // check that against a canary and fail loudly instead, private RPC or not.
+    const logCanary = this.network.logCanary ?? null;
     this.publicClient =
-      opts.publicClient ?? (createPublicClient({ chain, transport: gloamReadTransport({ rpcUrl: this.network.rpc, historyRpc }) }) as PublicClient);
+      opts.publicClient ??
+      (createPublicClient({ chain, transport: gloamReadTransport({ rpcUrl: this.network.rpc, historyRpc, logCanary }) }) as PublicClient);
     this.agentId = opts.agentId ?? envAgentId(env);
 
     // The key comes from the agent's own environment and never leaves this process.

@@ -24,7 +24,7 @@ export function emailClaimOn(networkKey: string, walletsOn: boolean = EMBEDDED_W
 
 /**
  * The coin a claim link pays in, when it is the chain's own: HYPE on Elysium,
- * ETH elsewhere, read from the link's chain, never from the network the
+ * BNB on BNB Chain, ETH elsewhere, read from the link's chain, never from the network the
  * browser saved (a HYPE link opened with Base saved showed "ETH"). Null for a
  * token, which the link's network's token list names.
  */

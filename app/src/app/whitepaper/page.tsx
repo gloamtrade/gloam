@@ -6,6 +6,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram, PoolPicture } from "@/components/docs/FlowDiagram";
 import { joinNames, liveMainnetNames, liveMainnetsSinceText, mainnetPool } from "@/lib/mainnet";
 import { ELYSIUM, ELYSIUM_TESTNET } from "@/lib/elysium";
+import { BNB } from "@/lib/bnb";
 
 /** Base and Ethereum mainnet join the lists once their pools are in (lib/mainnet.ts). */
 const BASE_LIVE = mainnetPool(8453) !== null;
@@ -17,9 +18,11 @@ const MAINNET_IDS = [
   ...(ETHEREUM_LIVE ? ["Ethereum 1"] : []),
   // Elysium mainnet, only while it is on (lib/elysium.ts)
   ...(ELYSIUM ? [`Elysium ${ELYSIUM.chainId}`] : []),
+  // BNB Chain, only while it is on (lib/bnb.ts)
+  ...(BNB ? [`BNB Chain ${BNB.chainId}`] : []),
 ].join(" · ");
 /** The mainnets after Robinhood Chain and Tempo, as words: "Base and Ethereum", and Elysium while it is on. */
-const LATER_NAMES = joinNames([...(BASE_LIVE ? ["Base"] : []), ...(ETHEREUM_LIVE ? ["Ethereum"] : []), ...(ELYSIUM ? ["Elysium"] : [])]);
+const LATER_NAMES = joinNames([...(BASE_LIVE ? ["Base"] : []), ...(ETHEREUM_LIVE ? ["Ethereum"] : []), ...(ELYSIUM ? ["Elysium"] : []), ...(BNB ? ["BNB Chain"] : [])]);
 
 export const metadata: Metadata = {
   title: "Whitepaper",
@@ -348,7 +351,7 @@ export default function WhitepaperPage() {
           {
             n: "1",
             title: "Connect",
-            body: `Wallet on a mainnet (Robinhood Chain 4663, Tempo 4217${BASE_LIVE ? ", Base 8453" : ""}${ETHEREUM_LIVE ? ", Ethereum 1" : ""}${ELYSIUM ? `, Elysium ${ELYSIUM.chainId}` : ""}), or on a testnet (46630, 42431, 84532, 11155111${ELYSIUM_TESTNET ? ", 99801" : ""}) to practice.`,
+            body: `Wallet on a mainnet (Robinhood Chain 4663, Tempo 4217${BASE_LIVE ? ", Base 8453" : ""}${ETHEREUM_LIVE ? ", Ethereum 1" : ""}${ELYSIUM ? `, Elysium ${ELYSIUM.chainId}` : ""}${BNB ? `, BNB Chain ${BNB.chainId}` : ""}), or on a testnet (46630, 42431, 84532, 11155111${ELYSIUM_TESTNET ? ", 99801" : ""}) to practice.`,
           },
           {
             n: "2",

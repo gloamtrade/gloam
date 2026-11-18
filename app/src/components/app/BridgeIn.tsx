@@ -18,6 +18,8 @@ import {
   expensiveRoute,
   formatBridgeBalance,
   leftoverLabel,
+  bridgeChain,
+  bridgeToken,
   privateBridgeable,
   swapSource,
   type BridgeAppFee,
@@ -135,6 +137,18 @@ function TokenMark({ src, size = 20 }: { src: string; size?: number }) {
  * `startOpen` opens the panel once a wallet is there (a link with ?bridge=open,
  * from a new Gloam wallet's Add funds).
  */
+/**
+ * The decimals of the token a bridge approval is for, from the bridge's own
+ * token list by chain and address. USDC and USDT have 18 decimals on BNB Chain
+ * and 6 on most chains, so the symbol alone never decides it. 18 if unlisted.
+ */
+function approvedDecimals(chainId: number, token: Address, symbol: string): number {
+  const chain = bridgeChain(chainId);
+  const byAddress = chain?.tokens.find((t) => t.address.toLowerCase() === token.toLowerCase());
+  if (byAddress) return byAddress.decimals;
+  return (chain ? bridgeToken(chain, symbol)?.decimals : undefined) ?? 18;
+}
+
 export function BridgeInCard({
   recipient,
   onArrived,
@@ -795,7 +809,7 @@ function BridgeSheet({
             const needed = BigInt(`0x${tx.data.slice(74, 138)}`);
             const allowed = await readContract(config, { address: tx.to as Address, abi: erc20Abi, functionName: "allowance", args: [getAccount(config).address as Address, spender], chainId }).catch(() => null);
             if (allowed !== null && allowed < needed) {
-              throw new Error(`Your wallet approved less than this payment needs (${formatUnits(allowed, quote.send.symbol === "USDC" || quote.send.symbol === "USDT" ? 6 : 18)} of ${quote.send.amount} ${quote.send.symbol}). Try again and approve the amount shown, without editing it.`);
+              throw new Error(`Your wallet approved less than this payment needs (${formatUnits(allowed, approvedDecimals(quote.send.chainId, tx.to as Address, quote.send.symbol))} of ${quote.send.amount} ${quote.send.symbol}). Try again and approve the amount shown, without editing it.`);
             }
           }
           approved = true;

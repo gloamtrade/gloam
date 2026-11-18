@@ -107,6 +107,8 @@ type Prices = {
   ethUsd: number | null;
   /** HYPE's price: the Elysium vault's native coin, never valued at ETH's. */
   hypeUsd: number | null;
+  /** BNB's price: the BNB Chain vault's native coin, never valued at ETH's. */
+  bnbUsd: number | null;
   /** Live marks by token address (the markets feed); for a stock this is a share price, not a token price. */
   byAddress: Map<string, number>;
   markets: Market[];
@@ -136,7 +138,7 @@ function usePrices(): { prices: Prices | null; waiting: boolean } {
     let live = true;
     const markets = fetch("/api/markets", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null) as Promise<{ ethUsd?: number | null; hypeUsd?: number | null; markets?: Partial<Market>[] } | null>;
+      .catch(() => null) as Promise<{ ethUsd?: number | null; hypeUsd?: number | null; bnbUsd?: number | null; markets?: Partial<Market>[] } | null>;
     // display only: a slow price read never holds the other prices back
     const tokenPrices = fetch("/api/token-marks", { signal: AbortSignal.timeout(5_000) })
       .then((r) => (r.ok ? r.json() : null))
@@ -159,6 +161,7 @@ function usePrices(): { prices: Prices | null; waiting: boolean } {
       setPrices({
         ethUsd: typeof d?.ethUsd === "number" ? d.ethUsd : null,
         hypeUsd: typeof d?.hypeUsd === "number" ? d.hypeUsd : null,
+        bnbUsd: typeof d?.bnbUsd === "number" ? d.bnbUsd : null,
         byAddress,
         markets: list,
         tokenMarks,
@@ -196,7 +199,7 @@ function fmtUsd(n: number): string {
 
 /**
  * A holding's dollar value, priced as the server's figures price it
- * (lib/onchainMetrics usdOf): stablecoins $1, ETH and WETH at ETH's price, HYPE at HYPE's, a
+ * (lib/onchainMetrics usdOf): stablecoins $1, ETH and WETH at ETH's price, HYPE at HYPE's, BNB at BNB's, a
  * Robinhood Chain stock at its share price times uiMultiplier / 1e18 (never the
  * share price alone), anything else at its live mark or the server's price. Null
  * means no price: left out of the total and named, never counted as $0.
@@ -205,8 +208,9 @@ function usdFor(h: VaultHolding, chainId: number, prices: Prices | null): number
   const amount = units(h.raw, h.decimals);
   if (h.stable) return amount;
   if (!prices) return null;
-  // the native coin: HYPE on Elysium at HYPE's price, ETH everywhere else
+  // the native coin: HYPE on Elysium at HYPE's price, BNB on BNB Chain at BNB's, ETH everywhere else
   if (!h.address && h.symbol === "HYPE") return prices.hypeUsd != null ? amount * prices.hypeUsd : null;
+  if (!h.address && h.symbol === "BNB") return prices.bnbUsd != null ? amount * prices.bnbUsd : null;
   if (!h.address || h.id === "weth") return prices.ethUsd != null ? amount * prices.ethUsd : null;
   if (chainId === 4663 && h.kind === "stock") {
     const mult = h.uiMultiplier ? BigInt(h.uiMultiplier) : null;
@@ -762,11 +766,21 @@ export function TransparencyView() {
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-[640px]">
               <h2 className="t-display-l">The vault, live</h2>
-              <p className="mt-5 max-w-[54ch] text-[16px] leading-relaxed text-mute">
-                Read straight from public nodes
-                {since ? `, from ${since} when this vault went live` : ""}. No
-                Gloam server sits in between, and you do not need a wallet.
-              </p>
+              {net.family === "bnb" ? (
+                <p className="mt-5 max-w-[54ch] text-[16px] leading-relaxed text-mute">
+                  Read from public nodes
+                  {since ? `, from ${since} when this vault went live` : ""}. BNB
+                  Chain&apos;s public nodes keep about a day of history, so older
+                  blocks come through Gloam&apos;s own server, which passes the
+                  read on to a node that keeps them. You do not need a wallet.
+                </p>
+              ) : (
+                <p className="mt-5 max-w-[54ch] text-[16px] leading-relaxed text-mute">
+                  Read straight from public nodes
+                  {since ? `, from ${since} when this vault went live` : ""}. No
+                  Gloam server sits in between, and you do not need a wallet.
+                </p>
+              )}
             </div>
             <NetworkPicker value={shown} onChange={choose} />
           </div>

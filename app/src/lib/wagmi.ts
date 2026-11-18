@@ -3,7 +3,8 @@
 import { http, createConfig, createStorage, cookieStorage } from "wagmi";
 import { injected } from "wagmi/connectors";
 import { robinhood, robinhoodTestnet } from "./chain";
-import { NETWORK_KEYS, baseMainnet, baseTestnet, elysiumMainnet, elysiumTestnet, ethereumMainnet, ethereumTestnet, getNetwork, tempoMainnet, tempoTestnet } from "./networks";
+import { NETWORK_KEYS, baseMainnet, baseTestnet, bnbMainnet, elysiumMainnet, elysiumTestnet, ethereumMainnet, ethereumTestnet, getNetwork, tempoMainnet, tempoTestnet } from "./networks";
+import { BNB_BROWSER_ARCHIVE_RPC } from "./bnb";
 import { BLOCK_POLL_MS, readTransport } from "./readTransport";
 import { ORIGIN_CHAINS } from "./originChains";
 import { turnkeyConnector } from "./turnkeyConnector";
@@ -42,6 +43,9 @@ const mainnetChains = [
   ...(NETWORK_KEYS.includes("ethereum-mainnet") ? [ethereumMainnet] : []),
   // Behind NEXT_PUBLIC_ELYSIUM_ENABLED and its values (lib/elysium.ts): only then is it a network.
   ...(NETWORK_KEYS.includes("elysium-mainnet") ? [elysiumMainnet] : []),
+  // Behind NEXT_PUBLIC_BNB_ENABLED and its pool (lib/bnb.ts). Until then BNB Chain is only a
+  // bridge origin (below), as before.
+  ...(NETWORK_KEYS.includes("bnb-mainnet") ? [bnbMainnet] : []),
 ];
 const baseTestnetChains = NETWORK_KEYS.includes("base") ? [baseTestnet] : [];
 const ethereumTestnetChains = NETWORK_KEYS.includes("ethereum") ? [ethereumTestnet] : [];
@@ -78,6 +82,7 @@ const chains = [
   typeof ethereumMainnet,
   typeof elysiumMainnet,
   typeof elysiumTestnet,
+  typeof bnbMainnet,
 ];
 
 // Ethereum's 12 s blocks: receipt waits look for a new one every 2 s. Keyed by
@@ -118,6 +123,13 @@ export const wagmiConfig = createConfig({
     ...(NETWORK_KEYS.includes("elysium-mainnet")
       ? { [elysiumMainnet.id]: rpcListTransport(elysiumMainnet.rpcUrls.default.http, { batch: { wait: 16 }, retryCount: 2 }, { proxy: rpcProxyUrl(elysiumMainnet.id) }) }
       : {}),
+    // BNB Chain, once it is a network: its public RPCs (publicnode reads logs, the dataseed the
+    // rest), and the pruned-logs check: old logs the public RPC dropped come from
+    // NEXT_PUBLIC_BNB_ARCHIVE_RPC_URL when set, else from gloam.trade's proxy (lib/readTransport).
+    // While it is off, 56 is a bridge origin only and the origin entry below replaces this one.
+    [bnbMainnet.id]: NETWORK_KEYS.includes("bnb-mainnet")
+      ? readTransport(getNetwork("bnb-mainnet"), { batch: { wait: 16 }, retryCount: 2 }, { proxy: rpcProxyUrl(bnbMainnet.id), archive: BNB_BROWSER_ARCHIVE_RPC })
+      : http(),
     // Elysium testnet: Kinetiq's RPC, then Conduit's. Only used once it is a network (registered above).
     [elysiumTestnet.id]: rpcListTransport(elysiumTestnet.rpcUrls.default.http, { batch: { wait: 16 }, retryCount: 2 }),
     ...Object.fromEntries(originChains.map((c) => [c.id, http()])),

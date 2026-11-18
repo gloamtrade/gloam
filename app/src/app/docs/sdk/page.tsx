@@ -4,6 +4,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { swapMainnets } from "@/lib/vaultSwap";
 import { ELYSIUM, ELYSIUM_TESTNET } from "@/lib/elysium";
+import { BNB } from "@/lib/bnb";
 import { CASH_OUT_FEE_BPS, CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 const MAINNETS = liveMainnetNames();
@@ -16,8 +17,17 @@ const MAINNET_IDS = [
   ...(mainnetPool(1) ? ["Ethereum 1"] : []),
   // Elysium, only while it is on (lib/elysium.ts)
   ...(ELYSIUM ? [`Elysium ${ELYSIUM.chainId}`] : []),
+  // BNB Chain, only while it is on (lib/bnb.ts)
+  ...(BNB ? [`BNB Chain ${BNB.chainId}`] : []),
 ].join(", ");
-const MAINNET_CHAIN_IDS = [4663, 4217, ...(mainnetPool(8453) ? [8453] : []), ...(mainnetPool(1) ? [1] : []), ...(ELYSIUM ? [ELYSIUM.chainId] : [])].join(" · ");
+const MAINNET_CHAIN_IDS = [
+  4663,
+  4217,
+  ...(mainnetPool(8453) ? [8453] : []),
+  ...(mainnetPool(1) ? [1] : []),
+  ...(ELYSIUM ? [ELYSIUM.chainId] : []),
+  ...(BNB ? [BNB.chainId] : []),
+].join(" · ");
 
 export const metadata: Metadata = {
   title: "SDK",

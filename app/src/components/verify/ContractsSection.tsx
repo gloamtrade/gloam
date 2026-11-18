@@ -40,6 +40,7 @@ const LOGOS: Record<ChainFamily, string> = {
   base: "/brand/networks/base.svg",
   ethereum: "/brand/networks/ethereum.svg",
   elysium: "/brand/networks/elysium.png",
+  bnb: "/brand/networks/bnb.png",
 };
 
 type Side = "mainnet" | "testnet";

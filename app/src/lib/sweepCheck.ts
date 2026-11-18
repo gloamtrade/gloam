@@ -22,6 +22,7 @@
 import { parseAbiItem, type Address, type Hex } from "viem";
 import { getLogsSafe } from "./logRange";
 import { ELYSIUM_LOG_RANGE, isElysiumFamilyChainId } from "./elysium";
+import { BNB_LOG_RANGE, isBnbChainId } from "./bnb";
 
 const TRANSFER = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
 
@@ -60,6 +61,9 @@ function lookback(chainId: number): { chunk: bigint; chunks: number } {
   // Elysium, mainnet and testnet: its RPC's range (lib/elysium, 1,000,000 blocks by
   // default, about 28 hours at 100 ms), four reads: about 4.6 days, like the others.
   if (isElysiumFamilyChainId(chainId)) return { chunk: ELYSIUM_LOG_RANGE, chunks: 4 };
+  // BNB Chain: blocks every 0.45 s, 50,000 a read; four reads are about 25 hours, inside
+  // the roughly 27 hours of logs its public RPC keeps (older reads fail loudly, lib/bnb).
+  if (isBnbChainId(chainId)) return { chunk: BNB_LOG_RANGE, chunks: 4 };
   // Ethereum Sepolia: 12-second blocks, so one 50,000-block read covers about a week.
   if (chainId === 11155111) return { chunk: BigInt(50_000), chunks: 1 };
   return { chunk: BigInt(5_000_000), chunks: 1 };

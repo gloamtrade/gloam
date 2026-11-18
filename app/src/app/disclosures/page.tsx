@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ELYSIUM, ELYSIUM_LIVE_SINCE } from "@/lib/elysium";
+import { BNB, BNB_LIVE_SINCE } from "@/lib/bnb";
 import Link from "next/link";
 import { LegalLayout } from "@/components/LegalLayout";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
@@ -31,7 +32,8 @@ export default function DisclosuresPage() {
         Since Gloam&apos;s mainnet launch on 21 October 2026, the mainnet pools
         on Robinhood Chain and Tempo have been live, and since 26 October 2026
         the pools on Base and Ethereum
-        {ELYSIUM ? `, and since ${ELYSIUM_LIVE_SINCE} the pool on Elysium, a new chain with one sequencer at launch` : ""}.
+        {ELYSIUM ? `, and since ${ELYSIUM_LIVE_SINCE} the pool on Elysium, a new chain with one sequencer at launch` : ""}
+        {BNB ? `, and since ${BNB_LIVE_SINCE} the pool on BNB Chain` : ""}.
         The contracts were reviewed internally before launch. Kann Audits then
         reviewed the vault contracts (<Link href="/security">report, 1 November
         2026</Link>) and found no Critical, High or Medium issues. Its findings
@@ -42,7 +44,8 @@ export default function DisclosuresPage() {
         Deposits have limits: 50,000 per deposit and 2,500,000
         in total for each stablecoin, 20 per deposit and 1,000 in total for ETH
         on Base and Ethereum, and 2,500,000 per deposit and 25,000,000 in total
-        for $GLOAM{ELYSIUM ? ", and 500 per deposit and 25,000 in total for USDC on Elysium" : ""}. Cash outs and
+        for $GLOAM{ELYSIUM ? ", and 500 per deposit and 25,000 in total for USDC on Elysium" : ""}
+        {BNB ? ". On BNB Chain, USDT, USDC and BNB have no deposit limit, and BDX is capped at 100,000 per deposit and 2,000,000 in total" : ""}. Cash outs and
         private payments are never limited.
         Direct deposits and private payments are free; a cash out costs {CASH_OUT_FEE_PERCENT} of
         its amount. Money bridged in from another chain pays the bridge&apos;s
@@ -59,6 +62,8 @@ export default function DisclosuresPage() {
         deposits at once.
         {ELYSIUM &&
           " Elysium's vault is owned by a guard contract from its deploy: its verifiers can never be changed, and its limits and fee change only through the same three-day timelock."}
+        {BNB &&
+          " BNB Chain's vault is owned the same way from its deploy, and a 2 of 3 multisig runs its guard."}
       </p>
       <p>
         The Robinhood Chain and Tempo testnets use test tokens and

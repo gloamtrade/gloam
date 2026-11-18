@@ -38,6 +38,9 @@ const KEY = "selftestKey0123456789abcdef";
 const RPC = `https://elysium-mainnet.g.alchemy.com/v2/${KEY}`;
 
 for (const k of Object.keys(process.env)) if (k.startsWith("NEXT_PUBLIC_ELYSIUM_")) delete process.env[k];
+// BNB Chain stays off here: its own flag would add a sixth mainnet after Elysium (selftest-bnb and
+// selftest-bnb-everywhere check the lists with both on).
+for (const k of Object.keys(process.env)) if (k.startsWith("NEXT_PUBLIC_BNB_")) delete process.env[k];
 // Elysium mainnet is on unless the flag says off
 if (MODE === "off") process.env.NEXT_PUBLIC_ELYSIUM_ENABLED = "0";
 delete process.env.UPSTASH_REDIS_REST_URL;

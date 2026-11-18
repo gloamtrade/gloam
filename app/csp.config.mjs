@@ -167,6 +167,41 @@ export function elysiumTestnetConnectSources(env = process.env) {
 }
 
 /**
+ * BNB Chain's public RPCs, only while NEXT_PUBLIC_BNB_ENABLED is on (opt-in:
+ * "1", "true", "on" or "yes", lib/bnb.ts bnbFlagFrom) and its pool is in
+ * (NEXT_PUBLIC_BNB_POOL, or the SDK file's), as the app reads it: the rpcUrls written in
+ * the SDK's config (packages/sdk/src/bnb.ts), publicnode and BNB Chain's
+ * dataseed. gloam.trade's own proxy, the browser's way to old logs, is 'self'.
+ * A NEXT_PUBLIC_BNB_ARCHIVE_RPC_URL is picked up by rpcOverrideSources below.
+ */
+export function bnbConnectSources(env = process.env) {
+  if (!/^(1|true|on|yes)$/i.test((env.NEXT_PUBLIC_BNB_ENABLED ?? "").trim())) return [];
+  let urls = [];
+  let pool = /^0x[0-9a-fA-F]{40}$/.test((env.NEXT_PUBLIC_BNB_POOL ?? "").trim());
+  try {
+    const src = readFileSync(new URL("../packages/sdk/src/bnb.ts", import.meta.url), "utf8");
+    const block = /export const BNB_MAINNET\b[^{]*\{([\s\S]*?)\n\};/.exec(src)?.[1] ?? "";
+    const list = /^\s*rpcUrls:\s*\[([^\]]*)\]/m.exec(block)?.[1] ?? "";
+    urls = [...list.matchAll(/"(https:\/\/[^"]+)"/g)].map((m) => m[1]);
+    pool ||= /^\s*pool:\s*"0x[0-9a-fA-F]{40}",\s*$/m.test(block);
+  } catch {
+    urls = [];
+  }
+  // Like the app (lib/bnb.ts): no pool, no network, so nothing to allow.
+  if (!pool) return [];
+  const out = [];
+  for (const url of urls) {
+    try {
+      const u = new URL(url);
+      if (u.protocol === "https:" && !out.includes(u.origin)) out.push(u.origin);
+    } catch {
+      // not a URL: the SDK's own check refuses it
+    }
+  }
+  return out;
+}
+
+/**
  * The origin of every NEXT_PUBLIC_*_RPC_URL set for this build: an RPC an
  * environment variable points the browser at (NEXT_PUBLIC_ELYSIUM_RPC_URL with
  * a keyed provider, say), so an override set on Vercel cannot break a page
@@ -195,6 +230,7 @@ export const CSP_CONNECT_SOURCES = unique([
   ...GLOAM_RPCS,
   ...elysiumConnectSources(),
   ...elysiumTestnetConnectSources(),
+  ...bnbConnectSources(),
   ...rpcOverrideSources(),
   ...ORIGIN_RPCS,
   ...SOLANA_RPCS,
@@ -280,6 +316,7 @@ export function claimPagesCsp(env = process.env) {
     ...GLOAM_NETWORK_RPCS,
     ...elysiumConnectSources(env),
     ...elysiumTestnetConnectSources(env),
+    ...bnbConnectSources(env),
     ...rpcOverrideSources(env),
   ]);
   return [

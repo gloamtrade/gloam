@@ -46,6 +46,9 @@ const { VAULT_SWAP_ROUTERS, swapV3Live } = await import("../src/lib/vaultSwap");
 /** Elysium mainnet is listed, after Ethereum, while NEXT_PUBLIC_ELYSIUM_ENABLED is on (as production builds it). */
 const { ELYSIUM_FLAG } = await import("../src/lib/elysium");
 const ELYSIUM_ROW = ELYSIUM_FLAG ? 1 : 0;
+/** BNB Chain mainnet is listed last among the mainnets while NEXT_PUBLIC_BNB_ENABLED is on (off by default). */
+const { BNB_FLAG } = await import("../src/lib/bnb");
+const BNB_ROW = BNB_FLAG ? 1 : 0;
 const { SHOW_TESTNETS } = await import("../src/lib/showTestnets");
 
 let checks = 0;
@@ -99,11 +102,11 @@ const byKey = Object.fromEntries(entries.map((e) => [e.key, e]));
 check("every network is listed once, mainnets first in Gloam's order", () => {
   assert.deepEqual(
     entries.map((e) => e.key),
-    ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", ...(ELYSIUM_ROW ? ["elysium-mainnet"] : []), "robinhood", "tempo", "base", "ethereum"]
+    ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", ...(ELYSIUM_ROW ? ["elysium-mainnet"] : []), ...(BNB_ROW ? ["bnb-mainnet"] : []), "robinhood", "tempo", "base", "ethereum"]
   );
   assert.deepEqual(
     entries.map((e) => e.kind),
-    [...Array<string>(4 + ELYSIUM_ROW).fill("mainnet"), "testnet", "testnet", "testnet", "testnet"]
+    [...Array<string>(4 + ELYSIUM_ROW + BNB_ROW).fill("mainnet"), "testnet", "testnet", "testnet", "testnet"]
   );
   assert.deepEqual(
     entries.map((e) => e.name),
@@ -113,6 +116,7 @@ check("every network is listed once, mainnets first in Gloam's order", () => {
       "Base",
       "Ethereum",
       ...(ELYSIUM_ROW ? ["Elysium"] : []),
+      ...(BNB_ROW ? ["BNB Chain"] : []),
       "Robinhood Chain testnet",
       "Tempo Moderato testnet",
       "Base Sepolia testnet",
@@ -347,7 +351,8 @@ if (!CONFIGURED) {
       assert.equal(vault.deployBlock, pool.deployBlock);
       assert.deepEqual(
         e.rows.filter((r) => r.role !== "payment_messages" && r.role !== "swap_router").map((r) => r.role),
-        ["vault", "owner", "fee_recipient", "relayer", "deployer"]
+        // the owner wallet, then the owner guard once it is set (dir.GLOAM_OWNER_GUARD)
+        ["vault", "owner", ...(dir.GLOAM_OWNER_GUARD ? ["owner"] : []), "fee_recipient", "relayer", "deployer"]
       );
       const csv = dir.directoryCsv(dir.contractDirectory());
       assert.ok(csv.includes(`,${id},mainnet,vault,Vault,ShieldPoolPayments,${vault.address},${pool.deployBlock},${explorer}/address/${vault.address},app`), key);

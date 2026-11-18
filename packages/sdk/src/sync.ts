@@ -25,6 +25,7 @@
 
 import { decodeEventLog, parseAbi, toEventSelector, type Address, type Hex, type Log, type PublicClient } from "viem";
 import { ELYSIUM_LOG_RANGE_DEFAULT, ELYSIUM_MAINNET_CHAIN_ID, ELYSIUM_TESTNET_CHAIN_ID } from "./elysium.js";
+import { BNB_LOG_RANGE_DEFAULT, BNB_MAINNET_CHAIN_ID } from "./bnb.js";
 import {
   IncrementalMerkleTreePoseidon,
   type PoseidonMerklePath,
@@ -125,8 +126,10 @@ export class TreeSyncError extends Error {
  * takes (checked on 10 November 2026): Robinhood Chain 10,000,000 (100,000 if
  * the query lists topics, 30,000 with no address), Tempo 100,000, publicnode
  * (Base, Base Sepolia, Ethereum Sepolia) 50,000, MEV Blocker (Ethereum)
- * 10,000, Elysium 1,000,000 (it caps the logs returned, not the range). Any
- * other chain: 40,000. An RPC that takes less says so, and the range is split.
+ * 10,000, Elysium 1,000,000 (it caps the logs returned, not the range), BNB
+ * Chain 50,000 (publicnode; it keeps only about a day of logs, so read old
+ * blocks from an RPC that keeps them, through gloamReadTransport). Any other
+ * chain: 40,000. An RPC that takes less says so, and the range is split.
  */
 export function treeLogRange(chainId?: number | null): bigint {
   switch (chainId) {
@@ -145,6 +148,8 @@ export function treeLogRange(chainId?: number | null): bigint {
     case ELYSIUM_MAINNET_CHAIN_ID:
     case ELYSIUM_TESTNET_CHAIN_ID:
       return BigInt(ELYSIUM_LOG_RANGE_DEFAULT);
+    case BNB_MAINNET_CHAIN_ID:
+      return BigInt(BNB_LOG_RANGE_DEFAULT);
     default:
       return 40_000n;
   }
@@ -157,6 +162,7 @@ function treeLogConcurrency(chainId?: number | null): number {
     case 46630:
     case ELYSIUM_MAINNET_CHAIN_ID:
     case ELYSIUM_TESTNET_CHAIN_ID:
+    case BNB_MAINNET_CHAIN_ID:
       return 2;
     case 4217:
     case 42431:

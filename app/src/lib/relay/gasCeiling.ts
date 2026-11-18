@@ -8,7 +8,9 @@
  *
  * GLOAM_RELAY_MAX_GAS_GWEI_<chainId> (server env) sets it, in gwei ("3",
  * "0.5"); "off" turns it off for that chain. The default is 3 gwei on Ethereum
- * mainnet and no ceiling elsewhere, where gas costs a fraction of a cent.
+ * mainnet, 1 gwei on BNB Chain (56; it charged 0.05 gwei on 18 Nov 2026, so the
+ * ceiling is 20 times that, and a 1.9M-gas send at it costs about 0.0019 BNB), and
+ * no ceiling elsewhere, where gas costs a fraction of a cent.
  *
  * Under the ceiling, a send still caps what it can pay: its max fee per gas is
  * at most one and a half times the ceiling, room for the base fee to rise for
@@ -17,7 +19,7 @@
 import { formatUnits, parseUnits } from "viem";
 
 /** Default ceilings, in gwei, by chain id. */
-export const DEFAULT_MAX_GAS_GWEI: Readonly<Record<number, string>> = { 1: "3" };
+export const DEFAULT_MAX_GAS_GWEI: Readonly<Record<number, string>> = { 1: "3", 56: "1" };
 
 /** What a refusal over gas says, and its code. */
 export const GAS_HIGH_CODE = "gas_high";
