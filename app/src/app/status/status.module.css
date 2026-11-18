@@ -1,0 +1,119 @@
+/* The status page's day bars. Real media queries, not Tailwind variants, for
+   the counts: 90 days on a wide screen, 60 on a tablet, 30 on a phone. */
+
+.track {
+  position: relative;
+}
+
+.bars {
+  display: flex;
+  gap: 3px;
+  height: 34px;
+}
+
+.bar {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 3px;
+  background: var(--surface-2);
+  cursor: default;
+  transition: opacity 120ms ease;
+}
+
+.bar[data-tone="ok"] {
+  background: color-mix(in srgb, var(--sealed) 78%, var(--background));
+}
+
+.bar[data-tone="degraded"] {
+  background: var(--warn);
+}
+
+.bar[data-tone="down"] {
+  background: var(--danger);
+}
+
+.bars:hover .bar:not([data-active="true"]),
+.bars:focus-within .bar:not([data-active="true"]) {
+  opacity: 0.55;
+}
+
+.bar:focus-visible {
+  outline: 2px solid var(--foreground);
+  outline-offset: 2px;
+}
+
+.tip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  z-index: 20;
+  min-width: 148px;
+  padding: 9px 12px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* the legend's swatches match the bars */
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+
+.swatch[data-tone="ok"] {
+  background: color-mix(in srgb, var(--sealed) 78%, var(--background));
+}
+
+.swatch[data-tone="degraded"] {
+  background: var(--warn);
+}
+
+.swatch[data-tone="down"] {
+  background: var(--danger);
+}
+
+.span60,
+.span30 {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .bar:nth-child(-n + 30) {
+    display: none;
+  }
+  .span90 {
+    display: none;
+  }
+  .span60 {
+    display: inline;
+  }
+}
+
+@media (max-width: 639px) {
+  .bar:nth-child(-n + 60) {
+    display: none;
+  }
+  .bars {
+    gap: 2px;
+  }
+  .span60 {
+    display: none;
+  }
+  .span30 {
+    display: inline;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    transition: none;
+  }
+}
