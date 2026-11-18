@@ -100,7 +100,7 @@ import { cashOutTargetProblem } from "@/lib/cashOutTarget";
 import { LockStoreDown, RECEIPT_WATCH_MS, forgetNonce, inSendLanes, inflightKey, inflightTtlSec, isSwapEscrow, markSwapEscrow, readSent, recordSent, relayStoreDown, releaseIfReverted, takeInflight, type InflightLock, type SentRecord } from "@/lib/relay/inflight";
 import { jobKeyReady } from "@/lib/relay/jobSeal";
 import { datedOff } from "@/lib/relay/scheduled";
-import { WrongChainRpcError, serverTransport } from "@/lib/serverRpc";
+import { WrongChainRpcError, assertServerRpc, hasServerRpc, serverTransport } from "@/lib/serverRpc";
 import { SWAP_SEND_MARGIN_SECONDS, encodeRoute, escrowAddress, isKnownRoute, isSwapAsset, receiptPaysEscrow, refundAmountFor, swapExpired, swapRouterFor, vaultFeeOf, vaultSwapAbi, vaultSwapRouter, vaultSwapV3Abi, type EscrowKey, type PoolKey } from "@/lib/vaultSwap";
 import { knownTokens } from "@/lib/tokens";
 import { GAS_HIGH_CODE, formatGwei, gasHighMessage, maxFeeCapWei, maxGasPriceWei as maxGasPriceWeiFor, readGas } from "@/lib/relay/gasCeiling";
@@ -308,12 +308,24 @@ export function relayerAccount(): PrivateKeyAccount | null {
   return relayerAccounts()[0] ?? null;
 }
 
+/** The networks the relay serves: live ones with a pool, and on BNB Chain only with GLOAM_RPC_URL_56 set (lib/serverRpc). */
 export function relayNetworks(): GloamNetwork[] {
-  return NETWORK_KEYS.map(getNetwork).filter(isNetworkWritable);
+  return NETWORK_KEYS.map(getNetwork).filter((n) => isNetworkWritable(n) && hasServerRpc(n));
 }
+
+export const SERVER_RPC_MISSING_MESSAGE = (label: string) => `${label} is not open on the relay yet. Send from your wallet, or try again later.`;
 
 export function networkForChain(chainId: unknown): GloamNetwork {
   const id = typeof chainId === "number" ? chainId : Number(chainId);
+  const live = NETWORK_KEYS.map(getNetwork).find((n) => n.chainId === id && isNetworkWritable(n) && n.pool);
+  if (live && !hasServerRpc(live)) {
+    // Fail closed: never the public RPC alone for sends and the tree there (logged once with what to set).
+    try {
+      assertServerRpc(live);
+    } catch {
+      throw new RelayError(SERVER_RPC_MISSING_MESSAGE(live.label), 503, "network");
+    }
+  }
   const net = relayNetworks().find((n) => n.chainId === id);
   if (!net || !net.pool) {
     throw new RelayError("This network is not supported by the relay.", 400, "network");

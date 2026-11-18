@@ -212,7 +212,16 @@ if (MODE === "on") {
   ok(nativeGasReserve(CHAIN_ID, 50_000_000n) === SHIELD_BOUND_GAS_LIMIT * 50_000_000n * 3n, "on: read gas price used");
 
   // The relay.
-  ok(networkForChain(CHAIN_ID).key === "bnb-mainnet", "on: the relay serves it");
+  // Without GLOAM_RPC_URL_56 the server neither sends there nor keeps the leaf list: closed, with a clear error.
+  ok(!relayNetworks().some((n) => n.family === "bnb"), "on, no GLOAM_RPC_URL_56: the relay does not list it");
+  await assert.rejects(async () => networkForChain(CHAIN_ID), (err: Error & { status?: number }) => err.status === 503 && /BNB Chain is not open on the relay yet/.test(err.message));
+  checks++;
+  const { getLeafSnapshot } = await import("../src/lib/leafIndexServer");
+  await assert.rejects(getLeafSnapshot("bnb-mainnet", () => {}), /needs GLOAM_RPC_URL_56/);
+  checks++;
+  process.env.GLOAM_RPC_URL_56 = "https://archive.example/bsc";
+  ok(networkForChain(CHAIN_ID).key === "bnb-mainnet" && relayNetworks().some((n) => n.family === "bnb"), "on, with GLOAM_RPC_URL_56: the relay serves it");
+  delete process.env.GLOAM_RPC_URL_56;
   ok(hourlySpendWei(CHAIN_ID, {}) === 50_000_000_000_000_000n, "on: the relay's hourly cap is 0.05 BNB by default");
   ok(hourlySpendWei(CHAIN_ID, { GLOAM_RELAY_HOURLY_SPEND_56: "0.2" }) === 200_000_000_000_000_000n, "on: GLOAM_RELAY_HOURLY_SPEND_56 changes it");
   ok(walkTuning(CHAIN_ID, e.logRange).span === 50_000n, "on: tree reads at publicnode's 50,000 blocks");

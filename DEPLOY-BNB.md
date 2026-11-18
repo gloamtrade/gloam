@@ -246,9 +246,10 @@ From `contracts/` in a fresh worktree of `main` (with `pnpm install` done, and
     | `GLOAM_RELAY_MAX_GAS_GWEI_56` | server, optional | the relay's gas price ceiling, default `1`; `off` for none |
     | `NEXT_PUBLIC_BNB_ARCHIVE_RPC_URL` | build, optional | an archive RPC for the browser's old logs. Not needed: without it the browser asks gloam.trade's `/api/rpc/56`, which reads through `GLOAM_RPC_URL_56`. If you set it, its key is in the page, so restrict it to gloam.trade |
 
-    Redeploy. Set `GLOAM_RPC_URL_56` before or with the flag: without it, every read about
-    blocks older than about a day fails loudly (on purpose), so the vault tree, stats and
-    payment scans stop a day after launch.
+    Redeploy. Set `GLOAM_RPC_URL_56` before or with the flag: without it the relay refuses BNB
+    Chain ("not open on the relay yet", 503) and the server keeps no leaf list for its vault,
+    instead of running on the public RPCs, and every other read about blocks older than about
+    a day fails loudly (on purpose).
 
     Then BNB Chain shows everywhere the app lists its chains, last among the mainnets, with
     its own mark (`public/brand/chains/56.png`) and gas in BNB.

@@ -206,7 +206,10 @@ if (MODE !== "on") {
   const n = nets.getNetwork("bnb-mainnet");
   ok(n.primaryAsset.symbol === "BNB" && n.chain.nativeCurrency.symbol === "BNB", "on: gas in BNB");
   ok(n.ceremony === "production" && n.paymentsPool && n.logCanary, "on: final keys, payments pool, pruned-logs check");
-  ok(networkForChain(CHAIN_ID).key === "bnb-mainnet", "on: the relay serves it");
+  // the relay serves it once the server has its own RPC there (lib/serverRpc hasServerRpc)
+  process.env.GLOAM_RPC_URL_56 = "https://archive.example/bsc";
+  ok(networkForChain(CHAIN_ID).key === "bnb-mainnet", "on: the relay serves it with GLOAM_RPC_URL_56 set");
+  delete process.env.GLOAM_RPC_URL_56;
   // Its tokens, each in its own decimals.
   const list = tokens.shieldTokensFor(CHAIN_ID);
   ok(list.map((t) => `${t.symbol}:${t.decimals}`).join() === "USDT:18,USDC:18,BDX:9", "on: USDT and USDC with 18 decimals, BDX with 9");

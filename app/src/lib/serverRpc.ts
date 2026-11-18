@@ -42,8 +42,38 @@ import { readTransport } from "./readTransport";
 
 type Net = Pick<GloamNetwork, "chainId" | "chain" | "historyRpc"> & { logCanary?: LogCanary | null };
 
-function privateRpc(net: Net): string | null {
+function privateRpc(net: Pick<Net, "chainId">): string | null {
   return process.env[`GLOAM_RPC_URL_${net.chainId}`]?.trim() || null;
+}
+
+/**
+ * A network whose public RPCs keep too little history for the server to run
+ * on (one with a logCanary: BNB Chain) needs GLOAM_RPC_URL_<chainId>. Without
+ * it the server neither sends there (the relay) nor keeps the vault's leaf
+ * list, rather than reading the public RPC and failing a day later.
+ */
+export class ServerRpcMissingError extends Error {
+  constructor(readonly chainId: number, label: string) {
+    super(`${label} needs GLOAM_RPC_URL_${chainId} on the server (an RPC that keeps every log). Until it is set the server does not send there or keep its vault's leaf list.`);
+    this.name = "ServerRpcMissingError";
+  }
+}
+
+/** False for a network the server must not run on its public RPCs alone (a logCanary and no GLOAM_RPC_URL_<chainId>). */
+export function hasServerRpc(net: Pick<Net, "chainId" | "logCanary">): boolean {
+  return !net.logCanary || privateRpc(net) !== null;
+}
+
+const missingLogged = new Set<number>();
+
+/** Throws ServerRpcMissingError (and logs it once per instance) unless hasServerRpc. */
+export function assertServerRpc(net: Pick<Net, "chainId" | "logCanary"> & { label: string }): void {
+  if (hasServerRpc(net)) return;
+  if (!missingLogged.has(net.chainId)) {
+    missingLogged.add(net.chainId);
+    console.error("gloam_server_rpc_missing", JSON.stringify({ chainId: net.chainId, set: `GLOAM_RPC_URL_${net.chainId}` }));
+  }
+  throw new ServerRpcMissingError(net.chainId, net.label);
 }
 
 /** The private RPC set for this chain answers for another chain. Nothing was sent. */

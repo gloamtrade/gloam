@@ -35,7 +35,7 @@ import {
   type LeafSnapshot,
   type RawInsert,
 } from "./leafIndex";
-import { serverTransport } from "@/lib/serverRpc";
+import { assertServerRpc, serverTransport } from "@/lib/serverRpc";
 
 const FRESH_MS = 2_000;
 /**
@@ -196,6 +196,8 @@ export async function getLeafSnapshot(
 ): Promise<LeafSnapshot | null> {
   const n = getNetwork(key);
   if (!isNetworkWritable(n) || !n.pool) return null;
+  // BNB Chain with no GLOAM_RPC_URL_56: no leaf list from its public RPCs (ServerRpcMissingError, a 503)
+  assertServerRpc(n);
   const id = stateId(n);
   let st = states.get(id) ?? null;
   if (!st) {

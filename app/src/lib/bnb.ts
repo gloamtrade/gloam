@@ -29,7 +29,8 @@
  *   GLOAM_RPC_URL_56                   REQUIRED before the flag goes on: a BNB Chain RPC that keeps
  *                                      every log from the vault's deploy block (an archive or
  *                                      full-history plan). The relay, the leaf list, stats and proofs
- *                                      read through it (lib/serverRpc).
+ *                                      read through it (lib/serverRpc). Without it the relay and the
+ *                                      leaf list stay closed on BNB Chain (hasServerRpc).
  *   GLOAM_RELAY_HOURLY_SPEND_56        BNB the relay may spend on gas an hour, default 0.05
  *   GLOAM_RELAY_MAX_GAS_GWEI_56        the relay's gas price ceiling, default 1 gwei ("off" for none)
  *
