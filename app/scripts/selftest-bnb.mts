@@ -1,0 +1,253 @@
+/**
+ * Self-test: BNB Chain mainnet (56) in the app, OFF unless NEXT_PUBLIC_BNB_ENABLED
+ * is "1" (or "true", "on", "yes") and its pool is in.
+ *
+ * Runs of this file (all but the first as child processes):
+ *
+ *  - off (no NEXT_PUBLIC_BNB_* set, as a preview build or a missing variable
+ *    leaves it): BNB Chain does not exist. Not a network key, not served by the
+ *    relay, not in the CSP, not in the RPC proxy, no tokens, no fixed gas. The
+ *    flag's words are checked here: only the on words turn it on, and the CSP
+ *    reads them the same. Chain 56 still proves with the final keys.
+ *  - nopool (flag "1", the SDK file without its pool, as before the deploy):
+ *    still nothing anywhere.
+ *  - on (flag "1" and NEXT_PUBLIC_BNB_POOL / _DEPLOY_BLOCK / _LIVE_SINCE): BNB
+ *    Chain shows last among the mainnets, gas in BNB which the vault lists, USDT
+ *    and USDC with 18 decimals, BDX with 9, fixed deposit gas, the relay serves it
+ *    with a 0.05 BNB hourly cap and a 1 gwei gas ceiling, the CSP allows its RPCs,
+ *    the RPC proxy serves 56, and every read goes through the pruned-logs check:
+ *    on the server an empty old answer from a pruned RPC fails loudly; in the
+ *    browser it is asked again of the proxy, which answers from the archive.
+ *  - nolivesince (flag on with a pool but no NEXT_PUBLIC_BNB_LIVE_SINCE): the build fails.
+ *  - badpool, keyed: a wrong pool fails the build, and so does nothing else quietly.
+ *
+ * The placeholder values reach no host: fetch is replaced by fake RPCs.
+ *
+ * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-bnb.mts
+ */
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const MODE = process.env.GLOAM_SELFTEST_BNB ?? "off";
+const CHAIN_ID = 56;
+const POOL = "0x89d3042390204f57b8b4F8949D3c2203E4002164";
+const USDT = "0x55d398326f99059fF775485246999027B3197955";
+const USDC = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
+const BDX = "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181";
+
+for (const k of Object.keys(process.env)) if (k.startsWith("NEXT_PUBLIC_BNB_")) delete process.env[k];
+delete process.env.GLOAM_RPC_URL_56;
+delete process.env.GLOAM_RELAY_HOURLY_SPEND_56;
+delete process.env.GLOAM_RELAY_MAX_GAS_GWEI_56;
+delete process.env.UPSTASH_REDIS_REST_URL;
+delete process.env.UPSTASH_REDIS_REST_TOKEN;
+if (MODE !== "off") process.env.NEXT_PUBLIC_BNB_ENABLED = "1";
+if (MODE === "on" || MODE === "nolivesince" || MODE === "badpool") {
+  process.env.NEXT_PUBLIC_BNB_POOL = MODE === "badpool" ? "0x1234" : POOL;
+  process.env.NEXT_PUBLIC_BNB_DEPLOY_BLOCK = "134300000";
+}
+if (MODE === "on" || MODE === "badpool") process.env.NEXT_PUBLIC_BNB_LIVE_SINCE = "21 November 2026";
+
+// ── fake RPCs: publicnode keeps logs from PRUNED_FROM on; the archive (the proxy) keeps all ──
+const HEAD = 135_000_000n;
+const PRUNED_FROM = HEAD - 220_000n;
+const VAULT_LOG_BLOCK = 134_300_010n;
+const asked: { url: string; method: string; params: unknown[] }[] = [];
+const hex = (n: bigint) => `0x${n.toString(16)}`;
+function answer(url: string, method: string, params: unknown[]): unknown {
+  if (method === "eth_chainId") return "0x38";
+  if (method === "eth_blockNumber") return hex(HEAD);
+  if (method === "eth_getLogs") {
+    const f = params[0] as { address?: string; fromBlock?: string; toBlock?: string };
+    const from = BigInt(f.fromBlock ?? "0x0");
+    const to = f.toBlock ? BigInt(f.toBlock) : HEAD;
+    const keepsFrom = url.includes("/api/rpc/56") || url.includes("archive.example") ? 0n : PRUNED_FROM;
+    if (to < keepsFrom) return [];
+    if (String(f.address).toLowerCase() === USDT.toLowerCase()) {
+      return [{ address: USDT, blockNumber: hex(from), blockHash: `0x${"11".repeat(32)}`, transactionHash: `0x${"22".repeat(32)}`, transactionIndex: "0x0", logIndex: "0x0", data: "0x", topics: [], removed: false }];
+    }
+    if (VAULT_LOG_BLOCK >= from && VAULT_LOG_BLOCK <= to && VAULT_LOG_BLOCK >= keepsFrom) {
+      return [{ address: POOL, blockNumber: hex(VAULT_LOG_BLOCK), blockHash: `0x${"33".repeat(32)}`, transactionHash: `0x${"44".repeat(32)}`, transactionIndex: "0x0", logIndex: "0x0", data: "0x", topics: [], removed: false }];
+    }
+    return [];
+  }
+  throw new Error(`fake RPC: ${method} not expected`);
+}
+globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
+  const url = String(input instanceof Request ? input.url : input);
+  if (!/bsc-rpc\.publicnode\.com|bsc-dataseed\.bnbchain\.org|\/api\/rpc\/56|archive\.example/.test(url)) {
+    throw new Error(`selftest-bnb: no network calls allowed (${url})`);
+  }
+  const body = JSON.parse(init?.body ?? "null");
+  const one = (b: { id: number; method: string; params?: unknown[] }) => {
+    asked.push({ url, method: b.method, params: b.params ?? [] });
+    if (b.method === "eth_getLogs" && url.includes("bsc-dataseed")) return { jsonrpc: "2.0", id: b.id, error: { code: -32005, message: "limit exceeded" } };
+    return { jsonrpc: "2.0", id: b.id, result: answer(url, b.method, b.params ?? []) };
+  };
+  const out = Array.isArray(body) ? body.map(one) : one(body);
+  return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
+}) as typeof fetch;
+
+if (MODE === "nolivesince") {
+  await assert.rejects(import("../src/lib/bnb"), /NEXT_PUBLIC_BNB_LIVE_SINCE/);
+  console.log("selftest-bnb (nolivesince): ok (on with a pool but no live-since date fails the build)");
+  process.exit(0);
+}
+if (MODE === "badpool") {
+  await assert.rejects(import("../src/lib/bnb"), /pool is not a pool address/);
+  console.log("selftest-bnb (badpool): ok (a pool that is not an address fails the build)");
+  process.exit(0);
+}
+
+const bnb = await import("../src/lib/bnb");
+const nets = await import("../src/lib/networks");
+const tokens = await import("../src/lib/tokens");
+const mainnet = await import("../src/lib/mainnet");
+const { CSP_CONNECT_SOURCES, bnbConnectSources } = await import("../csp.config.mjs");
+const { hourlySpendWei } = await import("../src/lib/relay/spendCap");
+const { maxGasPriceWei } = await import("../src/lib/relay/gasCeiling");
+const { relayNetworks, networkForChain, sendGasMost } = await import("../src/lib/relay/server");
+const { walkTuning } = await import("../src/lib/leafIndex");
+const { gasFor, nativeGasReserve, summaryDecimals, SHIELD_BOUND_GAS_LIMIT, APPROVE_GAS_LIMIT, TRANSFER_GAS_LIMIT } = await import("../src/lib/shield");
+const { rpcProxyChainIds } = await import("../src/lib/rpcProxy");
+const { readTransport } = await import("../src/lib/readTransport");
+const { serverTransport, resetRpcChecks } = await import("../src/lib/serverRpc");
+const { PUBLIC_MEMPOOL_CHAINS } = await import("../src/lib/partnerCode");
+const { VAULT_SWAP_ROUTERS } = await import("../src/lib/vaultSwap");
+const { NO_LOG_RPCS } = nets;
+
+let checks = 0;
+const ok = (cond: unknown, msg: string) => {
+  assert.ok(cond, msg);
+  checks++;
+};
+
+// Every run: the entry is defined, a payments pool on the final keys, gas in BNB.
+const e = nets.getNetwork("bnb-mainnet");
+ok(e.family === "bnb" && e.label === "BNB Chain" && !e.testnet && e.chainId === CHAIN_ID, "the entry is defined");
+ok(e.paymentsPool && e.ceremony === "production", "mainnet pool on the final keys");
+ok(e.primaryAsset.symbol === "BNB" && e.primaryAsset.decimals === 18 && e.chain.nativeCurrency.symbol === "BNB", "gas in BNB");
+ok(e.logCanary?.address === USDT && e.logCanary.trustRecentBlocks === 100_000n, "reads carry the pruned-logs check (USDT)");
+ok(e.chain.rpcUrls.default.http[0] === "https://bsc-rpc.publicnode.com" && e.chain.rpcUrls.default.http.every((u) => !/key|\/v\d+\//i.test(u)), "public RPCs only, no key, for wallets");
+ok(NO_LOG_RPCS.has("https://bsc-dataseed.bnbchain.org"), "the dataseed never gets a log read");
+ok(nets.ceremonyForChain(CHAIN_ID) === "production", "a proof for 56 uses the final keys, on or off");
+ok(tokens.nativeTokenFor(CHAIN_ID).symbol === "BNB", "a wallet on 56 holds BNB, never ETH");
+ok(maxGasPriceWei(CHAIN_ID, {}) === 1_000_000_000n, "the relay's gas ceiling on BNB Chain: 1 gwei");
+ok(maxGasPriceWei(CHAIN_ID, { GLOAM_RELAY_MAX_GAS_GWEI_56: "0.5" }) === 500_000_000n && maxGasPriceWei(CHAIN_ID, { GLOAM_RELAY_MAX_GAS_GWEI_56: "off" }) === null, "the ceiling's env");
+ok(maxGasPriceWei(1, {}) === 3_000_000_000n && maxGasPriceWei(8453, {}) === null, "Ethereum keeps 3 gwei, Base none");
+ok(!VAULT_SWAP_ROUTERS[CHAIN_ID], "no swap router on BNB Chain");
+ok(PUBLIC_MEMPOOL_CHAINS.includes(CHAIN_ID), "a public mempool: only relay-sent link payments count");
+ok(sendGasMost(CHAIN_ID, "unshield") === 1_200_000n, "a relayed cash out may use up to 1.2M gas (0.46M to 0.83M on a BNB Chain fork)");
+ok(mainnet.liveMainnetCount() >= 5, "the other mainnets still count");
+
+if (MODE === "off") {
+  for (const raw of ["1", "true", "TRUE", "on", "yes", " 1 "]) {
+    ok(bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} is on`);
+    ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw, NEXT_PUBLIC_BNB_POOL: POOL } as unknown as NodeJS.ProcessEnv).length === 2, `${JSON.stringify(raw)} with a pool: the CSP allows its two RPCs`);
+    ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === 0, `${JSON.stringify(raw)} with no pool: nothing to allow`);
+  }
+  for (const raw of [undefined, "", " ", "0", "false", "off", "no", "enabled", "2", "maybe"]) {
+    ok(!bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} is off`);
+    ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw, NEXT_PUBLIC_BNB_POOL: POOL } as unknown as NodeJS.ProcessEnv).length === 0, `${JSON.stringify(raw)}: no BNB Chain RPC in the CSP`);
+  }
+  ok(!bnb.BNB_FLAG, "off: no flag set");
+}
+
+if (MODE === "off" || MODE === "nopool") {
+  ok(bnb.BNB === null && !bnb.BNB_ENABLED, `${MODE}: BNB Chain is off`);
+  ok(!nets.NETWORK_KEYS.includes("bnb-mainnet") && !nets.isNetworkKey("bnb-mainnet") && !nets.isShownNetworkKey("bnb-mainnet"), `${MODE}: not a network key, not shown`);
+  ok(e.pool === null && e.deployBlock === null, `${MODE}: no pool`);
+  ok(!relayNetworks().some((n) => n.family === "bnb"), `${MODE}: the relay does not serve it`);
+  assert.throws(() => networkForChain(CHAIN_ID), /not supported/);
+  checks++;
+  ok(!mainnet.liveMainnetNames().includes("BNB"), `${MODE}: not in the live names`);
+  ok(!CSP_CONNECT_SOURCES.includes("https://bsc-rpc.publicnode.com") && !CSP_CONNECT_SOURCES.includes("https://bsc-dataseed.bnbchain.org"), `${MODE}: no BNB Chain RPC in the CSP`);
+  ok(!rpcProxyChainIds().includes(CHAIN_ID), `${MODE}: the RPC proxy does not serve 56`);
+  ok(tokens.shieldTokensFor(CHAIN_ID).every((t) => t.address.toLowerCase() !== USDT.toLowerCase()), `${MODE}: no BNB Chain USDT`);
+  ok(gasFor(CHAIN_ID, SHIELD_BOUND_GAS_LIMIT) === undefined, `${MODE}: no fixed gas for a chain the build does not run`);
+  ok(hourlySpendWei(CHAIN_ID, {}) === null || hourlySpendWei(CHAIN_ID, {}) === 0n || hourlySpendWei(CHAIN_ID, {}) === undefined, `${MODE}: no relay budget for BNB Chain`);
+}
+
+if (MODE === "on") {
+  ok(bnb.BNB_ENABLED && bnb.BNB?.chainId === CHAIN_ID && bnb.BNB_LIVE_SINCE === "21 November 2026", "on: BNB Chain is on");
+  ok(nets.NETWORK_KEYS.includes("bnb-mainnet") && nets.isShownNetworkKey("bnb-mainnet"), "on: a network key, shown with the mainnets");
+  const mainnets = nets.NETWORK_KEYS.filter((k) => !nets.getNetwork(k).testnet);
+  ok(mainnets[mainnets.length - 1] === "bnb-mainnet", "on: listed after the other mainnets");
+  ok(e.pool === POOL && e.deployBlock === 134_300_000n, "on: its pool and block");
+  ok(e.explorerTx("0xab") === "https://bscscan.com/tx/0xab", "on: BscScan links");
+  ok(nets.isNetworkWritable(e), "on: writable");
+  ok(mainnet.liveMainnetNames().endsWith("and BNB Chain"), "on: named last in the live mainnets");
+  ok(mainnet.mainnetChainPool(CHAIN_ID)?.pool === POOL, "on: its pool from lib/bnb");
+
+  // Tokens: each in its own decimals, never 6 by accident.
+  const add = tokens.shieldTokensFor(CHAIN_ID);
+  const by = Object.fromEntries(add.map((t) => [t.symbol, t]));
+  ok(add.map((t) => t.symbol).join(",") === "USDT,USDC,BDX", "on: USDT, USDC, BDX (and BNB, the native coin)");
+  ok(by.USDT!.address === USDT && by.USDT!.decimals === 18 && by.USDT!.kind === "stablecoin", "on: USDT, 18 decimals");
+  ok(by.USDC!.address === USDC && by.USDC!.decimals === 18 && by.USDC!.kind === "stablecoin", "on: USDC, 18 decimals");
+  ok(by.BDX!.address === BDX && by.BDX!.decimals === 9 && by.BDX!.opensWithLimit === true, "on: BDX, 9 decimals, read from its live limit");
+  ok(tokens.supportsNativeShield(CHAIN_ID) && tokens.isNativeAddable(CHAIN_ID), "on: BNB listed and offered (no limit from the deploy)");
+  nets.setShownNetworkKey("bnb-mainnet");
+  ok(summaryDecimals(USDT) === 2 && summaryDecimals(USDC) === 2, "on: 18-decimal stablecoins show cents in summaries");
+  ok(summaryDecimals("0x0000000000000000000000000000000000000000") === 6 && summaryDecimals(BDX) === 6, "on: BNB and BDX show 6 places");
+
+  // Gas: fixed limits for deposits, and a native reserve from BNB's own price.
+  ok(gasFor(CHAIN_ID, SHIELD_BOUND_GAS_LIMIT) === SHIELD_BOUND_GAS_LIMIT && gasFor(CHAIN_ID, APPROVE_GAS_LIMIT) === APPROVE_GAS_LIMIT, "on: deposits carry a fixed gas limit");
+  ok(SHIELD_BOUND_GAS_LIMIT >= 1_800_000n && TRANSFER_GAS_LIMIT >= 2_000_000n, "on: limits above the fork's 1.69M first deposit and 1.89M private send");
+  ok(nativeGasReserve(CHAIN_ID, null) === SHIELD_BOUND_GAS_LIMIT * 100_000_000n * 3n, "on: unread gas price: 0.1 gwei, three times over");
+  ok(nativeGasReserve(CHAIN_ID, 50_000_000n) === SHIELD_BOUND_GAS_LIMIT * 50_000_000n * 3n, "on: read gas price used");
+
+  // The relay.
+  ok(networkForChain(CHAIN_ID).key === "bnb-mainnet", "on: the relay serves it");
+  ok(hourlySpendWei(CHAIN_ID, {}) === 50_000_000_000_000_000n, "on: the relay's hourly cap is 0.05 BNB by default");
+  ok(hourlySpendWei(CHAIN_ID, { GLOAM_RELAY_HOURLY_SPEND_56: "0.2" }) === 200_000_000_000_000_000n, "on: GLOAM_RELAY_HOURLY_SPEND_56 changes it");
+  ok(walkTuning(CHAIN_ID, e.logRange).span === 50_000n, "on: tree reads at publicnode's 50,000 blocks");
+  ok(CSP_CONNECT_SOURCES.includes("https://bsc-rpc.publicnode.com") && CSP_CONNECT_SOURCES.includes("https://bsc-dataseed.bnbchain.org"), "on: the CSP allows its RPCs");
+  ok(rpcProxyChainIds().includes(CHAIN_ID), "on: the RPC proxy serves 56 (the browser's way to old logs)");
+
+  // Reads: the pruned-logs check, end to end through the app's own transports.
+  const { createPublicClient } = await import("viem");
+  const vaultLogs = { method: "eth_getLogs", params: [{ address: POOL, fromBlock: hex(134_300_000n), toBlock: hex(134_349_999n) }] } as const;
+  const recentLogs = { method: "eth_getLogs", params: [{ address: POOL, fromBlock: hex(HEAD - 1_000n), toBlock: hex(HEAD) }] } as const;
+  ok(readTransport(e)({}).config.type === "gloamPrunedGuard" && serverTransport(e)({}).config.type === "gloamPrunedGuard", "on: browser and server reads are guarded");
+  ok(nets.getNetwork("base-mainnet").logCanary == null && readTransport(nets.getNetwork("base-mainnet"))({}).config.type !== "gloamPrunedGuard", "other networks read as before");
+
+  // The server with no GLOAM_RPC_URL_56: publicnode answers [] for the vault's old blocks; that fails loudly.
+  resetRpcChecks();
+  const server = createPublicClient({ chain: e.chain, transport: serverTransport(e, { retryCount: 0 }) });
+  await assert.rejects(server.request(vaultLogs as never), /no logs at block 134300000[\s\S]*GLOAM_RPC_URL_56/);
+  checks++;
+  ok(((await server.request(recentLogs as never)) as unknown[]).length === 0, "on: a recent empty range is trusted");
+  ok(!asked.some((a) => a.method === "eth_getLogs" && a.url.includes("bsc-dataseed")), "on: the dataseed was never asked for logs");
+
+  // The server with GLOAM_RPC_URL_56 set to an archive: the vault's old log comes back.
+  process.env.GLOAM_RPC_URL_56 = "https://archive.example/bsc";
+  resetRpcChecks();
+  const keyed = createPublicClient({ chain: e.chain, transport: serverTransport(e, { retryCount: 0 }) });
+  const got = (await keyed.request(vaultLogs as never)) as { blockNumber: string }[];
+  ok(got.length === 1 && BigInt(got[0]!.blockNumber) === VAULT_LOG_BLOCK, "on: with GLOAM_RPC_URL_56 the old log is read");
+  delete process.env.GLOAM_RPC_URL_56;
+  resetRpcChecks();
+
+  // The browser: the pruned answer is asked again of the proxy (the archive), which has it.
+  const browser = createPublicClient({ chain: e.chain, transport: readTransport(e, { retryCount: 0 }, { proxy: "https://www.gloam.trade/api/rpc/56" }) });
+  const viaProxy = (await browser.request(vaultLogs as never)) as { blockNumber: string }[];
+  ok(viaProxy.length === 1 && asked.some((a) => a.url.includes("/api/rpc/56") && a.method === "eth_getLogs"), "on: the browser gets the old log through the proxy");
+}
+
+if (MODE === "off") {
+  for (const mode of ["nopool", "on", "nolivesince", "badpool"]) {
+    const child = spawnSync(process.execPath, [...process.execArgv, fileURLToPath(import.meta.url)], {
+      env: { ...process.env, GLOAM_SELFTEST_BNB: mode },
+      encoding: "utf8",
+    });
+    if (child.status !== 0) {
+      console.error(child.stdout, child.stderr);
+      assert.fail(`the ${mode} run failed`);
+    }
+    process.stdout.write(child.stdout);
+    checks++;
+  }
+}
+console.log(`selftest-bnb (${MODE}): ok (${checks} checks)`);

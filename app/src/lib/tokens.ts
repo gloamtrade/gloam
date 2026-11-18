@@ -499,6 +499,9 @@ export function knownTokens(chainId?: number): OnchainToken[] {
     ...BASE_MAINNET_TOKENS,
     ...BASE_SEPOLIA_TOKENS,
     ...ETHEREUM_MAINNET_TOKENS,
+    // BNB Chain's, while it is on: its USDT and USDC addresses are its own (18 decimals),
+    // so a lookup by address finds the right decimals whichever network is open.
+    ...BNB_MAINNET_TOKENS,
   ];
   return chainId === undefined ? all : [...shieldTokensFor(chainId), ...all];
 }

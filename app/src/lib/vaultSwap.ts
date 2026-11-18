@@ -115,8 +115,8 @@ export const VAULT_SWAP_ROUTERS: Record<number, Address | null> = {
   4217: v3Address(4217) ?? TEMPO_ROUTER,
   8453: v3Address(8453),
   1: v3Address(1),
-  // Elysium: not yet. No router is deployed there, so swaps are off on Elysium
-  // (its id is not listed, which reads as null) and the copy says "not on Elysium yet".
+  // Elysium and BNB Chain (56): not yet. No router is deployed on either, so swaps are
+  // off there (their ids are not listed, which reads as null) and the copy says "not yet".
 };
 
 /**
