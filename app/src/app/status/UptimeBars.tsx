@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { DayTone } from "@/lib/status/model";
 import css from "./status.module.css";
 
@@ -22,21 +22,23 @@ function detail(d: BarDay): string | null {
   return bits.length ? bits.join(" · ") : null;
 }
 
-function visible(el: Element | null | undefined): el is HTMLElement {
-  return !!el && (el as HTMLElement).getClientRects().length > 0;
-}
+/** How long a day picked by touch stays shown. */
+const TOUCH_SHOW_MS = 2_500;
 
 /**
- * One part's days, oldest first. Hover or focus a day for its date and
- * uptime. One Tab stop per row: the arrow keys, Home and End move between the
- * days that fit the screen.
+ * One part's 90 days, oldest first. The bars are thin in a card, so the day is
+ * picked from where the pointer is along the strip, by mouse or by touch.
+ * Keyboard: one Tab stop per strip; the arrow keys, Home and End move a day.
  */
 export function UptimeBars({ name, days }: { name: string; days: BarDay[] }) {
   const track = useRef<HTMLDivElement>(null);
   const bars = useRef<(HTMLSpanElement | null)[]>([]);
   const tip = useRef<HTMLDivElement>(null);
+  const touchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [focusIdx, setFocusIdx] = useState(days.length - 1);
   const [shown, setShown] = useState<number | null>(null);
+
+  useEffect(() => () => clearTimeout(touchTimer.current), []);
 
   useLayoutEffect(() => {
     const t = tip.current;
@@ -49,18 +51,27 @@ export function UptimeBars({ name, days }: { name: string; days: BarDay[] }) {
     t.style.left = `${left - half}px`;
   }, [shown]);
 
+  const pick = (e: PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    if (r.width <= 0) return;
+    const i = Math.min(days.length - 1, Math.max(0, Math.floor(((e.clientX - r.left) / r.width) * days.length)));
+    setShown(i);
+    clearTimeout(touchTimer.current);
+    if (e.pointerType !== "mouse") touchTimer.current = setTimeout(() => setShown(null), TOUCH_SHOW_MS);
+  };
+
   const move = (to: number) => {
     const el = bars.current[to];
-    if (!visible(el)) return;
+    if (!el) return;
     setFocusIdx(to);
     setShown(to);
     el.focus();
   };
 
   const onKey = (e: KeyboardEvent<HTMLSpanElement>, i: number) => {
-    if (e.key === "ArrowLeft") move(i - 1);
-    else if (e.key === "ArrowRight") move(i + 1);
-    else if (e.key === "Home") move(bars.current.findIndex((b) => visible(b)));
+    if (e.key === "ArrowLeft") move(Math.max(0, i - 1));
+    else if (e.key === "ArrowRight") move(Math.min(days.length - 1, i + 1));
+    else if (e.key === "Home") move(0);
     else if (e.key === "End") move(days.length - 1);
     else if (e.key === "Escape") setShown(null);
     else return;
@@ -76,7 +87,12 @@ export function UptimeBars({ name, days }: { name: string; days: BarDay[] }) {
         className={css.bars}
         role="group"
         aria-label={`${name}, day by day`}
-        onMouseLeave={() => setShown(null)}
+        data-active={shown === null ? undefined : ""}
+        onPointerMove={pick}
+        onPointerDown={pick}
+        onPointerLeave={(e) => {
+          if (e.pointerType === "mouse") setShown(null);
+        }}
       >
         {days.map((day, i) => (
           <span
@@ -90,7 +106,6 @@ export function UptimeBars({ name, days }: { name: string; days: BarDay[] }) {
             data-tone={day.tone}
             data-active={shown === i ? "true" : undefined}
             className={css.bar}
-            onMouseEnter={() => setShown(i)}
             onFocus={() => {
               setFocusIdx(i);
               setShown(i);

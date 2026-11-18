@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Logo } from "@/components/Logo";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { chainLogoSrc } from "@/lib/chainLogo";
-import { getPublicStats, type PublicStats } from "@/lib/publicStats";
 import { runStatusChecks, statusParts } from "@/lib/status/checks";
 import { readHistory, type History } from "@/lib/status/history";
 import { INCIDENTS, STATE_LABEL, ongoingIncidents, pastIncidents, type Incident } from "@/lib/status/incidents";
@@ -32,7 +30,7 @@ import css from "./status.module.css";
  * The checks run on the server when the page is regenerated, at most once a
  * minute (lib/status/checks); the bars are the cron's 90 days
  * (lib/status/history); incidents are kept by hand (lib/status/incidents).
- * The figures at the top are /stats' own (lib/publicStats), never re-counted.
+ * Each part is a card in its group's grid, money first and the site last.
  */
 export const dynamic = "force-static";
 export const revalidate = 60;
@@ -49,12 +47,6 @@ export const metadata: Metadata = {
 };
 
 const SITE = "https://www.gloam.trade";
-
-const TONE_TEXT: Record<Health, string> = {
-  operational: "text-sealed",
-  degraded: "text-warn",
-  down: "text-danger",
-};
 
 const TONE_BG: Record<Health, string> = {
   operational: "bg-sealed",
@@ -87,17 +79,6 @@ function emptyDays(history: History | null, nowMs: number): DayTally[] {
   }));
 }
 
-function ChainMark({ chainId }: { chainId: number }) {
-  return (
-    <span className="relative mt-[2px] h-[18px] w-[18px] shrink-0 overflow-hidden rounded-full">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={chainLogoSrc(chainId)} alt="" width={18} height={18} className="h-full w-full object-cover dark:hidden" />
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={chainLogoSrc(chainId, true)} alt="" width={18} height={18} className="hidden h-full w-full object-cover dark:block" />
-    </span>
-  );
-}
-
 /** "99.98% uptime", or "100% since 19 Nov" while the history is younger than the bars. */
 function uptimeText(tallies: DayTally[]): string {
   const uptime = rangeUptime(tallies);
@@ -107,36 +88,26 @@ function uptimeText(tallies: DayTally[]): string {
   return `${formatPercent(uptime)} since ${formatDay(tallies[first]!.day).replace(/ \d{4}$/, "")}`;
 }
 
-function PartRow({ part, tallies }: { part: PartCheck; tallies: DayTally[] }) {
-  const sub = [part.note, part.detail].filter(Boolean).join(" · ");
+function PartCard({ part, tallies }: { part: PartCheck; tallies: DayTally[] }) {
   return (
-    <li className="py-6 first:pt-0 last:pb-0">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h3 className="flex items-start gap-2.5 text-[16px] font-medium leading-snug">
-            {part.chainId !== undefined ? <ChainMark chainId={part.chainId} /> : null}
-            <span className="min-w-0 text-pretty">{part.name}</span>
-          </h3>
-          {part.reason ? <p className="mt-1.5 text-[14px] leading-snug text-soft">{part.reason}</p> : null}
-          {sub ? <p className="mt-1 text-[13px] leading-snug text-mute">{sub}</p> : null}
-        </div>
-        <p className="shrink-0 pt-px text-right text-[14px] leading-snug">
-          <span className={TONE_TEXT[part.status]}>{HEALTH_LABEL[part.status]}</span>
-          {part.latencyMs !== null ? <span className="tnum text-mute"> · {formatLatency(part.latencyMs)}</span> : null}
-        </p>
+    <li className={css.card}>
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="flex min-w-0 items-start gap-2.5 text-[15px] font-medium leading-snug">
+          <span className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${TONE_BG[part.status]}`} aria-hidden />
+          <span className="min-w-0">
+            {part.name}
+            <span className="sr-only">: {HEALTH_LABEL[part.status]}</span>
+          </span>
+        </h3>
+        {part.latencyMs !== null ? (
+          <span className="tnum shrink-0 pt-px text-[13px] text-mute">{formatLatency(part.latencyMs)}</span>
+        ) : null}
       </div>
-      <div className="mt-4">
+      {part.reason ? <p className="mt-1.5 text-[13px] leading-snug text-soft">{part.reason}</p> : null}
+      <div className="mt-auto pt-5">
         <UptimeBars name={part.name} days={barDays(tallies)} />
       </div>
-      <div className="mt-2.5 flex items-center justify-between gap-3 text-[12.5px] text-mute">
-        <span>
-          <span className={css.span90}>90 days ago</span>
-          <span className={css.span60}>60 days ago</span>
-          <span className={css.span30}>30 days ago</span>
-        </span>
-        <span className="tnum">{uptimeText(tallies)}</span>
-        <span>Today</span>
-      </div>
+      <p className="tnum mt-2 text-right text-[12px] text-mute">{uptimeText(tallies)}</p>
     </li>
   );
 }
@@ -170,16 +141,6 @@ function IncidentCard({ incident, names }: { incident: Incident; names: Map<stri
   );
 }
 
-/** /stats' own figures, or null when they are not ready in time: the strip is then left out, never guessed. */
-function glance(): Promise<PublicStats | null> {
-  return Promise.race([
-    getPublicStats().catch(() => null),
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), 9_000)),
-  ]);
-}
-
-const count = (n: number) => n.toLocaleString("en-US");
-
 /** "Base", "Base and Tempo", "Base, Tempo and 3 more". */
 function affectedText(names: string[]): string {
   if (names.length <= 3) return names.length === 3 ? `${names[0]}, ${names[1]} and ${names[2]}` : names.join(" and ");
@@ -188,7 +149,7 @@ function affectedText(names: string[]): string {
 
 export default async function StatusPage() {
   const parts = statusParts();
-  const [snap, history, stats] = await Promise.all([runStatusChecks(), readHistory(parts.map((p) => p.id)), glance()]);
+  const [snap, history] = await Promise.all([runStatusChecks(), readHistory(parts.map((p) => p.id))]);
   const ongoing = ongoingIncidents(INCIDENTS);
   const past = pastIncidents(snap.checkedAt, 90, INCIDENTS);
   const overall = worst([snap.overall, ...ongoing.map((i) => i.impact)]);
@@ -226,32 +187,6 @@ export default async function StatusPage() {
               <CheckedAgo at={snap.checkedAt} />
               {affected.length ? <span className="text-soft"> · {affectedText(affected)}</span> : null}
             </p>
-            {stats ? (
-              <div className="mt-7 border-t border-line pt-6">
-                <h2 className="sr-only">At a glance</h2>
-                <dl className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
-                  {(
-                    [
-                      ["Networks live", stats.networks.length],
-                      ["Deposits", stats.total.deposits],
-                      ["Private transfers", stats.total.transfers],
-                      ["Cash-outs", stats.total.cashouts],
-                    ] as const
-                  ).map(([label, n]) => (
-                    <div key={label} className="flex flex-col-reverse justify-end">
-                      <dt className="mt-1 text-[13px] text-mute">{label}</dt>
-                      <dd className="tnum text-[26px] font-light leading-none tracking-[-0.01em]">{count(n)}</dd>
-                    </div>
-                  ))}
-                </dl>
-                <p className="mt-5 text-[13px] text-mute">
-                  Mainnet, since {formatDay(stats.countedSince.slice(0, 10))}.{" "}
-                  <a href={`${SITE}/stats`} className="underline decoration-line-strong underline-offset-4 hover:text-foreground">
-                    All figures
-                  </a>
-                </p>
-              </div>
-            ) : null}
           </div>
         </section>
 
@@ -270,9 +205,7 @@ export default async function StatusPage() {
 
         <div className="mt-12 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 text-[13px] text-mute sm:mt-16">
           <p>
-            Uptime over the last <span className={css.span90}>90</span>
-            <span className={css.span60}>60</span>
-            <span className={css.span30}>30</span> days
+            Last 90 days
             {history === null ? <span className="text-soft"> · History is not available right now.</span> : null}
           </p>
           <ul className="flex flex-wrap items-center gap-x-4 gap-y-2" aria-label="Legend">
@@ -293,59 +226,50 @@ export default async function StatusPage() {
         </div>
 
         {GROUPS.map((g) => {
-          const rows = snap.parts.filter((p) => p.group === g.id);
-          if (!rows.length) return null;
+          const cards = snap.parts.filter((p) => p.group === g.id);
+          if (!cards.length) return null;
           return (
-            <section
-              key={g.id}
-              aria-labelledby={`group-${g.id}`}
-              className="mt-8 grid grid-cols-1 gap-x-12 gap-y-6 border-t border-line pt-8 lg:mt-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,3fr)] lg:pt-10"
-            >
+            <section key={g.id} aria-labelledby={`group-${g.id}`} className="mt-10 sm:mt-12">
               <h2 id={`group-${g.id}`} className="t-title">
                 {g.name}
               </h2>
-              <div className="min-w-0">
-                <ul className="divide-y divide-line">
-                  {rows.map((p) => (
-                    <PartRow key={p.id} part={p} tallies={history?.byPart.get(p.id) ?? fallbackDays} />
+              <ul className={`mt-4 ${css.grid}`}>
+                {cards.map((p) => (
+                  <PartCard key={p.id} part={p} tallies={history?.byPart.get(p.id) ?? fallbackDays} />
+                ))}
+              </ul>
+              {g.id === "integrations" ? (
+                <p className="mt-4 text-[13px] text-mute">
+                  On npm:{" "}
+                  {snap.packages.map((pkg, i) => (
+                    <span key={pkg.name}>
+                      {i ? " · " : ""}
+                      <span className="text-soft">{pkg.name}</span> <span className="tnum">{pkg.version ?? "not read"}</span>
+                    </span>
                   ))}
-                </ul>
-                {g.id === "integrations" ? (
-                  <p className="mt-7 border-t border-line pt-6 text-[13px] text-mute">
-                    On npm:{" "}
-                    {snap.packages.map((pkg, i) => (
-                      <span key={pkg.name}>
-                        {i ? " · " : ""}
-                        <span className="text-soft">{pkg.name}</span> <span className="tnum">{pkg.version ?? "not read"}</span>
-                      </span>
-                    ))}
-                  </p>
-                ) : null}
-              </div>
+                </p>
+              ) : null}
             </section>
           );
         })}
 
-        <section
-          aria-labelledby="incidents"
-          className="mt-8 grid grid-cols-1 gap-x-12 gap-y-6 border-t border-line pt-8 lg:mt-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,3fr)] lg:pt-10"
-        >
+        <section aria-labelledby="incidents" className="mt-14 border-t border-line pt-8 sm:mt-16">
           <h2 id="incidents" className="t-title">
             Incidents
           </h2>
           {past.length ? (
-            <div className="min-w-0 space-y-10">
+            <div className="mt-4 min-w-0 space-y-10">
               {past.map((i) => (
                 <IncidentCard key={i.id} incident={i} names={names} />
               ))}
             </div>
           ) : (
-            <p className="text-[15px] text-mute">No incidents reported in the last 90 days.</p>
+            <p className="mt-4 text-[15px] text-mute">No incidents reported in the last 90 days.</p>
           )}
         </section>
 
         <footer className="mt-16 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-t border-line pt-6 text-[13px] text-mute">
-          <p>Checked every minute on this page, and every 5 minutes for the history. Times are UTC.</p>
+          <p>Checked every minute. History every 5 minutes. Times in UTC.</p>
           <div className="flex items-center gap-5">
             <a href="/api/status" className="inline-flex min-h-10 items-center underline decoration-line-strong underline-offset-4 hover:text-foreground">
               JSON
