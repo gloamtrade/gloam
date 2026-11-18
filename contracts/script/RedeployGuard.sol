@@ -96,6 +96,8 @@ abstract contract RedeployGuard is DeployerBroadcast {
         if (chainId == 8453) return ("deployments/base-mainnet.json", ".contracts.ShieldPoolPayments");
         if (chainId == 1) return ("deployments/ethereum-mainnet.json", ".contracts.ShieldPoolPayments");
         if (chainId == 99901) return ("deployments/elysium-mainnet.json", ".contracts.ShieldPoolPayments");
+        // BNB Chain: the file is in before the deploy and names no vault until bnb-mainnet-after-deploy.sh writes it.
+        if (chainId == 56) return ("deployments/bnb-mainnet.json", ".contracts.ShieldPoolPayments");
     }
 
     /// @dev The recorded vault, or zero while the file names none.

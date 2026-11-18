@@ -11,6 +11,7 @@ import {MockERC20} from "./MockERC20.sol";
 import {DeployEthereumSepolia} from "../script/DeployEthereumSepolia.s.sol";
 import {DeployGloamPayMemo} from "../script/DeployGloamPayMemo.s.sol";
 import {ElysiumDeploySteps} from "./DeployElysium.t.sol";
+import {BnbDeploySteps} from "./DeployBnb.t.sol";
 
 /**
  * The Base deploy scripts, run in a local EVM with the exact settings in
@@ -18,9 +19,10 @@ import {ElysiumDeploySteps} from "./DeployElysium.t.sol";
  * runs only on its own chain (test/DeployChains.t.sol covers every script),
  * lists native ETH next to the stablecoins with the beta limits, sets the 0.25%
  * cash-out fee for the treasury, starts the handoff to the owner wallet and
- * ends setup. Elysium's guarded deploy runs here too (test/DeployElysium.t.sol).
+ * ends setup. Elysium's guarded deploy runs here too (test/DeployElysium.t.sol),
+ * and BNB Chain's (test/DeployBnb.t.sol).
  */
-contract DeployBaseTest is Test, ElysiumDeploySteps {
+contract DeployBaseTest is Test, ElysiumDeploySteps, BnbDeploySteps {
     using stdJson for string;
 
     // Not a real key: a local test signer only.
@@ -104,6 +106,8 @@ contract DeployBaseTest is Test, ElysiumDeploySteps {
     function test_deploys_with_runbook_settings() public {
         // Elysium (test/DeployElysium.t.sol) first, from the fresh deployer, rolled back after.
         _elysiumSteps();
+        // BNB Chain (test/DeployBnb.t.sol), from its own fresh deployer, rolled back after.
+        _bnbSteps();
         uint256 snap = vm.snapshotState();
         _ethereumSepoliaDeploy();
         vm.revertToState(snap);
