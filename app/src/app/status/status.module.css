@@ -1,20 +1,52 @@
-/* The status page's day bars. Real media queries, not Tailwind variants, for
-   the counts: 90 days on a wide screen, 60 on a tablet, 30 on a phone. */
+/* The status page's grid of cards and their day bars. Real media queries, not
+   Tailwind variants, for the column counts: 1 on a phone, 2 on a tablet, 4 wide. */
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  /* every card in a group the same height, whatever its row */
+  grid-auto-rows: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 640px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1200px) {
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+  }
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 18px 18px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+}
 
 .track {
   position: relative;
+  touch-action: pan-y;
 }
 
 .bars {
   display: flex;
-  gap: 3px;
-  height: 34px;
+  gap: 1px;
+  height: 28px;
 }
 
 .bar {
   flex: 1 1 0;
   min-width: 0;
-  border-radius: 3px;
+  border-radius: 1px;
   background: var(--surface-2);
   cursor: default;
   transition: opacity 120ms ease;
@@ -32,8 +64,7 @@
   background: var(--danger);
 }
 
-.bars:hover .bar:not([data-active="true"]),
-.bars:focus-within .bar:not([data-active="true"]) {
+.bars[data-active] .bar:not([data-active="true"]) {
   opacity: 0.55;
 }
 
@@ -78,38 +109,6 @@
 
 .swatch[data-tone="down"] {
   background: var(--danger);
-}
-
-.span60,
-.span30 {
-  display: none;
-}
-
-@media (max-width: 1023px) {
-  .bar:nth-child(-n + 30) {
-    display: none;
-  }
-  .span90 {
-    display: none;
-  }
-  .span60 {
-    display: inline;
-  }
-}
-
-@media (max-width: 639px) {
-  .bar:nth-child(-n + 60) {
-    display: none;
-  }
-  .bars {
-    gap: 2px;
-  }
-  .span60 {
-    display: none;
-  }
-  .span30 {
-    display: inline;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
