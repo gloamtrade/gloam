@@ -213,16 +213,134 @@ export function splitReadTransport<T extends AnyTransport = Transport>({ fresh, 
 /**
  * The read transport for a network: plain `http(rpcUrl)` where that RPC keeps
  * everything, else the fresh/history split. `config` applies to both RPCs.
+ * A network with a `logCanary` (BNB Chain, whose public RPCs keep about a day
+ * of logs and answer an empty list for older blocks) reads through
+ * guardPrunedLogs, so a missing history fails loudly instead of reading as
+ * "no events". Pass your own `rpcUrl` (one that keeps every log) to read old
+ * blocks there.
  */
 export function gloamReadTransport(
-  net: { rpcUrl: string; historyRpc?: HistoryRpc | null },
+  net: { rpcUrl: string; historyRpc?: HistoryRpc | null; logCanary?: LogCanary | null },
   config: HttpTransportConfig = {}
 ): Transport {
   const fresh = http(net.rpcUrl, config);
-  if (!net.historyRpc || net.historyRpc.url === net.rpcUrl) return fresh;
-  return splitReadTransport({
-    fresh,
-    history: http(net.historyRpc.url, config),
-    recentBlocks: net.historyRpc.recentBlocks,
-  });
+  const read =
+    !net.historyRpc || net.historyRpc.url === net.rpcUrl
+      ? fresh
+      : splitReadTransport({
+          fresh,
+          history: http(net.historyRpc.url, config),
+          recentBlocks: net.historyRpc.recentBlocks,
+        });
+  return net.logCanary ? guardPrunedLogs(read, net.logCanary) : read;
+}
+
+// ── pruned logs: fail loudly instead of reading "no events" ─────────────────────
+
+/**
+ * A contract that logs in (nearly) every block of a chain, used to tell "no
+ * events here" from "this RPC has no logs this old". On BNB Chain it is USDT,
+ * with dozens of transfers a block (BNB_LOG_CANARY in src/bnb.ts).
+ */
+export interface LogCanary {
+  /** The contract whose logs are looked for. */
+  address: `0x${string}`;
+  /** Blocks read from the start of a range; one log in them is enough. */
+  blocks: bigint;
+  /** The first block the canary is known to log at; a range that starts earlier is checked here. */
+  sinceBlock: bigint;
+  /** An empty answer whose range starts within this many blocks of the head is trusted without a check. */
+  trustRecentBlocks: bigint;
+  /** What to do about it, named in the error (which RPC to set). */
+  hint: string;
+}
+
+/**
+ * An eth_getLogs read came back empty for blocks the RPC keeps no logs for: the
+ * canary contract, which logs in every block, has none there either. Some public
+ * RPCs (publicnode on BNB Chain, about 27 hours of logs) answer an empty list
+ * for older ranges instead of an error, which would read as "nothing happened"
+ * and silently drop deposits, payments and notes. Nothing partial is returned.
+ */
+export class PrunedLogsError extends Error {
+  readonly fromBlock: bigint;
+  readonly toBlock: bigint | null;
+  constructor(fromBlock: bigint, toBlock: bigint | null, hint: string) {
+    super(
+      `The RPC has no logs at block ${fromBlock}${toBlock !== null ? ` to ${toBlock}` : ""} (it answered an empty list where every block has logs), so this read cannot be trusted. ${hint}`
+    );
+    this.name = "PrunedLogsError";
+    this.fromBlock = fromBlock;
+    this.toBlock = toBlock;
+  }
+}
+
+export interface GuardPrunedLogsOptions<T extends AnyTransport = Transport> {
+  /**
+   * Asked when the guarded RPC turns out to have no logs that old: an RPC that
+   * keeps them (in the Gloam app, gloam.trade's own proxy, which reads through
+   * the server's keyed RPC). Its empty answers are checked the same way.
+   */
+  archive?: T | null;
+  /** How long a head read places the trust line, ms. Default 60 s. */
+  headTtlMs?: number;
+}
+
+/**
+ * Wraps a transport so an empty eth_getLogs answer about old blocks is only
+ * passed on once the same RPC shows it has logs there: it is asked for the
+ * canary's logs at the range's first blocks, and if those are missing too the
+ * read throws PrunedLogsError (or goes to `archive`, when given). Non-empty
+ * answers, recent ranges, reads by block hash and every other method pass
+ * through untouched. Costs one small extra read per empty old range.
+ */
+export function guardPrunedLogs<T extends AnyTransport = Transport>(inner: T, canary: LogCanary, opts: GuardPrunedLogsOptions<T> = {}): T {
+  const headTtlMs = opts.headTtlMs ?? 60_000;
+  const guarded = (args: Parameters<T>[0]) => {
+    const t = inner(args);
+    const ir = t as unknown as Rpc;
+    const ar = opts.archive ? (opts.archive(args) as unknown as Rpc) : null;
+    let head: { n: bigint; at: number } | null = null;
+    const headNow = async (): Promise<bigint> => {
+      if (head && Date.now() - head.at < headTtlMs) return head.n;
+      const n = BigInt((await ir.request({ method: "eth_blockNumber" })) as string);
+      head = { n, at: Date.now() };
+      return n;
+    };
+    const hasCanaryLogs = async (rpc: Rpc, from: bigint): Promise<boolean> => {
+      const at = from < canary.sinceBlock ? canary.sinceBlock : from;
+      const logs = (await rpc.request({
+        method: "eth_getLogs",
+        params: [{ address: canary.address, fromBlock: toHex(at), toBlock: toHex(at + canary.blocks - 1n) }] as never,
+      })) as unknown[];
+      return Array.isArray(logs) && logs.length > 0;
+    };
+    const request = (async ({ method, params }: { method: string; params?: unknown }) => {
+      const list = params as readonly unknown[] | undefined;
+      const out = await ir.request({ method, params: list as never });
+      if (method !== "eth_getLogs" || !Array.isArray(out) || out.length > 0) return out;
+      const f = list?.[0] as { fromBlock?: unknown; toBlock?: unknown; blockHash?: unknown } | undefined;
+      if (!f || f.blockHash) return out;
+      const from = taggedBlock(f.fromBlock);
+      if (from === null) return out; // "latest" and friends: the head
+      const to = taggedBlock(f.toBlock);
+      // a range that ends before the canary logs at all says nothing either way
+      if (to !== null && to < canary.sinceBlock) return out;
+      const n = await headNow();
+      if (from + canary.trustRecentBlocks >= n) return out;
+      if (await hasCanaryLogs(ir, from)) return out;
+      if (ar) {
+        const again = await ar.request({ method, params: list as never });
+        if (!Array.isArray(again) || again.length > 0) return again;
+        if (await hasCanaryLogs(ar, from)) return again;
+      }
+      throw new PrunedLogsError(from, to, canary.hint);
+    }) as EIP1193RequestFn;
+    return {
+      config: { ...t.config, key: "gloamPrunedGuard", name: "Gloam read (pruned logs refused)", type: "gloamPrunedGuard", request, retryCount: 0 },
+      request,
+      value: t.value,
+    };
+  };
+  return guarded as unknown as T;
 }

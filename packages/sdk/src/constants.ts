@@ -1,7 +1,7 @@
 import { defineChain, zeroAddress, type Address, type Chain } from "viem";
-import { base, baseSepolia, mainnet as ethereum, sepolia } from "viem/chains";
+import { base, baseSepolia, bsc, mainnet as ethereum, sepolia } from "viem/chains";
 import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, mainnetPoolFor, type MainnetChainId } from "./mainnet.js";
-import type { HistoryRpc } from "./rpc.js";
+import type { HistoryRpc, LogCanary } from "./rpc.js";
 import {
   ELYSIUM_NATIVE_CURRENCY,
   ELYSIUM_TESTNET_CHAIN_ID,
@@ -11,6 +11,16 @@ import {
   type ElysiumMainnet,
   type ElysiumTestnet,
 } from "./elysium.js";
+import {
+  BNB_LOG_CANARY,
+  BNB_MAINNET,
+  BNB_MAINNET_CHAIN_ID,
+  BNB_NATIVE_CURRENCY,
+  BNB_WBNB,
+  bnbMainnetConfig,
+  type BnbMainnet,
+  type BnbMainnetInput,
+} from "./bnb.js";
 
 /** Native ETH is represented as the zero address across the vault. */
 export const NATIVE_ASSET: Address = zeroAddress;
@@ -249,10 +259,14 @@ export type GloamNetworkKey =
   | "base-mainnet"
   | "ethereum-mainnet"
   | "elysium-mainnet"
-  | "elysium";
+  | "elysium"
+  | "bnb-mainnet";
 
-/** The chain a network runs on, testnet or mainnet. Elysium's testnet is "elysium", its mainnet "elysium-mainnet". */
-export type GloamChainFamily = "robinhood" | "tempo" | "base" | "ethereum" | "elysium";
+/**
+ * The chain a network runs on, testnet or mainnet. Elysium's testnet is
+ * "elysium", its mainnet "elysium-mainnet". BNB Chain has a mainnet only, "bnb-mainnet".
+ */
+export type GloamChainFamily = "robinhood" | "tempo" | "base" | "ethereum" | "elysium" | "bnb";
 
 /** Robinhood Chain mainnet (4663). */
 export const RH_MAINNET_CHAIN: Chain = defineChain({
@@ -352,14 +366,32 @@ export const ETHEREUM_SEPOLIA_HISTORY_RPC: HistoryRpc = {
 };
 
 const units = (whole: bigint, decimals: number) => whole * 10n ** BigInt(decimals);
+
 /**
- * Each stablecoin's limit on the four mainnet vaults, as read on chain on
- * 2026-11-02 (depositLimit on 0x39E2…0194): 50,000 per deposit and 2,500,000 in
- * total. The limits change through the vault's timelock (a change to no limit
- * is queued for every asset), so readDepositLimit reads the live value.
+ * "No limit": the largest limit the vault can hold (type(uint128).max).
+ * depositLimitsOn is one-way, so this is how a vault takes any amount.
  */
-const stableLimit: DepositLimit = { perDeposit: units(50_000n, 6), total: units(2_500_000n, 6) };
-/** Each stablecoin's limit on the Sepolia vaults: the launch value, still live there. */
+const NO_LIMIT: DepositLimit = { perDeposit: (1n << 128n) - 1n, total: (1n << 128n) - 1n };
+
+/**
+ * A stablecoin's limit of 50,000 per deposit and 2,500,000 in total, in the
+ * token's OWN decimals. Most stablecoins Gloam lists have 6 decimals, but USDT
+ * and USDC on BNB Chain have 18: the same raw number would cap them at a
+ * trillionth of a cent, so the decimals are always passed, never assumed.
+ */
+export function stableLimitFor(decimals: number): DepositLimit {
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) throw new Error(`not a decimals count: ${decimals}`);
+  return { perDeposit: units(50_000n, decimals), total: units(2_500_000n, decimals) };
+}
+
+/**
+ * Each 6-decimal stablecoin's limit on the four older mainnet vaults, as read
+ * on chain on 2026-11-02 (depositLimit on 0x39E2…0194): 50,000 per deposit and
+ * 2,500,000 in total. The limits change through the vault's timelock (a change
+ * to no limit is queued for every asset), so readDepositLimit reads the live value.
+ */
+const stableLimit: DepositLimit = stableLimitFor(6);
+/** Each 6-decimal stablecoin's limit on the Sepolia vaults: the launch value (500 / 25,000), still live there. */
 const sepoliaStableLimit: DepositLimit = { perDeposit: units(500n, 6), total: units(25_000n, 6) };
 
 /**
@@ -376,7 +408,7 @@ const sepoliaStableLimit: DepositLimit = { perDeposit: units(500n, 6), total: un
 export const RH_MAINNET_ASSETS: GloamAsset[] = [
   { symbol: "USDG", address: RH_MAINNET_USDG, decimals: 6, depositLimit: stableLimit },
   { symbol: "GLOAM", address: GLOAM_TOKEN, decimals: 18, depositLimit: { perDeposit: units(2_500_000n, 18), total: units(25_000_000n, 18) } },
-  { symbol: "GRIFT", address: RH_MAINNET_GRIFT, decimals: 18, depositLimit: { perDeposit: (1n << 128n) - 1n, total: (1n << 128n) - 1n } },
+  { symbol: "GRIFT", address: RH_MAINNET_GRIFT, decimals: 18, depositLimit: NO_LIMIT },
   { symbol: "ETH", address: NATIVE_ASSET, decimals: 18, depositLimit: { perDeposit: units(11n, 18), total: units(110n, 18) } },
   { symbol: "PONS", address: RH_MAINNET_PONS, decimals: 18, depositLimit: { perDeposit: units(390_000n, 18), total: units(9_800_000n, 18) } },
   { symbol: "CASHCAT", address: RH_MAINNET_CASHCAT, decimals: 18, depositLimit: { perDeposit: units(960_000n, 18), total: units(24_000_000n, 18) } },
@@ -407,7 +439,7 @@ const sepoliaEthLimit: DepositLimit = { perDeposit: 2n * 10n ** 17n, total: unit
  * deposits before it runs: assertDepositWithinLiveLimit reads the live value
  * and says so.
  */
-const bdxLimit: DepositLimit = { perDeposit: (1n << 128n) - 1n, total: (1n << 128n) - 1n };
+const bdxLimit: DepositLimit = NO_LIMIT;
 
 /** Base mainnet pool assets and their deposit limits. Native ETH is listed, then BDX. */
 export const BASE_MAINNET_ASSETS: GloamAsset[] = [
@@ -476,6 +508,43 @@ export function elysiumTestnetAssets(cfg: ElysiumTestnet | null = elysiumTestnet
   return [{ symbol: "USDC", address: cfg.usdc, decimals: cfg.usdcDecimals, depositLimit: { perDeposit: units(500n, cfg.usdcDecimals), total: units(25_000n, cfg.usdcDecimals) } }];
 }
 
+/**
+ * BNB Chain mainnet (56), from viem's definition, with the public RPCs in
+ * src/bnb.ts: publicnode first (it answers eth_getLogs, recent blocks only),
+ * then BNB Chain's own dataseed (state and sends; it refuses log reads).
+ */
+export const BNB_MAINNET_CHAIN: Chain = defineChain({
+  ...bsc,
+  rpcUrls: { default: { http: [...BNB_MAINNET.rpcUrls] } },
+  blockExplorers: { default: { name: "BscScan", url: BNB_MAINNET.explorerUrl } },
+});
+
+/**
+ * BDX on BNB Chain stays capped while the stablecoins and BNB take any amount:
+ * 100,000 per deposit and 2,000,000 in total, in BDX's own decimals (9), the
+ * cap BDX has on Base and Ethereum (contracts/script/NoDepositLimits.s.sol).
+ */
+export function bdxCapFor(decimals: number): DepositLimit {
+  return { perDeposit: units(100_000n, decimals), total: units(2_000_000n, decimals) };
+}
+
+/**
+ * BNB Chain mainnet pool assets and the limits the deploy sets
+ * (contracts/bnb-mainnet-env.sh, DEPLOY-BNB.md): USDT and USDC (18 decimals
+ * each) and native BNB with no limit, like the stablecoins and ETH on Base
+ * today, and BDX (9 decimals) capped at 100,000 / 2,000,000. Listed in the
+ * deploy itself, so none of them waits on the timelock. readDepositLimit reads
+ * the live value, which wins.
+ */
+export function bnbMainnetAssets(cfg: Pick<BnbMainnetInput, "usdt" | "usdc" | "bdx"> = BNB_MAINNET): GloamAsset[] {
+  return [
+    { symbol: "USDT", address: cfg.usdt.address, decimals: cfg.usdt.decimals, depositLimit: NO_LIMIT },
+    { symbol: "USDC", address: cfg.usdc.address, decimals: cfg.usdc.decimals, depositLimit: NO_LIMIT },
+    { symbol: "BNB", address: NATIVE_ASSET, decimals: BNB_NATIVE_CURRENCY.decimals, depositLimit: NO_LIMIT },
+    { symbol: "BDX", address: cfg.bdx.address, decimals: cfg.bdx.decimals, depositLimit: bdxCapFor(cfg.bdx.decimals) },
+  ];
+}
+
 /** Base Sepolia pool assets: Circle's test USDC and EURC (500 / 25,000 each), and ETH (0.2 / 10). No USDT there. */
 export const BASE_SEPOLIA_ASSETS: GloamAsset[] = [
   { symbol: "USDC", address: BASE_SEPOLIA_USDC, decimals: 6, depositLimit: sepoliaStableLimit },
@@ -534,6 +603,12 @@ export interface GloamNetwork {
   explorerUrl: string;
   /** Assets the pool takes, with deposit limits on the payments pools. */
   assets: GloamAsset[];
+  /**
+   * Set where the public RPC keeps only recent logs and answers an EMPTY list
+   * for older blocks (BNB Chain): gloamReadTransport then reads through
+   * guardPrunedLogs, so a pruned answer fails loudly. Unset elsewhere.
+   */
+  logCanary?: LogCanary | null;
 }
 
 /** A testnet entry: always has a payment-message board. */
@@ -661,12 +736,42 @@ function buildElysium(): GloamNetwork | null {
   };
 }
 
+/**
+ * BNB Chain mainnet, or null until its pool and deploy block are in src/bnb.ts.
+ * Born guarded like Elysium (its owner is a VaultOwnerGuard), gas in BNB, which
+ * the vault lists. Its public RPCs keep about a day of logs, so it carries a
+ * logCanary: reads through gloamReadTransport fail loudly on a pruned answer.
+ */
+function buildBnb(): GloamNetwork | null {
+  const cfg: BnbMainnet | null = bnbMainnetConfig();
+  if (!cfg) return null;
+  return {
+    key: "bnb-mainnet",
+    label: "BNB Chain",
+    chainId: cfg.chainId,
+    pool: cfg.pool,
+    deployBlock: cfg.deployBlock,
+    payMemo: cfg.payMemo?.address ?? null,
+    nativeShield: true,
+    family: "bnb",
+    testnet: false,
+    ceremony: "production",
+    chain: BNB_MAINNET_CHAIN,
+    rpcUrl: cfg.rpcUrls[0]!,
+    historyRpc: null,
+    explorerUrl: cfg.explorerUrl,
+    assets: bnbMainnetAssets(cfg),
+    logCanary: { ...BNB_LOG_CANARY },
+  };
+}
+
 const MAINNETS: Partial<Record<GloamChainFamily, GloamNetwork | null>> = {
   robinhood: buildMainnet("robinhood"),
   tempo: buildMainnet("tempo"),
   base: buildMainnet("base"),
   ethereum: buildMainnet("ethereum"),
   elysium: buildElysium(),
+  bnb: buildBnb(),
 };
 
 /**
@@ -767,6 +872,8 @@ export function mainnetNetwork(family: GloamChainFamily): GloamNetwork | null {
  * Ethereum Sepolia and Elysium testnet once each pool is filled in.
  */
 export function testnetNetwork(family: GloamChainFamily): GloamNetwork | null {
+  // BNB Chain has no Gloam testnet.
+  if (family === "bnb") return null;
   if (family === "elysium") return ELYSIUM_TESTNET_NETWORK;
   if (family === "base") return BASE_TESTNET;
   if (family === "ethereum") return ETHEREUM_TESTNET;
@@ -775,7 +882,7 @@ export function testnetNetwork(family: GloamChainFamily): GloamNetwork | null {
 
 /** Every network Gloam runs on right now: mainnets with a pool first, then the testnets. */
 export function gloamNetworks(): GloamNetwork[] {
-  const live = [MAINNETS.robinhood, MAINNETS.tempo, MAINNETS.base, MAINNETS.ethereum, MAINNETS.elysium].filter((n): n is GloamNetwork => n !== null);
+  const live = [MAINNETS.robinhood, MAINNETS.tempo, MAINNETS.base, MAINNETS.ethereum, MAINNETS.elysium, MAINNETS.bnb].filter((n): n is GloamNetwork => n !== null);
   return [
     ...live,
     GLOAM_NETWORKS.robinhood,
@@ -797,9 +904,9 @@ export function networkForChainId(chainId: number): GloamNetwork | undefined {
 }
 
 /**
- * True for Robinhood Chain (4663), Tempo (4217), Base (8453) and Ethereum (1)
- * mainnet, pool or not, and for Elysium mainnet once its chain id is filled in.
- * Never for Elysium's testnet (99801).
+ * True for Robinhood Chain (4663), Tempo (4217), Base (8453), Ethereum (1) and
+ * BNB Chain (56) mainnet, pool or not, and for Elysium mainnet once its chain
+ * id is filled in. Never for Elysium's testnet (99801).
  */
 export function isMainnetChainId(chainId: number): boolean {
   return (
@@ -807,6 +914,7 @@ export function isMainnetChainId(chainId: number): boolean {
     chainId === TEMPO_MAINNET_CHAIN_ID ||
     chainId === BASE_MAINNET_CHAIN_ID ||
     chainId === ETHEREUM_MAINNET_CHAIN_ID ||
+    chainId === BNB_MAINNET_CHAIN_ID ||
     (elysiumChainId() !== null && chainId === elysiumChainId())
   );
 }
@@ -836,6 +944,7 @@ export function networkName(chainId: number): string {
   if (chainId === BASE_MAINNET_CHAIN_ID) return "Base";
   if (chainId === ETHEREUM_MAINNET_CHAIN_ID) return "Ethereum";
   if (elysiumChainId() !== null && chainId === elysiumChainId()) return "Elysium";
+  if (chainId === BNB_MAINNET_CHAIN_ID) return "BNB Chain";
   if (chainId === RH_TESTNET_CHAIN_ID) return "Robinhood Chain testnet";
   if (chainId === TEMPO_TESTNET_CHAIN_ID) return "Tempo testnet";
   if (chainId === BASE_SEPOLIA_CHAIN_ID) return "Base testnet";
@@ -925,6 +1034,7 @@ const VAULT_SWAP_ROUTERS: Record<number, readonly Address[]> = {
 const UNLISTED_TOKENS: Record<number, readonly Address[]> = {
   [BASE_MAINNET_CHAIN_ID]: ["0x4200000000000000000000000000000000000006"], // WETH
   [ETHEREUM_MAINNET_CHAIN_ID]: ["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"], // WETH
+  [BNB_MAINNET_CHAIN_ID]: [BNB_WBNB], // WBNB
   [RH_MAINNET_CHAIN_ID]: [
     "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", // WETH
     "0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34", // USDe
