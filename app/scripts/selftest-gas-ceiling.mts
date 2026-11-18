@@ -290,9 +290,12 @@ await test("status: gas high is said plainly, the relay stays on, and a spike do
     [s.enabled, s.lowBalance, s.gasHigh, s.maxGasGwei, s.gasGwei],
     [true, false, true, "3", "50"]
   );
-  for (const other of all.filter((x) => x.chainId !== 1)) {
+  // BNB Chain (56, only while it is on) has a 1 gwei ceiling of its own; 50 gwei is over it too.
+  for (const other of all.filter((x) => x.chainId !== 1 && x.chainId !== 56)) {
     assert.deepEqual([other.gasHigh, other.maxGasGwei, other.gasGwei], [false, null, null], `chain ${other.chainId} has no ceiling`);
   }
+  const bnb = all.find((x) => x.chainId === 56);
+  if (bnb) assert.deepEqual([bnb.gasHigh, bnb.maxGasGwei], [true, "1"], "BNB Chain: over its 1 gwei ceiling");
   // top-ups: off everywhere until the relay can seal them, then off on Ethereum mainnet only
   assert.ok(all.every((x) => x.topUps === false), "no job key: none");
   process.env.GLOAM_RELAY_JOB_KEY = "11".repeat(32);

@@ -67,6 +67,7 @@ const B = await import("../src/lib/partnerBackfill");
 const AD = await import("../src/lib/partnerAddresses");
 /** Elysium mainnet, while NEXT_PUBLIC_ELYSIUM_ENABLED is on (as production builds it): one more mainnet to read. */
 const { ELYSIUM } = await import("../src/lib/elysium");
+const { BNB } = await import("../src/lib/bnb");
 const { linkNullifierHash, linkBindHash, proofBindValue } = await import("../src/lib/partnerCode");
 const { relayPoolAbi } = await import("../src/lib/relay/server");
 const { getNetwork } = await import("../src/lib/networks");
@@ -1110,7 +1111,11 @@ await test("match: deploy blocks are the ones in contracts/deployments", () => {
   const eth = JSON.parse(readFileSync(new URL("ethereum-mainnet.json", root), "utf8")) as { contracts: { deployBlock: number } };
   // Elysium is in addressChains only while NEXT_PUBLIC_ELYSIUM_ENABLED is on (as production builds it)
   const ely = JSON.parse(readFileSync(new URL("elysium-mainnet.json", root), "utf8")) as { chainId: number; contracts: { deployBlock: number } };
-  const want: Record<number, number> = { 4663: main.chains["4663"]!.deployBlock, 4217: main.chains["4217"]!.deployBlock, 8453: base.contracts.deployBlock, 1: eth.contracts.deployBlock, [ely.chainId]: ely.contracts.deployBlock };
+  // BNB Chain's record names its vault only after its deploy (bnb-mainnet-after-deploy.sh); before
+  // that, a build with it on reads its pool from NEXT_PUBLIC_BNB_* (selftest-bnb covers those).
+  const bnbRec = JSON.parse(readFileSync(new URL("bnb-mainnet.json", root), "utf8")) as { chainId: number; contracts?: { deployBlock: number } };
+  const bnbBlock = bnbRec.contracts?.deployBlock ?? Number(process.env.NEXT_PUBLIC_BNB_DEPLOY_BLOCK ?? 0);
+  const want: Record<number, number> = { 4663: main.chains["4663"]!.deployBlock, 4217: main.chains["4217"]!.deployBlock, 8453: base.contracts.deployBlock, 1: eth.contracts.deployBlock, [ely.chainId]: ely.contracts.deployBlock, [bnbRec.chainId]: bnbBlock };
   for (const n of AD.addressChains()) assert.equal(n.deployBlock, BigInt(want[n.chainId]!), n.label);
   assert.equal(B.spanFor(RH), 5_000_000n);
 });
@@ -1160,7 +1165,7 @@ await test("match (F7): a dry run reads every mainnet from its deploy block, wri
   const book = await AD.addressBook();
   const { deps, cursors, queries } = fakeBackfill();
   const r = await B.runBackfill({ dryRun: true, from: "deploy", book, budgetMs: 60_000 }, deps);
-  assert.deepEqual(r.chains.map((c) => c.chainId).sort(), [1, 4217, 4663, 8453, ...(ELYSIUM ? [ELYSIUM.chainId] : [])].sort());
+  assert.deepEqual(r.chains.map((c) => c.chainId).sort(), [1, 4217, 4663, 8453, ...(ELYSIUM ? [ELYSIUM.chainId] : []), ...(BNB ? [BNB.chainId] : [])].sort());
   assert.equal(r.chains.find((c) => c.chainId === RH.chainId)!.from, RH.deployBlock!.toString());
   for (const q of queries) assert.ok(q.to - q.from + 1n <= (q.chainId === RH.chainId ? 5_000_000n : AD.addressChains().find((n) => n.chainId === q.chainId)!.logRange));
   const mine = r.byAddress.filter((a) => a.partnerId === shop.id);

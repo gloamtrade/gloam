@@ -126,7 +126,9 @@ const seedBytes = (h: Hex) => Uint8Array.from(h.slice(2).match(/../g)!.map((b) =
  * without one: an id the published SDK 0.7.0 doesn't know would make a HYPE
  * link unreadable to agents on it.
  */
-const NO_SHORT_ID_YET = new Set(["elysium-mainnet HYPE"]);
+// BNB Chain's four have no ids yet (DEPLOY-BNB.md, "Short links"): ids are forever, so they are
+// given in a release of their own. Its links are written out in full until then.
+const NO_SHORT_ID_YET = new Set(["elysium-mainnet HYPE", "bnb-mainnet USDT", "bnb-mainnet USDC", "bnb-mainnet BNB", "bnb-mainnet BDX"]);
 
 const lengths: { kind: string; long: number; short: number }[] = [];
 for (const key of NETWORK_KEYS) {
