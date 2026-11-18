@@ -1,5 +1,6 @@
 "use client";
 
+import { useHideAmounts } from "@/lib/hideAmounts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -1484,7 +1485,7 @@ function PrivateBalanceCard({
   signedOut: boolean;
   actions?: React.ReactNode;
 }) {
-  const [hidden, setHidden] = useState(false);
+  const [hidden, toggleHidden] = useHideAmounts();
   return (
     <div className="gl-card relative overflow-hidden p-5">
       <SealedField tone="soft" />
@@ -1499,7 +1500,7 @@ function PrivateBalanceCard({
             {rows.length > 0 && (
               <button
                 type="button"
-                onClick={() => setHidden((v) => !v)}
+                onClick={toggleHidden}
                 aria-pressed={hidden}
                 aria-label={hidden ? "Show amounts" : "Hide amounts"}
                 className="-mr-2 grid h-10 w-10 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground"
