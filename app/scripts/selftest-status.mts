@@ -202,10 +202,13 @@ for (const live of [4663, 4217, 8453, 1]) {
 }
 assert.deepEqual(
   ids.filter((id) => !/^(network|relay):/.test(id)),
-  ["web:home", "web:app", "web:docs", "web:verify", "web:transparency", "database", "api", "leaves", "rpc-proxy", "bridge", "mcp", "glim", "turnkey"]
+  ["bridge", "leaves", "rpc-proxy", "mcp", "api", "glim", "turnkey", "web:home", "web:app", "web:docs", "web:verify", "web:transparency", "database"]
 );
 assert.equal(new Set(ids).size, ids.length, "ids are unique");
 for (const g of model.GROUPS) assert.ok(parts.some((p) => p.group === g.id), `group ${g.id} has parts`);
+assert.deepEqual(model.GROUPS.map((g) => g.id), ["payments", "networks", "api", "integrations", "platform"], "money first, the site last");
+const firstOf = (g: string) => ids.indexOf(parts.find((p) => p.group === g)!.id);
+assert.ok(firstOf("payments") < firstOf("networks") && firstOf("networks") < firstOf("api") && firstOf("api") < firstOf("platform"));
 assert.ok(!parts.find((p) => p.id === "rpc-proxy")!.note!.includes("Base"), "the proxy serves the one-RPC mainnets only");
 ok("parts: networks people can see, every group filled");
 
