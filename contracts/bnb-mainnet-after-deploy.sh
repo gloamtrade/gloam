@@ -20,9 +20,11 @@ export PATH="$HOME/.foundry/bin:/Users/duke/.nvm/versions/node/v24.11.1/bin:$PAT
 : "${RPC_URL:?set RPC_URL, a BNB Chain mainnet RPC}"
 CHAIN=56
 NAME="BNB Chain mainnet"
-RUN=broadcast/DeployBnbMainnet.s.sol/$CHAIN/run-latest.json
-MRUN=broadcast/DeployGloamPayMemo.s.sol/$CHAIN/run-latest.json
-OUT=deployments/bnb-mainnet.json
+# BROADCAST_DIR and OUT are for bnb-mainnet-rehearsal.sh only, which runs all of this on a local fork.
+BROADCAST_DIR=${BROADCAST_DIR:-broadcast}
+RUN=$BROADCAST_DIR/DeployBnbMainnet.s.sol/$CHAIN/run-latest.json
+MRUN=$BROADCAST_DIR/DeployGloamPayMemo.s.sol/$CHAIN/run-latest.json
+OUT=${OUT:-deployments/bnb-mainnet.json}
 SDK_BNB=${SDK_BNB:-../packages/sdk/src/bnb.ts}
 # What the relayer should hold before the flag is turned on (DEPLOY-BNB.md, step 2): about
 # an hour of relayed sends at the hourly cap (GLOAM_RELAY_HOURLY_SPEND_56, default 0.05 BNB).
@@ -258,7 +260,7 @@ jq -n \
     } + $verifiers + (if $memo == "" then {} else {GloamPayMemo: $memo, GloamPayMemoDeployBlock: ($memoBlock | tonumber), GloamPayMemoDeployTx: $memoTx} end)),
     assets: $assets
   }' > "$OUT"
-ok "wrote contracts/$OUT"
+ok "wrote $OUT"
 
 # The switch-on: the pool and its block, and the memo board when there is one.
 swap "$SDK_BNB" "$POOL_OFF" "  pool: \"$POOL\","
