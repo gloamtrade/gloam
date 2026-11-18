@@ -194,7 +194,8 @@ if (MODE === "off" || MODE === "coming") {
   ok(/no partnership/.test(facts) && !/coming/.test(facts), "on: no partnership, no longer coming");
   const entry = contractDirectory().find((d) => d.key === "elysium-mainnet");
   ok(entry?.live && entry.rows.some((r) => r.role === "vault"), "on: /verify lists its vault");
-  ok(!entry!.rows.some((r) => r.role === "owner"), "on: no owner-wallet row, the guard owns it");
+  const owners = entry!.rows.filter((r) => r.role === "owner").map((r) => r.name);
+  ok(owners.join() === "Owner guard,Guard controller", "on: the guard owns it, listed with its controller, no owner-wallet row");
   const one = await toolText("gloam_networks", { network: "elysium-mainnet" });
   ok(!one.isError && one.text.includes("HYPE") && one.text.includes(String(CHAIN_ID)), "on: the remote MCP names it, gas in HYPE");
 }
