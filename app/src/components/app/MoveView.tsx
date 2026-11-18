@@ -144,12 +144,11 @@ import {
 } from "@/lib/cashOutPrivately";
 import {
   CashOutLinkNote,
-  HowChoice,
   PieceLeftover,
   PiecesCard,
   ScheduledCashOuts,
-  SpreadOver,
   aboutTime,
+  PrivateCashOutToggle,
 } from "./PrivateCashOut";
 import { cashOutPrivacyWarnings, depositWallets } from "@/lib/cashOutPrivacy";
 import { CashOutPercentChips, CashOutWarnings } from "./CashOutPrivacy";
@@ -271,8 +270,6 @@ export function MoveView() {
   const [cashOutInput, setCashOutInput] = useState("");
   const cashOutInputRef = useRef<HTMLInputElement>(null);
   const [cashOutWhen, setCashOutWhen] = useState<"now" | CashOutWindow>("now");
-  // Cash out keeps to the basics; timing, pieces, Hide my wallet and the privacy notes sit under More options.
-  const [cashOutMore, setCashOutMore] = useState(false);
   const [cashOutDest, setCashOutDest] = useState<"mine" | "other">("mine");
   const [otherTo, setOtherTo] = useState("");
   // The cash-out address's sweep check (lib/sweepCheck), keyed by network, address and token.
@@ -1085,8 +1082,15 @@ export function MoveView() {
       : null;
   const planOffered = plan != null && relayAvailable && poseidonMode && !xActive;
   const planActive = planOffered && privatePref;
-  // Open whenever a choice inside it is already in use, so nothing set is hidden.
-  const cashOutMoreOpen = cashOutMore || planActive || cashOutWhen !== "now";
+  // Cash out privately, one switch: pieces when the balance can be split, else once at a random later time.
+  const privateAvailable = relayAvailable && poseidonMode && !xActive;
+  const privateOn = privateAvailable && (planOffered ? planActive : cashOutWhen !== "now");
+  const privateWindow: CashOutWindow = !planOffered && cashOutWhen !== "now" ? cashOutWhen : planWindow;
+  const privateReason = xActive
+    ? "A cash out to another chain goes out at once."
+    : !relayAvailable
+      ? "Needs the Gloam relay, which is off right now."
+      : null;
   // While a run is setting pieces up, the card shows that run (the note it
   // started from is spent part way, so the selection moves on underneath).
   const planPieceList = planRun ? planRun.map((p) => p.amount) : (plan?.pieces ?? []);
@@ -1190,6 +1194,22 @@ export function MoveView() {
   function choosePrivately(on: boolean) {
     setPrivatePref(on);
     savePrivatePref({ on });
+  }
+
+  /** The Cash out privately switch: pieces when offered, else one send at a random later time. */
+  function togglePrivate(on: boolean) {
+    if (planOffered) {
+      choosePrivately(on);
+      setCashOutWhen("now");
+    } else {
+      setCashOutWhen(on ? planWindow : "now");
+    }
+  }
+
+  function choosePrivateWindow(w: CashOutWindow) {
+    setPlanWindow(w);
+    savePrivatePref({ window: w });
+    if (!planOffered && cashOutWhen !== "now") setCashOutWhen(w);
   }
 
   /** The cash out button: its checks run before busy is set, so a second click waits for the first. */
@@ -2583,7 +2603,7 @@ export function MoveView() {
 
   return (
     <>
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className={`grid items-start gap-6 ${mode === "cashout" ? "" : "lg:grid-cols-[minmax(0,1fr)_340px]"}`}>
         {/* Send, Receive and Cash out are picked in the Vault's own row
             (VaultHub: Pay privately, Receive, Cash out) through ?mode=, so
             the card has no row of its own; the first block sits at the top. */}
@@ -3154,7 +3174,7 @@ export function MoveView() {
                           ) : null
                         }
                       />
-                      {cashOutMoreOpen && <CashOutWarnings
+                      {!privateOn && <CashOutWarnings
                         warnings={amountWarnings}
                         scope={selected.id}
                         disabled={working}
@@ -3172,7 +3192,7 @@ export function MoveView() {
                         }
                       />}
                       {/* the broader note (close amounts, payments received, timing) when the exact-deposit warning has not said it */}
-                      {cashOutMoreOpen && cashOutLink && amountWarnings.length === 0 && (
+                      {!privateOn && cashOutLink && amountWarnings.length === 0 && (
                         <CashOutLinkNote
                           text={linkMessage(cashOutLink)}
                           action={
@@ -3301,10 +3321,10 @@ export function MoveView() {
                         )}
                       </>
                     )}
-                    {selected && cashOutMoreOpen && (
+                    {selected && !privateOn && (
                       <CashOutWarnings warnings={addressWarnings} scope={selected.id} onElsewhere={cashOutElsewhere} disabled={working} />
                     )}
-                    {cashOutMoreOpen && addressWarnings.length === 0 && cashOutDest === "other" && cashOutTo ? (
+                    {!privateOn && addressWarnings.length === 0 && cashOutDest === "other" && cashOutTo ? (
                       <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
                         For privacy, a fresh wallet that never added money to Gloam is best.
                       </p>
@@ -3361,33 +3381,24 @@ export function MoveView() {
                   )}
 
                   {selected && (
-                    <button
-                      type="button"
-                      aria-expanded={cashOutMoreOpen}
-                      aria-controls="cashout-more"
-                      disabled={working || (cashOutMoreOpen && !cashOutMore)}
-                      onClick={() => setCashOutMore((v) => !v)}
-                      className="-my-1 inline-flex min-h-10 items-center gap-1.5 text-[13.5px] font-medium text-foreground disabled:opacity-60"
-                    >
-                      {cashOutMoreOpen ? "Fewer options" : "More options"}
-                      <svg aria-hidden width="14" height="14" viewBox="0 0 24 24" fill="none" className={`transition-transform ${cashOutMoreOpen ? "rotate-180" : ""}`}>
-                        <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </button>
-                  )}
-
-                  {cashOutMoreOpen && (
-                  <div id="cashout-more" className="space-y-4">
-                  {planOffered && plan && (
-                    <HowChoice
-                      privately={privatePref}
-                      onChange={choosePrivately}
-                      pieceCount={planPieceList.length}
-                      window={planWindow}
+                    <PrivateCashOutToggle
+                      on={privateOn}
+                      available={privateAvailable}
+                      reason={privateReason}
+                      onToggle={togglePrivate}
+                      window={privateWindow}
+                      onWindow={choosePrivateWindow}
+                      pieceCount={planOffered ? planPieceList.length : null}
+                      hideWallet={{
+                        on: relayOn,
+                        available: relayAvailable,
+                        onChange: (v) => {
+                          setRelayOn(v);
+                          setRelayPreferred(v);
+                        },
+                      }}
                       disabled={working}
-                    />
-                  )}
-
+                    >
                   {planActive && plan && selected && (
                     <>
                       <PiecesCard
@@ -3399,14 +3410,6 @@ export function MoveView() {
                         run={planRun}
                         onReroll={working ? undefined : () => setPlanSeed((v) => v + 1)}
                         onRound={roundCashOut}
-                      />
-                      <SpreadOver
-                        value={planWindow}
-                        disabled={working}
-                        onChange={(w) => {
-                          setPlanWindow(w);
-                          savePrivatePref({ window: w });
-                        }}
                       />
                       <div>
                         <p className="text-[12.5px] leading-relaxed text-mute">{whereLine}</p>
@@ -3459,57 +3462,9 @@ export function MoveView() {
                     </>
                   )}
 
-                  {!planActive && !xActive && (
-                  <div>
-                    <p id="cashout-when" className="text-[13px] text-mute">When</p>
-                    <div role="radiogroup" aria-labelledby="cashout-when" className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      {(
-                        [
-                          ["now", "Now"],
-                          ["hour", "Within an hour"],
-                          ["6h", "Within 6 hours"],
-                          ["day", "Within a day"],
-                        ] as const
-                      ).map(([when, label]) => {
-                        const active = cashOutWhen === when;
-                        const off = when !== "now" && !relayAvailable;
-                        return (
-                          <button
-                            key={when}
-                            type="button"
-                            role="radio"
-                            aria-checked={active}
-                            disabled={off}
-                            onClick={() => setCashOutWhen(when)}
-                            className={`min-h-[48px] rounded-[14px] border px-2 py-2.5 text-center text-[13.5px] leading-snug transition-colors disabled:opacity-40 ${
-                              active ? "border-foreground bg-panel text-foreground" : "border-line text-soft hover:border-line-strong hover:bg-surface"
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
-                      {cashOutWhen === "now"
-                        ? relayAvailable
-                          ? "Later sends it at a random time in that window, so it doesn't go out right after a payment."
-                          : "Cashing out later needs the Gloam relay, which is off right now."
-                        : "Your proof is made now and the Gloam relay sends it at a random time in that window. It can't change the amount or where it goes. The vault takes its fee when it goes out, at the rate then. If it can't go out, nothing moves and it comes back to your private balance."}
-                    </p>
-                    {cashOutWhen !== "now" && (
-                      <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
-                        A proof shows roughly when it was made. While Gloam is open it swaps in a fresh one now and then, so
-                        leaving it open until the send hides the most. If it goes out while Gloam is closed, it shows when
-                        its proof was last made.
-                      </p>
-                    )}
-                  </div>
+                    </PrivateCashOutToggle>
                   )}
-
-                  {!planActive && relayToggle}
-                  </div>
-                  )}
+                  {gasHigh && <RelayGasNotice status={relayStatus} label={network.label} later />}
                   {!connectedOk ? (
                     connectPrompt("cash out")
                   ) : (
@@ -3564,7 +3519,7 @@ export function MoveView() {
                       )}
                     </button>
                   )}
-                  {connectedOk && !planActive && (
+                  {connectedOk && !privateOn && (
                     <p className="-mt-1 text-center text-[12.5px] text-mute">Cashing out is public.</p>
                   )}
                   {planActive && connectedOk && (
@@ -3953,6 +3908,7 @@ export function MoveView() {
           )}
         </div>
 
+        {mode !== "cashout" && (
         <aside className="space-y-4">
           {mode === "receive" ? (
             <div className="gl-card p-5">
@@ -3999,7 +3955,6 @@ export function MoveView() {
           ) : (
             <>
               <PrivateBalanceCard rows={totals} signedOut={!isConnected} />
-              {mode !== "cashout" && (
               <div className="gl-card p-5">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-[13px] text-mute">What the explorer shows</p>
@@ -4063,10 +4018,10 @@ export function MoveView() {
                       : "A cash out is a public transfer. It ends privacy for this amount."}
                 </p>
               </div>
-              )}
             </>
           )}
         </aside>
+        )}
       </div>
 
       <SuccessModal
