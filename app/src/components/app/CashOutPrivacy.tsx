@@ -71,6 +71,95 @@ export function CashOutAmountChips({
   );
 }
 
+const PERCENTS = [25, 50, 75] as const;
+
+/** A share of the balance, floored and cut to 4 decimals so it reads and types cleanly. */
+export function percentOf(balance: bigint, pct: number, decimals: number): bigint {
+  const raw = (balance * BigInt(pct)) / 100n;
+  if (decimals <= 4) return raw;
+  const step = 10n ** BigInt(decimals - 4);
+  return (raw / step) * step;
+}
+
+/**
+ * 25%, 50%, 75%, Max and Custom under a cash-out amount. Custom puts the
+ * cursor in the field to type any amount. `extra` (Round it) shows only when it
+ * changes something, with the one line on why round amounts help.
+ */
+export function CashOutPercentChips({
+  balance,
+  decimals,
+  current,
+  maxActive,
+  onPick,
+  onMax,
+  onCustom,
+  extra,
+  disabled,
+}: {
+  /** The whole balance this cash out spends, base units. */
+  balance: bigint;
+  decimals: number;
+  /** The amount in the field now (base units), or null while it is not valid. */
+  current: bigint | null;
+  /** The whole balance is going out. */
+  maxActive: boolean;
+  /** A share was picked: the amount as plain text for the field. */
+  onPick: (value: string) => void;
+  onMax: () => void;
+  onCustom: () => void;
+  extra?: ReactNode;
+  disabled?: boolean;
+}) {
+  const shares = PERCENTS.map((pct) => ({ pct, wei: percentOf(balance, pct, decimals) })).filter((s) => s.wei > 0n);
+  const shareOn = shares.find((s) => !maxActive && current === s.wei)?.pct ?? null;
+  const customOn = !maxActive && shareOn === null && current !== null;
+  const chip = (on: boolean) => `gl-chip tnum min-h-10 ${on ? "border-foreground! text-foreground!" : ""}`;
+  return (
+    <div className="mt-3">
+      <div role="group" aria-label="Amount" className="flex flex-wrap gap-2">
+        {shares.map((s) => (
+          <button
+            key={s.pct}
+            type="button"
+            disabled={disabled}
+            aria-pressed={shareOn === s.pct}
+            onClick={() => onPick(trimZeros(formatUnitsPlain(s.wei, decimals)))}
+            className={chip(shareOn === s.pct)}
+          >
+            {s.pct}%
+          </button>
+        ))}
+        <button type="button" disabled={disabled} aria-pressed={maxActive} onClick={onMax} className={chip(maxActive)}>
+          Max
+        </button>
+        <button type="button" disabled={disabled} aria-pressed={customOn} onClick={onCustom} className={chip(customOn)}>
+          Custom
+        </button>
+        {extra}
+      </div>
+      {extra && (
+        <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
+          Round amounts are common, so they are harder to match to your deposit.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function formatUnitsPlain(wei: bigint, decimals: number): string {
+  const neg = wei < 0n;
+  const v = neg ? -wei : wei;
+  const base = 10n ** BigInt(decimals);
+  const whole = v / base;
+  const frac = (v % base).toString().padStart(decimals, "0");
+  return `${neg ? "-" : ""}${whole}${decimals > 0 ? `.${frac}` : ""}`;
+}
+
+function trimZeros(s: string): string {
+  return s.includes(".") ? s.replace(/\.?0+$/, "") : s;
+}
+
 /**
  * Quiet warnings, one line each, each dismissible for this cash out
  * (`scope`, e.g. the balance it spends: a new cash out shows them again). The

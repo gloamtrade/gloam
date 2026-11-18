@@ -133,8 +133,6 @@ const STATE_WORDS: Record<PieceState, string> = {
 export function PiecesCard({
   pieces,
   asset,
-  amount,
-  avoiding,
   tailMatch,
   run,
   onReroll,
@@ -142,9 +140,10 @@ export function PiecesCard({
 }: {
   pieces: bigint[];
   asset: string;
-  amount: bigint;
+  /** Kept for callers; the card no longer spells out the total. */
+  amount?: bigint;
   /** What the pieces stay clear of, in words ("money you added"), or null when there is nothing to avoid. */
-  avoiding: string | null;
+  avoiding?: string | null;
   tailMatch: boolean;
   run: PieceProgress[] | null;
   onReroll?: () => void;
@@ -154,15 +153,29 @@ export function PiecesCard({
   return (
     <div className="rounded-[16px] bg-sealed-soft px-4 py-4 sm:px-5">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[13px] font-medium text-sealed">{`In ${pieces.length} pieces`}</p>
-        {onReroll && !run && (
-          <button
-            type="button"
-            onClick={onReroll}
-            className="-my-2 -mr-2 inline-flex min-h-10 items-center rounded-full px-2 text-[13px] text-mute transition-colors hover:text-foreground"
-          >
-            Other sizes
-          </button>
+        <p className="text-[13px] font-medium text-sealed">{`${pieces.length} pieces`}</p>
+        {!run && (onReroll || (tailMatch && onRound)) && (
+          <span className="-my-2 -mr-2 flex items-center">
+            {tailMatch && onRound && (
+              <button
+                type="button"
+                onClick={onRound}
+                title="One piece keeps the cents of money you added. Rounding leaves them in your balance."
+                className="inline-flex min-h-10 items-center rounded-full px-2 text-[13px] font-medium text-foreground transition-colors hover:text-sealed"
+              >
+                Round it
+              </button>
+            )}
+            {onReroll && (
+              <button
+                type="button"
+                onClick={onReroll}
+                className="inline-flex min-h-10 items-center rounded-full px-2 text-[13px] text-mute transition-colors hover:text-foreground"
+              >
+                Other sizes
+              </button>
+            )}
+          </span>
         )}
       </div>
       {run ? (
@@ -190,21 +203,6 @@ export function PiecesCard({
             </li>
           ))}
         </ul>
-      )}
-      <p className="mt-3 text-[12.5px] leading-relaxed text-soft">
-        {avoiding ? `None of them matches ${avoiding}. ` : ""}
-        {`Together they make exactly ${formatAssetLabel(amount, asset)}.`}
-      </p>
-      {tailMatch && !run && (
-        <p className="mt-2 text-[12.5px] leading-relaxed text-soft">
-          One piece keeps the cents of money you added, which can tie it back.{" "}
-          {onRound && (
-            <button type="button" onClick={onRound} className="font-medium text-foreground underline underline-offset-4">
-              Round it
-            </button>
-          )}{" "}
-          to leave them in your balance.
-        </p>
       )}
     </div>
   );
@@ -365,5 +363,136 @@ function LinkGlyph() {
       <path d="M10 14a4.5 4.5 0 0 0 6.36 0l3-3a4.5 4.5 0 0 0-6.36-6.36l-1.25 1.25" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       <path d="M14 10a4.5 4.5 0 0 0-6.36 0l-3 3a4.5 4.5 0 0 0 6.36 6.36l1.25-1.25" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
+  );
+}
+
+/**
+ * Cash out privately: one card, one switch. On, it goes out in pieces at random
+ * times (or, for a balance that can't be split, once at a random later time),
+ * sent by the Gloam relay; the window and the pieces show inside the card. Off,
+ * it goes now, and the card's second row hides the wallet that pays the gas.
+ */
+export function PrivateCashOutToggle({
+  on,
+  available,
+  reason,
+  onToggle,
+  window,
+  onWindow,
+  pieceCount,
+  hideWallet,
+  disabled,
+  children,
+}: {
+  on: boolean;
+  available: boolean;
+  /** Why it can't be private right now (shown when not available). */
+  reason?: string | null;
+  onToggle: (on: boolean) => void;
+  window: CashOutWindow;
+  onWindow: (w: CashOutWindow) => void;
+  /** Pieces when it splits; null when it goes once, later. */
+  pieceCount: number | null;
+  hideWallet?: { on: boolean; available: boolean; onChange: (v: boolean) => void };
+  disabled?: boolean;
+  children?: ReactNode;
+}) {
+  const sub = !available
+    ? (reason ?? "Not available for this cash out.")
+    : on
+      ? pieceCount
+        ? `${pieceCount} pieces at random times over ${windowWords(window)}, sent by the Gloam relay.`
+        : `Goes out at a random time over ${windowWords(window)}, sent by the Gloam relay.`
+      : pieceCount === null
+        ? "Sends it later at a random time, so it doesn't go out right after a payment."
+        : "Splits it into pieces at random times, so it can't be matched to what you added.";
+  return (
+    <div
+      className={`rounded-[18px] border px-4 py-4 transition-colors sm:px-5 ${
+        on ? "border-sealed/30 bg-sealed-soft" : "border-line bg-surface"
+      }`}
+    >
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        disabled={disabled || !available}
+        onClick={() => onToggle(!on)}
+        className="flex w-full items-center gap-3.5 text-left disabled:cursor-not-allowed"
+      >
+        <span
+          aria-hidden
+          className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition-colors ${
+            on ? "bg-sealed text-panel" : "bg-panel text-mute"
+          }`}
+        >
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+            <rect x="5" y="10.5" width="14" height="9.5" rx="2.5" stroke="currentColor" strokeWidth="1.9" />
+            <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+          </svg>
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className={`block text-[15.5px] font-medium ${available ? "text-foreground" : "text-mute"}`}>Cash out privately</span>
+          <span className="mt-0.5 block text-[12.5px] leading-relaxed text-mute">{sub}</span>
+        </span>
+        <span
+          aria-hidden
+          className={`relative h-[26px] w-[46px] shrink-0 rounded-full transition-colors ${
+            on ? "bg-sealed" : "bg-line-strong"
+          } ${available ? "" : "opacity-50"}`}
+        >
+          <span
+            className={`absolute top-[3px] h-5 w-5 rounded-full bg-panel shadow transition-[left] duration-200 ${
+              on ? "left-[23px]" : "left-[3px]"
+            }`}
+          />
+        </span>
+      </button>
+
+      {on && available && (
+        <div className="mt-4 space-y-4 border-t border-sealed/20 pt-4">
+          <div role="radiogroup" aria-label="Spread over" className="grid grid-cols-3 gap-2">
+            {PLAN_WINDOWS.map(([w, label]) => {
+              const active = window === w;
+              return (
+                <button
+                  key={w}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  disabled={disabled}
+                  onClick={() => onWindow(w)}
+                  className={`min-h-[44px] rounded-[12px] border px-2 py-2 text-center text-[13px] leading-snug transition-colors disabled:opacity-60 ${
+                    active ? "border-foreground bg-panel text-foreground" : "border-line bg-panel/40 text-soft hover:border-line-strong"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          {children}
+        </div>
+      )}
+
+      {!on && hideWallet && hideWallet.available && (
+        <button
+          type="button"
+          role="switch"
+          aria-checked={hideWallet.on}
+          disabled={disabled}
+          onClick={() => hideWallet.onChange(!hideWallet.on)}
+          className="mt-4 flex w-full items-center gap-3.5 border-t border-line pt-4 text-left"
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block text-[14px] text-foreground">Hide my wallet</span>
+            <span className="mt-0.5 block text-[12.5px] leading-relaxed text-mute">Gloam sends it for you, so your wallet never shows up next to it.</span>
+          </span>
+          <span aria-hidden className={`relative h-[22px] w-[38px] shrink-0 rounded-full transition-colors ${hideWallet.on ? "bg-sealed" : "bg-line-strong"}`}>
+            <span className={`absolute top-[3px] h-4 w-4 rounded-full bg-panel shadow transition-[left] duration-200 ${hideWallet.on ? "left-[19px]" : "left-[3px]"}`} />
+          </span>
+        </button>
+      )}
+    </div>
   );
 }

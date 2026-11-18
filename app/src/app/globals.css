@@ -1570,3 +1570,13 @@ html[data-theme="dark"],
     -webkit-print-color-adjust: exact;
   }
 }
+
+/* Cash out to another chain: the dot that travels the route until it lands. */
+@keyframes gl-route {
+  0% { left: 0; opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { left: calc(100% - 8px); opacity: 0; }
+}
+.gl-route-dot { animation: gl-route 1.6s cubic-bezier(0.45, 0, 0.25, 1) infinite; }
+@media (prefers-reduced-motion: reduce) { .gl-route-dot { animation: none; } }

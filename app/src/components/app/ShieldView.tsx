@@ -1,8 +1,7 @@
 "use client";
 
-import { useHideAmounts } from "@/lib/hideAmounts";
+import { CashOutPercentChips } from "./CashOutPrivacy";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useGasPrice, useReadContract, useReadContracts } from "wagmi";
 import {
@@ -13,7 +12,7 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { formatEth, shortAddress } from "@/lib/chain";
+import { formatEth } from "@/lib/chain";
 import {
   useAppAccount,
   useAppBalance,
@@ -23,7 +22,7 @@ import {
   useAppWriteContract,
 } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
-import { MAINNET_ENABLED, getActiveNetwork } from "@/lib/networks";
+import { getActiveNetwork } from "@/lib/networks";
 import { safeParseEther, safeParseUnits } from "@/lib/amount";
 import { amountTextError } from "@/lib/amountText";
 import { erc20Abi } from "@/lib/dex";
@@ -37,15 +36,12 @@ import { surelyNotSent, walletErrorForPeople } from "@/lib/walletErrors";
 import { publicClientFor } from "@/lib/rhClient";
 
 import { isNoLimit } from "@gloamtrade/sdk";
-import { APPROVE_GAS_LIMIT, gasFor, HASH_SCHEME, NATIVE_ASSET, SHIELD_GAS_LIMIT, SHIELD_BOUND_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, dropUnsentNote, formatAssetAmount, isNativeAsset, isShieldDeployed, makeNoteMaterial, markAllNotesRecovered, nativeGasReserve, saveLocalNote, shieldPoolAbi, SIGNED_OUT_BALANCE_MESSAGE } from "@/lib/shield";
+import { APPROVE_GAS_LIMIT, gasFor, HASH_SCHEME, NATIVE_ASSET, SHIELD_GAS_LIMIT, SHIELD_BOUND_GAS_LIMIT, type LocalNote, assetLabel, dropUnsentNote, formatAssetAmount, isShieldDeployed, makeNoteMaterial, markAllNotesRecovered, nativeGasReserve, saveLocalNote, shieldPoolAbi } from "@/lib/shield";
 import { makeBoundNotePoseidon } from "@/lib/notePoseidon";
 import { createTxLog, depositAfterLostApproval, depositCall, networkMovedMessage, type DepositCall } from "@/lib/depositFlow";
 import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
 import { screenWallets } from "@/lib/screeningClient";
-import { IssuerPolicyRow } from "./IssuerPolicyRow";
 import { useVaultStatus } from "@/lib/passkey";
-import { SealedField } from "@/components/ui/SealedField";
-import { SealDots } from "@/components/ui/SealDots";
 import { WalletMenu } from "./WalletMenu";
 import { TokenLogo } from "./TokenLogo";
 import { Select } from "@/components/ui/Select";
@@ -55,7 +51,7 @@ import { BridgeInCard } from "./BridgeIn";
 import { RefreshIcon } from "./VaultHealth";
 import { BRIDGE_DESTINATIONS, bridgeVisible } from "@/lib/bridge";
 import { countPerson } from "@/lib/people";
-import { compareHoldings, pickAddAsset, vaultActionSearch } from "@/lib/vaultHub";
+import { pickAddAsset } from "@/lib/vaultHub";
 import { faucetFor } from "@/lib/faucet";
 import { TempoFaucetButton } from "./TempoFaucetButton";
 
@@ -90,13 +86,7 @@ export function ShieldView() {
   // $GLOAM, PONS, AI and the like: the markets feed has no price for them.
   const { marks: geckoMarks } = useCoingeckoMarks(hasCoingeckoMarks(network.chainId));
   const deployed = isShieldDeployed() && Boolean(network.pool);
-  const {
-    open: openNotes,
-    shieldedWei,
-    byAsset,
-    syncing,
-    refresh: refreshNotes,
-  } = useLocalShieldNotes(address);
+  const { refresh: refreshNotes } = useLocalShieldNotes(address);
 
   // An asset listed ahead of its deposit limit (BDX, ETH on Robinhood Chain) shows
   // only once the vault's live limit for it is open, so no one is offered a deposit
@@ -530,13 +520,10 @@ export function ShieldView() {
     setSuccessTitle("Added privately");
     setSuccessBody(
       <>
-        <p>
-          <span className="tnum font-medium text-foreground">{sentLabel}</span>{" "}
-          is now in your private balance. Only you can see it.
-        </p>
-        <p className="mt-2">
-          From the Vault you can pay privately or cash out to any wallet.
-        </p>
+        <span className="inline-flex items-center rounded-full bg-sealed-soft px-3 py-1 text-[13px] font-medium text-sealed">
+          In your private balance
+        </span>
+        <p className="tnum mt-3 text-[15px] text-foreground">{sentLabel}</p>
       </>
     );
     setShowSuccess(true);
@@ -571,6 +558,22 @@ export function ShieldView() {
     }
     return safeParseEther(amount || "0");
   }
+
+  /**
+   * What Max adds: the whole token balance, less a little on Tempo where gas is
+   * paid in the stablecoin itself (the approve and the deposit need it), or the
+   * gas coin less its gas reserve.
+   */
+  const spendable: bigint = (() => {
+    if (walletBalance === undefined) return BigInt(0);
+    const leave = selectedToken
+      ? network.family === "tempo"
+        ? BigInt(2) * BigInt(10) ** BigInt(Math.max(0, decimals - 2)) // ~0.02 of the token
+        : BigInt(0)
+      : gasReserve;
+    return walletBalance > leave ? walletBalance - leave : BigInt(0);
+  })();
+  const typedAdd = amount.trim() ? parseAmount() : null;
 
   function limitText(v: bigint): string {
     const n = Number(formatUnits(v, decimals));
@@ -994,31 +997,6 @@ export function ShieldView() {
       ? formatUsd(amtNum * mark)
       : null;
 
-  const myShieldUsd =
-    nativeUsd != null && shieldedWei > BigInt(0)
-      ? formatUsd((Number(shieldedWei) / 1e18) * nativeUsd)
-      : null;
-
-  // The same order as the Vault overview (lib/vaultHub compareHoldings).
-  const assetRows = useMemo(() => {
-    const rows: { asset: string; label: string; amount: bigint; dollar: boolean; size: number }[] = [];
-    byAsset.forEach((amount, asset) => {
-      if (amount > BigInt(0)) {
-        const t = tokens.find((x) => x.address.toLowerCase() === asset.toLowerCase());
-        rows.push({
-          asset,
-          label: assetLabel(asset),
-          amount,
-          dollar: Boolean(t && isDollarStable(t)),
-          size: Number(formatUnits(amount, assetDecimals(asset))),
-        });
-      }
-    });
-    return rows.sort((a, b) =>
-      compareHoldings({ dollar: a.dollar, amount: a.size, symbol: a.label }, { dollar: b.dollar, amount: b.size, symbol: b.label })
-    );
-  }, [byAsset, tokens]);
-
   if (!deployed) {
     return (
       <div className="gl-card max-w-[620px] p-6 sm:p-8">
@@ -1042,32 +1020,12 @@ export function ShieldView() {
   const proving =
     pendingKind === "shield" && !isPending && !confirming && !formError;
 
-  const hasActiveShield = openNotes.length > 0;
   const connectedOk = isConnected && onProduct;
   const maxDisplay =
     selectedToken && walletBalance !== undefined
       ? formatAssetAmount(walletBalance, selectedToken.address)
       : maxLabel;
 
-  const logoIdFor = (asset: string): string | null => {
-    if (isNativeAsset(asset)) return nativeToken.id;
-    return (
-      tokens.find((t) => t.address.toLowerCase() === asset.toLowerCase())?.id ??
-      asset
-    );
-  };
-
-  const balanceRows = hasActiveShield
-    ? assetRows.map((r) => ({
-        asset: r.asset,
-        label: r.label,
-        logoId: logoIdFor(r.asset),
-        amount: isNativeAsset(r.asset)
-          ? formatEth(r.amount)
-          : formatAssetAmount(r.amount, r.asset),
-        sub: isNativeAsset(r.asset) && myShieldUsd ? `≈ ${myShieldUsd}` : null,
-      }))
-    : [];
 
   // What stops this deposit before the wallet is asked, said on the button
   // itself; the checks on submit (validate) stay as they were.
@@ -1123,7 +1081,7 @@ export function ShieldView() {
 
   return (
     <>
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid items-start gap-6">
         <form onSubmit={onSubmit} className="gl-card min-w-0 p-5 sm:p-7">
           <DevKeysBanner compact />
 
@@ -1154,39 +1112,11 @@ export function ShieldView() {
                     <RefreshIcon />
                   </span>
                 </button>
-                <button
-                  type="button"
-                  disabled={!isConnected}
-                  onClick={() => {
-                    if (walletBalance === undefined) return;
-                    if (selectedToken) {
-                      // On Tempo gas is paid in the stablecoin itself, so Max
-                      // leaves a little of the token for the approve and deposit
-                      // gas, the same reason the native branch keeps an ETH buffer.
-                      // Without it, the approve's gas drops the balance below Max
-                      // and the deposit reverts. Other chains pay gas in ETH, so
-                      // a token deposit keeps its whole balance.
-                      const leaveForGas =
-                        network.family === "tempo"
-                          ? BigInt(2) * BigInt(10) ** BigInt(Math.max(0, decimals - 2)) // ~0.02 of the token
-                          : BigInt(0);
-                      const v =
-                        walletBalance > leaveForGas ? walletBalance - leaveForGas : BigInt(0);
-                      setAmount(v === BigInt(0) ? "0" : formatUnits(v, decimals).slice(0, 18));
-                    } else {
-                      const leave = gasReserve;
-                      const v =
-                        walletBalance > leave ? walletBalance - leave : BigInt(0);
-                      setAmount(v === BigInt(0) ? "0" : formatEther(v).slice(0, 12));
-                    }
-                  }}
-                  className="tnum -my-2 inline-flex min-h-10 min-w-0 items-center gap-1.5 text-mute transition-colors hover:text-foreground disabled:opacity-45"
-                >
+                <span className="tnum -my-2 inline-flex min-h-10 min-w-0 items-center text-mute">
                   <span className="truncate">
                     In wallet {isConnected ? maxDisplay : "0"} {symbol}
                   </span>
-                  <span className="font-medium text-foreground">Max</span>
-                </button>
+                </span>
                 </span>
               </div>
               <div className="mt-2 flex items-center gap-3">
@@ -1232,6 +1162,23 @@ export function ShieldView() {
               >
                 {amountProblem ?? liveLimit ?? (usdHint ? `≈ ${usdHint}` : " ")}
               </p>
+              {isConnected && spendable > BigInt(0) && (
+                <CashOutPercentChips
+                  balance={spendable}
+                  decimals={decimals}
+                  current={typedAdd}
+                  maxActive={typedAdd !== null && typedAdd === spendable}
+                  onPick={setAmount}
+                  onMax={() => setAmount(formatUnits(spendable, decimals))}
+                  onCustom={() => {
+                    const el = document.getElementById("shield-amount") as HTMLInputElement | null;
+                    if (!el) return;
+                    el.focus();
+                    requestAnimationFrame(() => el.select());
+                  }}
+                  disabled={working}
+                />
+              )}
             </div>
 
             <div
@@ -1260,17 +1207,6 @@ export function ShieldView() {
           </div>
 
           <dl className="mt-5 divide-y divide-line text-[14px]">
-            <div className="flex h-11 items-center justify-between gap-3">
-              <dt className="text-mute">Fee</dt>
-              <dd className="text-foreground">No fee</dd>
-            </div>
-            <div className="flex h-11 items-center justify-between gap-3">
-              <dt className="text-mute">Network</dt>
-              {/* Once a mainnet sits next to the testnets, say which side this deposit lands on. */}
-              <dd className="text-foreground">
-                {MAINNET_ENABLED ? `${network.label} ${network.testnet ? "testnet" : "mainnet"}` : network.label}
-              </dd>
-            </div>
             {limitsOn && limitPer !== null && limitPer > BigInt(0) && (
               <div className="flex h-11 items-center justify-between gap-3">
                 <dt className="text-mute">Deposit limit</dt>
@@ -1355,30 +1291,8 @@ export function ShieldView() {
             </p>
           )}
 
-          <p className="mt-5 text-center text-[12.5px] leading-relaxed text-mute">
-            Your public wallet balance goes down. Only you can see what is in your
-            private balance.
-          </p>
+          <p className="mt-4 text-center text-[12.5px] text-mute">Adding money is public. What you do after stays private.</p>
         </form>
-
-        <aside className="space-y-4">
-          <PrivateBalanceCard
-            rows={balanceRows}
-            syncing={syncing}
-            signedOut={!isConnected}
-            actions={
-              balanceRows.length > 0 ? (
-                <>
-                  <Link href={`/app/vault${vaultActionSearch("pay", "")}`} className="btn btn-ghost btn-sm h-10">
-                    Pay privately
-                  </Link>
-                  <Link href={`/app/vault${vaultActionSearch("cashout", "")}`} className="btn btn-ghost btn-sm h-10">
-                    Cash out
-                  </Link>
-                </>
-              ) : null
-            }
-          />
 
           {bridgeVisible(network) && (!demo || process.env.NEXT_PUBLIC_BRIDGE_PREVIEW === "1") && (
             <BridgeInCard
@@ -1406,42 +1320,6 @@ export function ShieldView() {
               }}
             />
           )}
-
-          <div className="gl-card p-5">
-            <p className="text-[13px] text-mute">What the explorer shows</p>
-            <dl className="mt-3 divide-y divide-line text-[14px]">
-              <div className="flex h-11 items-center justify-between gap-3">
-                <dt className="text-mute">Your deposit</dt>
-                <dd className="tnum truncate text-foreground">
-                  {amtNum > 0 ? `${amount} ${symbol}` : `The amount, in ${symbol}`}
-                </dd>
-              </div>
-              <div className="flex h-11 items-center justify-between gap-3">
-                <dt className="text-mute">From</dt>
-                <dd className="tnum truncate text-foreground">
-                  {address ? shortAddress(address, 4) : "Your wallet"}
-                </dd>
-              </div>
-              <IssuerPolicyRow chainId={network.chainId} asset={assetAddress} flow="deposit" />
-              <div className="flex h-11 items-center justify-between gap-3">
-                <dt className="text-mute">Your private balance</dt>
-                <dd className="text-foreground/60">
-                  <SealDots n={6} />
-                </dd>
-              </div>
-              <div className="flex h-11 items-center justify-between gap-3">
-                <dt className="text-mute">Who you pay next</dt>
-                <dd className="text-foreground/60">
-                  <SealDots n={6} />
-                </dd>
-              </div>
-            </dl>
-            <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
-              Adding money is a deposit like any other. What you hold and who you
-              pay after that stays private.
-            </p>
-          </div>
-        </aside>
       </div>
 
       <SuccessModal
@@ -1464,93 +1342,6 @@ export function ShieldView() {
   );
 }
 
-type BalanceRow = {
-  asset: string;
-  label: string;
-  logoId: string | null;
-  amount: string;
-  sub: string | null;
-};
-
-/** The private balance, only visible to its owner. Carries the sealed glow. */
-function PrivateBalanceCard({
-  rows,
-  syncing,
-  signedOut,
-  actions,
-}: {
-  rows: BalanceRow[];
-  syncing: boolean;
-  /** No wallet connected: no balance is read, so none is shown, not even 0. */
-  signedOut: boolean;
-  actions?: React.ReactNode;
-}) {
-  const [hidden, toggleHidden] = useHideAmounts();
-  return (
-    <div className="gl-card relative overflow-hidden p-5">
-      <SealedField tone="soft" />
-      <div className="relative">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[13px] text-mute">Private balance</p>
-          <div className="flex items-center gap-1">
-            <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-sealed">
-              <span className="h-1.5 w-1.5 rounded-full bg-sealed" aria-hidden />
-              {syncing ? "Syncing" : "Only you"}
-            </span>
-            {rows.length > 0 && (
-              <button
-                type="button"
-                onClick={toggleHidden}
-                aria-pressed={hidden}
-                aria-label={hidden ? "Show amounts" : "Hide amounts"}
-                className="-mr-2 grid h-10 w-10 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground"
-              >
-                <EyeIcon off={hidden} />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {rows.length > 0 ? (
-          <ul className="mt-4 space-y-3.5">
-            {rows.map((r) => (
-              <li key={r.asset} className="flex items-center gap-3">
-                <AssetMark id={r.logoId} symbol={r.label} size={32} />
-                <div className="min-w-0">
-                  <p className="tnum truncate text-[26px] font-light leading-none tracking-[-0.02em] text-foreground">
-                    {hidden ? (
-                      <SealDots n={6} className="text-foreground/60" />
-                    ) : (
-                      r.amount
-                    )}{" "}
-                    <span className="text-[14px] tracking-normal text-mute">{r.label}</span>
-                  </p>
-                  {r.sub && !hidden && (
-                    <p className="tnum mt-1 text-[12.5px] text-mute">{r.sub}</p>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : signedOut ? (
-          <p className="mt-4 max-w-[30ch] text-[13px] leading-relaxed text-mute">{SIGNED_OUT_BALANCE_MESSAGE}</p>
-        ) : (
-          <div className="mt-4">
-            <p className="tnum text-[34px] font-light leading-none tracking-[-0.02em] text-foreground">
-              0
-            </p>
-            <p className="mt-2 max-w-[30ch] text-[13px] leading-relaxed text-mute">
-              Money you add shows up here. Nobody else can see it.
-            </p>
-          </div>
-        )}
-
-        {actions && <div className="mt-5 flex flex-wrap gap-2">{actions}</div>}
-      </div>
-    </div>
-  );
-}
-
 function AssetMark({
   id,
   symbol,
@@ -1567,21 +1358,6 @@ function AssetMark({
 /** ETH's real mark, the same one Portfolio and every token list show. */
 function EthMark({ size = 28 }: { size?: number }) {
   return <TokenLogo id="eth" symbol="ETH" size={size} />;
-}
-
-function EyeIcon({ off = false }: { off?: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <circle cx="12" cy="12" r="2.75" stroke="currentColor" strokeWidth="1.6" />
-      {off && <path d="M4 20L20 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />}
-    </svg>
-  );
 }
 
 function Spinner() {
