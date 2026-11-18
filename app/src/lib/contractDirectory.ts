@@ -18,6 +18,7 @@ import { getAddress, isAddressEqual, parseAbi, zeroAddress, type Address, type P
 import { getNetwork, isNetworkKey, networkName, type GloamNetwork, type NetworkKey } from "./networks";
 import { swapRoutersOn } from "./vaultSwap";
 import { ELYSIUM_FLAG, ELYSIUM_TESTNET_FLAG } from "./elysium";
+import { SHOW_TESTNETS } from "./showTestnets";
 
 /**
  * Owner of every mainnet vault, and of Base Sepolia's and Ethereum Sepolia's.
@@ -264,9 +265,13 @@ export function directoryEntry(key: NetworkKey): DirectoryEntry {
   };
 }
 
-/** Every network Gloam knows, mainnets first: live ones with their rows, the rest as next. */
-export function contractDirectory(): DirectoryEntry[] {
-  return [...MAINNET_ORDER, ...TESTNET_ORDER].map(directoryEntry);
+/**
+ * Every network Gloam knows, mainnets first: live ones with their rows, the rest
+ * as next. The testnets only while people see them (lib/showTestnets); pass
+ * `testnets` to choose.
+ */
+export function contractDirectory(testnets: boolean = SHOW_TESTNETS): DirectoryEntry[] {
+  return [...MAINNET_ORDER, ...(testnets ? TESTNET_ORDER : [])].map(directoryEntry);
 }
 
 /* ---------------------------------------------------------------- the chain */

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "re
 import { SealedField } from "@/components/ui/SealedField";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { liveMainnetNames } from "@/lib/mainnet";
+import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { publicClientFor } from "@/lib/rhClient";
 import type { ChainFamily, NetworkKey } from "@/lib/networks";
 import {
@@ -25,7 +26,8 @@ import { CheckMark, CopyButton, ExplorerLink } from "./VerifyBits";
  * /verify#contracts: every address behind Gloam, one network at a time, with
  * what its vault says right now and a CSV of the lot. The list is the app's
  * own network data (lib/contractDirectory), so a mainnet joins the moment its
- * pool is filled in; until then it shows as next.
+ * pool is filled in; until then it shows as next. The testnets are listed only
+ * while people see them (lib/showTestnets).
  */
 
 const GITHUB = "https://github.com/gloamtrade/gloam";
@@ -42,10 +44,12 @@ const LOGOS: Record<ChainFamily, string> = {
 };
 
 type Side = "mainnet" | "testnet";
-const SIDES: { side: Side; label: string }[] = [
-  { side: "mainnet", label: "Mainnets" },
-  { side: "testnet", label: "Testnets" },
-];
+const SIDES: { side: Side; label: string }[] = (
+  [
+    { side: "mainnet", label: "Mainnets" },
+    { side: "testnet", label: "Testnets" },
+  ] as const
+).filter((s) => ENTRIES.some((e) => e.kind === s.side));
 
 type ReadState = { status: "done"; read: VaultRead } | { status: "error" };
 
@@ -402,7 +406,7 @@ export function ContractsSection() {
             <div className="max-w-[640px]">
               <h2 className="t-display-l">The contracts</h2>
               <p className="mt-5 max-w-[54ch] text-[16px] leading-relaxed text-mute">
-                Gloam runs on {liveMainnetNames()} mainnet, and on the testnets. Every address here comes from the
+                Gloam runs on {liveMainnetNames()} mainnet{SHOW_TESTNETS ? ", and on the testnets" : ""}. Every address here comes from the
                 list the app itself uses, and each vault is read on chain as you look. The source is on GitHub.
               </p>
             </div>
@@ -429,7 +433,7 @@ export function ContractsSection() {
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <SideSwitch value={side} onChange={(s) => setShown(firstOn(s).key)} />
+            {SIDES.length > 1 && <SideSwitch value={side} onChange={(s) => setShown(firstOn(s).key)} />}
             <ChainChoice entries={ENTRIES.filter((e) => e.kind === side)} value={shown} onChange={setShown} />
           </div>
 

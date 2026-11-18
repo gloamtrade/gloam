@@ -12,6 +12,7 @@ import { tempoWalletConnector } from "./tempoWallet";
 import { lazyWalletConnect } from "./walletConnect";
 import { rpcListTransport } from "./rpcList";
 import { rpcProxyUrl } from "./rpcProxy";
+import { SHOW_TESTNETS } from "./showTestnets";
 
 const walletConnectFn = lazyWalletConnect();
 
@@ -55,16 +56,16 @@ const originChains = mainnetChains.length
   ? ORIGIN_CHAINS.filter((c) => !mainnetChains.some((m) => m.id === c.id))
   : [];
 
+const testnetChains = [robinhoodTestnet, tempoTestnet, ...baseTestnetChains, ...ethereumTestnetChains, ...elysiumTestnetChains];
+
 // wagmi narrows hook `chainId` options to the registered ids. The type names
 // all ten (GloamChainId); at runtime only the testnets and mainnets with a pool
-// are there, plus the bridge's origin chains.
+// are there, plus the bridge's origin chains. While the testnets are hidden
+// (lib/showTestnets) they stay registered, so a claim link on one still works,
+// but come after the mainnets: a wallet connecting starts on a mainnet, and a
+// wallet app asked to approve the chains lists the mainnets first.
 const chains = [
-  robinhoodTestnet,
-  tempoTestnet,
-  ...baseTestnetChains,
-  ...ethereumTestnetChains,
-  ...elysiumTestnetChains,
-  ...mainnetChains,
+  ...(SHOW_TESTNETS || !mainnetChains.length ? [...testnetChains, ...mainnetChains] : [...mainnetChains, ...testnetChains]),
   ...originChains,
 ] as unknown as readonly [
   typeof robinhoodTestnet,

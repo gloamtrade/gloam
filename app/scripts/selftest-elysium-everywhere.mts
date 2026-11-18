@@ -195,7 +195,8 @@ if (MODE === "off") {
   ok(tokens.shieldTokensFor(CHAIN_ID).map((t) => t.symbol).join() === "USDC,KNTQ", "on: USDC and KNTQ on Elysium mainnet");
   ok(tokens.shieldTokensFor(TESTNET_ID)[0]?.address === "0x7D29d8047B905000459c0E80c34a26CeedcB47b2", "on: test USDC on Elysium testnet");
   ok(hourlySpendWei(CHAIN_ID, {}) === 10n ** 18n, "on: the relay's hourly cap is 1 HYPE");
-  const dir = contractDirectory();
+  // the testnets too, as /verify lists them while NEXT_PUBLIC_SHOW_TESTNETS is on (lib/showTestnets)
+  const dir = contractDirectory(true);
   ok(dir.some((d) => d.key === "elysium-mainnet" && d.live) && dir.some((d) => d.key === "elysium" && d.live), "on: /verify lists both");
   ok(CSP_CONNECT_SOURCES.includes("https://elysium-mainnet.g.alchemy.com"), "on: the CSP allows the keyed RPC's origin");
   ok(CSP_CONNECT_SOURCES.includes("https://testnet-rpc.elysium.kinetiq.xyz"), "on: the CSP allows the testnet RPC");

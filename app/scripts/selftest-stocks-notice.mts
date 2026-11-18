@@ -4,8 +4,9 @@
  *
  *  - the script after the notice (lib/stocksNotice) shows it exactly when the app
  *    would once React runs: NetworkProvider's reading of the network (the one
- *    picked here, else the first mainnet), not closed here, not a testnet, not
- *    already on the Swap it points to; blocked storage keeps it hidden
+ *    picked here while people can pick it, else the first mainnet), not closed
+ *    here, not a testnet, not already on the Swap it points to; blocked storage
+ *    keeps it hidden
  *  - the wiring: the notice is in the server's HTML (no Suspense around it, the
  *    search params read apart), sent hidden, with the script right after it
  *
@@ -15,7 +16,7 @@ import "./browser-shim.mts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { NETWORK_KEYS, defaultNetworkKey, getNetwork, isNetworkKey } from "../src/lib/networks";
+import { NETWORK_KEYS, getNetwork, isNetworkKey, isShownNetworkKey, shownKeyOrDefault } from "../src/lib/networks";
 import {
   NETWORK_STORAGE_KEY,
   STOCKS_NOTICE_ID,
@@ -54,8 +55,7 @@ function firstPaint(stored: Record<string, string>, path = "/app", search = "", 
 /** What StocksLiveNotice shows once React runs (NetworkProvider readStored, then the notice's rules). */
 function afterReact(stored: Record<string, string>, path = "/app", search = ""): boolean {
   if (stored[STOCKS_NOTICE_KEY] === "1") return false;
-  const v = stored[NETWORK_STORAGE_KEY];
-  const key = isNetworkKey(v) ? v : defaultNetworkKey();
+  const key = shownKeyOrDefault(stored[NETWORK_STORAGE_KEY]);
   if (getNetwork(key).testnet) return false;
   const tab = new URLSearchParams(search).get("tab");
   return !(key === STOCKS_NOTICE_MAINNET && path === "/app/vault" && tab === "swap");
@@ -88,7 +88,12 @@ test("the cases people hit", () => {
   if (!live) return;
   assert.equal(firstPaint({}), true, "a new visitor lands on the first mainnet and sees it in the first paint");
   assert.equal(firstPaint({ [STOCKS_NOTICE_KEY]: "1" }), false, "closed here: never painted");
-  assert.equal(firstPaint({ [NETWORK_STORAGE_KEY]: "robinhood" }), false, "on a testnet: never painted");
+  if (isShownNetworkKey("robinhood")) {
+    assert.equal(firstPaint({ [NETWORK_STORAGE_KEY]: "robinhood" }), false, "on a testnet: never painted");
+  } else {
+    // NEXT_PUBLIC_SHOW_TESTNETS off (lib/showTestnets): the app opens on the first mainnet instead
+    assert.equal(firstPaint({ [NETWORK_STORAGE_KEY]: "robinhood" }), true, "a testnet saved before they were hidden: on the first mainnet, so painted");
+  }
   assert.equal(firstPaint({ [NETWORK_STORAGE_KEY]: STOCKS_NOTICE_MAINNET }, "/app/vault", "?tab=swap"), false, "already on the Swap");
   assert.equal(firstPaint({}, "/app", "", true), false, "storage that can't be read: hidden, React decides");
 });

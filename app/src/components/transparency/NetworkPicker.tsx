@@ -2,12 +2,14 @@
 
 import Image from "next/image";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import { NETWORK_KEYS, getNetwork, type ChainFamily, type NetworkKey } from "@/lib/networks";
+import { SHOWN_NETWORK_KEYS, getNetwork, type ChainFamily, type NetworkKey } from "@/lib/networks";
 
 /**
  * The transparency page's network choice: Mainnets or Testnets, then the chain.
- * Every key in NETWORK_KEYS is one side plus one chain, so ?chain= deep links
- * land on the same pair of controls.
+ * Every key in SHOWN_NETWORK_KEYS is one side plus one chain, so ?chain= deep
+ * links land on the same pair of controls. While the testnets are hidden
+ * (lib/showTestnets) there is one side, so the Mainnets or Testnets switch is
+ * not shown.
  */
 
 type Side = "mainnet" | "testnet";
@@ -22,7 +24,7 @@ const LOGOS: Record<ChainFamily, string> = {
 };
 
 const sideOf = (k: NetworkKey): Side => (getNetwork(k).testnet ? "testnet" : "mainnet");
-const keysOn = (side: Side) => NETWORK_KEYS.filter((k) => sideOf(k) === side);
+const keysOn = (side: Side) => SHOWN_NETWORK_KEYS.filter((k) => sideOf(k) === side);
 const SIDES: { side: Side; label: string }[] = (
   [
     { side: "mainnet", label: "Mainnets" },

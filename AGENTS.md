@@ -17,7 +17,7 @@ Tagline: private by default, provable on demand. Hero line: private money on pub
 - Docs: `gloam.trade/docs`
 - Whitepaper: `gloam.trade/whitepaper`
 - Pitch deck: `gloam.trade/pitch` (source `app/public/pitch/index.html`; `pitch/gloam-deck.html` is a repo copy, keep them in sync)
-- Product: `gloam.trade/app`, mainnet and testnet in one app, switched in-app (future testnet host: `testnet.gloam.trade`)
+- Product: `gloam.trade/app`, mainnet and testnet in one app, switched in-app (future testnet host: `testnet.gloam.trade`). Since 18 November 2026 the testnets are out of view unless `NEXT_PUBLIC_SHOW_TESTNETS` is `1`, `true`, `on` or `yes` (`app/src/lib/showTestnets.ts`): the network menu, the `/transparency` picker, `/verify#contracts` and the links to `/docs/testnet` show the mainnets alone, and a saved testnet opens on mainnet. The testnets keep running for the API, SDK, MCP, partner test keys and claim links, which still open and say they are on a testnet. Do not point people at a testnet in app or site copy while it is off
 - X: `@gloamtrade`
 - Vercel: one project, Root Directory = `app`
 - Contracts: `contracts/` (Foundry). Mainnet: `ShieldPoolPayments` (payments only) on Robinhood Chain mainnet (`4663`), Tempo mainnet (`4217`), Base mainnet (`8453`), Ethereum mainnet (`1`) and Elysium mainnet (`99901`). Testnet: `ShieldPoolPoseidon` on Robinhood Chain testnet (`46630`) and Tempo Moderato testnet (`42431`)

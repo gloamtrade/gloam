@@ -6,6 +6,11 @@
  * picked one starts on defaultNetworkKey(): Robinhood Chain testnet until
  * mainnet is live, a mainnet after.
  *
+ * While the testnets are out of view (NEXT_PUBLIC_SHOW_TESTNETS off,
+ * lib/showTestnets), a saved testnet opens on that default instead, with no
+ * error. A claim or request link on a testnet still moves the page there, but
+ * that visit is not saved, so the next one opens on mainnet again.
+ *
  * This is the switch the app reads to know which chain to talk to. It does not
  * itself rewire the existing Robinhood write path (that stays the default);
  * consumers opt in by reading `useNetwork()` as they are migrated off the
@@ -21,10 +26,11 @@ import {
 } from "react";
 import {
   DEFAULT_NETWORK_KEY,
-  defaultNetworkKey,
+  FIRST_PAINT_NETWORK_KEY,
   getNetwork,
-  isNetworkKey,
+  isShownNetworkKey,
   setShownNetworkKey,
+  shownKeyOrDefault,
   type GloamNetwork,
   type NetworkKey,
 } from "@/lib/networks";
@@ -45,21 +51,22 @@ interface NetworkContextValue {
 
 const NetworkContext = createContext<NetworkContextValue | null>(null);
 
+/** This browser's saved network while people can pick it, else the default (lib/networks shownKeyOrDefault). */
 function readStored(): NetworkKey {
   if (typeof window === "undefined") return DEFAULT_NETWORK_KEY;
+  let v: string | null = null;
   try {
-    const v = window.localStorage.getItem(STORAGE_KEY);
-    if (isNetworkKey(v)) return v;
+    v = window.localStorage.getItem(STORAGE_KEY);
   } catch {
     /* private mode / blocked storage */
   }
-  return defaultNetworkKey();
+  return shownKeyOrDefault(v);
 }
 
 export function NetworkProvider({ children }: { children: ReactNode }) {
   // Start from the default for a stable first render, then hydrate from storage
   // on mount to avoid an SSR/client mismatch.
-  const [networkKey, setKey] = useState<NetworkKey>(DEFAULT_NETWORK_KEY);
+  const [networkKey, setKey] = useState<NetworkKey>(FIRST_PAINT_NETWORK_KEY);
   const [settled, setSettled] = useState(false);
 
   useEffect(() => {
@@ -75,7 +82,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   // Cross-tab sync.
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY && isNetworkKey(e.newValue)) {
+      if (e.key === STORAGE_KEY && isShownNetworkKey(e.newValue)) {
         setShownNetworkKey(e.newValue);
         setKey(e.newValue);
       }
@@ -87,6 +94,8 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   const setNetworkKey = (key: NetworkKey) => {
     setShownNetworkKey(key);
     setKey(key);
+    // a hidden testnet (opened from a claim link) is never saved over this browser's pick
+    if (!isShownNetworkKey(key)) return;
     try {
       window.localStorage.setItem(STORAGE_KEY, key);
     } catch {

@@ -10,11 +10,13 @@ import { SealedField } from "@/components/ui/SealedField";
 import { SealDots } from "@/components/ui/SealDots";
 import { TokenLogo } from "@/components/app/TokenLogo";
 import {
+  FIRST_PAINT_NETWORK_KEY,
   NETWORK_KEYS,
+  SHOWN_NETWORK_KEYS,
   defaultNetworkKey,
   getNetwork,
-  isNetworkKey,
   networkName,
+  shownKeyOrDefault,
   type NetworkKey,
 } from "@/lib/networks";
 import {
@@ -72,8 +74,8 @@ function useLedger(key: NetworkKey | null) {
         const again = ledger.incomplete && tries < RESUME_AFTER_MS.length;
         patch({ ledger, error: null, refreshing: false, progress: 1, resuming: Boolean(again) });
         if (again && live) resumeTimer = window.setTimeout(() => setNonce((x) => x + 1), RESUME_AFTER_MS[tries]);
-        // the other chain on the same side (testnet or mainnet)
-        const other = NETWORK_KEYS.find((k) => k !== key && getNetwork(k).testnet === getNetwork(key).testnet);
+        // the other chain on the same side (testnet or mainnet), of those the picker offers
+        const other = SHOWN_NETWORK_KEYS.find((k) => k !== key && getNetwork(k).testnet === getNetwork(key).testnet);
         if (other) {
           void loadLedger(other).catch(() => {
             /* read again when opened */
@@ -650,18 +652,19 @@ const PRIVATE_FACTS = [
 
 export function TransparencyView() {
   const [active, setActive] = useState<NetworkKey | null>(null);
-  const shown: NetworkKey = active ?? "robinhood";
+  const shown: NetworkKey = active ?? FIRST_PAINT_NETWORK_KEY;
   const net = getNetwork(shown);
   const { ledger, error, progress, refreshing, resuming, refresh } = useLedger(active);
   const { prices, waiting } = usePrices();
 
   // ?chain=tempo opens on Tempo; read after mount so server and client match.
   // With no ?chain it opens where the app does: Robinhood Chain testnet until
-  // mainnet is live, a mainnet after.
+  // mainnet is live, a mainnet after. A ?chain= naming a testnet while the
+  // testnets are hidden (lib/showTestnets) opens on that same default, quietly.
   useEffect(() => {
     const t = window.setTimeout(() => {
       const q = new URLSearchParams(window.location.search).get("chain");
-      const first = isNetworkKey(q) ? q : defaultNetworkKey();
+      const first = shownKeyOrDefault(q);
       setActive(first);
       // A public page view: counted only with analytics consent, like pageviews.
       void import("@/lib/track").then(({ track }) => {
