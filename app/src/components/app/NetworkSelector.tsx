@@ -85,7 +85,7 @@ export function NetworkSelector() {
         }`}
       >
         {settled ? (
-          <TokenLogo id={network.family} symbol={network.label} size={34} />
+          <TokenLogo id={network.family} symbol={network.label} size={34} network />
         ) : (
           <span className="h-[34px] w-[34px] shrink-0 rounded-full bg-surface-2" aria-hidden />
         )}
@@ -152,7 +152,7 @@ export function NetworkSelector() {
                       writable ? "hover:bg-surface" : "cursor-not-allowed opacity-60"
                     } ${active ? "bg-surface" : ""}`}
                   >
-                    <TokenLogo id={n.family} symbol={n.label} size={30} />
+                    <TokenLogo id={n.family} symbol={n.label} size={30} network />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[14px] font-medium leading-tight text-foreground">
                         {n.label}

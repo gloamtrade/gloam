@@ -60,6 +60,20 @@ const INK_PLATE_LOGO_IDS = new Set(["dis", "hims", "ibm", "nke", "rblx", "uber",
  */
 const FULL_TILE_LOGO_IDS = new Set(["robinhood", "tempo", "base", "ethereum", "elysium"]);
 
+/**
+ * Network tiles by chain family. BNB Chain's family id is also its gas coin's
+ * token id ("bnb"), so a network picker asks for the tile with `network`, and
+ * the coin keeps its round mark everywhere else.
+ */
+const NETWORK_TILES: Record<string, string> = {
+  robinhood: "/brand/networks/robinhood.png",
+  tempo: "/brand/networks/tempo.svg",
+  base: "/brand/networks/base.svg",
+  ethereum: "/brand/networks/ethereum.svg",
+  elysium: "/brand/networks/elysium.png",
+  bnb: "/brand/networks/bnb.png",
+};
+
 const SPECIAL_LOGOS: Record<string, string> = {
   // Networks: full-bleed tiles in /brand/networks, edge to edge, no plate
   tempo: "/brand/networks/tempo.svg",
@@ -115,12 +129,15 @@ export function TokenLogo({
   size = 34,
   logoSrc,
   className = "",
+  network = false,
 }: {
   id: string;
   symbol: string;
   size?: number;
   /** Real logo path. When omitted, a monogram tile is shown (no 404 request). */
   logoSrc?: string;
+  /** A network (chain family), drawn as its full tile. */
+  network?: boolean;
   className?: string;
 }) {
   const [broken, setBroken] = useState(false);
@@ -130,9 +147,10 @@ export function TokenLogo({
   // Scale the ticker to fit the tile: shorter tickers read larger.
   const fontRatio =
     label.length <= 2 ? 0.38 : label.length === 3 ? 0.3 : 0.25;
-  const src = logoSrc ?? resolveLogo(id);
+  const tile = network ? NETWORK_TILES[id.toLowerCase()] : undefined;
+  const src = logoSrc ?? tile ?? resolveLogo(id);
 
-  if (src && !broken && DISC_LOGO_IDS.has(id.toLowerCase())) {
+  if (src && !broken && !tile && DISC_LOGO_IDS.has(id.toLowerCase())) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
@@ -147,7 +165,7 @@ export function TokenLogo({
     );
   }
 
-  if (src && !broken && FULL_TILE_LOGO_IDS.has(id.toLowerCase())) {
+  if (src && !broken && (tile || FULL_TILE_LOGO_IDS.has(id.toLowerCase()))) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
