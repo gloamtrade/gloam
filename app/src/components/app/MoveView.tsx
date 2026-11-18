@@ -3254,18 +3254,10 @@ export function MoveView() {
                         )}
                       </div>
                       )}
-                      <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-3 text-[13px]">
-                        <span className="text-mute">
-                          In the vault ({assetLabel(selected.asset)})
-                        </span>
-                        <span className="tnum truncate text-foreground">
-                          {poolForCashOut != null
-                            ? formatAssetLabel(poolForCashOut, selected.asset)
-                            : "Checking…"}
-                        </span>
-                      </div>
-                      {cashOutInventoryShort ? (
-                        <p className="mt-2 text-[12.5px] leading-relaxed text-warn">
+                      {/* Only when the vault really can't pay this out (rare): a balance in
+                          the vault is otherwise always covered, so no row says so. */}
+                      {cashOutInventoryShort && (
+                        <p className="mt-3 border-t border-line pt-3 text-[12.5px] leading-relaxed text-warn">
                           Not enough in the vault to pay this out yet. Cash out
                           opens once more {assetLabel(selected.asset)} is added.{" "}
                           <Link
@@ -3275,11 +3267,7 @@ export function MoveView() {
                             Add more
                           </Link>
                         </p>
-                      ) : poolForCashOut != null ? (
-                        <p className="mt-2 text-[12.5px] text-mute">
-                          The vault can cover this cash out.
-                        </p>
-                      ) : null}
+                      )}
                     </div>
                   )}
 
