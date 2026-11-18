@@ -12,7 +12,6 @@ import { PasskeyGate } from "./PasskeyGate";
 import { NetworkSelector } from "./NetworkSelector";
 import { useNetwork } from "./NetworkProvider";
 import { FeeRiseNotice } from "./FeeRiseNotice";
-import { StocksLiveNotice } from "./StocksLiveNotice";
 import { TestFundsNotice } from "./TestFundsNotice";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { VaultNavGroup, VaultNavGroupStatic, navActiveFill } from "./VaultNavGroup";
@@ -347,7 +346,6 @@ export function AppShell({
           <FeeRiseNotice />
           <TestFundsNotice />
           {/* in the first paint, hidden or shown before the app's JavaScript runs: nothing below it moves */}
-          <StocksLiveNotice />
           {/* no fade on the title: it paints with the page, not after the app's JavaScript frees the phone */}
           <div className="gl-pagehead mb-6 gap-4 sm:mb-8">
             <div>
