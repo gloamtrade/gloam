@@ -367,3 +367,134 @@ function LinkGlyph() {
     </svg>
   );
 }
+
+/**
+ * Cash out privately: one card, one switch. On, it goes out in pieces at random
+ * times (or, for a balance that can't be split, once at a random later time),
+ * sent by the Gloam relay; the window and the pieces show inside the card. Off,
+ * it goes now, and the card's second row hides the wallet that pays the gas.
+ */
+export function PrivateCashOutToggle({
+  on,
+  available,
+  reason,
+  onToggle,
+  window,
+  onWindow,
+  pieceCount,
+  hideWallet,
+  disabled,
+  children,
+}: {
+  on: boolean;
+  available: boolean;
+  /** Why it can't be private right now (shown when not available). */
+  reason?: string | null;
+  onToggle: (on: boolean) => void;
+  window: CashOutWindow;
+  onWindow: (w: CashOutWindow) => void;
+  /** Pieces when it splits; null when it goes once, later. */
+  pieceCount: number | null;
+  hideWallet?: { on: boolean; available: boolean; onChange: (v: boolean) => void };
+  disabled?: boolean;
+  children?: ReactNode;
+}) {
+  const sub = !available
+    ? (reason ?? "Not available for this cash out.")
+    : on
+      ? pieceCount
+        ? `${pieceCount} pieces at random times over ${windowWords(window)}, sent by the Gloam relay.`
+        : `Goes out at a random time over ${windowWords(window)}, sent by the Gloam relay.`
+      : pieceCount === null
+        ? "Sends it later at a random time, so it doesn't go out right after a payment."
+        : "Splits it into pieces at random times, so it can't be matched to what you added.";
+  return (
+    <div
+      className={`rounded-[18px] border px-4 py-4 transition-colors sm:px-5 ${
+        on ? "border-sealed/30 bg-sealed-soft" : "border-line bg-surface"
+      }`}
+    >
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        disabled={disabled || !available}
+        onClick={() => onToggle(!on)}
+        className="flex w-full items-center gap-3.5 text-left disabled:cursor-not-allowed"
+      >
+        <span
+          aria-hidden
+          className={`grid h-10 w-10 shrink-0 place-items-center rounded-full transition-colors ${
+            on ? "bg-sealed text-panel" : "bg-panel text-mute"
+          }`}
+        >
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+            <rect x="5" y="10.5" width="14" height="9.5" rx="2.5" stroke="currentColor" strokeWidth="1.9" />
+            <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+          </svg>
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className={`block text-[15.5px] font-medium ${available ? "text-foreground" : "text-mute"}`}>Cash out privately</span>
+          <span className="mt-0.5 block text-[12.5px] leading-relaxed text-mute">{sub}</span>
+        </span>
+        <span
+          aria-hidden
+          className={`relative h-[26px] w-[46px] shrink-0 rounded-full transition-colors ${
+            on ? "bg-sealed" : "bg-line-strong"
+          } ${available ? "" : "opacity-50"}`}
+        >
+          <span
+            className={`absolute top-[3px] h-5 w-5 rounded-full bg-panel shadow transition-[left] duration-200 ${
+              on ? "left-[23px]" : "left-[3px]"
+            }`}
+          />
+        </span>
+      </button>
+
+      {on && available && (
+        <div className="mt-4 space-y-4 border-t border-sealed/20 pt-4">
+          <div role="radiogroup" aria-label="Spread over" className="grid grid-cols-3 gap-2">
+            {PLAN_WINDOWS.map(([w, label]) => {
+              const active = window === w;
+              return (
+                <button
+                  key={w}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  disabled={disabled}
+                  onClick={() => onWindow(w)}
+                  className={`min-h-[44px] rounded-[12px] border px-2 py-2 text-center text-[13px] leading-snug transition-colors disabled:opacity-60 ${
+                    active ? "border-foreground bg-panel text-foreground" : "border-line bg-panel/40 text-soft hover:border-line-strong"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          {children}
+        </div>
+      )}
+
+      {!on && hideWallet && hideWallet.available && (
+        <button
+          type="button"
+          role="switch"
+          aria-checked={hideWallet.on}
+          disabled={disabled}
+          onClick={() => hideWallet.onChange(!hideWallet.on)}
+          className="mt-4 flex w-full items-center gap-3.5 border-t border-line pt-4 text-left"
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block text-[14px] text-foreground">Hide my wallet</span>
+            <span className="mt-0.5 block text-[12.5px] leading-relaxed text-mute">Gloam sends it for you, so your wallet never shows up next to it.</span>
+          </span>
+          <span aria-hidden className={`relative h-[22px] w-[38px] shrink-0 rounded-full transition-colors ${hideWallet.on ? "bg-sealed" : "bg-line-strong"}`}>
+            <span className={`absolute top-[3px] h-4 w-4 rounded-full bg-panel shadow transition-[left] duration-200 ${hideWallet.on ? "left-[19px]" : "left-[3px]"}`} />
+          </span>
+        </button>
+      )}
+    </div>
+  );
+}
