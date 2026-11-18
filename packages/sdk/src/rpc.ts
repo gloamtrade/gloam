@@ -256,10 +256,11 @@ export interface LogCanary {
 }
 
 /**
- * An eth_getLogs read came back empty for blocks the RPC keeps no logs for: the
- * canary contract, which logs in every block, has none there either. Some public
- * RPCs (publicnode on BNB Chain, about 27 hours of logs) answer an empty list
- * for older ranges instead of an error, which would read as "nothing happened"
+ * An eth_getLogs read came back for blocks the RPC keeps no logs for: the
+ * canary contract, which logs in every block, has none at the range's first
+ * block. Some public RPCs (publicnode on BNB Chain) answer an empty list for
+ * older ranges instead of an error, and only the newer part of a range that
+ * straddles the oldest block they keep, which would read as "nothing happened"
  * and silently drop deposits, payments and notes. Nothing partial is returned.
  */
 export class PrunedLogsError extends Error {
@@ -284,57 +285,103 @@ export interface GuardPrunedLogsOptions<T extends AnyTransport = Transport> {
   archive?: T | null;
   /** How long a head read places the trust line, ms. Default 60 s. */
   headTtlMs?: number;
+  /**
+   * How long a block the canary showed an RPC still has logs at is trusted for
+   * that RPC, ms: a later read starting at or after it asks no canary. Default
+   * 10 minutes. An RPC drops its oldest logs first, so newer blocks are covered.
+   */
+  floorTtlMs?: number;
+  /**
+   * Ask `archive` when the guarded RPC fails a log read outright (down, or a
+   * refusal), as the browser asked its proxy before. The archive's answer is
+   * checked against its own canary. If the archive fails too, the guarded
+   * RPC's error is thrown (a range error a walk splits on, say). Default false.
+   */
+  archiveOnError?: boolean;
 }
 
 /**
- * Wraps a transport so an empty eth_getLogs answer about old blocks is only
- * passed on once the same RPC shows it has logs there: it is asked for the
- * canary's logs at the range's first blocks, and if those are missing too the
- * read throws PrunedLogsError (or goes to `archive`, when given). Non-empty
- * answers, recent ranges, reads by block hash and every other method pass
- * through untouched. Costs one small extra read per empty old range.
+ * Wraps a transport so an eth_getLogs answer about old blocks is only passed
+ * on once the same RPC shows it has logs from the range's first block on: it
+ * is asked for the canary's logs there, and if those are missing the read
+ * goes to `archive` (when given) or throws PrunedLogsError. This covers an
+ * empty answer and a partial one alike: a range that straddles the oldest
+ * block an RPC keeps comes back with only its newer part (publicnode on BNB
+ * Chain, checked 18 November 2026). Recent ranges, reads by block hash and
+ * every other method pass through untouched. Each RPC's proven block is kept
+ * for `floorTtlMs`, so a walk from the deploy block costs one canary read.
+ *
+ * Wrap one RPC (or a list whose log reads go to one RPC), never a fallback
+ * across RPCs that keep different history: the canary must be answered by the
+ * RPC that answered the read.
  */
 export function guardPrunedLogs<T extends AnyTransport = Transport>(inner: T, canary: LogCanary, opts: GuardPrunedLogsOptions<T> = {}): T {
   const headTtlMs = opts.headTtlMs ?? 60_000;
+  const floorTtlMs = opts.floorTtlMs ?? 600_000;
   const guarded = (args: Parameters<T>[0]) => {
     const t = inner(args);
     const ir = t as unknown as Rpc;
     const ar = opts.archive ? (opts.archive(args) as unknown as Rpc) : null;
     let head: { n: bigint; at: number } | null = null;
-    const headNow = async (): Promise<bigint> => {
+    const headNow = async (rpc: Rpc): Promise<bigint> => {
       if (head && Date.now() - head.at < headTtlMs) return head.n;
-      const n = BigInt((await ir.request({ method: "eth_blockNumber" })) as string);
+      const n = BigInt((await rpc.request({ method: "eth_blockNumber" })) as string);
       head = { n, at: Date.now() };
       return n;
     };
-    const hasCanaryLogs = async (rpc: Rpc, from: bigint): Promise<boolean> => {
+    // per RPC: the oldest block the canary showed it has logs at, and when
+    const floors = new Map<Rpc, { block: bigint; at: number }>();
+    const keepsFrom = async (rpc: Rpc, from: bigint): Promise<boolean> => {
       const at = from < canary.sinceBlock ? canary.sinceBlock : from;
+      const floor = floors.get(rpc);
+      if (floor && Date.now() - floor.at < floorTtlMs && at >= floor.block) return true;
       const logs = (await rpc.request({
         method: "eth_getLogs",
         params: [{ address: canary.address, fromBlock: toHex(at), toBlock: toHex(at + canary.blocks - 1n) }] as never,
       })) as unknown[];
-      return Array.isArray(logs) && logs.length > 0;
+      const has = Array.isArray(logs) && logs.length > 0;
+      if (has) floors.set(rpc, { block: at, at: Date.now() });
+      return has;
+    };
+    /** The range's first block when the answer needs the canary's word, else null. */
+    const oldFrom = async (rpc: Rpc, list: readonly unknown[] | undefined): Promise<bigint | null> => {
+      const f = list?.[0] as { fromBlock?: unknown; toBlock?: unknown; blockHash?: unknown } | undefined;
+      if (!f || f.blockHash) return null;
+      const from = taggedBlock(f.fromBlock);
+      if (from === null) return null; // "latest" and friends: the head
+      const to = taggedBlock(f.toBlock);
+      // a range that ends before the canary logs at all says nothing either way
+      if (to !== null && to < canary.sinceBlock) return null;
+      if (from + canary.trustRecentBlocks >= (await headNow(rpc))) return null;
+      return from;
+    };
+    const toOf = (list: readonly unknown[] | undefined) => taggedBlock((list?.[0] as { toBlock?: unknown } | undefined)?.toBlock);
+    const fromArchive = async (rpc: Rpc, method: string, list: readonly unknown[] | undefined, from: bigint | null) => {
+      const again = await rpc.request({ method, params: list as never });
+      if (!Array.isArray(again)) return again;
+      const at = from ?? (await oldFrom(rpc, list));
+      if (at === null || (await keepsFrom(rpc, at))) return again;
+      throw new PrunedLogsError(at, toOf(list), canary.hint);
     };
     const request = (async ({ method, params }: { method: string; params?: unknown }) => {
       const list = params as readonly unknown[] | undefined;
-      const out = await ir.request({ method, params: list as never });
-      if (method !== "eth_getLogs" || !Array.isArray(out) || out.length > 0) return out;
-      const f = list?.[0] as { fromBlock?: unknown; toBlock?: unknown; blockHash?: unknown } | undefined;
-      if (!f || f.blockHash) return out;
-      const from = taggedBlock(f.fromBlock);
-      if (from === null) return out; // "latest" and friends: the head
-      const to = taggedBlock(f.toBlock);
-      // a range that ends before the canary logs at all says nothing either way
-      if (to !== null && to < canary.sinceBlock) return out;
-      const n = await headNow();
-      if (from + canary.trustRecentBlocks >= n) return out;
-      if (await hasCanaryLogs(ir, from)) return out;
-      if (ar) {
-        const again = await ar.request({ method, params: list as never });
-        if (!Array.isArray(again) || again.length > 0) return again;
-        if (await hasCanaryLogs(ar, from)) return again;
+      if (method !== "eth_getLogs") return ir.request({ method, params: list as never });
+      let out: unknown;
+      try {
+        out = await ir.request({ method, params: list as never });
+      } catch (e) {
+        if (!ar || !opts.archiveOnError) throw e;
+        try {
+          return await fromArchive(ar, method, list, null);
+        } catch {
+          throw e;
+        }
       }
-      throw new PrunedLogsError(from, to, canary.hint);
+      if (!Array.isArray(out)) return out;
+      const from = await oldFrom(ir, list);
+      if (from === null || (await keepsFrom(ir, from))) return out;
+      if (ar) return fromArchive(ar, method, list, from);
+      throw new PrunedLogsError(from, toOf(list), canary.hint);
     }) as EIP1193RequestFn;
     return {
       config: { ...t.config, key: "gloamPrunedGuard", name: "Gloam read (pruned logs refused)", type: "gloamPrunedGuard", request, retryCount: 0 },

@@ -214,13 +214,52 @@ if (MODE === "empty" || MODE === "live") {
     assert(Array.isArray(out) && out.length === 0, "archive RPC: an empty old range is real");
     assert(canaryAsks(rpc.asked) === 1, "one canary read for it");
   }
-  // non-empty answers and recent ranges pass with no extra read
+  // an old non-empty answer is checked too (it could be the newer part of a pruned range);
+  // recent ranges pass with no extra read
   {
     const rpc = fakeRpc({ keepsFrom: 0n, vaultLogs: [{ blockNumber: toHex(134_000_010n), address: POOL }] });
     const c = client(sdk.guardPrunedLogs(rpc.transport, CANARY));
     assert((await c.request(logs(134_000_000n, 134_049_999n))).length === 1, "logs come back as they are");
+    assert(canaryAsks(rpc.asked) === 1, "one canary read for the old range");
     assert((await c.request(logs(HEAD - 1_000n, HEAD))).length === 0, "a recent empty range passes");
-    assert(canaryAsks(rpc.asked) === 0, "no canary read for either");
+    assert(canaryAsks(rpc.asked) === 1, "no canary read for the recent one");
+  }
+  // a range straddling the oldest block a pruned RPC keeps: publicnode answers only its newer part
+  {
+    const keepsFrom = HEAD - 220_000n;
+    const vaultLogs = [{ blockNumber: toHex(keepsFrom - 10n), address: POOL }, { blockNumber: toHex(keepsFrom + 10n), address: POOL }];
+    const rpc = fakeRpc({ keepsFrom, vaultLogs });
+    const c = client(sdk.guardPrunedLogs(rpc.transport, CANARY));
+    await rejects(c.request(logs(keepsFrom - 20n, keepsFrom + 20n)), /has no logs at block/, "a partial answer fails loudly, never passes as the whole range");
+    const archive = fakeRpc({ keepsFrom: 0n, vaultLogs });
+    const c2 = client(sdk.guardPrunedLogs(rpc.transport, CANARY, { archive: archive.transport }));
+    assert((await c2.request(logs(keepsFrom - 20n, keepsFrom + 20n))).length === 2, "with an archive, both logs come back");
+  }
+  // each RPC's proven block is kept for a while: a walk from the deploy block asks the canary once
+  {
+    const rpc = fakeRpc({ keepsFrom: 0n });
+    const c = client(sdk.guardPrunedLogs(rpc.transport, CANARY));
+    for (let s = 134_000_000n; s < 134_250_000n; s += 50_000n) await c.request(logs(s, s + 49_999n));
+    assert(canaryAsks(rpc.asked) === 1, "five old ranges, one canary read");
+    await c.request(logs(133_900_000n, 133_949_999n));
+    assert(canaryAsks(rpc.asked) === 2, "an older range than the proven block is checked again");
+    const fresh = fakeRpc({ keepsFrom: 0n });
+    const c2 = client(sdk.guardPrunedLogs(fresh.transport, CANARY, { floorTtlMs: 0 }));
+    await c2.request(logs(134_000_000n, 134_049_999n));
+    await c2.request(logs(134_050_000n, 134_099_999n));
+    assert(canaryAsks(fresh.asked) === 2, "once the proof is stale, the canary is asked again");
+  }
+  // archiveOnError: a log read the RPC fails goes to the archive, whose answer is checked too
+  {
+    const down = { asked: [], transport: custom({ request: async ({ method }) => { if (method === "eth_blockNumber") return toHex(HEAD); throw new Error("upstream down"); } }) };
+    const archive = fakeRpc({ keepsFrom: 0n, vaultLogs: [{ blockNumber: toHex(134_000_010n), address: POOL }] });
+    const c = client(sdk.guardPrunedLogs(down.transport, CANARY, { archive: archive.transport, archiveOnError: true }));
+    assert((await c.request(logs(134_000_000n, 134_049_999n))).length === 1, "the archive answers when the RPC is down");
+    const prunedArchive = fakeRpc({ keepsFrom: HEAD - 220_000n });
+    const c2 = client(sdk.guardPrunedLogs(down.transport, CANARY, { archive: prunedArchive.transport, archiveOnError: true }));
+    await rejects(c2.request(logs(134_000_000n, 134_049_999n)), /upstream down/, "a pruned archive's answer is refused, and the RPC's own error is thrown");
+    const c3 = client(sdk.guardPrunedLogs(down.transport, CANARY, { archive: archive.transport }));
+    await rejects(c3.request(logs(134_000_000n, 134_049_999n)), /upstream down/, "without archiveOnError the RPC's error stands");
   }
   // a pruned RPC (publicnode: about 220,000 blocks): an empty old range throws
   {
