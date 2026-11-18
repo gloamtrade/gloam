@@ -4113,7 +4113,7 @@ export function MoveView() {
           paidPrivately ? (
             <PrivatePayShare chainId={network.chainId} networkLabel={network.label} testnet={network.testnet} />
           ) : successTitle === "Cashed out" && xSent ? (
-            <CrossChainCashOutStatus quote={xSent} fromChain={network.label} />
+            <CrossChainCashOutStatus quote={xSent} fromChain={network.label} fromChainId={network.chainId} />
           ) : successTitle === "Cashed out" && cashedOut ? (
             <AddTokenToWallet chainId={network.chainId} asset={cashedOut.asset} to={cashedOut.to} />
           ) : undefined
