@@ -9,12 +9,12 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { faucetFor } from "@/lib/faucet";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
-import { MAINNET_ENABLED, getNetwork, NETWORK_KEYS, isNetworkKey, networkName, type NetworkKey } from "@/lib/networks";
+import { MAINNET_ENABLED, getNetwork, NETWORK_KEYS, isNetworkKey, networkName, type GloamNetwork, type NetworkKey } from "@/lib/networks";
 import { MAINNET_LAUNCH_ISO } from "@/lib/mainnet";
 import { parseUnits, type Address } from "viem";
 import { swapMainnets, swapRouterFor, vaultSwapRouter } from "@/lib/vaultSwap";
 import { SWAP_PUBLIC_LINE, SWAP_QUOTE_PER_MINUTE, SwapQuoteError, quoteSwapServer, type SwapQuote } from "@/lib/swapQuote";
-import { knownTokens } from "@/lib/tokens";
+import { knownTokens, shieldTokensFor } from "@/lib/tokens";
 import { redactRpcUrl } from "@gloamtrade/sdk";
 import { formatGwei, maxGasPriceWei } from "@/lib/relay/gasCeiling";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
@@ -124,6 +124,7 @@ const MAINNET_PROP_TEXT: Partial<Record<NetworkKey, string>> = {
   "base-mainnet": '"base-mainnet" (Base mainnet: USDC, EURC, USDT, ETH)',
   "ethereum-mainnet": '"ethereum-mainnet" (Ethereum mainnet: USDC, USDT, USDG, PYUSD, EURC, ETH)',
   "elysium-mainnet": '"elysium-mainnet" (Elysium mainnet: USDC, then HYPE and KNTQ once their queued deposit limits land; gas in HYPE)',
+  "bnb-mainnet": '"bnb-mainnet" (BNB Chain mainnet: USDT and USDC with 18 decimals, BNB, and BDX capped at 100,000 per deposit; gas in BNB)',
 };
 
 /** What each live mainnet takes as a deposit, for the networks tool. */
@@ -134,6 +135,7 @@ const MAINNET_DEPOSITS_TEXT = (
     ["base-mainnet", "USDC, EURC, USDT and ETH on Base"],
     ["ethereum-mainnet", "USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum"],
     ["elysium-mainnet", "USDC on Elysium, with HYPE and KNTQ once their queued deposit limits land"],
+    ["bnb-mainnet", "USDT, USDC (18 decimals each), BNB and BDX on BNB Chain"],
   ] as const
 )
   .filter(([k]) => (NETWORK_KEYS as readonly string[]).includes(k))
@@ -406,13 +408,21 @@ function networkView(key: NetworkKey, origin: string) {
     poolExplorer: n.pool ? n.explorerAddress(n.pool) : null,
     deployBlock: n.deployBlock?.toString() ?? null,
     paymentMessageBoard: n.payMemo?.address ?? null,
+    // BNB Chain only: its public RPCs keep about a day of logs (lib/bnb)
+    ...(n.logCanary
+      ? {
+          logs: "This chain's public RPCs keep about a day of logs and answer an empty list for older blocks. Read the vault tree from deployBlock through an RPC that keeps every log; the SDK's gloamReadTransport(network) refuses an empty answer the chain does not back, so a missing history fails loudly.",
+        }
+      : {}),
     swapRouter: vaultSwapRouter(n.chainId),
     gas:
       n.family === "tempo"
         ? "Paid in stablecoins; Tempo has no gas coin. Deposits are tokens only."
         : n.family === "elysium"
           ? "HYPE (Elysium's gas coin). Deposits: USDC, and HYPE and KNTQ once their queued deposit limits land (depositLimit above 0)."
-          : "ETH",
+          : n.family === "bnb"
+            ? "BNB (BNB Chain's gas coin), also a pool asset. Deposits: USDT and USDC (18 decimals each), BNB, and BDX (9 decimals, capped at 100,000 per deposit and 2,000,000 in total)."
+            : "ETH",
     // The relay pays the gas of relayed payments; over this price it waits (Ethereum)
     relayMaxGasGwei: (() => {
       const c = maxGasPriceWei(n.chainId);
@@ -841,6 +851,40 @@ const MPP_TAIL = {
 };
 
 /**
+ * A network's first stablecoin as an MPP currency line, for a chain with no
+ * named SDK constant of its own: Elysium's USDC and BNB Chain's USDT from their
+ * config objects, anything else from the app's token list, each in its own
+ * decimals (18 for USDT on BNB Chain), never 6 by default.
+ */
+function nativeStableLine(n: GloamNetwork): { import: string; line: string; decimals: number; symbol: string } {
+  if (n.family === "bnb") {
+    return {
+      import: "BNB_MAINNET",
+      line: "      currency: BNB_MAINNET.usdt.address, decimals: BNB_MAINNET.usdt.decimals, // USDT, 18 decimals on BNB Chain; or BNB_MAINNET.usdc",
+      decimals: 18,
+      symbol: "USDT",
+    };
+  }
+  const t = shieldTokensFor(n.chainId).find((x) => x.kind === "stablecoin");
+  const dec = t?.decimals ?? 18;
+  if (n.family === "elysium") {
+    return { import: "ELYSIUM_MAINNET", line: "      currency: ELYSIUM_MAINNET.usdc!, decimals: ELYSIUM_MAINNET.usdcDecimals, // USDC on Elysium", decimals: dec, symbol: "USDC" };
+  }
+  return { import: "", line: `      currency: "${t?.address ?? ""}", decimals: ${dec}, // ${t?.symbol ?? "a stablecoin"} on ${n.label}`, decimals: dec, symbol: t?.symbol ?? "" };
+}
+
+/**
+ * The payer's spending cap in the snippet: 0.05 of the asset in its own
+ * decimals. At 6 decimals that is the line every 6-decimal chain has always had.
+ */
+function policyLine(asset: { decimals: number; symbol: string }): string {
+  if (asset.decimals === 6) return "policy: { maxAmountWei: 50_000n },                  // refuse anything bigger, before proving";
+  const v = (5n * 10n ** BigInt(Math.max(asset.decimals, 2))) / 100n;
+  const lit = `${v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, "_")}n`;
+  return `policy: { maxAmountWei: ${lit} }, // 0.05 ${asset.symbol} in its ${asset.decimals} decimals: refuse anything bigger, before proving`;
+}
+
+/**
  * MPP on a mainnet, with the SDK 0.1.0 API: mainnetNetwork() gives the vault
  * (null until its pool is published), and proofs use the trusted setup's final
  * keys through circuitArtifactUrls(), never the testnet's development keys.
@@ -855,18 +899,21 @@ function mppHowToMainnet(role: "pay" | "charge" | "both", network: NetworkKey): 
   const name = n.label;
   // "Base testnet" for Base Sepolia, "Ethereum Sepolia", "Tempo mainnet" and so on for the mainnets.
   const where = n.testnet ? networkName(n) : `${name} mainnet`;
-  const asset =
+  // Each chain's own first stablecoin, in its own decimals: never another chain's, never 6 by default.
+  const asset: { import: string; line: string; decimals: number; symbol: string } =
     family === "tempo"
-      ? { import: "TEMPO_USDCE", line: "      currency: TEMPO_USDCE, decimals: 6,                 // or TEMPO_PATHUSD, TEMPO_USDT0, TEMPO_OUSD" }
+      ? { import: "TEMPO_USDCE", line: "      currency: TEMPO_USDCE, decimals: 6,                 // or TEMPO_PATHUSD, TEMPO_USDT0, TEMPO_OUSD", decimals: 6, symbol: "USDC.e" }
       : family === "base"
         ? n.testnet
-          ? { import: "BASE_SEPOLIA_USDC", line: "      currency: BASE_SEPOLIA_USDC, decimals: 6,           // or BASE_SEPOLIA_EURC" }
-          : { import: "BASE_USDC", line: "      currency: BASE_USDC, decimals: 6,                   // or BASE_EURC, BASE_USDT" }
+          ? { import: "BASE_SEPOLIA_USDC", line: "      currency: BASE_SEPOLIA_USDC, decimals: 6,           // or BASE_SEPOLIA_EURC", decimals: 6, symbol: "USDC" }
+          : { import: "BASE_USDC", line: "      currency: BASE_USDC, decimals: 6,                   // or BASE_EURC, BASE_USDT", decimals: 6, symbol: "USDC" }
         : family === "ethereum"
           ? n.testnet
-            ? { import: "ETHEREUM_SEPOLIA_USDC", line: "      currency: ETHEREUM_SEPOLIA_USDC, decimals: 6,       // or ETHEREUM_SEPOLIA_PYUSD, _USDG, _EURC" }
-            : { import: "ETHEREUM_USDC", line: "      currency: ETHEREUM_USDC, decimals: 6,               // or ETHEREUM_USDT, ETHEREUM_USDG, ETHEREUM_PYUSD" }
-          : { import: "RH_MAINNET_USDG", line: "      currency: RH_MAINNET_USDG, decimals: 6,             // or GLOAM_TOKEN, RH_MAINNET_PONS, RH_MAINNET_CASHCAT with decimals: 18" };
+            ? { import: "ETHEREUM_SEPOLIA_USDC", line: "      currency: ETHEREUM_SEPOLIA_USDC, decimals: 6,       // or ETHEREUM_SEPOLIA_PYUSD, _USDG, _EURC", decimals: 6, symbol: "USDC" }
+            : { import: "ETHEREUM_USDC", line: "      currency: ETHEREUM_USDC, decimals: 6,               // or ETHEREUM_USDT, ETHEREUM_USDG, ETHEREUM_PYUSD", decimals: 6, symbol: "USDC" }
+          : family === "robinhood"
+            ? { import: "RH_MAINNET_USDG", line: "      currency: RH_MAINNET_USDG, decimals: 6,             // or GLOAM_TOKEN, RH_MAINNET_PONS, RH_MAINNET_CASHCAT with decimals: 18", decimals: 6, symbol: "USDG" }
+            : nativeStableLine(n);
   const getter = n.testnet ? "testnetNetwork" : "mainnetNetwork";
   const sdkVersion = "0.7.1";
   const netLines = `const net = ${getter}("${family}");                   // null until the pool is published
@@ -881,7 +928,7 @@ if (!net) throw new Error("${where} pool not published yet");`;
     code: `import { Mppx } from "mppx/server";
 import { gloam } from "@gloamtrade/mppx-gloam/server";
 import { gloamChargeChainFromClient } from "@gloamtrade/mppx-gloam/core";
-import { artifactProver, circuitArtifactUrls, ${getter}, relayIntent, ${asset.import} } from "@gloamtrade/sdk";
+import { artifactProver, circuitArtifactUrls, ${getter}, relayIntent${asset.import ? `, ${asset.import}` : ""} } from "@gloamtrade/sdk";
 
 ${netLines}
 const mppx = Mppx.create({
@@ -927,7 +974,7 @@ const mppx = Mppx.create({
       pools: { [net.chainId]: net.pool },                 // pay only into Gloam's vault
       mode: "auto",                                       // pull when offered, else push
       submit: (intent) => relayIntent(intent),            // only needed for push
-      policy: { maxAmountWei: 50_000n },                  // refuse anything bigger, before proving
+      ${policyLine(asset)}
       beforeSubmit: (built) => wallet.keep(built.changeNote),
     }),
   ],

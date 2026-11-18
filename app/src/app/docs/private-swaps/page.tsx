@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ELYSIUM_ENABLED } from "@/lib/elysium";
+import { BNB_ENABLED } from "@/lib/bnb";
 import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
@@ -74,6 +75,7 @@ export default function DocsPrivateSwapsPage() {
         next to the swap, so the app does not offer it.
       </p>
       {ELYSIUM_ENABLED && <p>Private swaps are not on Elysium yet: there is no swap router there.</p>}
+      {BNB_ENABLED && <p>Private swaps are not on BNB Chain yet: there is no swap router there.</p>}
 
       <h2 id="pairs">What you can swap</h2>
       <div className="overflow-x-auto">

@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { swapMainnets } from "@/lib/vaultSwap";
-import { liveMainnetNames } from "@/lib/mainnet";
+import { joinNames, liveMainnetNames } from "@/lib/mainnet";
 import { ELYSIUM_ENABLED } from "@/lib/elysium";
+import { BNB_ENABLED } from "@/lib/bnb";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = {
@@ -294,7 +295,7 @@ export default function DocsAgentsPage() {
           address is kept encrypted with the job.
         </li>
         <li>
-          <strong>On Robinhood Chain, Tempo{ELYSIUM_ENABLED ? ", Base and Elysium" : " and Base"}.</strong> They aren&apos;t
+          <strong>On {joinNames(["Robinhood Chain", "Tempo", "Base", ...(ELYSIUM_ENABLED ? ["Elysium"] : []), ...(BNB_ENABLED ? ["BNB Chain"] : [])])}.</strong> They aren&apos;t
           offered on Ethereum: each one takes two relay transactions, and gas
           there costs more than the fee brings in.
         </li>
@@ -305,7 +306,8 @@ export default function DocsAgentsPage() {
         can add them up. Only where the money came from stays private. The agent
         needs its own gas: top-ups send stablecoins only, so on Robinhood Chain,
         where ETH isn&apos;t held in the vault, and on Base it needs ETH from
-        somewhere else{ELYSIUM_ENABLED ? ", and HYPE on Elysium" : ""}.
+        somewhere else{ELYSIUM_ENABLED ? ", and HYPE on Elysium" : ""}
+        {BNB_ENABLED ? ", and BNB on BNB Chain" : ""}.
       </p>
       <p>
         Keep your backup current after setting one up. The proofs wait with the

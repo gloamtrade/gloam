@@ -4,6 +4,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { mainnetPool } from "@/lib/mainnet";
 import { swapMainnets } from "@/lib/vaultSwap";
 import { ELYSIUM } from "@/lib/elysium";
+import { BNB } from "@/lib/bnb";
 import { CASH_OUT_FEE_BPS, CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 /** Mainnets whose pool is not in yet (lib/mainnet.ts): "Base mainnet and Ethereum" until their deploys. */
@@ -79,7 +80,8 @@ export default function DocsSdkReferencePage() {
                 <code>chain</code> is <code>&quot;robinhood&quot;</code>,{" "}
                 <code>&quot;tempo&quot;</code>, <code>&quot;base&quot;</code>{" "}
                 (0.3.0), <code>&quot;ethereum&quot;</code> (0.4.0)
-                {ELYSIUM ? <> or <code>&quot;elysium&quot;</code></> : null}. A mainnet{" "}
+                {ELYSIUM ? <> or <code>&quot;elysium&quot;</code></> : null}
+                {BNB ? <> or <code>&quot;bnb&quot;</code></> : null}. A mainnet{" "}
                 <code>GloamNetwork</code>, or <code>null</code> until its pool is
                 published{NOT_YET ? ` (${NOT_YET}: not yet)` : ""}
               </td>
@@ -113,6 +115,21 @@ export default function DocsSdkReferencePage() {
                 </td>
               </tr>
             )}
+            {BNB && (
+              <tr>
+                <td>
+                  <code>bnbMainnetConfig()</code>
+                </td>
+                <td>
+                  BNB Chain mainnet&apos;s values (chain id 56, RPCs, explorer, USDT, USDC and BDX with
+                  their decimals, pool and deploy block) from <code>BNB_MAINNET</code>, checked, or{" "}
+                  <code>null</code> while the pool is not in. USDT and USDC have 18 decimals there. Gas is BNB.
+                  Read it through <code>gloamReadTransport(network)</code>: its public RPCs keep about a day of
+                  logs, and the read refuses an empty answer the chain does not back
+                  (<code>PrunedLogsError</code>)
+                </td>
+              </tr>
+            )}
             <tr>
               <td>
                 <code>getGloamNetwork(key)</code>
@@ -122,6 +139,7 @@ export default function DocsSdkReferencePage() {
                 <code>&quot;tempo-mainnet&quot;</code>, <code>&quot;base-mainnet&quot;</code>,{" "}
                 <code>&quot;ethereum-mainnet&quot;</code>,{" "}
                 {ELYSIUM ? <><code>&quot;elysium-mainnet&quot;</code>, </> : null}
+                {BNB ? <><code>&quot;bnb-mainnet&quot;</code>, </> : null}
                 <code>&quot;robinhood&quot;</code>,{" "}
                 <code>&quot;tempo&quot;</code>, <code>&quot;base&quot;</code> or{" "}
                 <code>&quot;ethereum&quot;</code>; null while its pool is not in
@@ -801,7 +819,8 @@ fieldToBytes32(field: bigint | string): Hex`}</code>
         Mainnet (<code>4663</code>, <code>4217</code>
         {mainnetPool(8453) ? <>, <code>8453</code></> : null}
         {mainnetPool(1) ? <>, <code>1</code></> : null}
-        {ELYSIUM ? <>, <code>{ELYSIUM.chainId}</code> (Elysium)</> : null}) runs
+        {ELYSIUM ? <>, <code>{ELYSIUM.chainId}</code> (Elysium)</> : null}
+        {BNB ? <>, <code>{BNB.chainId}</code> (BNB Chain)</> : null}) runs
         on the final ceremony keys, with deposit limits and a
         {CASH_OUT_FEE_PERCENT} cash-out fee. The Robinhood Chain and Tempo testnets (
         <code>46630</code>, <code>42431</code>) run on dev-ceremony keys with

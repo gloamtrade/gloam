@@ -5,6 +5,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { PoolPicture } from "@/components/docs/FlowDiagram";
 import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { ELYSIUM_ENABLED } from "@/lib/elysium";
+import { BNB_ENABLED } from "@/lib/bnb";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
@@ -92,7 +93,8 @@ export default function DocsOverviewPage() {
           limits
         </li>
         <li>
-          Send public balances: ETH{ELYSIUM_ENABLED ? " (HYPE on Elysium)" : ""} and every token listed on the network
+          Send public balances: ETH{ELYSIUM_ENABLED ? " (HYPE on Elysium)" : ""}
+          {BNB_ENABLED ? " (BNB on BNB Chain)" : ""} and every token listed on the network
         </li>
         <li>
           Add privately: USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO
@@ -100,7 +102,8 @@ export default function DocsOverviewPage() {
           USDC.e, pathUSD, USDT0 and OUSD on Tempo mainnet;
           {BASE_LIVE ? " USDC, EURC, USDT and ETH on Base mainnet;" : ""}
           {ETHEREUM_LIVE ? " USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum mainnet;" : ""}
-          {ELYSIUM_ENABLED ? " USDC on Elysium mainnet;" : ""} test
+          {ELYSIUM_ENABLED ? " USDC on Elysium mainnet;" : ""}
+          {BNB_ENABLED ? " USDT, USDC, BNB and BDX on BNB Chain mainnet;" : ""} test
           ETH, stock tokens and stablecoins on the testnets
         </li>
         <li>

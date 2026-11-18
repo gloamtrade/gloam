@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
-import { MAINNET_CHAINS, liveMainnetNames } from "@/lib/mainnet";
+import { MAINNET_CHAINS, joinNames, liveMainnetNames } from "@/lib/mainnet";
 import { ELYSIUM_ENABLED, ELYSIUM_TESTNET } from "@/lib/elysium";
+import { BNB_ENABLED } from "@/lib/bnb";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
 import { CASH_OUT_FEE_BPS, CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
@@ -485,8 +486,13 @@ export async function verifyGloamCashout(args: {
         <li>Deposits and private payments are free. A cash out costs {CASH_OUT_FEE_PERCENT}.</li>
         <li>
           Mainnets: {liveMainnetNames()}, with deposit limits (50,000 of a
-          stablecoin per deposit{ELYSIUM_ENABLED ? "; 500 USDC on Elysium" : ""}).{" "}
-          {ELYSIUM_ENABLED && !ELYSIUM_TESTNET ? "Every network but Elysium has a testnet" : "Every network has a testnet"}; see{" "}
+          stablecoin per deposit{ELYSIUM_ENABLED ? "; 500 USDC on Elysium" : ""}
+          {BNB_ENABLED ? "; none on USDT and USDC on BNB Chain, where they have 18 decimals" : ""}).{" "}
+          {(() => {
+            const none = [...(ELYSIUM_ENABLED && !ELYSIUM_TESTNET ? ["Elysium"] : []), ...(BNB_ENABLED ? ["BNB Chain"] : [])];
+            return none.length ? `Every network but ${joinNames(none)} has a testnet` : "Every network has a testnet";
+          })()}
+          ; see{" "}
           <Link href="/docs/chain">Networks</Link>.
         </li>
         <li>

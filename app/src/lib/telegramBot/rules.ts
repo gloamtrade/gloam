@@ -10,6 +10,7 @@ import { baseSepoliaPool, ethereumSepoliaPool, liveMainnetNames, mainnetPool } f
 import { COPYCAT_GLOAM, GLOAM_TOKEN } from "./knowledge";
 import type { TgMessage, TgPhotoSize, TgUser } from "./telegram";
 import { ELYSIUM, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET } from "@/lib/elysium";
+import { BNB } from "@/lib/bnb";
 
 /** Forum topics in t.me/gloamhq, by message_thread_id. General messages carry no thread id. */
 export const TOPIC = { general: 1, testers: 2, announcements: 3, help: 4, feedback: 5, buys: 798 } as const;
@@ -1279,6 +1280,7 @@ export function ownAddress(a: string): boolean {
   if (baseSepoliaPool()?.pool.toLowerCase() === l) return true;
   if (ethereumSepoliaPool()?.pool.toLowerCase() === l) return true;
   if (ELYSIUM?.pool.toLowerCase() === l) return true;
+  if (BNB?.pool.toLowerCase() === l) return true;
   return ([4663, 4217, 8453, 1] as const).some((id) => mainnetPool(id)?.pool.toLowerCase() === l);
 }
 
@@ -1593,6 +1595,8 @@ const CHAIN_NAMES: Record<number, string> = {
   // Elysium, only while it is on (lib/elysium.ts)
   ...(ELYSIUM ? { [ELYSIUM.chainId]: "Elysium mainnet" } : {}),
   ...(ELYSIUM_TESTNET ? { [ELYSIUM_TESTNET.chainId]: "Elysium testnet" } : {}),
+  // BNB Chain, only while it is on (lib/bnb.ts)
+  ...(BNB ? { [BNB.chainId]: "BNB Chain mainnet" } : {}),
 };
 
 /** Hand-add details for a chain the app can ask for. */
@@ -1607,17 +1611,34 @@ const CHAIN_DETAILS: Record<number, string> = {
   11155111: "RPC https://ethereum-sepolia-rpc.publicnode.com, chain ID 11155111, currency ETH.",
   ...(ELYSIUM ? { [ELYSIUM.chainId]: `RPC ${ELYSIUM_RPC_DISPLAY}, chain ID ${ELYSIUM.chainId}, currency HYPE.` } : {}),
   ...(ELYSIUM_TESTNET ? { [ELYSIUM_TESTNET.chainId]: `RPC ${ELYSIUM_TESTNET.rpcUrl}, chain ID ${ELYSIUM_TESTNET.chainId}, currency HYPE.` } : {}),
+  // the public RPC only, never a keyed one
+  ...(BNB ? { [BNB.chainId]: `RPC ${BNB.rpcUrls[0]}, chain ID ${BNB.chainId}, currency BNB.` } : {}),
 };
 
 /** The fix for a wrong-network error, in the helper's voice: the wallet and the app can each be on a mainnet or a testnet. */
 export function chainFix(name: string, m: ChainMismatch): string {
-  const mainnets = new Set<number>([...([4663, 4217, 8453, 1] as const).filter((id) => mainnetPool(id)), ...(ELYSIUM ? [ELYSIUM.chainId] : [])]);
+  const mainnets = new Set<number>([
+    ...([4663, 4217, 8453, 1] as const).filter((id) => mainnetPool(id)),
+    ...(ELYSIUM ? [ELYSIUM.chainId] : []),
+    ...(BNB ? [BNB.chainId] : []),
+  ]);
   const want = `${chainLabel(m.want)} (${m.want})`;
   const tempo = m.want === 42431 || m.want === 4217;
   const base = m.want === 84532 || m.want === 8453;
   const ethereum = m.want === 11155111 || m.want === 1;
   const elysium = (ELYSIUM !== null && m.want === ELYSIUM.chainId) || (ELYSIUM_TESTNET !== null && m.want === ELYSIUM_TESTNET.chainId);
-  const button = tempo ? "Switch to Tempo" : base ? "Switch to Base" : ethereum ? "Switch to Ethereum" : elysium ? "Switch to Elysium" : "Switch to Robinhood Chain";
+  const bnb = BNB !== null && m.want === BNB.chainId;
+  const button = tempo
+    ? "Switch to Tempo"
+    : base
+      ? "Switch to Base"
+      : ethereum
+        ? "Switch to Ethereum"
+        : elysium
+          ? "Switch to Elysium"
+          : bnb
+            ? "Switch to BNB Chain"
+            : "Switch to Robinhood Chain";
   const twin: Record<number, number> = {
     46630: 4663,
     4663: 46630,

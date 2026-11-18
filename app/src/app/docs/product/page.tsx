@@ -5,6 +5,7 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { mainnetPool } from "@/lib/mainnet";
 import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_LIVE_SINCE } from "@/lib/elysium";
+import { BNB, BNB_LIVE_SINCE } from "@/lib/bnb";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
@@ -69,7 +70,7 @@ export default function DocsProductPage() {
           {
             n: "●",
             title: "Mainnet",
-            body: `Live on Robinhood Chain and Tempo since 21 October 2026, 13:00 UTC${LATER ? `, and on ${LATER} since 26 October 2026` : ""}${ELYSIUM ? `, and on Elysium since ${ELYSIUM_LIVE_SINCE}` : ""}, on the same vault, the final ceremony keys and deposit limits. Direct deposits and private payments are free; a cash out costs ${CASH_OUT_FEE_PERCENT}.`,
+            body: `Live on Robinhood Chain and Tempo since 21 October 2026, 13:00 UTC${LATER ? `, and on ${LATER} since 26 October 2026` : ""}${ELYSIUM ? `, and on Elysium since ${ELYSIUM_LIVE_SINCE}` : ""}${BNB ? `, and on BNB Chain since ${BNB_LIVE_SINCE}` : ""}, on the same vault, the final ceremony keys and deposit limits. Direct deposits and private payments are free; a cash out costs ${CASH_OUT_FEE_PERCENT}.`,
           },
           {
             n: "●",
@@ -79,7 +80,7 @@ export default function DocsProductPage() {
           {
             n: "●",
             title: "Shield",
-            body: `Mainnet: USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO on Robinhood Chain; USDC.e, pathUSD, USDT0 and OUSD on Tempo${BASE_LIVE ? "; USDC, EURC, USDT and ETH on Base" : ""}${ETHEREUM_LIVE ? "; USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum" : ""}${ELYSIUM ? "; USDC on Elysium" : ""}, under deposit limits. Testnet: also test ETH and Robinhood Chain stock tokens.`,
+            body: `Mainnet: USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO on Robinhood Chain; USDC.e, pathUSD, USDT0 and OUSD on Tempo${BASE_LIVE ? "; USDC, EURC, USDT and ETH on Base" : ""}${ETHEREUM_LIVE ? "; USDC, USDT, USDG, PYUSD, EURC and ETH on Ethereum" : ""}${ELYSIUM ? "; USDC on Elysium" : ""}${BNB ? "; USDT, USDC, BNB and BDX on BNB Chain" : ""}, under deposit limits. Testnet: also test ETH and Robinhood Chain stock tokens.`,
           },
           {
             n: "●",
@@ -155,6 +156,16 @@ export default function DocsProductPage() {
                   body: ELYSIUM
                     ? `The mainnet vault and final keys on Elysium, live since ${ELYSIUM_LIVE_SINCE}: USDC, gas in HYPE, and money brought over from other chains through Relay. Private swaps are not on Elysium yet.`
                     : "Coming: the mainnet vault and final keys on Elysium, USDC first, gas in HYPE.",
+                },
+              ]
+            : []),
+          // BNB Chain, only while it is on (lib/bnb): never "coming" before that.
+          ...(BNB
+            ? [
+                {
+                  n: "●",
+                  title: "BNB Chain",
+                  body: `The mainnet vault and final keys on BNB Chain, live since ${BNB_LIVE_SINCE}: USDT, USDC, BNB and BDX, gas in BNB. Private swaps are not on BNB Chain yet.`,
                 },
               ]
             : []),

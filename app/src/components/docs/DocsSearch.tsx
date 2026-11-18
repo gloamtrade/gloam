@@ -16,6 +16,7 @@ import { FLAT_DOCS_NAV, DOCS_NAV, findDocHeading, slugify } from "./DocsNav";
 import { CloseIcon, HashIcon, Kbd, PageIcon, SearchIcon, useIsMac } from "./docsUi";
 import { liveMainnetCountWords, liveMainnetNames } from "@/lib/mainnet";
 import { ELYSIUM_FLAG, ELYSIUM_TESTNET_FLAG } from "@/lib/elysium";
+import { BNB_ENABLED } from "@/lib/bnb";
 
 /* ------------------------------------------------------------------ */
 /* Static index: the nav list plus a hand-written description, a few   */
@@ -312,7 +313,7 @@ const PAGE_META: Record<string, PageMeta> = {
   },
   "/docs/chain": {
     description: `${liveMainnetNames()} mainnet, and their testnets: chain IDs, RPCs, pools, assets and deposit limits.`,
-    keywords: ["robinhood", "tempo", "base", "base sepolia", "chain id", "rpc", "network", "mainnet", "testnet", "4663", "4217", "8453", "46630", "42431", "84532", "1", "ethereum", "explorer", "pool address", "deposit limits", "deposit limit", "usdg", "usdc.e", "usdt0", "usdc", "eurc", "usdt", "pyusd", "gas", "gloam token", "relayer", "fees", "swap router", "treasury", "ethereum sepolia", "sepolia", "11155111", ...(ELYSIUM_FLAG || ELYSIUM_TESTNET_FLAG ? ["elysium", "hype", "hyperliquid", "99801"] : [])],
+    keywords: ["robinhood", "tempo", "base", "base sepolia", "chain id", "rpc", "network", "mainnet", "testnet", "4663", "4217", "8453", "46630", "42431", "84532", "1", "ethereum", "explorer", "pool address", "deposit limits", "deposit limit", "usdg", "usdc.e", "usdt0", "usdc", "eurc", "usdt", "pyusd", "gas", "gloam token", "relayer", "fees", "swap router", "treasury", "ethereum sepolia", "sepolia", "11155111", ...(ELYSIUM_FLAG || ELYSIUM_TESTNET_FLAG ? ["elysium", "hype", "hyperliquid", "99801"] : []), ...(BNB_ENABLED ? ["bnb", "bnb chain", "bsc", "56", "bdx", "beldex"] : [])],
     headings: [
       `${liveMainnetCountWords().replace(/^./, (c) => c.toUpperCase())}, one shielded pool design`,
       "Mainnet",
@@ -323,6 +324,7 @@ const PAGE_META: Record<string, PageMeta> = {
       "Ethereum Sepolia",
       ...(ELYSIUM_FLAG ? ["Elysium"] : []),
       ...(ELYSIUM_TESTNET_FLAG ? ["Elysium testnet"] : []),
+      ...(BNB_ENABLED ? ["BNB Chain"] : []),
       "Switching networks in the app",
       "Honest status",
     ],

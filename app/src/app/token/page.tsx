@@ -13,6 +13,7 @@ import { CASH_OUT_FEE_BPS, MAX_CASH_OUT_FEE_BPS, bpsPercent } from "@/lib/cashOu
 import { BURN_ADDRESS, BUYBACKS, GLOAM_TOKEN, TREASURY_ADDRESS, buybackBurnedUnits, toUnits } from "@/lib/buybacks";
 import { readTokenLive, type TokenLive, type VaultFee } from "@/lib/tokenLive";
 import { ELYSIUM } from "@/lib/elysium";
+import { BNB } from "@/lib/bnb";
 import { chainLogoSrc } from "@/lib/chainLogo";
 
 /**
@@ -510,8 +511,10 @@ function BuybacksSection({ live }: { live: TokenLive }) {
 function SecuritySection({ live }: { live: TokenLive }) {
   const elysiumId = ELYSIUM?.chainId ?? null;
   const elysiumLive = elysiumId !== null && live.fees.some((f) => f.chainId === elysiumId);
-  // Read 9 November 2026: owner() on these vaults is a wallet, on Elysium the guard.
-  const walletOwned = joinNames(live.fees.filter((f) => f.chainId !== elysiumId).map((f) => f.name));
+  const bnbId = BNB?.chainId ?? null;
+  const bnbLive = bnbId !== null && live.fees.some((f) => f.chainId === bnbId);
+  // Read 9 November 2026: owner() on these vaults is a wallet, on Elysium (and BNB Chain, born the same way) the guard.
+  const walletOwned = joinNames(live.fees.filter((f) => f.chainId !== elysiumId && f.chainId !== bnbId).map((f) => f.name));
   const items: { title: string; body: ReactNode }[] = [
     {
       title: "Open source",
@@ -555,6 +558,7 @@ function SecuritySection({ live }: { live: TokenLive }) {
           On every mainnet vault, a new proof checker, a higher fee or higher deposit limits wait three days in a public
           queue on chain. Lowering a fee or a limit is instant.
           {elysiumLive && <> The Elysium vault is owned by a guard contract (VaultOwnerGuard), so its proof checkers can never be replaced.</>}
+          {bnbLive && <> So is the BNB Chain vault, with a 2 of 3 multisig running its guard.</>}
           {walletOwned && <> The {walletOwned} vaults are owned by a team wallet.</>} Follow it on{" "}
           <Link href="/transparency" className={LINK}>
             Transparency
