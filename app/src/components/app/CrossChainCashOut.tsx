@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Address } from "viem";
 import { chainLogo } from "@/lib/bridge";
+import { TokenLogo } from "./TokenLogo";
 import type { BridgeStage } from "@/lib/bridge";
 import { shortAddress } from "@/lib/chain";
 import {
@@ -313,7 +314,7 @@ export function CrossChainQuoteCard({
 }
 
 /** Where a cash out to another chain stands, read from Relay every few seconds until it ends. */
-export function CrossChainCashOutStatus({ quote, fromChain }: { quote: CrossChainQuote; fromChain: string }) {
+export function CrossChainCashOutStatus({ quote, fromChain, fromChainId }: { quote: CrossChainQuote; fromChain: string; fromChainId: number }) {
   const [stage, setStage] = useState<BridgeStage>("waiting");
 
   useEffect(() => {
@@ -350,22 +351,45 @@ export function CrossChainCashOutStatus({ quote, fromChain }: { quote: CrossChai
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3 rounded-[14px] bg-surface px-4 py-3.5 text-left">
-        <ChainLogo id={d.chainId} size={28} />
-        <div className="min-w-0 flex-1">
-          <p className="tnum truncate text-[15px] text-foreground">{`${money(quote.receive.amount)} ${d.symbol}`}</p>
-          <p className="truncate text-[12.5px] text-mute">{`${fromChain} → ${d.chain}`}</p>
+      <div className="rounded-[18px] bg-surface px-5 py-4 text-left">
+        {/* What arrives: the token's own mark and the amount, its status at the right */}
+        <div className="flex items-center gap-3">
+          <TokenLogo id={d.symbol.toLowerCase()} symbol={d.symbol} size={36} />
+          <p className="tnum min-w-0 flex-1 truncate text-[22px] font-light leading-none tracking-[-0.02em] text-foreground">
+            {money(quote.receive.amount)} <span className="text-[14px] tracking-normal text-mute">{d.symbol}</span>
+          </p>
+          <span
+            className={`inline-flex shrink-0 items-center gap-1.5 text-[12.5px] ${
+              trouble ? "text-warn" : stage === "done" ? "font-medium text-sealed" : "text-mute"
+            }`}
+          >
+            {stage === "done" && (
+              <span aria-hidden className="grid h-5 w-5 place-items-center rounded-full bg-sealed text-panel">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                  <path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+            )}
+            {state}
+          </span>
         </div>
-        <span className={`inline-flex shrink-0 items-center gap-1.5 text-[12.5px] ${trouble ? "text-warn" : stage === "done" ? "font-medium text-sealed" : "text-mute"}`}>
-          {stage === "done" && (
-            <span aria-hidden className="grid h-5 w-5 place-items-center rounded-full bg-sealed text-panel">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                <path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </span>
-          )}
-          {state}
-        </span>
+
+        {/* The route: from chain to chain, a dot travelling the line until it lands */}
+        <div className="mt-4 flex items-center gap-2.5 border-t border-line pt-4" aria-label={`${fromChain} to ${d.chain}`}>
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <ChainLogo id={fromChainId} size={20} />
+            <span className="truncate text-[13px] text-soft">{fromChain}</span>
+          </span>
+          <span aria-hidden className={`relative mx-1 h-[2px] min-w-8 flex-1 rounded-full ${stage === "done" ? "bg-sealed" : "bg-line"}`}>
+            {!trouble && stage !== "done" && (
+              <span className="gl-route-dot absolute top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-foreground motion-reduce:hidden" />
+            )}
+          </span>
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <ChainLogo id={d.chainId} size={20} />
+            <span className="truncate text-[13px] text-soft">{d.chain}</span>
+          </span>
+        </div>
       </div>
       {trouble && (
         <p className="text-[12.5px] leading-relaxed text-warn">
