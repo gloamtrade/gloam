@@ -358,7 +358,7 @@ export function CrossChainCashOutStatus({ quote, fromChain }: { quote: CrossChai
         </div>
         <span className={`inline-flex shrink-0 items-center gap-1.5 text-[12.5px] ${trouble ? "text-warn" : stage === "done" ? "font-medium text-sealed" : "text-mute"}`}>
           {stage === "done" && (
-            <span aria-hidden className="grid h-5 w-5 place-items-center rounded-full bg-sealed text-white">
+            <span aria-hidden className="grid h-5 w-5 place-items-center rounded-full bg-sealed text-panel">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
                 <path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
