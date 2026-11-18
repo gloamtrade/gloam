@@ -153,6 +153,7 @@ import {
 import { cashOutPrivacyWarnings, depositWallets } from "@/lib/cashOutPrivacy";
 import { CashOutPercentChips, CashOutWarnings } from "./CashOutPrivacy";
 import { BalancePicker } from "./BalancePicker";
+import { PrivacyCard } from "./PrivacyCard";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { codeFromHash } from "@/lib/claimLink";
 import { dropClaimLink, keepClaimLink, keptClaimLink, onForgetClaim, onGoToClaim, setClaimWaiting } from "@/lib/claimLinkStore";
@@ -303,6 +304,7 @@ export function MoveView() {
   const [sendAmount, setSendAmount] = useState(
     () => request?.amount ?? suggestion?.amount ?? ""
   );
+  const sendAmountRef = useRef<HTMLInputElement>(null);
   // Private note that travels inside the payment (lib/paymentNote). A request's
   // note comes along by default; the payer can change or remove it.
   const [payNote, setPayNote] = useState(() => request?.note ?? "");
@@ -980,6 +982,7 @@ export function MoveView() {
   const maxEth = selected
     ? formatUnits(BigInt(selected.amountWei), assetDecimals(selected.asset))
     : "0";
+  const sendTypedWei = sendAmount.trim() && selected ? parseAssetAmount(sendAmount.trim(), selected.asset) : null;
 
   const cashOutAsset = selected?.asset as `0x${string}` | undefined;
   const { deposited: poolForCashOut } = usePoolDeposited(
@@ -2595,7 +2598,7 @@ export function MoveView() {
 
   return (
     <>
-      <div className={`grid items-start gap-6 ${mode === "cashout" ? "" : "lg:grid-cols-[minmax(0,1fr)_340px]"}`}>
+      <div className={`grid items-start gap-6 ${mode === "receive" ? "lg:grid-cols-[minmax(0,1fr)_340px]" : ""}`}>
         {/* Send, Receive and Cash out are picked in the Vault's own row
             (VaultHub: Pay privately, Receive, Cash out) through ?mode=, so
             the card has no row of its own; the first block sits at the top. */}
@@ -2901,12 +2904,7 @@ export function MoveView() {
                       <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
                         That Gloam address looks incomplete or mistyped. Copy it again from their Receive page.
                       </p>
-                    ) : (
-                      <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
-                        Like sending to an address, but private. They find their
-                        Gloam address under Receive.
-                      </p>
-                    )}
+                    ) : null}
                     {(contacts.length > 0 || recipientTag.trim().startsWith("gloamr1.")) && (
                       <div className="mt-3 flex flex-wrap items-center gap-1.5">
                         {contacts.map((c) => (
@@ -2951,6 +2949,7 @@ export function MoveView() {
                     <div className="gl-inputcard mt-2 flex items-center gap-3 rounded-[16px] py-2 pl-4 pr-2">
                       <input
                         id="pay-amt"
+                        ref={sendAmountRef}
                         inputMode="decimal"
                         autoComplete="off"
                         value={sendAmount}
@@ -2963,19 +2962,25 @@ export function MoveView() {
                           {assetLabel(selected.asset)}
                         </span>
                       )}
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm shrink-0"
-                        onClick={() => setSendAmount(maxEth)}
-                      >
-                        Max
-                      </button>
                     </div>
                     <AmountProblem value={sendAmount} decimals={selected ? assetDecimals(selected.asset) : undefined} />
-                    <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
-                      The amount never shows up on the explorer. Anything left
-                      over stays in your private balance.
-                    </p>
+                    {selected && (
+                      <CashOutPercentChips
+                        balance={BigInt(selected.amountWei)}
+                        decimals={assetDecimals(selected.asset)}
+                        current={sendTypedWei}
+                        maxActive={sendTypedWei !== null && sendTypedWei === BigInt(selected.amountWei)}
+                        onPick={setSendAmount}
+                        onMax={() => setSendAmount(maxEth)}
+                        onCustom={() => {
+                          const el = sendAmountRef.current;
+                          if (!el) return;
+                          el.focus();
+                          requestAnimationFrame(() => el.select());
+                        }}
+                        disabled={working}
+                      />
+                    )}
                   </div>
 
                   <PayNoteField
@@ -2988,7 +2993,19 @@ export function MoveView() {
                     locked={Boolean(sendPassphrase.trim())}
                   />
 
-                  {relayToggle}
+                  {gasHigh && <RelayGasNotice status={relayStatus} label={network.label} />}
+                  <PrivacyCard
+                    title="Hide my wallet"
+                    line={relayOn ? "Gloam sends it for you, so your wallet never shows up next to it." : "Your wallet shows as the sender on the explorer."}
+                    on={relayOn}
+                    available={relayAvailable}
+                    reason="The relay that hides your wallet is offline right now."
+                    onToggle={(v) => {
+                      setRelayOn(v);
+                      setRelayPreferred(v);
+                    }}
+                    disabled={working}
+                  />
 
                   {!connectedOk ? (
                     connectPrompt("pay privately")
@@ -3050,12 +3067,6 @@ export function MoveView() {
                       >
                         Refresh
                       </button>
-                    </p>
-                  )}
-                  {memoLive && payStyle === "direct" && (
-                    <p className="text-center text-[12.5px] leading-relaxed text-mute">
-                      They get a private heads-up, so the payment shows up under
-                      Receive on their side. No QR needed.
                     </p>
                   )}
                   {shareBlob && (
@@ -3900,7 +3911,7 @@ export function MoveView() {
           )}
         </div>
 
-        {mode !== "cashout" && (
+        {mode === "receive" && (
         <aside className="space-y-4">
           {mode === "receive" ? (
             <div className="gl-card p-5">
@@ -4036,15 +4047,14 @@ export function MoveView() {
           busyAction === "memo" ||
           shareBlob ? (
             <>
-              <p>
-                {memoPosted
-                  ? "They got a private heads-up, so the payment shows up under Receive on their side. The claim code on the page is a backup."
-                  : "This code is the money. Copy, download or share it now. A copy stays under Sent links in this browser only, and anything left over stays in your private balance."}
-              </p>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-sealed-soft px-3 py-1 text-[13px] font-medium text-sealed">
+                <LockIcon size={11} />
+                Private payment
+              </span>
+              {!memoPosted && <p className="mt-3">This code is the money. Save or share it now.</p>}
               {sentNote && (
                 <p className="mt-3 break-words">
-                  Your note went with it:{" "}
-                  <span className="text-foreground">{sentNote}</span>
+                  Note: <span className="text-foreground">{sentNote}</span>
                 </p>
               )}
             </>
