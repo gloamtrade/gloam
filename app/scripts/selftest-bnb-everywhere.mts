@@ -163,11 +163,12 @@ ok(vaultSwapRouter(CHAIN_ID) === null, "no swap router on BNB Chain");
 ok(!swapMainnets().includes("BNB Chain"), "the swap chains leave BNB Chain out");
 for (const raw of ["1", "true", "TRUE", "on", "yes", " 1 "]) {
   ok(bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} turns it on`);
-  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === 2, `${JSON.stringify(raw)}: the CSP allows its two public RPCs`);
+  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw, NEXT_PUBLIC_BNB_POOL: "0x89d3042390204f57b8b4F8949D3c2203E4002164" } as unknown as NodeJS.ProcessEnv).length === 2, `${JSON.stringify(raw)} with a pool: the CSP allows its two public RPCs`);
+  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === 0, `${JSON.stringify(raw)} with no pool: nothing to allow yet`);
 }
 for (const raw of [undefined, "", "0", "false", "off", "no", "enabled", "2"]) {
   ok(!bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} leaves it off`);
-  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === 0, `${JSON.stringify(raw)}: no BNB Chain RPC in the CSP`);
+  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw, NEXT_PUBLIC_BNB_POOL: "0x89d3042390204f57b8b4F8949D3c2203E4002164" } as unknown as NodeJS.ProcessEnv).length === 0, `${JSON.stringify(raw)}: no BNB Chain RPC in the CSP`);
 }
 // A proof's amount reads in its own chain's decimals, whatever network the browser has open.
 ok(amountOf("1250000000", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 8453) === "1,250", "a Base USDC proof reads in 6 decimals");
