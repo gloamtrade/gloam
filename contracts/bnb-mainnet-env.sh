@@ -119,7 +119,10 @@ else
 fi
 if [ "$_nonce" != 0 ]; then
   echo "NOTE: the deployer's nonce is $_nonce, not 0: the vault will not land at 0x89d3...2164. That is safe, but the planned addresses in DEPLOY-BNB.md no longer apply."
+  echo "      deploy-poseidon.mjs refuses until you set EXPECT_DEPLOYER_NONCE=$_nonce yourself."
 fi
+# deploy-poseidon.mjs (step 4) refuses unless the RPC is chain 56 and the deployer's next nonce is this one.
+export EXPECT_CHAIN_ID=56 EXPECT_DEPLOYER_NONCE=${EXPECT_DEPLOYER_NONCE:-0}
 # BNB Chain meters plain EVM gas: creating ShieldVerifierFinal was about 389,744 on Ethereum,
 # Base and Elysium. A number far above it means something is off: do not broadcast.
 _gas=$(cast estimate --rpc-url "$RPC_URL" --create $(forge inspect ShieldVerifierFinal bytecode) 2>/dev/null)

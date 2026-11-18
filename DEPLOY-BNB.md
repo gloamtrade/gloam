@@ -179,11 +179,13 @@ From `contracts/` in a fresh worktree of `main` (with `pnpm install` done, and
 
 4. **PoseidonT3.**
    ```bash
-   POSEIDON_T3_ONLY=1 PRIORITY_FEE_GWEI=0.05 node circuits/scripts/deploy-poseidon.mjs
+   EXPECT_CHAIN_ID=56 POSEIDON_T3_ONLY=1 PRIORITY_FEE_GWEI=0.05 node circuits/scripts/deploy-poseidon.mjs
    export POSEIDON2=0x62c435CE6886fa91e3b0e91500c6dC9219723457   # or what it printed
    cast code $POSEIDON2 --rpc-url $RPC_URL | cast keccak            # 0x354b2699…e7da
    ```
-   `PRIORITY_FEE_GWEI=0.05` tips what BNB Chain charges instead of ethers' fixed 1.5 gwei.
+   `PRIORITY_FEE_GWEI=0.05` tips what BNB Chain charges instead of ethers' fixed 1.5 gwei. It
+   refuses, sending nothing, unless the RPC is chain 56 and the deployer's next nonce is
+   `EXPECT_DEPLOYER_NONCE` (step 3 sets it to 0, the planned one).
 
 5. **The vault, born guarded.**
    ```bash

@@ -14,6 +14,12 @@
  * PRIORITY_FEE_GWEI sets the tip. Without it, ethers v5 tips 1.5 gwei, which on
  * Ethereum can be fifty times the base fee itself; with it, the max fee is twice
  * the latest base fee plus that tip. Leave it unset on the L2s.
+ *
+ * EXPECT_CHAIN_ID and EXPECT_DEPLOYER_NONCE make it refuse, before sending
+ * anything, unless the RPC is that chain and the deployer's next nonce is that
+ * one (its pending count), so PoseidonT3 never lands on the wrong chain or at
+ * an unplanned address. On BNB Chain (56) the nonce is required:
+ * DEPLOY-BNB.md plans PoseidonT3 at the deployer's nonce 0.
  */
 import { writeFileSync, mkdirSync } from "fs";
 
@@ -59,8 +65,17 @@ async function main() {
   }
 
   const { chainId } = await provider.getNetwork();
-  const nonce = await provider.getTransactionCount(wallet.address);
+  const nonce = await provider.getTransactionCount(wallet.address, "pending");
   console.log("chainId", String(chainId), "deployer", wallet.address, "nonce", nonce);
+  const expectChain = process.env.EXPECT_CHAIN_ID?.trim();
+  const expectNonce = process.env.EXPECT_DEPLOYER_NONCE?.trim();
+  const stop = (why) => {
+    console.error(`STOP: ${why} Nothing was sent.`);
+    process.exit(1);
+  };
+  if (expectChain && String(chainId) !== expectChain) stop(`the RPC is chain ${chainId}, not EXPECT_CHAIN_ID ${expectChain}.`);
+  if (String(chainId) === "56" && !expectNonce) stop("on BNB Chain set EXPECT_DEPLOYER_NONCE to the nonce DEPLOY-BNB.md plans PoseidonT3 at (0).");
+  if (expectNonce && String(nonce) !== expectNonce) stop(`the deployer's next nonce is ${nonce}, not EXPECT_DEPLOYER_NONCE ${expectNonce}.`);
 
   const p2 = await deploy(2, "Poseidon2");
   const p3 = T3_ONLY ? null : await deploy(3, "Poseidon3");
