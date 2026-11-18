@@ -4,14 +4,17 @@
  *  - the arithmetic: worst state, a day's bar (none, ok, degraded, down by
  *    share), uptime that never reads 100% with a check down, the last 90 UTC
  *    days across a year end, days with no checks left out of the uptime
- *  - the verdicts: a stale or stopped chain, a slow RPC, vaults and Relay's
- *    chains failing on some or all, the relay paused or waiting for gas
- *  - the parts: the networks people can see only (no hidden testnet)
+ *  - the verdicts: a stale or stopped chain, a slow RPC, a vault or verifier
+ *    with no answer, a verifier that takes an empty proof; the relay per
+ *    network paused, out of gas, low on gas, waiting for gas, at its cap; a
+ *    check made per network failing on some or all; Glim's webhook; Turnkey
+ *  - the parts: the networks people can see only (no hidden testnet), every
+ *    group filled
  *  - the history: a run counted into today, 90 days read back, a day with no
  *    run all zeros, the cron refused without its secret
- *  - nothing leaks: with a keyed private RPC set and every request failing
- *    with that URL in its error, no URL or key is in the result, every part
- *    is down, and the checks end inside their cap
+ *  - nothing leaks: with a keyed private RPC and a bot token set and every
+ *    request failing with its URL in the error, no URL, key or token is in
+ *    the result, every part is down, and the checks end inside their cap
  *
  * Uses the in-process store (GLOAM_PARTNERS_STORE=memory); nothing reaches any host.
  *
@@ -106,75 +109,124 @@ ok("days and formats");
 
 const rh = { family: "robinhood" as const, testnet: false };
 const eth = { family: "ethereum" as const, testnet: false };
-assert.equal(checks.judgeHead(rh, null).status, "down");
-assert.equal(checks.judgeHead(rh, { ms: 120, blockAgeS: 2 }).status, "operational");
-assert.equal(checks.judgeHead(rh, { ms: 120, blockAgeS: -3 }).status, "operational", "a clock a little ahead is fine");
-assert.equal(checks.judgeHead(rh, { ms: 4_500, blockAgeS: 1 }).status, "degraded");
-assert.match(checks.judgeHead(rh, { ms: 4_500, blockAgeS: 1 }).reason!, /Slow to answer \(4\.5 s\)/);
-assert.equal(checks.judgeHead(rh, { ms: 120, blockAgeS: 75 }).status, "degraded");
-assert.match(checks.judgeHead(rh, { ms: 120, blockAgeS: 240 }).reason!, /4 min old/);
-assert.equal(checks.judgeHead(rh, { ms: 120, blockAgeS: 700 }).status, "down");
-assert.equal(checks.judgeHead(eth, { ms: 120, blockAgeS: 75 }).status, "operational", "Ethereum slots are 12 s, some missed");
-assert.equal(checks.judgeHead(eth, { ms: 120, blockAgeS: 200 }).status, "degraded");
-ok("chain head: stale, stopped, slow");
+const fine = { vault: true, verifier: "rejects" as const };
+const head = (ms: number, blockAgeS: number) => ({ ...fine, head: { ms, blockAgeS } });
+assert.equal(checks.judgeNetwork(rh, { ...fine, head: null }).status, "down");
+assert.equal(checks.judgeNetwork(rh, head(120, 2)).status, "operational");
+assert.equal(checks.judgeNetwork(rh, head(120, 2)).detail, "Latest block 2 s ago · Vault and verifier answer");
+assert.equal(checks.judgeNetwork(rh, head(120, -3)).status, "operational", "a clock a little ahead is fine");
+assert.equal(checks.judgeNetwork(rh, head(4_500, 1)).status, "degraded");
+assert.match(checks.judgeNetwork(rh, head(4_500, 1)).reason!, /Slow to answer \(4\.5 s\)/);
+assert.equal(checks.judgeNetwork(rh, head(120, 75)).status, "degraded");
+assert.match(checks.judgeNetwork(rh, head(120, 240)).reason!, /4 min old/);
+assert.equal(checks.judgeNetwork(rh, head(120, 700)).status, "down");
+assert.equal(checks.judgeNetwork(eth, head(120, 75)).status, "operational", "Ethereum slots are 12 s, some missed");
+assert.equal(checks.judgeNetwork(eth, head(120, 200)).status, "degraded");
+assert.equal(checks.judgeNetwork(rh, { head: { ms: 90, blockAgeS: 1 }, vault: false, verifier: "rejects" }).reason, "The vault did not answer.");
+assert.equal(checks.judgeNetwork(rh, { head: { ms: 90, blockAgeS: 1 }, vault: true, verifier: null }).reason, "The proof verifier did not answer.");
+assert.equal(checks.judgeNetwork(rh, { head: { ms: 90, blockAgeS: 1 }, vault: false, verifier: null }).status, "degraded");
+const accepts = checks.judgeNetwork(rh, { head: { ms: 90, blockAgeS: 1 }, vault: true, verifier: "accepts" });
+assert.equal(accepts.status, "down", "a verifier that takes an empty proof is down");
+assert.equal(accepts.reason, "The verifier accepted an empty proof.");
+ok("networks: stale, stopped, slow, vault and verifier");
 
-assert.equal(checks.judgeVaults([{ name: "Base", ms: 90 }, { name: "Tempo", ms: 110 }]).status, "operational");
-assert.equal(checks.judgeVaults([{ name: "Base", ms: 90 }, { name: "Tempo", ms: 110 }]).latencyMs, 110);
-const someVaults = checks.judgeVaults([{ name: "Base", ms: null }, { name: "Tempo", ms: 110 }, { name: "Ethereum", ms: null }]);
-assert.equal(someVaults.status, "degraded");
-assert.equal(someVaults.reason, "No answer from the vault on Base and Ethereum.");
-assert.equal(checks.judgeVaults([{ name: "Base", ms: null }]).status, "down");
-ok("vaults");
+const wei = (coins: number) => BigInt(Math.round(coins * 1e18));
+const api = (network: object | null) => ({ ms: 80, network: network as never });
+const on = { chainId: 4663, enabled: true };
+const reserve = wei(0.0001);
+const gas = (left: number) => ({ left: wei(left), reserve, decimals: 18, symbol: "ETH" });
+assert.equal(checks.judgeRelayNet({ api: null, gas: null, spendPct: null }).status, "down");
+const healthy = checks.judgeRelayNet({ api: api(on), gas: gas(0.0044), spendPct: 3.4 });
+assert.equal(healthy.status, "operational");
+assert.equal(healthy.detail, "Gas 0.0044 ETH · 3% of this hour's cap used");
+const low = checks.judgeRelayNet({ api: api(on), gas: gas(0.0006), spendPct: 0 });
+assert.equal(low.status, "degraded", "under ten times the reserve");
+assert.equal(low.reason, "Low on gas: about 12 sends left.");
+assert.equal(checks.judgeRelayNet({ api: api(on), gas: gas(0.001), spendPct: 0 }).status, "operational", "ten times the reserve is fine");
+const empty = checks.judgeRelayNet({ api: api({ chainId: 4663, enabled: false, lowBalance: true }), gas: gas(0.00005), spendPct: 0 });
+assert.equal(empty.status, "down");
+assert.equal(empty.reason, "Out of gas: paused until it is topped up.");
+assert.equal(checks.judgeRelayNet({ api: api(null), gas: null, spendPct: null }).reason, "Paused.", "a network missing from the answer is paused");
+assert.equal(checks.judgeRelayNet({ api: api({ ...on, gasHigh: true }), gas: gas(1), spendPct: 0 }).reason, "Waiting for network gas to come down.");
+const capped = checks.judgeRelayNet({ api: api(on), gas: gas(1), spendPct: 85 });
+assert.equal(capped.status, "degraded", "new sends stop at 80% of the cap");
+assert.equal(capped.reason, "This hour's cap is used up for new sends.");
+assert.equal(checks.judgeRelayNet({ api: api(on), gas: gas(1), spendPct: 140 }).detail, "Gas 1 ETH · 100% of this hour's cap used");
+assert.equal(checks.judgeRelayNet({ api: api(on), gas: null, spendPct: null }).detail, null);
+ok("relay per network: paused, out of gas, low gas, gas high, cap");
 
-const nets = [
-  { chainId: 4663, name: "Robinhood Chain" },
-  { chainId: 1, name: "Ethereum" },
-];
-assert.equal(checks.judgeRelay(nets, null).status, "down");
-assert.equal(
-  checks.judgeRelay(nets, { ms: 80, networks: [{ chainId: 4663, enabled: true }, { chainId: 1, enabled: true }, { chainId: 46630, enabled: false }] }).status,
-  "operational",
-  "a hidden network's relay does not count"
-);
-const gas = checks.judgeRelay(nets, { ms: 80, networks: [{ chainId: 4663, enabled: true }, { chainId: 1, enabled: true, gasHigh: true }] });
-assert.equal(gas.status, "degraded");
-assert.equal(gas.reason, "Waiting for lower gas on Ethereum.");
-const paused = checks.judgeRelay(nets, { ms: 80, networks: [{ chainId: 4663, enabled: true }] });
-assert.equal(paused.status, "degraded");
-assert.equal(paused.reason, "Paused on Ethereum.", "a network missing from the answer is paused");
-assert.equal(checks.judgeRelay(nets, { ms: 80, networks: [{ chainId: 4663, enabled: false }, { chainId: 1, enabled: false }] }).status, "down");
-ok("relay");
+const words = { none: "none", some: (names: string) => `some: ${names}`, all: "all" };
+assert.equal(checks.judgeEach([], words).status, "down");
+assert.equal(checks.judgeEach([{ name: "Base", ms: 50, ok: true }], words).status, "operational");
+const someBad = checks.judgeEach([{ name: "Base", ms: 50, ok: false }, { name: "Tempo", ms: null, ok: false }, { name: "Ethereum", ms: 60, ok: true }], words);
+assert.equal(someBad.status, "degraded");
+assert.equal(someBad.reason, "some: Base and Tempo");
+assert.equal(checks.judgeEach([{ name: "Base", ms: null, ok: false }], words).status, "down");
+assert.equal(checks.judgeEach([{ name: "Base", ms: 5_000, ok: true }], words).status, "degraded", "slow");
+ok("per-network parts: some, all, slow");
 
-assert.equal(checks.judgeBridge([{ name: "Base", ms: 50, healthy: true }]).status, "operational");
-assert.equal(checks.judgeBridge([{ name: "Base", ms: 50, healthy: false }, { name: "Tempo", ms: 60, healthy: true }]).reason, "Relay reports a problem on Base.");
-assert.equal(checks.judgeBridge([{ name: "Base", ms: null, healthy: false }]).status, "down");
-ok("bridge");
+const nowS = 1_800_000_000;
+assert.equal(checks.judgeGlim(null, nowS, false).reason, "Not set up on this server.");
+assert.equal(checks.judgeGlim(null, nowS).status, "down");
+assert.equal(checks.judgeGlim({ ms: 90, url: "", pending: 0, lastErrorAt: null }, nowS).reason, "No webhook is set.");
+assert.equal(checks.judgeGlim({ ms: 90, url: "set", pending: 0, lastErrorAt: null }, nowS).status, "operational");
+assert.equal(checks.judgeGlim({ ms: 90, url: "set", pending: 0, lastErrorAt: nowS - 60 }, nowS).status, "degraded");
+assert.equal(checks.judgeGlim({ ms: 90, url: "set", pending: 0, lastErrorAt: nowS - 3_600 }, nowS).status, "operational", "an old error has passed");
+assert.equal(checks.judgeGlim({ ms: 90, url: "set", pending: 80, lastErrorAt: null }, nowS).reason, "80 messages waiting.");
+ok("Glim's webhook");
+
+const tk = (indicator: string, components: { name: string; status: string }[] = []) => ({ ms: 90, indicator, components });
+assert.equal(checks.judgeTurnkey(null).status, "down");
+assert.equal(checks.judgeTurnkey(tk("none")).status, "operational");
+assert.equal(checks.judgeTurnkey(tk("minor")).status, "degraded", "no named part: the overall word");
+assert.equal(checks.judgeTurnkey(tk("major")).status, "down");
+const dashOnly = checks.judgeTurnkey(tk("minor", [{ name: "Dashboard", status: "partial_outage" }, { name: "APIs", status: "operational" }, { name: "Email", status: "operational" }]));
+assert.equal(dashOnly.status, "operational", "Turnkey's dashboard is not something Gloam's wallets use");
+const email = checks.judgeTurnkey(tk("minor", [{ name: "APIs", status: "operational" }, { name: "Email", status: "partial_outage" }]));
+assert.equal(email.status, "degraded");
+assert.equal(email.reason, "Turnkey reports a problem with Email.");
+assert.equal(checks.judgeTurnkey(tk("major", [{ name: "APIs", status: "major_outage" }, { name: "SDKs", status: "degraded_performance" }])).status, "down");
+ok("Turnkey");
 
 // ---------------------------------------------------------------- parts
 
 const parts = checks.statusParts();
 const ids = parts.map((p) => p.id);
-for (const hidden of [46630, 42431, 84532, 11155111, 99801]) assert.ok(!ids.includes(`network:${hidden}`), `testnet ${hidden} is hidden`);
-for (const live of [4663, 4217, 8453, 1]) assert.ok(ids.includes(`network:${live}`), `mainnet ${live} is listed`);
-assert.deepEqual(ids.filter((id) => !id.startsWith("network:")), ["vaults", "relay", "bridge", "api", "mcp", "database"]);
+for (const hidden of [46630, 42431, 84532, 11155111, 99801]) {
+  assert.ok(!ids.includes(`network:${hidden}`), `testnet ${hidden} is hidden`);
+  assert.ok(!ids.includes(`relay:${hidden}`), `testnet ${hidden} relay is hidden`);
+}
+for (const live of [4663, 4217, 8453, 1]) {
+  assert.ok(ids.includes(`network:${live}`), `mainnet ${live} is listed`);
+  assert.ok(ids.includes(`relay:${live}`), `mainnet ${live} relay is listed`);
+}
+assert.deepEqual(
+  ids.filter((id) => !/^(network|relay):/.test(id)),
+  ["web:home", "web:app", "web:docs", "web:verify", "web:transparency", "database", "api", "leaves", "rpc-proxy", "bridge", "mcp", "glim", "turnkey"]
+);
 assert.equal(new Set(ids).size, ids.length, "ids are unique");
-ok("parts: networks people can see");
+for (const g of model.GROUPS) assert.ok(parts.some((p) => p.group === g.id), `group ${g.id} has parts`);
+assert.ok(!parts.find((p) => p.id === "rpc-proxy")!.note!.includes("Base"), "the proxy serves the one-RPC mainnets only");
+ok("parts: networks people can see, every group filled");
 
 // ---------------------------------------------------------------- nothing leaks, nothing hangs
 
+process.env.TELEGRAM_BOT_TOKEN = "123456:TOKEN-selftest-secret";
 const t0 = Date.now();
 const snap = await checks.runStatusChecks();
 const took = Date.now() - t0;
 const json = JSON.stringify(snap);
 assert.ok(!json.includes("secret-node"), "no RPC host in the result");
 assert.ok(!json.includes("KEY-abc123"), "no key in the result");
+assert.ok(!json.includes("TOKEN-selftest"), "no bot token in the result");
 assert.ok(!json.includes("selftest.invalid"), "no URL in the result");
 assert.ok(!/https?:\/\//.test(json), "no URL at all in the result");
 assert.equal(snap.overall, "down");
 for (const p of snap.parts) assert.equal(p.status, "down", `${p.id} is down when nothing answers`);
 assert.equal(snap.parts.find((p) => p.id === "database")!.reason, "Not set up on this server.");
+assert.deepEqual(snap.packages, [{ name: "@gloamtrade/sdk", version: null }, { name: "@gloamtrade/mcp", version: null }]);
 assert.ok(took < 12_000, `the checks end inside their cap (${took} ms)`);
-ok(`no URL or key leaks; every part down; done in ${took} ms`);
+ok(`no URL, key or token leaks; every part down; done in ${took} ms`);
 
 // ---------------------------------------------------------------- history
 
@@ -182,7 +234,8 @@ const now = Date.UTC(2026, 10, 19, 12, 0);
 const run = (status: "operational" | "degraded" | "down", at: number) => ({
   checkedAt: at,
   overall: status,
-  parts: parts.map((p) => ({ ...p, status, latencyMs: 10, reason: null })),
+  parts: parts.map((p) => ({ ...p, status, latencyMs: 10, reason: null, detail: null })),
+  packages: [],
 });
 await history.recordRun(run("degraded", now - 86_400_000));
 await history.recordRun(run("operational", now));
@@ -192,7 +245,7 @@ const h = await history.readHistory(ids, now + 700_000);
 assert.ok(h);
 assert.equal(h.days.length, 90);
 assert.equal(h.days[89], "2026-11-19");
-const vault = h.byPart.get("vaults")!;
+const vault = h.byPart.get("relay:4663")!;
 assert.deepEqual(vault[89], { day: "2026-11-19", ok: 2, degraded: 0, down: 1 });
 assert.deepEqual(vault[88], { day: "2026-11-18", ok: 0, degraded: 1, down: 0 });
 assert.deepEqual(vault[10], { day: vault[10]!.day, ok: 0, degraded: 0, down: 0 }, "a day with no run is all zeros");

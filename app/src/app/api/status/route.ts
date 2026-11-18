@@ -30,10 +30,13 @@ export async function GET() {
           name: p.name,
           group: p.group,
           ...(p.chainId !== undefined ? { chainId: p.chainId } : {}),
+          ...(p.note ? { note: p.note } : {}),
           status: p.status,
           latencyMs: p.latencyMs,
           reason: p.reason,
+          detail: p.detail,
         })),
+        packages: s.packages,
         incidents: ongoing.map((i) => ({
           id: i.id,
           title: i.title,

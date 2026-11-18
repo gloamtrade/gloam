@@ -10,13 +10,15 @@
 
 export type Health = "operational" | "degraded" | "down";
 
-export type GroupId = "networks" | "payments" | "bridge" | "platform";
+export type GroupId = "platform" | "api" | "payments" | "networks" | "integrations";
 
+/** The page's groups, in its order. */
 export const GROUPS: { id: GroupId; name: string }[] = [
-  { id: "networks", name: "Networks" },
-  { id: "payments", name: "Payments and relay" },
-  { id: "bridge", name: "Bridge" },
   { id: "platform", name: "Platform" },
+  { id: "api", name: "API" },
+  { id: "payments", name: "Payments and relay" },
+  { id: "networks", name: "Networks" },
+  { id: "integrations", name: "Bridge and integrations" },
 ];
 
 /** One part of Gloam, as the page lists it. */
@@ -27,6 +29,8 @@ export interface StatusPart {
   group: GroupId;
   /** For a network, its chain id (the page shows its logo). */
   chainId?: number;
+  /** What it is, in a few words, when the name alone does not say. */
+  note?: string;
 }
 
 /** One check's answer. `reason` is a short fixed sentence, never an error's own text. */
@@ -35,6 +39,14 @@ export interface PartCheck extends StatusPart {
   /** How long it took to answer, or null when it never did. */
   latencyMs: number | null;
   reason: string | null;
+  /** Live facts read with the check ("Latest block 1 s ago"), or null. Never a URL or a key. */
+  detail: string | null;
+}
+
+/** A package's latest version on npm, as information (no uptime). Null when npm did not answer. */
+export interface PackageVersion {
+  name: string;
+  version: string | null;
 }
 
 export interface StatusSnapshot {
@@ -42,6 +54,7 @@ export interface StatusSnapshot {
   checkedAt: number;
   overall: Health;
   parts: PartCheck[];
+  packages: PackageVersion[];
 }
 
 /** How many checks of one part landed in each state on one UTC day. */
