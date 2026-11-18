@@ -10,7 +10,8 @@ export const ELYSIUM_LOGO = "/brand/chains/elysium.png";
  */
 /**
  * Testnets have no logo file of their own: each shows its mainnet's mark
- * (Robinhood Chain, Tempo, Base and Ethereum testnets).
+ * (Robinhood Chain, Tempo, Base and Ethereum testnets). BNB Chain's mark is
+ * /brand/chains/56.png (and 56-dark.png), already there for the bridge.
  */
 const TESTNET_MARK: Record<number, number> = { 46630: 4663, 42431: 4217, 84532: 8453, 11155111: 1 };
 

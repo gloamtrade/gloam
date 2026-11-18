@@ -1,4 +1,5 @@
 import { ELYSIUM, ELYSIUM_TESTNET, isElysiumChainId, isElysiumFamilyChainId, isElysiumTestnetChainId } from "./elysium";
+import { BNB, isBnbChainId } from "./bnb";
 
 /**
  * Robinhood Chain testnet stock tokens (from public explorer / faucet).
@@ -307,14 +308,37 @@ export const NATIVE_ETH_TOKEN: OnchainToken = { id: "eth", symbol: "ETH", name: 
 /** Native HYPE, Elysium's gas coin: the vault's address(0) there, like ETH elsewhere. */
 export const NATIVE_HYPE_TOKEN: OnchainToken = { id: "hype", symbol: "HYPE", name: "Hyperliquid", address: "0x0000000000000000000000000000000000000000", decimals: 18, yahoo: "", kind: "token", coingecko: "hyperliquid" };
 
+/** Native BNB, BNB Chain's gas coin: the vault's address(0) there, like ETH elsewhere. */
+export const NATIVE_BNB_TOKEN: OnchainToken = { id: "bnb", symbol: "BNB", name: "BNB", address: "0x0000000000000000000000000000000000000000", decimals: 18, yahoo: "", kind: "token", coingecko: "binancecoin" };
+
 /**
  * The chain's native coin as the app names, draws and prices it: HYPE on
- * Elysium, ETH everywhere else that holds one (Tempo holds none:
- * supportsNativeShield). Its id is the TokenLogo id and the market feed's.
+ * Elysium, BNB on BNB Chain, ETH everywhere else that holds one (Tempo holds
+ * none: supportsNativeShield). Its id is the TokenLogo id and the market feed's.
  */
 export function nativeTokenFor(chainId: number): OnchainToken {
-  return isElysiumFamilyChainId(chainId) ? NATIVE_HYPE_TOKEN : NATIVE_ETH_TOKEN;
+  if (isElysiumFamilyChainId(chainId)) return NATIVE_HYPE_TOKEN;
+  // 56 whether BNB Chain is on or not: a wallet on BNB Chain holds BNB, never ETH.
+  if (chainId === 56) return NATIVE_BNB_TOKEN;
+  return NATIVE_ETH_TOKEN;
 }
+
+/**
+ * BNB Chain mainnet, behind NEXT_PUBLIC_BNB_ENABLED (lib/bnb.ts). USDT and USDC
+ * have 18 decimals there (not 6), read on chain on 18 Nov 2026 and kept in
+ * packages/sdk/src/bnb.ts. Both are listed with no deposit limit, like the
+ * stablecoins on Base; BNB, the gas coin, is the vault's native asset
+ * (supportsNativeShield), with no limit either; BDX (Beldex's OFT, 9 decimals)
+ * is capped at 100,000 per deposit and 2,000,000 in total, all set in the deploy
+ * itself (DEPLOY-BNB.md). Add reads each live limit as everywhere else.
+ */
+export const BNB_MAINNET_TOKENS: OnchainToken[] = BNB
+  ? [
+      { id: "usdt", symbol: "USDT", name: "Tether USD", address: BNB.usdt.address, decimals: BNB.usdt.decimals, yahoo: "", kind: "stablecoin" },
+      { id: "usdc", symbol: "USDC", name: "USD Coin", address: BNB.usdc.address, decimals: BNB.usdc.decimals, yahoo: "", kind: "stablecoin" },
+      { ...BDX, address: BNB.bdx.address, decimals: BNB.bdx.decimals },
+    ]
+  : [];
 
 /**
  * Elysium mainnet, behind NEXT_PUBLIC_ELYSIUM_ENABLED (lib/elysium.ts): USDC from
@@ -343,6 +367,7 @@ export const ELYSIUM_TESTNET_TOKENS: OnchainToken[] = ELYSIUM_TESTNET
 /** ERC-20 tokens shieldable on a given chain (stablecoins first). */
 export function shieldTokensFor(chainId: number): OnchainToken[] {
   if (isElysiumChainId(chainId)) return ELYSIUM_MAINNET_TOKENS;
+  if (isBnbChainId(chainId)) return BNB_MAINNET_TOKENS;
   if (isElysiumTestnetChainId(chainId)) return ELYSIUM_TESTNET_TOKENS;
   if (chainId === 11155111) return ETHEREUM_SEPOLIA_TOKENS;
   if (chainId === 4663) return RH_MAINNET_TOKENS;

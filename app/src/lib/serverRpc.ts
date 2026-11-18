@@ -22,13 +22,20 @@
  * The public side is the chain's whole list of public RPCs, in order
  * (lib/rpcList): one that is down is passed over for a while, and a send
  * still goes to exactly one node.
+ *
+ * A network with a `logCanary` (BNB Chain) is read through the SDK's
+ * guardPrunedLogs around all of it: its public RPCs keep about a day of logs
+ * and answer an empty list for older blocks, so an empty answer about old blocks
+ * is checked against the canary's logs, and a pruned one (the public RPC, or a
+ * GLOAM_RPC_URL_56 that is not an archive plan) fails loudly, never as "no events".
  */
 import { fallback, http, type HttpTransportConfig, type Transport } from "viem";
+import { guardPrunedLogs, type LogCanary } from "@gloamtrade/sdk";
 import type { GloamNetwork } from "./networks";
 import { SEND_METHODS, nodeFailed, resetRpcRest, rpcListTransport } from "./rpcList";
 import { readTransport } from "./readTransport";
 
-type Net = Pick<GloamNetwork, "chainId" | "chain" | "historyRpc">;
+type Net = Pick<GloamNetwork, "chainId" | "chain" | "historyRpc"> & { logCanary?: LogCanary | null };
 
 function privateRpc(net: Net): string | null {
   return process.env[`GLOAM_RPC_URL_${net.chainId}`]?.trim() || null;
@@ -152,6 +159,10 @@ function checkedPrivate(url: string, chainId: number, config: HttpTransportConfi
  * also takes `retryCount` from `config` then, instead of its own default of 3.
  */
 export function serverTransport(net: Net, config: HttpTransportConfig = {}, opts: { sendOnce?: boolean } = {}): Transport {
+  if (net.logCanary) {
+    // one check around the whole thing (private RPC and public list), not one per side
+    return guardPrunedLogs<Transport>(serverTransport({ ...net, logCanary: null }, config, opts), net.logCanary);
+  }
   const urls = net.chain.rpcUrls.default.http;
   const priv = privateRpc(net);
   // The public side reads the way the browser does (lib/readTransport): the

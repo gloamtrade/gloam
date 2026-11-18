@@ -49,7 +49,7 @@ function ChainMark({ net, size = 28 }: { net: GloamNetwork; size?: number }) {
       </span>
     );
   }
-  const id = { robinhood: 4663, tempo: 4217, base: 8453, ethereum: 1 }[net.family];
+  const id = { robinhood: 4663, tempo: 4217, base: 8453, ethereum: 1, bnb: 56 }[net.family];
   const dark = id !== 4217;
   return (
     <span className="relative inline-block shrink-0 overflow-hidden rounded-full" style={{ width: size, height: size }}>

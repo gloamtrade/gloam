@@ -1,4 +1,5 @@
 import { ELYSIUM, ELYSIUM_LIVE_SINCE } from "./elysium";
+import { BNB, BNB_LIVE_SINCE } from "./bnb";
 
 /**
  * Mainnet: the pools and the launch time.
@@ -100,6 +101,8 @@ export const MAINNET_CHAINS: readonly { chainId: number; name: string; liveSince
   { chainId: 8453, name: "Base", liveSince: "26 October 2026" },
   { chainId: 1, name: "Ethereum", liveSince: "26 October 2026" },
   ...(ELYSIUM ? [{ chainId: ELYSIUM.chainId, name: "Elysium", liveSince: ELYSIUM_LIVE_SINCE }] : []),
+  // BNB Chain, only while NEXT_PUBLIC_BNB_ENABLED is on and its pool is in (lib/bnb.ts).
+  ...(BNB ? [{ chainId: BNB.chainId, name: "BNB Chain", liveSince: BNB_LIVE_SINCE }] : []),
 ];
 
 /** A MAINNET_CHAINS entry's pool: MAINNET_POOLS, or Elysium's from lib/elysium.ts. */
@@ -109,6 +112,7 @@ export function mainnetChainPool(chainId: number): MainnetPool | null {
 
 function chainPool(chainId: number): MainnetPool | null {
   if (ELYSIUM && chainId === ELYSIUM.chainId) return { pool: ELYSIUM.pool, deployBlock: ELYSIUM.deployBlock };
+  if (BNB && chainId === BNB.chainId) return { pool: BNB.pool, deployBlock: BNB.deployBlock };
   return chainId in MAINNET_POOLS ? mainnetPool(chainId as MainnetChainId) : null;
 }
 

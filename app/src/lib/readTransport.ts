@@ -18,6 +18,14 @@
  * `opts.proxy` (browser only) adds gloam.trade's RPC proxy for the chain after
  * the head list (lib/rpcProxy): asked only when the public RPCs fail, for reads.
  *
+ * A network with a `logCanary` (BNB Chain, whose public RPCs keep about a day of
+ * logs and answer an empty list for older blocks) reads through the SDK's
+ * guardPrunedLogs: an empty answer about old blocks is checked against the
+ * canary's logs there, and when the RPC turns out to have dropped them the read
+ * goes to `opts.archive` (an RPC that keeps every log), else to the proxy, which
+ * reads through the server's keyed RPC; with neither it fails loudly
+ * (PrunedLogsError) instead of passing as "nothing happened".
+ *
  * The routing itself is the SDK's (splitReadTransport), so the app, the SDK
  * and the MCP split reads the same way. Both sides are this app's own viem
  * transports, never the SDK's copy, so errors keep the classes app code checks
@@ -25,24 +33,29 @@
  * the split keeps the head list's `methods`, which viem's fallback reads to
  * keep a raw send off a backup.
  */
-import { splitReadTransport } from "@gloamtrade/sdk";
+import { guardPrunedLogs, splitReadTransport, type LogCanary } from "@gloamtrade/sdk";
 import { http, type HttpTransportConfig, type Transport } from "viem";
 import type { GloamNetwork } from "./networks";
 import { rpcListTransport, type RpcListOptions } from "./rpcList";
 
 export function readTransport(
-  net: Pick<GloamNetwork, "chain" | "historyRpc">,
+  net: Pick<GloamNetwork, "chain" | "historyRpc"> & { logCanary?: LogCanary | null },
   config: HttpTransportConfig = {},
-  opts: RpcListOptions = {}
+  opts: RpcListOptions & { archive?: string | null } = {}
 ): Transport {
-  const head = rpcListTransport(net.chain.rpcUrls.default.http, config, opts);
-  if (!net.historyRpc) return head;
-  return splitReadTransport<Transport>({
-    fresh: head,
-    // one RPC, not the list: the head RPCs cannot serve these old blocks
-    history: http(net.historyRpc.url, config),
-    recentBlocks: net.historyRpc.recentBlocks,
-  });
+  const { archive, ...listOpts } = opts;
+  const head = rpcListTransport(net.chain.rpcUrls.default.http, config, listOpts);
+  const read = !net.historyRpc
+    ? head
+    : splitReadTransport<Transport>({
+        fresh: head,
+        // one RPC, not the list: the head RPCs cannot serve these old blocks
+        history: http(net.historyRpc.url, config),
+        recentBlocks: net.historyRpc.recentBlocks,
+      });
+  if (!net.logCanary) return read;
+  const old = archive ?? listOpts.proxy ?? null;
+  return guardPrunedLogs<Transport>(read, net.logCanary, { archive: old ? http(old, config) : null });
 }
 
 /**

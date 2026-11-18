@@ -19,15 +19,19 @@ import { NETWORK_KEYS, getNetwork, type NetworkKey } from "./networks";
 
 export const RPC_PROXY_PATH = "/api/rpc";
 
-/** The mainnets whose browser reads have one public RPC behind them. */
-const PROXIED_KEYS: readonly NetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "elysium-mainnet"];
+/**
+ * The mainnets whose browser reads have one public RPC behind them, and BNB
+ * Chain, whose public RPCs keep about a day of logs: the browser asks the proxy
+ * for older logs (lib/readTransport), which reads through GLOAM_RPC_URL_56.
+ */
+const PROXIED_KEYS: readonly NetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "elysium-mainnet", "bnb-mainnet"];
 
 /** Chain ids the proxy serves: the mainnets above that are live in this build. */
 export function rpcProxyChainIds(): number[] {
   return PROXIED_KEYS.filter((k) => NETWORK_KEYS.includes(k)).map((k) => getNetwork(k).chainId);
 }
 
-/** Their names for copy: "Robinhood Chain, Tempo and Elysium" while all three are live. */
+/** Their names for copy: "Robinhood Chain, Tempo and Elysium" while those three are live. */
 export function rpcProxyNetworkNames(): string {
   return joinNames(PROXIED_KEYS.filter((k) => NETWORK_KEYS.includes(k)).map((k) => getNetwork(k).label));
 }

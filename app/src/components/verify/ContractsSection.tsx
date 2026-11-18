@@ -41,6 +41,8 @@ const LOGOS: Record<ChainFamily, string> = {
   ethereum: "/brand/chains/1.png",
   // Elysium's mark, its official avatar circle-cropped
   elysium: "/brand/chains/elysium.png",
+  // BNB Chain's mark, already used for the bridge
+  bnb: "/brand/chains/56.png",
 };
 
 type Side = "mainnet" | "testnet";

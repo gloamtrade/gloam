@@ -21,6 +21,9 @@
  * off, or with a value missing, it is hidden the same way. Its testnet (99801,
  * key "elysium") has its own switch, NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED, off
  * unless set, and needs its pool in.
+ *
+ * BNB Chain mainnet (56) is behind NEXT_PUBLIC_BNB_ENABLED, OFF unless set, and
+ * needs its pool in (lib/bnb.ts). It has no Gloam testnet.
  */
 import { defineChain, type Address, type Chain } from "viem";
 import {
@@ -28,9 +31,11 @@ import {
   ELYSIUM_TESTNET as SDK_ELYSIUM_TESTNET,
   ELYSIUM_TESTNET_RPC_FALLBACK,
   ETHEREUM_SEPOLIA_HISTORY_RPC,
+  BNB_NO_LOG_RPCS,
   type HistoryRpc,
+  type LogCanary,
 } from "@gloamtrade/sdk";
-import { base, baseSepolia, mainnet as ethereum, sepolia } from "viem/chains";
+import { base, baseSepolia, bsc, mainnet as ethereum, sepolia } from "viem/chains";
 import { robinhood, robinhoodTestnet } from "./chain";
 import type { CeremonyKind } from "./circuitArtifacts";
 import {
@@ -40,6 +45,7 @@ import {
 } from "./config";
 import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, mainnetPool } from "./mainnet";
 import { ELYSIUM, ELYSIUM_CHAIN_ID, ELYSIUM_LOG_RANGE, ELYSIUM_TESTNET } from "./elysium";
+import { BNB, BNB_LOG_GUARD, BNB_LOG_RANGE } from "./bnb";
 import { SHOW_TESTNETS } from "./showTestnets";
 
 export type NetworkKey =
@@ -52,10 +58,11 @@ export type NetworkKey =
   | "base-mainnet"
   | "ethereum-mainnet"
   | "elysium-mainnet"
-  | "elysium";
+  | "elysium"
+  | "bnb-mainnet";
 
 /** The chain a network runs on, testnet or mainnet: wallets, fees and logos follow it. */
-export type ChainFamily = "robinhood" | "tempo" | "base" | "ethereum" | "elysium";
+export type ChainFamily = "robinhood" | "tempo" | "base" | "ethereum" | "elysium" | "bnb";
 
 /**
  * Elysium's chain id. Not public when it was added, so it is a number from
@@ -70,7 +77,7 @@ export type ElysiumChainId = number & { readonly __chain?: "elysium" };
  * narrow `chainId` to the configured ids. Mainnet ids are only registered with
  * wagmi once their pool is filled in (lib/wagmi.ts).
  */
-export type GloamChainId = 46630 | 42431 | 84532 | 11155111 | 4663 | 4217 | 8453 | 1 | 99801 | ElysiumChainId;
+export type GloamChainId = 46630 | 42431 | 84532 | 11155111 | 4663 | 4217 | 8453 | 1 | 99801 | 56 | ElysiumChainId;
 
 /** Whether a network is deployed and safe for real shield/spend writes. */
 export type NetworkStatus = "live" | "planned";
@@ -138,6 +145,12 @@ export interface GloamNetwork {
    * state older than `recentBlocks` here and everything else to the first RPC.
    */
   historyRpc: HistoryRpc | null;
+  /**
+   * Set where the public RPCs keep only recent logs and answer an EMPTY list for
+   * older blocks (BNB Chain): reads go through the SDK's guardPrunedLogs, so a
+   * pruned answer fails loudly (lib/readTransport, lib/serverRpc). Unset elsewhere.
+   */
+  logCanary?: LogCanary | null;
   chainId: GloamChainId;
   /** Shielded pool address; null while a network is still `planned`. */
   pool: Address | null;
@@ -308,6 +321,17 @@ export const elysiumTestnet = defineChain({
 });
 
 /**
+ * BNB Chain mainnet (56), behind NEXT_PUBLIC_BNB_ENABLED (lib/bnb.ts): viem's
+ * definition with the SDK's public RPCs, publicnode first (it answers eth_getLogs,
+ * for about the last 27 hours only), then BNB Chain's own dataseed (state and
+ * sends; it refuses log reads). Never a keyed RPC: wallets read these.
+ */
+export const bnbMainnet = defineChain({
+  ...bsc,
+  rpcUrls: { default: { http: [...(BNB?.rpcUrls ?? ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.bnbchain.org"])] } },
+});
+
+/**
  * Public RPCs above that trail the chain head: a network's history RPC (Ethereum
  * Sepolia's Tenderly gateway), which keeps every block but showed a new
  * receipt minutes late. It stays in its chain's list as the last head RPC to
@@ -323,7 +347,7 @@ const TRAILING_RPCS: readonly string[] = [ETHEREUM_SEPOLIA_HISTORY_RPC.url];
  * where the newest logs would be missing. They stay in the lists for every
  * other read, and for wallets that add the chain.
  */
-export const NO_LOG_RPCS: ReadonlySet<string> = new Set(["https://sepolia.base.org", "https://mainnet.base.org", ...TRAILING_RPCS]);
+export const NO_LOG_RPCS: ReadonlySet<string> = new Set(["https://sepolia.base.org", "https://mainnet.base.org", ...BNB_NO_LOG_RPCS, ...TRAILING_RPCS]);
 
 /**
  * Public RPCs a signed transaction from a chain's list never goes to, even when
@@ -337,6 +361,7 @@ const TEMPO_MAINNET_POOL = mainnetPool(4217);
 const BASE_MAINNET_POOL = mainnetPool(8453);
 const ETHEREUM_MAINNET_POOL = mainnetPool(1);
 const ELYSIUM_MEMO = ELYSIUM?.payMemo ?? null;
+const BNB_MEMO = BNB?.payMemo ?? null;
 const BASE_SEPOLIA_POOL = baseSepoliaPool();
 const ETHEREUM_SEPOLIA_POOL = ethereumSepoliaPool();
 const ETHEREUM_SEPOLIA_MEMO = ethereumSepoliaPayMemo();
@@ -631,12 +656,40 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
     explorerTx: (hash) => `${elysiumTestnet.blockExplorers.default.url}/tx/${hash}`,
     explorerAddress: (addr) => `${elysiumTestnet.blockExplorers.default.url}/address/${addr}`,
   },
+  // BNB Chain mainnet (DEPLOY-BNB.md): hidden until NEXT_PUBLIC_BNB_ENABLED is on and its
+  // pool is in (lib/bnb.ts). Payments only, born guarded like Elysium, gas in BNB, which the
+  // vault lists. USDT and USDC have 18 decimals here. Its public RPCs keep about a day of
+  // logs, so reads carry the pruned-logs check (logCanary). No testnet entry.
+  "bnb-mainnet": {
+    key: "bnb-mainnet",
+    label: "BNB Chain",
+    family: "bnb",
+    testnet: false,
+    stocks: false,
+    paymentsPool: true,
+    chain: bnbMainnet,
+    chainId: 56,
+    historyRpc: null,
+    logCanary: BNB_LOG_GUARD,
+    pool: BNB?.pool ?? null,
+    deployBlock: BNB?.deployBlock ?? null,
+    ceremony: "production",
+    logRange: BNB_LOG_RANGE,
+    hashScheme: "poseidon",
+    primaryAsset: { symbol: "BNB", address: null, decimals: 18 },
+    stableAssets: [],
+    status: "live",
+    payMemo: BNB_MEMO ? { address: BNB_MEMO.address, deployBlock: BNB_MEMO.deployBlock, emitsPoster: false } : null,
+    note: "Mainnet: private USDT, USDC, BNB and BDX payments.",
+    explorerTx: (hash) => `${bnbMainnet.blockExplorers.default.url}/tx/${hash}`,
+    explorerAddress: (addr) => `${bnbMainnet.blockExplorers.default.url}/address/${addr}`,
+  },
 };
 
 const hasPool = (k: NetworkKey) => NETWORKS[k].pool !== null && NETWORKS[k].deployBlock !== null;
 
 /** Mainnets whose pool is filled in, Robinhood Chain first. Empty before deploy day. */
-const MAINNET_KEYS: NetworkKey[] = (["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet"] as const).filter(hasPool);
+const MAINNET_KEYS: NetworkKey[] = (["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "bnb-mainnet"] as const).filter(hasPool);
 
 /** The testnets: Robinhood Chain and Tempo, then Base Sepolia, Ethereum Sepolia and Elysium testnet once each pool is filled in (Elysium's behind its switch too). */
 const TESTNET_KEYS: NetworkKey[] = ["robinhood", "tempo", ...(["base", "ethereum", "elysium"] as const).filter(hasPool)];

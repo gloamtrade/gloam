@@ -47,6 +47,7 @@
  */
 import { parseEther } from "viem";
 import { ELYSIUM } from "../elysium";
+import { BNB } from "../bnb";
 
 type Env = Record<string, string | undefined>;
 
@@ -59,6 +60,11 @@ export const DEFAULT_HOURLY_SPEND: Readonly<Record<number, string>> = {
   // Base's. Check it against real gas on launch day (DEPLOY-ELYSIUM.md) and set
   // GLOAM_RELAY_HOURLY_SPEND_<chainId> to change it without a deploy.
   ...(ELYSIUM ? { [ELYSIUM.chainId]: "1" } : {}),
+  // BNB Chain, in BNB, only while it is on (lib/bnb). A relayed private send is about
+  // 1.9M gas and a cash out about 0.5 to 0.85M (BNB Chain fork, 18 Nov 2026); at the
+  // 0.05 gwei BNB Chain charged then, 0.05 BNB an hour is about 500 sends, and at the
+  // 1 gwei ceiling (lib/relay/gasCeiling) about 25. GLOAM_RELAY_HOURLY_SPEND_56 changes it.
+  ...(BNB ? { [BNB.chainId]: "0.05" } : {}),
 };
 export const NEW_SEND_SHARE_PCT = 80n;
 /** Cash outs stop here. What is left above it is for refunds and exits only. */
