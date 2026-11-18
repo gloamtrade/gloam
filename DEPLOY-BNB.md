@@ -118,8 +118,16 @@ cast gas-price --rpc-url $RPC_URL                                               
   K=<the keyed URL>; H=$(cast block-number --rpc-url $K)
   cast logs --from-block $((H-1000000)) --to-block $((H-999998)) --address 0x55d398326f99059fF775485246999027B3197955 --rpc-url $K | head -3
   ```
-  Empty output means the plan prunes logs: pick another. Note its largest `eth_getLogs` range
-  too (the app reads 50,000 blocks a call and splits on a range error).
+  Empty output means the plan prunes logs: pick another. Then find its largest `eth_getLogs`
+  range. The app reads 50,000 blocks a call; a refusal from `GLOAM_RPC_URL_56` is passed back
+  so the read is halved and asked of it again (never of the public RPC), which works but costs
+  extra calls. Ask 50,000 blocks of a quiet address (the Safe, no logs):
+  ```bash
+  cast logs --from-block $((H-1000000)) --to-block $((H-950001)) --address 0x8E74b2b85b40f36771f92392b42BBaeacDC75507 --rpc-url $K
+  ```
+  No output means it takes 50,000: leave `NEXT_PUBLIC_BNB_LOG_RANGE` unset. An error naming a
+  range (10,000 is common) means set `NEXT_PUBLIC_BNB_LOG_RANGE` to that number (step 10).
+  Never above 50,000: publicnode, which the browser reads first, takes no more.
 
 ## Steps
 
@@ -229,6 +237,7 @@ From `contracts/` in a fresh worktree of `main` (with `pnpm install` done, and
     | Variable | Where | Value |
     | --- | --- | --- |
     | `GLOAM_RPC_URL_56` | server only, **required** | the keyed RPC that keeps every log (Check first) |
+    | `NEXT_PUBLIC_BNB_LOG_RANGE` | build, set it when the keyed RPC takes less than 50,000 blocks a read | that plan's largest `eth_getLogs` range (Check first), for example `10000`; unset is 50,000. The proxy refuses a log read wider than this |
     | `NEXT_PUBLIC_BNB_ENABLED` | build | `1` |
     | `NEXT_PUBLIC_BNB_LIVE_SINCE` | build, **required with the flag** | the day, as the copy writes dates: `21 November 2026` |
     | `GLOAM_RELAY_HOURLY_SPEND_56` | server, optional | BNB the relay may spend an hour, default `0.05` |
