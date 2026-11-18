@@ -2017,19 +2017,20 @@ export type RelayNetworkStatus = {
 
 /** Relay balance reads kept briefly, so a public status poll is not an RPC call each time. */
 const BALANCE_TTL_MS = 30_000;
-const RELAY_RESERVE_GAS = 2n * 2_400_000n;
+/** Gas for a couple more private transfers: under this at today's price, an account is empty (also read by lib/status). */
+export const RELAY_RESERVE_GAS = 2n * 2_400_000n;
 const balances = new Map<string, { at: number; empty: boolean }>();
 
 /** Tempo has no native coin: fees are paid in the account's chosen stablecoin, else PathUSD. */
-const TEMPO_FEE_MANAGER = "0xfeec000000000000000000000000000000000000" as Address;
-const TEMPO_PATH_USD = "0x20c0000000000000000000000000000000000000" as Address;
+export const TEMPO_FEE_MANAGER = "0xfeec000000000000000000000000000000000000" as Address;
+export const TEMPO_PATH_USD = "0x20c0000000000000000000000000000000000000" as Address;
 /** 0.50 in a 6-decimal USD fee token: enough for a couple more private transfers. */
-const TEMPO_FEE_RESERVE = 500_000n;
-const tempoFeeAbi = [
+export const TEMPO_FEE_RESERVE = 500_000n;
+export const tempoFeeAbi = [
   { name: "userTokens", type: "function", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "address" }] },
   { name: "balanceOf", type: "function", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
 ] as const;
-function isTempoChain(chainId: number): boolean {
+export function isTempoChain(chainId: number): boolean {
   return chainId === 42431 || chainId === 4217;
 }
 
