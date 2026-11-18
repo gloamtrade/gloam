@@ -6,7 +6,7 @@
  * through Relay. This draws the picker, the Solana address field, the price,
  * and where an order stands after it is sent. MoveView owns the cash out.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Address } from "viem";
 import { chainLogo } from "@/lib/bridge";
 import type { BridgeStage } from "@/lib/bridge";
@@ -35,7 +35,7 @@ function ChainLogo({ id, size = 18 }: { id: number; size?: number }) {
 const money = (v: string) =>
   Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-/** "Lands on": this chain as today, or another chain. */
+/** "Lands on": this chain as today, or another chain, in one dropdown. */
 export function CrossChainPicker({
   chainId,
   chainLabel,
@@ -57,33 +57,119 @@ export function CrossChainPicker({
     { id: null, chainId, label: chainLabel, hint: symbol },
     ...destinations.map((d) => ({ id: d.id, chainId: d.chainId, label: d.chain, hint: d.token.symbol })),
   ];
+  const current = options.find((o) => o.id === value) ?? options[0];
+  const [open, setOpen] = useState(false);
+  const [focus, setFocus] = useState(0);
+  const wrap = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+
+  // Close on a click outside.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) list.current?.focus();
+  }, [open]);
+
+  const pick = (i: number) => {
+    onChange(options[i].id);
+    setOpen(false);
+    button.current?.focus();
+  };
+
   return (
-    <div>
+    <div ref={wrap} className="relative">
       <p id="cashout-lands" className="text-[13px] text-mute">Lands on</p>
-      <div role="radiogroup" aria-labelledby="cashout-lands" className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {options.map((o) => {
-          const active = value === o.id;
-          return (
-            <button
-              key={o.id ?? "same"}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              disabled={disabled}
-              onClick={() => onChange(o.id)}
-              className={`flex min-h-[48px] min-w-0 items-center gap-2.5 rounded-[14px] border px-3 py-2.5 text-left transition-colors disabled:opacity-50 ${
-                active ? "border-foreground bg-panel" : "border-line hover:border-line-strong hover:bg-surface"
-              }`}
-            >
-              <ChainLogo id={o.chainId} />
-              <span className="min-w-0">
-                <span className="block truncate text-[14px] leading-snug text-foreground">{o.label}</span>
-                <span className="block text-[12px] leading-snug text-mute">{o.hint}</span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      <button
+        ref={button}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-labelledby="cashout-lands cashout-lands-value"
+        onClick={() => {
+          setFocus(Math.max(0, options.indexOf(current)));
+          setOpen((v) => !v);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            setFocus(Math.max(0, options.indexOf(current)));
+            setOpen(true);
+          }
+        }}
+        className="mt-2 flex min-h-[52px] w-full items-center gap-3 rounded-[14px] border border-line bg-panel px-3.5 py-2.5 text-left transition-colors hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/50 disabled:opacity-50"
+      >
+        <ChainLogo id={current.chainId} size={22} />
+        <span id="cashout-lands-value" className="min-w-0 flex-1">
+          <span className="block truncate text-[14.5px] leading-snug text-foreground">{current.label}</span>
+          <span className="block text-[12px] leading-snug text-mute">{current.hint}</span>
+        </span>
+        <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" className={`shrink-0 text-mute transition-transform ${open ? "rotate-180" : ""}`}>
+          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <ul
+          ref={list}
+          role="listbox"
+          tabIndex={-1}
+          aria-labelledby="cashout-lands"
+          aria-activedescendant={`cashout-lands-${focus}`}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setOpen(false);
+              button.current?.focus();
+            } else if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setFocus((i) => Math.min(options.length - 1, i + 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setFocus((i) => Math.max(0, i - 1));
+            } else if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              pick(focus);
+            } else if (e.key === "Tab") {
+              setOpen(false);
+            }
+          }}
+          className="absolute left-0 right-0 top-full z-40 mt-2 max-h-[320px] overflow-auto rounded-[16px] border border-line bg-panel p-1.5 shadow-pop outline-none"
+        >
+          {options.map((o, i) => {
+            const active = o.id === current.id;
+            return (
+              <li
+                key={o.id ?? "same"}
+                id={`cashout-lands-${i}`}
+                role="option"
+                aria-selected={active}
+                onPointerEnter={() => setFocus(i)}
+                onClick={() => pick(i)}
+                className={`flex min-h-[48px] cursor-pointer items-center gap-3 rounded-[12px] px-2.5 py-2 ${focus === i ? "bg-surface" : ""}`}
+              >
+                <ChainLogo id={o.chainId} size={22} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[14px] leading-snug text-foreground">{o.label}</span>
+                  <span className="block text-[12px] leading-snug text-mute">{o.hint}</span>
+                </span>
+                {active && (
+                  <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" className="shrink-0 text-foreground">
+                    <path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {value !== null && (
         <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
           Relay moves it to the other chain in the same step. It goes out now, all at once.

@@ -151,8 +151,8 @@ import {
   SpreadOver,
   aboutTime,
 } from "./PrivateCashOut";
-import { cashOutPrivacyWarnings, cashOutSender, depositWallets, presetAmounts } from "@/lib/cashOutPrivacy";
-import { CashOutAmountChips, CashOutPrivacyLine, CashOutWarnings } from "./CashOutPrivacy";
+import { cashOutPrivacyWarnings, cashOutSender, depositWallets } from "@/lib/cashOutPrivacy";
+import { CashOutPercentChips, CashOutPrivacyLine, CashOutWarnings } from "./CashOutPrivacy";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { codeFromHash } from "@/lib/claimLink";
 import { dropClaimLink, keepClaimLink, keptClaimLink, onForgetClaim, onGoToClaim, setClaimWaiting } from "@/lib/claimLinkStore";
@@ -270,6 +270,7 @@ export function MoveView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Cash out: how much ("" is the whole balance), when, and to which wallet.
   const [cashOutInput, setCashOutInput] = useState("");
+  const cashOutInputRef = useRef<HTMLInputElement>(null);
   const [cashOutWhen, setCashOutWhen] = useState<"now" | CashOutWindow>("now");
   const [cashOutDest, setCashOutDest] = useState<"mine" | "other">("mine");
   const [otherTo, setOtherTo] = useState("");
@@ -1099,12 +1100,9 @@ export function MoveView() {
           : "money you added or were paid";
   const tiedToYou = (a: string) =>
     depositWalletSet.has(a.toLowerCase()) || (address != null && a.toLowerCase() === address.toLowerCase());
-  // The privacy kit (lib/cashOutPrivacy): round amounts under the amount field, and quiet
-  // warnings when the address or the amount ties this cash out back to you. In pieces
-  // the whole amount never goes out as one transfer, so only the address counts there.
-  const cashOutPresets = selected
-    ? presetAmounts({ chainId: network.chainId, asset: selected.asset, spendable: noteWei })
-    : [];
+  // The privacy kit (lib/cashOutPrivacy): quiet warnings when the address or the amount
+  // ties this cash out back to you. In pieces the whole amount never goes out as one
+  // transfer, so only the address counts there.
   const privacyWarnings = selected
     ? cashOutPrivacyWarnings({
         to: xActive ? xRecipient : cashOutTo,
@@ -3146,8 +3144,17 @@ export function MoveView() {
                           id="cashout-amt"
                           inputMode="decimal"
                           autoComplete="off"
+                          ref={cashOutInputRef}
                           value={cashOutInput}
                           onChange={(e) => setCashOutInput(e.target.value)}
+                          // Empty means the whole balance, shown as the placeholder. On focus the
+                          // number becomes real text, so the cursor lands at its end and it can be edited.
+                          onFocus={(e) => {
+                            if (cashOutInput.trim() !== "") return;
+                            const el = e.currentTarget;
+                            setCashOutInput(maxEth);
+                            requestAnimationFrame(() => el.setSelectionRange(maxEth.length, maxEth.length));
+                          }}
                           placeholder={maxEth}
                           aria-describedby="cashout-amt-help"
                           className="tnum min-w-0 flex-1 bg-transparent text-[32px] font-light leading-[1.25] tracking-[-0.02em] text-foreground outline-none! placeholder:text-foreground"
@@ -3164,12 +3171,21 @@ export function MoveView() {
                               : `First this sets ${formatAssetLabel(cashOutAmount, selected.asset)} aside privately, then cashes it out. The rest stays in your private balance.`
                             : `The whole balance: ${formatAssetLabel(noteWei, selected.asset)}.`}
                       </p>
-                      <CashOutAmountChips
-                        presets={cashOutPresets}
+                      <CashOutPercentChips
+                        balance={noteWei}
+                        decimals={assetDecimals(selected.asset)}
                         current={cashOutAmountInvalid ? null : typedWei}
-                        maxActive={cashOutInput.trim() === ""}
+                        maxActive={cashOutInput.trim() === "" || (!cashOutAmountInvalid && typedWei === noteWei)}
                         onPick={setCashOutInput}
                         onMax={() => setCashOutInput("")}
+                        onCustom={() => {
+                          const el = cashOutInputRef.current;
+                          if (!el) return;
+                          const v = cashOutInput.trim() === "" ? maxEth : cashOutInput;
+                          if (v !== cashOutInput) setCashOutInput(v);
+                          el.focus();
+                          requestAnimationFrame(() => el.select());
+                        }}
                         disabled={working}
                         extra={
                           // only where it changes something: there are cents to drop and whole units left
