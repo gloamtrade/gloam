@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Logo } from "@/components/Logo";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { chainLogoSrc } from "@/lib/chainLogo";
+import { getPublicStats, type PublicStats } from "@/lib/publicStats";
 import { runStatusChecks, statusParts } from "@/lib/status/checks";
 import { readHistory, type History } from "@/lib/status/history";
 import { INCIDENTS, STATE_LABEL, ongoingIncidents, pastIncidents, type Incident } from "@/lib/status/incidents";
@@ -31,13 +32,14 @@ import css from "./status.module.css";
  * The checks run on the server when the page is regenerated, at most once a
  * minute (lib/status/checks); the bars are the cron's 90 days
  * (lib/status/history); incidents are kept by hand (lib/status/incidents).
+ * The figures at the top are /stats' own (lib/publicStats), never re-counted.
  */
 export const dynamic = "force-static";
 export const revalidate = 60;
 export const maxDuration = 60;
 
 const DESCRIPTION =
-  "Live status of Gloam: each network, the vaults, the relay, the bridge and the platform, with 90 days of history.";
+  "Live status of Gloam: the site and app, the API, the relay, each network and vault, the bridge and integrations, with 90 days of history.";
 
 export const metadata: Metadata = {
   title: "Status",
@@ -106,8 +108,9 @@ function uptimeText(tallies: DayTally[]): string {
 }
 
 function PartRow({ part, tallies }: { part: PartCheck; tallies: DayTally[] }) {
+  const sub = [part.note, part.detail].filter(Boolean).join(" · ");
   return (
-    <li className="py-7 first:pt-0 last:pb-0">
+    <li className="py-6 first:pt-0 last:pb-0">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h3 className="flex items-center gap-2.5 text-[16px] font-medium leading-snug">
@@ -115,6 +118,7 @@ function PartRow({ part, tallies }: { part: PartCheck; tallies: DayTally[] }) {
             <span className="min-w-0 truncate">{part.name}</span>
           </h3>
           {part.reason ? <p className="mt-1.5 text-[14px] leading-snug text-soft">{part.reason}</p> : null}
+          {sub ? <p className="mt-1 text-[13px] leading-snug text-mute">{sub}</p> : null}
         </div>
         <p className="shrink-0 pt-px text-right text-[14px] leading-snug">
           <span className={TONE_TEXT[part.status]}>{HEALTH_LABEL[part.status]}</span>
@@ -166,9 +170,25 @@ function IncidentCard({ incident, names }: { incident: Incident; names: Map<stri
   );
 }
 
+/** /stats' own figures, or null when they are not ready in time: the strip is then left out, never guessed. */
+function glance(): Promise<PublicStats | null> {
+  return Promise.race([
+    getPublicStats().catch(() => null),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 9_000)),
+  ]);
+}
+
+const count = (n: number) => n.toLocaleString("en-US");
+
+/** "Base", "Base and Tempo", "Base, Tempo and 3 more". */
+function affectedText(names: string[]): string {
+  if (names.length <= 3) return names.length === 3 ? `${names[0]}, ${names[1]} and ${names[2]}` : names.join(" and ");
+  return `${names[0]}, ${names[1]} and ${names.length - 2} more`;
+}
+
 export default async function StatusPage() {
   const parts = statusParts();
-  const [snap, history] = await Promise.all([runStatusChecks(), readHistory(parts.map((p) => p.id))]);
+  const [snap, history, stats] = await Promise.all([runStatusChecks(), readHistory(parts.map((p) => p.id)), glance()]);
   const ongoing = ongoingIncidents(INCIDENTS);
   const past = pastIncidents(snap.checkedAt, 90, INCIDENTS);
   const overall = worst([snap.overall, ...ongoing.map((i) => i.impact)]);
@@ -204,8 +224,34 @@ export default async function StatusPage() {
             </h1>
             <p className="mt-2 pl-7 text-[14px] text-mute">
               <CheckedAgo at={snap.checkedAt} />
-              {affected.length ? <span className="text-soft"> · {affected.join(", ")}</span> : null}
+              {affected.length ? <span className="text-soft"> · {affectedText(affected)}</span> : null}
             </p>
+            {stats ? (
+              <div className="mt-7 border-t border-line pt-6">
+                <h2 className="sr-only">At a glance</h2>
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
+                  {(
+                    [
+                      ["Networks live", stats.networks.length],
+                      ["Deposits", stats.total.deposits],
+                      ["Private transfers", stats.total.transfers],
+                      ["Cash-outs", stats.total.cashouts],
+                    ] as const
+                  ).map(([label, n]) => (
+                    <div key={label} className="flex flex-col-reverse justify-end">
+                      <dt className="mt-1 text-[13px] text-mute">{label}</dt>
+                      <dd className="tnum text-[26px] font-light leading-none tracking-[-0.01em]">{count(n)}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="mt-5 text-[13px] text-mute">
+                  Mainnet, since {formatDay(stats.countedSince.slice(0, 10))}.{" "}
+                  <a href={`${SITE}/stats`} className="underline decoration-line-strong underline-offset-4 hover:text-foreground">
+                    All figures
+                  </a>
+                </p>
+              </div>
+            ) : null}
           </div>
         </section>
 
@@ -258,11 +304,24 @@ export default async function StatusPage() {
               <h2 id={`group-${g.id}`} className="t-title">
                 {g.name}
               </h2>
-              <ul className="min-w-0 divide-y divide-line">
-                {rows.map((p) => (
-                  <PartRow key={p.id} part={p} tallies={history?.byPart.get(p.id) ?? fallbackDays} />
-                ))}
-              </ul>
+              <div className="min-w-0">
+                <ul className="divide-y divide-line">
+                  {rows.map((p) => (
+                    <PartRow key={p.id} part={p} tallies={history?.byPart.get(p.id) ?? fallbackDays} />
+                  ))}
+                </ul>
+                {g.id === "integrations" ? (
+                  <p className="mt-7 border-t border-line pt-6 text-[13px] text-mute">
+                    On npm:{" "}
+                    {snap.packages.map((pkg, i) => (
+                      <span key={pkg.name}>
+                        {i ? " · " : ""}
+                        <span className="text-soft">{pkg.name}</span> <span className="tnum">{pkg.version ?? "not read"}</span>
+                      </span>
+                    ))}
+                  </p>
+                ) : null}
+              </div>
             </section>
           );
         })}
