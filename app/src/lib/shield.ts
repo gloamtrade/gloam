@@ -494,11 +494,15 @@ export function formatAssetAmount(raw: bigint | string, asset: string, maxFrac =
 
 /**
  * Decimal places for a total or a balance in a summary (payroll runs, caps,
- * schedules): cents for the 6-decimal stablecoins, 6 places for an 18-decimal
- * coin such as ETH, where 0.01 is already a real amount (0.004 ETH read
- * "<0.01").
+ * schedules): cents for a stablecoin, whatever its decimals (USDT and USDC
+ * have 18 on BNB Chain, 6 elsewhere), 6 places for anything else with more
+ * than 6 decimals, such as ETH, where 0.01 is already a real amount (0.004 ETH
+ * read "<0.01"). Decided by what the token is, never by its decimals alone.
  */
 export function summaryDecimals(asset: string): number {
+  if (isNativeAsset(asset)) return 6;
+  const t = knownForActive().find((x) => x.address.toLowerCase() === asset.toLowerCase());
+  if (t?.kind === "stablecoin") return 2;
   return assetDecimals(asset) > 6 ? 6 : 2;
 }
 
