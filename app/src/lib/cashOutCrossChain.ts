@@ -69,14 +69,18 @@ export type CrossChainDestination = {
   explorerTx: (hash: string) => string;
 };
 
-const usdc = (address: string): CrossChainToken => ({ symbol: "USDC", address, decimals: 6, logo: "/brand/tokens/usdc.png" });
+/**
+ * USDC at one address, with its decimals written out: 6 on every chain below,
+ * but 18 on BNB Chain, so a new destination states its own and never inherits 6.
+ */
+const usdc = (address: string, decimals: number): CrossChainToken => ({ symbol: "USDC", address, decimals, logo: "/brand/tokens/usdc.png" });
 
 /** Where a cash out can land instead of its own chain. Checked with live strict quotes on 2026-11-09. */
 export const CROSS_CHAIN_DESTINATIONS: readonly CrossChainDestination[] = [
-  { id: "base-usdc", chainId: 8453, chain: "Base", kind: "evm", token: usdc("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"), explorerTx: (h) => `https://basescan.org/tx/${h}` },
-  { id: "ethereum-usdc", chainId: 1, chain: "Ethereum", kind: "evm", token: usdc("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"), explorerTx: (h) => `https://etherscan.io/tx/${h}` },
-  { id: "arbitrum-usdc", chainId: 42161, chain: "Arbitrum", kind: "evm", token: usdc("0xaf88d065e77c8cc2239327c5edb3a432268e5831"), explorerTx: (h) => `https://arbiscan.io/tx/${h}` },
-  { id: "solana-usdc", chainId: SOLANA_RELAY_ID, chain: "Solana", kind: "svm", token: usdc("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"), explorerTx: (h) => `https://solscan.io/tx/${h}` },
+  { id: "base-usdc", chainId: 8453, chain: "Base", kind: "evm", token: usdc("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 6), explorerTx: (h) => `https://basescan.org/tx/${h}` },
+  { id: "ethereum-usdc", chainId: 1, chain: "Ethereum", kind: "evm", token: usdc("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", 6), explorerTx: (h) => `https://etherscan.io/tx/${h}` },
+  { id: "arbitrum-usdc", chainId: 42161, chain: "Arbitrum", kind: "evm", token: usdc("0xaf88d065e77c8cc2239327c5edb3a432268e5831", 6), explorerTx: (h) => `https://arbiscan.io/tx/${h}` },
+  { id: "solana-usdc", chainId: SOLANA_RELAY_ID, chain: "Solana", kind: "svm", token: usdc("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", 6), explorerTx: (h) => `https://solscan.io/tx/${h}` },
 ];
 
 /**

@@ -29,19 +29,28 @@ export function symbolOf(asset: string, chainId: number): string {
   return t?.symbol ?? `${asset.slice(0, 6)}…${asset.slice(-4)}`;
 }
 
+/** The asset's decimals on the proof's own chain when it is known, else on the open network. */
+function decimalsOn(asset: string, chainId?: number): number {
+  if (chainId === undefined || !Number.isSafeInteger(chainId) || chainId <= 0) return assetDecimals(asset);
+  if (isNativeAsset(asset)) return 18;
+  return knownTokens(chainId).find((t) => t.address.toLowerCase() === asset.toLowerCase())?.decimals ?? assetDecimals(asset);
+}
+
 /**
  * A raw amount in the asset's real decimals (USDG 6, ETH 18), with every unit
  * the proof states: "exactly 0.000000000000000001", never "exactly 0". It is
  * read as text, so a large amount is not rounded the way a Number would be.
+ * Pass the proof's `chainId`: the decimals are then that chain's (USDT has 18
+ * on BNB Chain, 6 elsewhere), not the network this browser has open.
  */
-export function amountOf(raw: string, asset: string): string {
+export function amountOf(raw: string, asset: string, chainId?: number): string {
   let v: bigint;
   try {
     v = BigInt(raw);
   } catch {
     return raw;
   }
-  const [whole, frac] = formatUnits(v, assetDecimals(asset)).split(".");
+  const [whole, frac] = formatUnits(v, decimalsOn(asset, chainId)).split(".");
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return frac ? `${grouped}.${frac}` : grouped;
 }
@@ -130,15 +139,15 @@ function verdictOf(r: VerifyResult): Verdict {
  */
 function claimOf(p: AnyProof, r: VerifyResult): { lead: string; amount: string; sym: string; tail?: string } {
   const sym = symbolOf(p.asset, p.chainId);
-  if (p.kind === "funds") return { lead: "Holds at least", amount: amountOf(p.threshold, p.asset), sym };
-  if (p.kind === "balance") return { lead: "A private balance of exactly", amount: amountOf(p.amount, p.asset), sym };
+  if (p.kind === "funds") return { lead: "Holds at least", amount: amountOf(p.threshold, p.asset, p.chainId), sym };
+  if (p.kind === "balance") return { lead: "A private balance of exactly", amount: amountOf(p.amount, p.asset, p.chainId), sym };
   if (p.kind === "payroll") {
     const lead = p.count === 1 ? "One payment of" : `${p.count.toLocaleString("en-US")} payments adding up to`;
-    return { lead, amount: amountOf(p.total, p.asset), sym };
+    return { lead, amount: amountOf(p.total, p.asset, p.chainId), sym };
   }
   const tail = r.paidAt ? `on ${day(r.paidAt)}` : undefined;
-  if (p.amount != null) return { lead: "A private payment of", amount: amountOf(p.amount, p.asset), sym, tail };
-  return { lead: "A private payment of at least", amount: amountOf(p.minAmount, p.asset), sym, tail };
+  if (p.amount != null) return { lead: "A private payment of", amount: amountOf(p.amount, p.asset, p.chainId), sym, tail };
+  return { lead: "A private payment of at least", amount: amountOf(p.minAmount, p.asset, p.chainId), sym, tail };
 }
 
 /** What a verified proof means, in one or two plain sentences under the claim. */
