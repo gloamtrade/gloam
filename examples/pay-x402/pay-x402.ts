@@ -66,6 +66,8 @@ import {
   type GloamNetworkKey,
   type PoolCircuit,
   type Prover,
+  gloamReadTransport,
+  isNoLimit,
 } from "@gloamtrade/sdk";
 
 const shieldBoundAbi = [
@@ -87,7 +89,9 @@ const shieldBoundAbi = [
 
 // Base ("base-mainnet", and "base" for Base Sepolia) and Ethereum ("ethereum-mainnet") work once the SDK has their pools;
 // Elysium ("elysium-mainnet") takes USDC, with gas in HYPE.
-const NETWORK_KEYS: GloamNetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "robinhood", "tempo", "base"];
+// BNB Chain ("bnb-mainnet", gas in BNB) takes USDT and USDC (18 decimals each), BNB and BDX once the SDK has its pool.
+// Its public RPCs keep about a day of logs, so point GLOAM_RPC at one that keeps them all; a pruned read fails loudly.
+const NETWORK_KEYS: GloamNetworkKey[] = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "bnb-mainnet", "robinhood", "tempo", "base"];
 const isNative = (a: GloamAsset) => a.address.toLowerCase() === NATIVE_ASSET.toLowerCase();
 /** Blocks per getLogs call when reading the pool's tree: Elysium's 100 ms blocks take a wider range than the default. */
 const logRange = (net: GloamNetwork) => (net.family === "elysium" ? BigInt(ELYSIUM_LOG_RANGE_DEFAULT) : undefined);
@@ -107,7 +111,7 @@ function pickNetwork(fallback: GloamNetworkKey = "robinhood"): GloamNetwork {
     console.log(`${networkName(net.chainId)}. Set GLOAM_NETWORK=${net.family}-mainnet to use mainnet.`);
   } else {
     const first = net.assets[0];
-    const cap = first?.depositLimit ? Number(formatUnits(first.depositLimit.perDeposit, first.decimals)).toLocaleString("en-US") : null;
+    const cap = first?.depositLimit && !isNoLimit(first.depositLimit.perDeposit) ? Number(formatUnits(first.depositLimit.perDeposit, first.decimals)).toLocaleString("en-US") : null;
     console.log(`${net.label} mainnet.${cap ? ` Deposit limit: at most ${cap} per stablecoin deposit.` : ""}`);
   }
   return net;
@@ -174,7 +178,11 @@ async function main() {
   const account = privateKeyToAccount((pk.startsWith("0x") ? pk : `0x${pk}`) as `0x${string}`);
   const rpc = process.env.GLOAM_RPC?.trim() || net.rpcUrl;
   const wallet = createWalletClient({ account, chain: net.chain, transport: http(rpc) });
-  const pub = createPublicClient({ chain: net.chain, transport: http(rpc) });
+  // Old logs from the network's history RPC where it has one, and on BNB Chain a pruned log answer fails loudly.
+  const pub = createPublicClient({
+    chain: net.chain,
+    transport: gloamReadTransport({ rpcUrl: rpc, historyRpc: rpc === net.rpcUrl ? net.historyRpc : null, logCanary: net.logCanary ?? null }),
+  });
   const show = (v: bigint) => `${formatUnits(v, asset.decimals)} ${asset.symbol}`;
   const transferProver = await proverFor("transfer", net);
 
