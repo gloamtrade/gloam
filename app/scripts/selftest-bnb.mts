@@ -128,7 +128,7 @@ const e = nets.getNetwork("bnb-mainnet");
 ok(e.family === "bnb" && e.label === "BNB Chain" && !e.testnet && e.chainId === CHAIN_ID, "the entry is defined");
 ok(e.paymentsPool && e.ceremony === "production", "mainnet pool on the final keys");
 ok(e.primaryAsset.symbol === "BNB" && e.primaryAsset.decimals === 18 && e.chain.nativeCurrency.symbol === "BNB", "gas in BNB");
-ok(e.logCanary?.address === USDT && e.logCanary.trustRecentBlocks === 100_000n, "reads carry the pruned-logs check (USDT)");
+ok(e.logCanary?.address === USDT && e.logCanary.trustRecentBlocks === 1_000n, "reads carry the pruned-logs check (USDT), trusting only the last 1,000 blocks");
 ok(e.chain.rpcUrls.default.http[0] === "https://bsc-rpc.publicnode.com" && e.chain.rpcUrls.default.http.every((u) => !/key|\/v\d+\//i.test(u)), "public RPCs only, no key, for wallets");
 ok(NO_LOG_RPCS.has("https://bsc-dataseed.bnbchain.org"), "the dataseed never gets a log read");
 ok(nets.ceremonyForChain(CHAIN_ID) === "production", "a proof for 56 uses the final keys, on or off");

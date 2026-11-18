@@ -114,11 +114,16 @@ export const BNB_NO_LOG_RPCS: readonly string[] = ["https://bsc-dataseed.bnbchai
 export const BNB_LOG_RANGE_DEFAULT = 50_000;
 
 /**
- * How far below the head an empty eth_getLogs answer is trusted without a
- * check: 100,000 blocks, about 12.5 hours, well inside the roughly 27 hours
- * publicnode keeps. Older empty answers are checked against USDT's logs.
+ * How far below the head an eth_getLogs answer is trusted without a check:
+ * 1,000 blocks, about 7.5 minutes. Older answers, empty or not, are checked
+ * against USDT's logs (once per RPC every 10 minutes, guardPrunedLogs).
+ * publicnode does not keep a steady window: on 18 November 2026 its oldest
+ * block with logs stayed at 134,000,000 all day while the head moved on (about
+ * 220,000 blocks kept, then 329,000), so it drops history in steps and right
+ * after one may keep far less than a day. Only the last few minutes are safe
+ * to take on trust.
  */
-export const BNB_TRUST_RECENT_BLOCKS = 100_000n;
+export const BNB_TRUST_RECENT_BLOCKS = 1_000n;
 
 /**
  * The canary for pruned logs: USDT on BNB Chain logs dozens of transfers in

@@ -155,7 +155,7 @@ if (MODE === "filled" || MODE === "filled-memo" || MODE === "live") {
   assert(n.chainId === 56 && !n.testnet && n.ceremony === "production" && n.nativeShield, "mainnet, final keys, BNB deposits allowed");
   if (MODE !== "live") assert(n.pool === POOL && n.deployBlock === 134_300_000n, "pool and deploy block from the file");
   assert(n.rpcUrl === "https://bsc-rpc.publicnode.com" && n.explorerUrl === "https://bscscan.com" && n.historyRpc === null, "RPC and explorer");
-  assert(n.logCanary && n.logCanary.address === USDT && n.logCanary.trustRecentBlocks === 100_000n, "reads carry the pruned-logs canary (USDT)");
+  assert(n.logCanary && n.logCanary.address === USDT && n.logCanary.trustRecentBlocks === 1_000n, "reads carry the pruned-logs canary (USDT), trusting only the last 1,000 blocks");
   assert(sdk.gloamReadTransport(n)({}).config.type === "gloamPrunedGuard", "gloamReadTransport guards BNB reads");
   assert(sdk.gloamNetworks().at(-1 - sdk.gloamNetworks().filter((x) => x.testnet).length).key === "bnb-mainnet", "BNB Chain is the last mainnet");
   assert(sdk.networkForChainId(56) === n && sdk.getGloamNetwork("bnb-mainnet") === n, "found by chain id and key");
