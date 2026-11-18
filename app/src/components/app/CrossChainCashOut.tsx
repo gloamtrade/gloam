@@ -313,9 +313,8 @@ export function CrossChainQuoteCard({
 }
 
 /** Where a cash out to another chain stands, read from Relay every few seconds until it ends. */
-export function CrossChainCashOutStatus({ quote, explorerTx }: { quote: CrossChainQuote; explorerTx: (hash: string) => string }) {
+export function CrossChainCashOutStatus({ quote, fromChain }: { quote: CrossChainQuote; fromChain: string }) {
   const [stage, setStage] = useState<BridgeStage>("waiting");
-  const [outTx, setOutTx] = useState<string | null>(null);
 
   useEffect(() => {
     let stopped = false;
@@ -330,7 +329,6 @@ export function CrossChainCashOutStatus({ quote, explorerTx }: { quote: CrossCha
         const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: { stage: BridgeStage; outTx: string | null } } | null;
         if (!stopped && json?.ok && json.data) {
           setStage(json.data.stage);
-          setOutTx(json.data.outTx);
           if (json.data.stage === "done" || json.data.stage === "refunded" || json.data.stage === "failed") return;
         }
       } catch {
@@ -347,36 +345,48 @@ export function CrossChainCashOutStatus({ quote, explorerTx }: { quote: CrossCha
   }, [quote.requestId, quote.depositAddress]);
 
   const d = quote.destination;
-  const line =
-    stage === "done"
-      ? `Arrived on ${d.chain}.`
-      : stage === "refunded"
-        ? `Relay couldn't deliver it, so it sent the ${quote.sourceSymbol} back to your wallet ${shortAddress(quote.refundTo, 4)}.`
-        : stage === "failed"
-          ? `Relay couldn't deliver it. A refund goes back to your wallet ${shortAddress(quote.refundTo, 4)}. Follow it on Relay.`
-          : stage === "moving"
-            ? `Relay is moving it to ${d.chain}.`
-            : "Waiting for the cash out to reach Relay.";
+  const trouble = stage === "refunded" || stage === "failed";
+  const state = stage === "done" ? "Arrived" : trouble ? (stage === "refunded" ? "Refunded" : "Not delivered") : "On its way";
 
   return (
-    <div className="rounded-[14px] bg-surface px-4 py-3.5 text-[13px] leading-relaxed text-foreground">
-      <p className="flex items-center gap-2">
-        <ChainLogo id={d.chainId} />
-        <span>{line}</span>
-      </p>
-      <p className="mt-1 text-mute">
-        {`${money(quote.receive.amount)} ${d.symbol} to ${shortAddress(quote.recipient, 4)} on ${d.chain}, at least ${money(quote.receive.minimum)}.`}
-      </p>
-      <p className="mt-2 flex flex-wrap gap-x-4">
-        {stage === "done" && outTx && (
-          <a href={explorerTx(outTx)} target="_blank" rel="noopener noreferrer" className="font-medium underline underline-offset-4">
-            {`See it on ${d.chain}`}
+    <div className="space-y-3">
+      <div className="flex items-center gap-3 rounded-[14px] bg-surface px-4 py-3.5 text-left">
+        <ChainLogo id={d.chainId} size={28} />
+        <div className="min-w-0 flex-1">
+          <p className="tnum truncate text-[15px] text-foreground">{`${money(quote.receive.amount)} ${d.symbol}`}</p>
+          <p className="truncate text-[12.5px] text-mute">{`${fromChain} → ${d.chain}`}</p>
+        </div>
+        <span className={`inline-flex shrink-0 items-center gap-1.5 text-[12.5px] ${trouble ? "text-warn" : stage === "done" ? "font-medium text-sealed" : "text-mute"}`}>
+          {stage === "done" && (
+            <span aria-hidden className="grid h-5 w-5 place-items-center rounded-full bg-sealed text-panel">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                <path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+          )}
+          {state}
+        </span>
+      </div>
+      {trouble && (
+        <p className="text-[12.5px] leading-relaxed text-warn">
+          {`Relay couldn't deliver it, so the ${quote.sourceSymbol} goes back to your wallet ${shortAddress(quote.refundTo, 4)}. `}
+          <a href={relayOrderUrl(quote.requestId)} target="_blank" rel="noopener noreferrer" className="font-medium underline underline-offset-4">
+            Follow it on Relay
           </a>
-        )}
-        <a href={relayOrderUrl(quote.requestId)} target="_blank" rel="noopener noreferrer" className="font-medium underline underline-offset-4">
-          Follow it on Relay
-        </a>
-      </p>
+        </p>
+      )}
+      <a
+        href="https://relay.link"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-2 text-[12px] text-mute opacity-80 transition-opacity hover:opacity-100"
+      >
+        Powered by
+        {/* eslint-disable-next-line @next/next/no-img-element -- small local logo */}
+        <img src="/brand/partners/relay.svg" alt="Relay" width={62} height={14} className="inline-block h-[14px] w-auto dark:hidden" />
+        {/* eslint-disable-next-line @next/next/no-img-element -- small local logo */}
+        <img src="/brand/partners/relay-white.svg" alt="Relay" width={62} height={14} className="hidden h-[14px] w-auto dark:inline-block" />
+      </a>
     </div>
   );
 }
