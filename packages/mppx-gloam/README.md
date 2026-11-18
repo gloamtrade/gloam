@@ -144,6 +144,8 @@ Ethereum too (0.3.0): `"ethereum-mainnet"` (Ethereum `1`, USDC by default, also 
 
 Elysium: `"elysium-mainnet"` (Elysium mainnet, live since 9 November 2026, USDC only, gas in HYPE, final keys) works with SDK 0.7.0 or later, which has Elysium's values. `"elysium"` (Elysium testnet `99801`, test USDC) works once its pool is in the SDK. Without them each is refused with a plain error.
 
+BNB Chain: `"bnb-mainnet"` (chain `56`, gas in BNB) works once an SDK release has its pool, and is refused by name before. Its USDT and USDC have 18 decimals, not 6, so leave `decimals` out and let each asset use its own: a value that disagrees with a listed asset is refused, and a chain id the SDK has no network for has no default currency (pass `currency`).
+
 Ethereum Sepolia: `"ethereum"` (`11155111`, test USDC by default, also USDG, PYUSD, EURC and ETH, on the final keys) is known to 0.3.0 and works with SDK 0.4.0, which has its pool (deployed 25 October 2026). Built with an older SDK it is refused with a plain error.
 
 ### The chain reader must say which chain it reads

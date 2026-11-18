@@ -26,6 +26,9 @@ import {
   elysiumMainnetConfig,
   ELYSIUM_TESTNET,
   ELYSIUM_TESTNET_CHAIN_ID,
+  BNB_MAINNET_CHAIN_ID,
+  bnbMainnetAssets,
+  isPaymentsPoolChainId,
   networkForChainId,
   networkName,
   BASE_EURC,
@@ -72,11 +75,11 @@ export type GloamMode = "push" | "pull";
 export const GLOAM_MODES: readonly GloamMode[] = ["push", "pull"];
 
 export interface GloamChargeMethodDetails {
-  /** Chain the shielded pool lives on: Tempo 4217 or Robinhood Chain 4663 (mainnet), Tempo Moderato 42431 or Robinhood Chain testnet 46630; Base 8453, Base Sepolia 84532 and Ethereum 1 once their pools are in; Elysium mainnet once the SDK has its values. */
+  /** Chain the shielded pool lives on: Tempo 4217 or Robinhood Chain 4663 (mainnet), Tempo Moderato 42431 or Robinhood Chain testnet 46630; Base 8453, Base Sepolia 84532 and Ethereum 1 once their pools are in; Elysium mainnet once the SDK has its values; BNB Chain 56 once the SDK has its pool. */
   chainId: number;
   /** The Gloam pool the transfer settles through. Clients and servers accept only the official pool for chainId. */
   pool: Address;
-  /** Token decimals, for display only. */
+  /** The token's own decimals, for display. A server that reads prices in display units reads them in these. */
   decimals?: number;
   /** Submission modes the server accepts. Absent means both. */
   supportedModes?: GloamMode[];
@@ -174,10 +177,27 @@ const HEX32 = /^0x[0-9a-fA-F]{64}$/;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const UINT = /^(0|[1-9][0-9]*)$/;
 
-/** Decimals of the assets Gloam knows (native ETH and GLOAM 18; the stablecoins 6), or undefined. */
-export function assetDecimals(currency: Address): number | undefined {
+/**
+ * Decimals of an asset Gloam knows, or undefined. Each asset's own: 18 for the
+ * gas coins and GLOAM, 9 for BDX, 6 for most stablecoins, and 18 for USDT and
+ * USDC on BNB Chain. Pass `chainId` to read them from that network's own list
+ * (the SDK's), which wins; the fixed list below is for the testnets and
+ * for callers that name no chain. Never assume a stablecoin has 6.
+ */
+export function assetDecimals(currency: Address, chainId?: number): number | undefined {
   const c = lc(currency);
+  if (chainId !== undefined) {
+    const listed = networkForChainId(chainId)?.assets.find((a) => lc(a.address) === c);
+    if (listed) return listed.decimals;
+    if (chainId === BNB_MAINNET_CHAIN_ID) {
+      const bnb = bnbMainnetAssets().find((a) => lc(a.address) === c);
+      if (bnb) return bnb.decimals;
+    }
+  }
   if (c === lc(NATIVE_ASSET) || c === lc(GLOAM_TOKEN)) return 18;
+  // BNB Chain's USDT and USDC (18 decimals) and BDX (9, the same address on Base and Ethereum).
+  const bnb = bnbMainnetAssets().find((a) => lc(a.address) === c);
+  if (bnb) return bnb.decimals;
   const sixes = [
     TEMPO_PATHUSD,
     TEMPO_OUSD,
@@ -209,9 +229,29 @@ export function assetDecimals(currency: Address): number | undefined {
   return undefined;
 }
 
+/**
+ * The decimals to read `currency`'s amounts in on `chainId`: the asset's own
+ * where Gloam lists it, and `given` only for an asset it does not. A `given`
+ * that disagrees with a listed asset throws: 6 for USDT on BNB Chain (18
+ * there) would price every charge a trillion times too low.
+ */
+export function chargeDecimals(currency: Address, chainId: number, given?: number): number | undefined {
+  const own = assetDecimals(currency, chainId);
+  if (given === undefined) return own;
+  if (own !== undefined && given !== own) {
+    throw new Error(`${assetSymbol(chainId, currency)} on ${networkName(chainId)} has ${own} decimals, not ${given}. Leave decimals out to use the asset's own.`);
+  }
+  return given;
+}
+
 /** Known assets, for labels only (never for matching: matching is by address). */
 export function assetSymbol(chainId: number, currency: Address): string {
   const c = lc(currency);
+  // BNB Chain: gas in BNB; USDT and USDC with 18 decimals, and BDX.
+  if (chainId === BNB_MAINNET_CHAIN_ID) {
+    const bnb = bnbMainnetAssets().find((a) => lc(a.address) === c);
+    if (bnb) return bnb.symbol;
+  }
   const ely = elysiumMainnetConfig();
   // Elysium's gas coin is HYPE, and its vault takes USDC only.
   if (ely && chainId === ely.chainId) {
@@ -234,10 +274,13 @@ export function assetSymbol(chainId: number, currency: Address): string {
   if (c === lc(BASE_USDT) || c === lc(ETHEREUM_USDT)) return "USDT";
   if (c === lc(ETHEREUM_USDG) || c === lc(ETHEREUM_SEPOLIA_USDG)) return "USDG";
   if (c === lc(ETHEREUM_PYUSD) || c === lc(ETHEREUM_SEPOLIA_PYUSD)) return "PYUSD";
+  // Anything else a network lists (BDX on Base and Ethereum, say), by that network's own symbol.
+  const listed = networkForChainId(chainId)?.assets.find((a) => lc(a.address) === c);
+  if (listed) return listed.symbol;
   return "TOKEN";
 }
 
-/** The network names a charge takes: "tempo-mainnet", "robinhood-mainnet", "tempo", "robinhood", and "base-mainnet" / "base" / "ethereum-mainnet" / "ethereum" (Ethereum Sepolia) once their pools are in; "elysium-mainnet" and "elysium" (Elysium testnet) once the SDK has Elysium's values. */
+/** The network names a charge takes: "tempo-mainnet", "robinhood-mainnet", "tempo", "robinhood", and "base-mainnet" / "base" / "ethereum-mainnet" / "ethereum" (Ethereum Sepolia) once their pools are in; "elysium-mainnet" and "elysium" (Elysium testnet) once the SDK has Elysium's values; "bnb-mainnet" once it has BNB Chain's pool. */
 export type GloamChargeNetwork = GloamNetworkKey;
 
 // ── building and parsing requests ─────────────────────────────────────────────
@@ -252,16 +295,19 @@ export interface BuildChargeRequestParams {
    * (the testnets), or a chain id. "base-mainnet", "base" (Base Sepolia) and
    * "ethereum" (Ethereum Sepolia) work once the SDK has their pools, and
    * "elysium-mainnet" and "elysium" (its testnet; USDC, gas in HYPE) once it
-   * has Elysium's values. Default
+   * has Elysium's values, and "bnb-mainnet" (USDT and USDC with 18
+   * decimals, gas in BNB) once it has BNB Chain's pool. Default
    * "tempo" (Tempo testnet), as in 0.0.x.
    */
   network?: GloamChargeNetwork | number;
   /**
    * Token address. Default: the network's first stablecoin (USDC.e on Tempo
-   * mainnet, USDG on Robinhood Chain mainnet, USDC on Base, PathUSD on Tempo
-   * testnet) and native ETH on Robinhood Chain testnet.
+   * mainnet, USDG on Robinhood Chain mainnet, USDC on Base, USDT on BNB Chain,
+   * PathUSD on Tempo testnet) and native ETH on Robinhood Chain testnet. A chain
+   * id this SDK has no network for has no default: pass it.
    */
   currency?: Address;
+  /** Only for a currency Gloam does not list; a listed one always has its own (a different value throws). */
   decimals?: number;
   modes?: GloamMode[];
   description?: string;
@@ -281,19 +327,26 @@ const PUBLISHED_POOL_CHAINS: Partial<Record<GloamNetworkKey, number>> = {
   ethereum: ETHEREUM_SEPOLIA_CHAIN_ID,
 };
 
-/** Resolve a network name or chain id to a chain id, plus that network's default asset. */
-export function resolveNetwork(network: BuildChargeRequestParams["network"] = "tempo") {
+/**
+ * Resolve a network name or chain id to a chain id, plus that network's default
+ * asset. A chain id this SDK has no network for (a private deployment, with its
+ * own `pools`) has no default asset or decimals: the caller passes them. It
+ * used to fall back to Tempo's PathUSD with 6 decimals, which would have
+ * priced a charge on another chain in the wrong token.
+ */
+export function resolveNetwork(network: BuildChargeRequestParams["network"] = "tempo"): {
+  chainId: number;
+  currency: Address | undefined;
+  decimals: number | undefined;
+} {
   if (typeof network === "number") {
     const known = networkForChainId(network);
     const asset = known ? defaultAsset(known) : null;
-    return {
-      chainId: network,
-      currency: asset?.address ?? TEMPO_PATHUSD,
-      decimals: asset?.decimals ?? 6,
-    };
+    return { chainId: network, currency: asset?.address, decimals: asset?.decimals };
   }
   const net = getGloamNetwork(network);
   if (!net) {
+    if (network === "bnb-mainnet") throw new Error("BNB Chain mainnet is not live in this version of @gloamtrade/sdk yet. Update it once it is.");
     if (network === "elysium-mainnet") throw new Error("Elysium mainnet is not live in this version of @gloamtrade/sdk yet. Update it once it is.");
     if (network === "elysium") throw new Error("Elysium testnet is not live in this version of @gloamtrade/sdk yet. Update it once it is.");
     const id = PUBLISHED_POOL_CHAINS[network];
@@ -307,6 +360,18 @@ export function resolveNetwork(network: BuildChargeRequestParams["network"] = "t
   return { chainId: net.chainId, currency: asset.address, decimals: asset.decimals };
 }
 
+/** Why a charge on `chainId` has no pool: by name for a Gloam chain whose pool this SDK lacks (BNB Chain before its deploy). */
+export function noPoolMessage(chainId: number): string {
+  return isPaymentsPoolChainId(chainId)
+    ? `This version of @gloamtrade/sdk has no ${networkName(chainId)}${isMainnetChainId(chainId) ? " mainnet" : ""} pool yet. Update it.`
+    : `There is no Gloam pool on chain ${chainId}.`;
+}
+
+/** A chain id with no Gloam network in this SDK has no default asset. */
+export function noDefaultCurrencyMessage(chainId: number): string {
+  return `Pass currency: this version of @gloamtrade/sdk has no Gloam network on chain ${chainId}, so it has no default asset there.`;
+}
+
 /** Server side: the request of a gloam charge challenge. */
 export function buildGloamChargeRequest(p: BuildChargeRequestParams): GloamChargeRequest {
   if (p.amountWei <= 0n) throw new Error("amountWei must be positive.");
@@ -315,14 +380,15 @@ export function buildGloamChargeRequest(p: BuildChargeRequestParams): GloamCharg
   }
   const net = resolveNetwork(p.network);
   const pool = officialPool(net.chainId, p.pools);
-  if (!pool) throw new Error(`There is no Gloam pool on chain ${net.chainId}.`);
+  if (!pool) throw new Error(noPoolMessage(net.chainId));
   const currency = p.currency ?? net.currency;
+  if (currency === undefined) throw new Error(noDefaultCurrencyMessage(net.chainId));
   if (!ADDRESS.test(currency)) throw new Error("currency must be a token address.");
   const modes = p.modes ? [...new Set(p.modes)] : undefined;
   if (modes && (modes.length === 0 || modes.some((m) => !GLOAM_MODES.includes(m)))) {
     throw new Error('modes must be a non-empty subset of ["push", "pull"].');
   }
-  const decimals = p.decimals ?? assetDecimals(currency);
+  const decimals = chargeDecimals(currency, net.chainId, p.decimals);
   return {
     amount: p.amountWei.toString(),
     currency,
