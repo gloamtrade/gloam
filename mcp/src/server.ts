@@ -107,7 +107,7 @@ import {
   NETWORK_KEYS,
   type McpNetwork,
 } from "./networks.js";
-import { KNOWN_ASSETS, assetLabel, type Spend } from "./policy.js";
+import { KNOWN_ASSETS, assetLabel, networkName, type Spend } from "./policy.js";
 import { assetDecimals, authorizeSpend, limitsReport, previewSpend, settleSpend, spendingReport } from "./spendGuard.js";
 import {
   balances,
@@ -325,7 +325,29 @@ function parsePriced(input: string): { req: GloamPaymentRequirements; mpp: Payme
 
 function assetInfo(chainId: number, asset: Address, fallbackDecimals = 18) {
   const known = KNOWN_ASSETS.find((a) => a.chainId === chainId && a.address.toLowerCase() === asset.toLowerCase());
-  return { symbol: known?.symbol ?? assetLabel(chainId, asset), decimals: known?.decimals ?? fallbackDecimals };
+  return { symbol: known?.symbol ?? assetLabel(chainId, asset), decimals: known?.decimals ?? fallbackDecimals, listed: Boolean(known) };
+}
+
+/**
+ * The decimals to count an amount in: the agent's `given` value only for an
+ * asset Gloam does not list. For a listed asset its own decimals win, and a
+ * `given` that disagrees is refused rather than used: 6 for USDT on BNB Chain
+ * (18 there) would price or deposit a trillionth of what was meant.
+ */
+export function amountDecimals(
+  chainId: number,
+  asset: Address,
+  given: number | undefined,
+  fallbackDecimals = 18
+): { decimals: number } | { error: string } {
+  const info = assetInfo(chainId, asset, fallbackDecimals);
+  if (given === undefined) return { decimals: info.decimals };
+  if (info.listed && given !== info.decimals) {
+    return {
+      error: `${info.symbol} on ${networkName(chainId)} has ${info.decimals} decimals, not ${given}. Leave decimals out to use the asset's own.`,
+    };
+  }
+  return { decimals: given };
 }
 
 /** A spend reservation with no transaction after this long was never sent (a crash between reserve and broadcast). */
@@ -364,7 +386,14 @@ const LEGACY_WARNING =
 /** Build a Gloam MCP server. Pass deps to test it without a chain. */
 /** "Robinhood Chain, Tempo, Base and Ethereum", plus Elysium once the SDK has its values. */
 function mainnetChainNames(): string {
-  const names = ["Robinhood Chain", "Tempo", "Base", "Ethereum", ...(MCP_MAINNETS.some((n) => n.family === "elysium") ? ["Elysium"] : [])];
+  const names = [
+    "Robinhood Chain",
+    "Tempo",
+    "Base",
+    "Ethereum",
+    ...(MCP_MAINNETS.some((n) => n.family === "elysium") ? ["Elysium"] : []),
+    ...(MCP_MAINNETS.some((n) => n.family === "bnb") ? ["BNB Chain"] : []),
+  ];
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
@@ -584,7 +613,9 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
           .number()
           .int()
           .optional()
-          .describe("Decimals of the asset; omit to use the asset's own (6 for the stablecoins, 18 for GLOAM and ETH)."),
+          .describe(
+            "Decimals of an asset Gloam does not list; omit it. A listed asset always counts in its own decimals (6 for most stablecoins, 18 for USDT and USDC on BNB Chain, GLOAM and the gas coins), and a value that disagrees is refused."
+          ),
       },
     },
     async ({ amount, network, asset, decimals }) => {
@@ -593,7 +624,9 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
       }
       const net = networkByKey(network);
       const assetAddr = (asset as Address | undefined) ?? net.defaultAsset;
-      const dec = decimals ?? (asset ? assetInfo(net.chainId, assetAddr).decimals : net.defaultAssetDecimals);
+      const decided = amountDecimals(net.chainId, assetAddr, decimals, asset ? 18 : net.defaultAssetDecimals);
+      if ("error" in decided) return text({ status: "error", network: net.key, error: decided.error });
+      const dec = decided.decimals;
       const amountWei = parseUnits(String(amount), dec);
       const isNative = assetAddr.toLowerCase() === NATIVE_ASSET.toLowerCase();
       // Mainnet pools list their assets and cap each deposit: say so before anything is reserved or signed.
@@ -972,7 +1005,9 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
           .min(0)
           .max(36)
           .optional()
-          .describe("Decimals of the settlement asset; omit for the asset's own (6 for the stablecoins)."),
+          .describe(
+            "Decimals of a settlement asset Gloam does not list; omit it. A listed asset always counts in its own decimals (6 for most stablecoins, 18 for USDT and USDC on BNB Chain), and a value that disagrees is refused."
+          ),
         assetSymbol: z.string().optional().describe("Asset label, e.g. USDC.e; omit for the asset's own symbol."),
         asset: z
           .string()
@@ -1016,9 +1051,12 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
       const net = networkByKey(network);
       const settleAsset = (asset as Address | undefined) ?? net.defaultAsset;
       const known = assetInfo(net.chainId, settleAsset, net.defaultAssetDecimals);
+      const decided = amountDecimals(net.chainId, settleAsset, decimals, net.defaultAssetDecimals);
+      if ("error" in decided) return text({ status: "error", network: net.key, error: decided.error });
+      const dec = decided.decimals;
       try {
         const req = buildGloamPaymentRequirements({
-          amountWei: parseUnits(String(amount), decimals ?? known.decimals),
+          amountWei: parseUnits(String(amount), dec),
           asset: settleAsset,
           assetSymbol: assetSymbol ?? known.symbol,
           payTo: tag,
@@ -1029,7 +1067,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
         // The same price as an MPP challenge. It needs this server's challenge key (MPP_SECRET_KEY, or the note store key).
         let mpp: Record<string, unknown>;
         try {
-          const issued = await mppChallengeFor(req, { env, realm, decimals: decimals ?? known.decimals, expiresInSeconds });
+          const issued = await mppChallengeFor(req, { env, realm, decimals: dec, expiresInSeconds });
           mpp = {
             wwwAuthenticate: issued.wwwAuthenticate,
             challengeId: issued.challenge.id,

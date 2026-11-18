@@ -148,6 +148,8 @@ export type Refusal = { code: string; message: string };
 type KnownAsset = { symbol: string; chainId: number; address: Address; decimals: number; stable: boolean };
 
 const RH = GLOAM_NETWORKS.robinhood.chainId;
+/** The dollar stablecoins BNB Chain's vault lists. BNB and BDX are not stablecoins. */
+const BNB_STABLES = new Set(["USDT", "USDC"]);
 const TEMPO = GLOAM_NETWORKS.tempo.chainId;
 
 /** Chain id of each network a limit can name, mainnet or testnet (whether or not this build has its pool). */
@@ -164,9 +166,11 @@ export const NETWORK_CHAIN_IDS: Record<NetworkKey, number> = {
   "elysium-mainnet": mainnetNetwork("elysium")?.chainId ?? 0,
   // Elysium testnet (99801): 0 until the SDK has its pool.
   elysium: testnetNetwork("elysium")?.chainId ?? 0,
+  // BNB Chain (56): 0 until the SDK has its pool (src/bnb.ts), so a limit naming it is refused before.
+  "bnb-mainnet": mainnetNetwork("bnb")?.chainId ?? 0,
 };
 
-/** The chain id a limit's network names; refuses Elysium while the SDK has no chain id for it. */
+/** The chain id a limit's network names; refuses Elysium and BNB Chain while the SDK has no pool for them. */
 function networkChainId(key: NetworkKey): number {
   const id = NETWORK_CHAIN_IDS[key];
   if (!id) throw new Error(`${key} is not available in this version of @gloamtrade/mcp yet. Update the package.`);
@@ -222,7 +226,18 @@ export const KNOWN_ASSETS: KnownAsset[] = [
   { symbol: "BDX", chainId: ETHEREUM_MAINNET_CHAIN_ID, address: ETHEREUM_BDX, decimals: 9, stable: false },
   // Elysium, once the SDK has its values: USDC only, after the others so a bare "USDC" keeps its old meaning.
   ...(mainnetNetwork("elysium")?.assets ?? []).map((a) => ({ symbol: a.symbol, chainId: mainnetNetwork("elysium")!.chainId, address: a.address, decimals: a.decimals, stable: true })),
+  // BNB Chain, once the SDK has its pool: USDT and USDC with 18 decimals (not 6), BNB, and BDX with 9,
+  // each with the decimals the SDK read on chain. Last, so a bare "USDT" or "USDC" keeps naming the
+  // one it named before; name the network (bnb-mainnet) for BNB Chain's, and a limit then counts in 18 decimals.
+  ...bnbKnownAssets(),
 ];
+
+/** BNB Chain's listed assets as KnownAsset rows, or none while the SDK has no pool for it. */
+function bnbKnownAssets(): KnownAsset[] {
+  const n = mainnetNetwork("bnb");
+  if (!n) return [];
+  return n.assets.map((a) => ({ symbol: a.symbol, chainId: n.chainId, address: a.address, decimals: a.decimals, stable: BNB_STABLES.has(a.symbol) }));
+}
 
 /** "Robinhood Chain", "Tempo testnet" and so on; "any network" for a limit that names none. */
 export function networkName(chainId: number | null): string {
@@ -238,7 +253,7 @@ export function assetLabel(chainId: number, asset: Address): string {
 // ------------------------------------------------------------------ config shape
 
 const amount = z.union([z.string(), z.number()]).transform((v) => String(v).trim());
-const network = z.enum(["robinhood", "tempo", "base", "ethereum", "robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "elysium"]);
+const network = z.enum(["robinhood", "tempo", "base", "ethereum", "robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "elysium", "bnb-mainnet"]);
 
 const assetEntry = z
   .object({
@@ -498,7 +513,7 @@ export function loadPolicy(env: Record<string, string | undefined>, readFile: (p
         mode: "invalid",
         agent,
         source,
-        error: `GLOAM_LIMIT_NETWORK "${limitNetwork}" is not a Gloam network. Use robinhood-mainnet, tempo-mainnet, base-mainnet, ethereum-mainnet, ${mainnetNetwork("elysium") ? "elysium-mainnet, " : ""}robinhood, tempo, base${testnetNetwork("elysium") ? ", ethereum or elysium" : " or ethereum"}.`,
+        error: `GLOAM_LIMIT_NETWORK "${limitNetwork}" is not a Gloam network. Use robinhood-mainnet, tempo-mainnet, base-mainnet, ethereum-mainnet, ${mainnetNetwork("elysium") ? "elysium-mainnet, " : ""}${mainnetNetwork("bnb") ? "bnb-mainnet, " : ""}robinhood, tempo, base${testnetNetwork("elysium") ? ", ethereum or elysium" : " or ethereum"}.`,
       };
     }
     const assetKeys = list(env.GLOAM_LIMIT_ASSETS ?? "");

@@ -20,6 +20,12 @@
  * private one), read when this module loads. Without it, a network whose
  * public RPC keeps only recent history (Ethereum Sepolia) reads old logs and
  * state from the SDK's historyRpc for it (signer.ts, gloamReadTransport).
+ *
+ * BNB Chain mainnet ("bnb-mainnet", chain 56, gas in BNB) is offered once the
+ * SDK has its pool (src/bnb.ts). Its public RPCs keep about a day of logs and
+ * answer an empty list for older blocks, so its reads go through the SDK's
+ * guardPrunedLogs (signer.ts): a pruned answer fails loudly instead of
+ * reading as "no events". GLOAM_RPC_URL_56 should name an RPC that keeps every log.
  */
 import type { Address } from "viem";
 import {
@@ -31,6 +37,7 @@ import {
   type CeremonyKind,
   type GloamNetwork,
   type HistoryRpc,
+  type LogCanary,
 } from "@gloamtrade/sdk";
 
 export type NetworkKey =
@@ -43,8 +50,9 @@ export type NetworkKey =
   | "base-mainnet"
   | "ethereum-mainnet"
   | "elysium-mainnet"
-  | "elysium";
-export type ChainFamily = "robinhood" | "tempo" | "base" | "ethereum" | "elysium";
+  | "elysium"
+  | "bnb-mainnet";
+export type ChainFamily = "robinhood" | "tempo" | "base" | "ethereum" | "elysium" | "bnb";
 
 export interface McpNetwork {
   key: NetworkKey;
@@ -61,6 +69,12 @@ export interface McpNetwork {
   rpc: string;
   /** Where reads about old blocks go when `rpc` keeps only recent history; null when it keeps everything or GLOAM_RPC_URL_<chainId> is set. */
   historyRpc: HistoryRpc | null;
+  /**
+   * Set where public RPCs answer an empty list for logs they no longer keep (BNB
+   * Chain): reads then go through the SDK's guardPrunedLogs, which fails loudly
+   * instead. Kept with GLOAM_RPC_URL_<chainId> set too, so a pruned private RPC is caught.
+   */
+  logCanary: LogCanary | null;
   explorer: string;
   /** Block the pool was deployed at, for tree scans. */
   deployBlock: bigint;
@@ -85,9 +99,18 @@ const NATIVE = {
   ethereum: { name: "Ether", symbol: "ETH", decimals: 18 },
   // Elysium, Kinetiq's Hyperliquid L2: gas in HYPE (mainnet and testnet, once the SDK has their values)
   elysium: { name: "HYPE", symbol: "HYPE", decimals: 18 },
+  // BNB Chain: gas in BNB, which its vault lists as address(0) (once the SDK has its pool)
+  bnb: { name: "BNB", symbol: "BNB", decimals: 18 },
 } as const;
 
-const CHAIN_NAMES: Record<ChainFamily, string> = { robinhood: "Robinhood Chain", tempo: "Tempo", base: "Base", ethereum: "Ethereum", elysium: "Elysium" };
+const CHAIN_NAMES: Record<ChainFamily, string> = {
+  robinhood: "Robinhood Chain",
+  tempo: "Tempo",
+  base: "Base",
+  ethereum: "Ethereum",
+  elysium: "Elysium",
+  bnb: "BNB Chain",
+};
 
 /** A testnet's name: "Base Sepolia Testnet", "Ethereum Sepolia Testnet", "Tempo Testnet". */
 function testnetName(family: ChainFamily): string {
@@ -105,6 +128,7 @@ export const MCP_NETWORKS: Record<"robinhood" | "tempo", McpNetwork> = {
     pool: GLOAM_NETWORKS.robinhood.pool,
     rpc: rpcFor(GLOAM_NETWORKS.robinhood.chainId, "https://rpc.testnet.chain.robinhood.com"),
     historyRpc: null,
+    logCanary: null,
     explorer: "https://explorer.testnet.chain.robinhood.com",
     deployBlock: GLOAM_NETWORKS.robinhood.deployBlock,
     nativeCurrency: NATIVE.robinhood,
@@ -123,6 +147,7 @@ export const MCP_NETWORKS: Record<"robinhood" | "tempo", McpNetwork> = {
     pool: GLOAM_NETWORKS.tempo.pool,
     rpc: rpcFor(GLOAM_NETWORKS.tempo.chainId, "https://rpc.moderato.tempo.xyz"),
     historyRpc: null,
+    logCanary: null,
     explorer: "https://explore.testnet.tempo.xyz",
     deployBlock: GLOAM_NETWORKS.tempo.deployBlock,
     nativeCurrency: NATIVE.tempo,
@@ -136,7 +161,7 @@ export const MCP_NETWORKS: Record<"robinhood" | "tempo", McpNetwork> = {
 /** An SDK network with a published pool (a mainnet, or Base Sepolia), or null while it has none. */
 function fromSdk(n: GloamNetwork | null): McpNetwork | null {
   if (!n) return null;
-  // The first listed asset is the default: USDG on Robinhood Chain, USDC.e on Tempo, USDC on Base and Ethereum.
+  // The first listed asset is the default: USDG on Robinhood Chain, USDC.e on Tempo, USDC on Base and Ethereum, USDT on BNB Chain.
   const first = n.assets[0]!;
   return {
     key: n.key,
@@ -149,6 +174,7 @@ function fromSdk(n: GloamNetwork | null): McpNetwork | null {
     rpc: rpcFor(n.chainId, n.rpcUrl),
     // an RPC set by hand serves everything itself, as before
     historyRpc: process.env[`GLOAM_RPC_URL_${n.chainId}`]?.trim() ? null : n.historyRpc,
+    logCanary: n.logCanary ?? null,
     explorer: n.explorerUrl,
     deployBlock: n.deployBlock,
     nativeCurrency: NATIVE[n.family],
@@ -167,6 +193,8 @@ export const MCP_MAINNETS: McpNetwork[] = [
   fromSdk(mainnetNetwork("ethereum")),
   // Elysium: once every value in the SDK's src/elysium.ts is in (chain id, RPC, USDC, pool)
   fromSdk(mainnetNetwork("elysium")),
+  // BNB Chain: once the SDK's src/bnb.ts has its pool and deploy block
+  fromSdk(mainnetNetwork("bnb")),
 ].filter((n): n is McpNetwork => n !== null);
 
 /** Base Sepolia, once the SDK has its pool; null before. */
@@ -197,6 +225,7 @@ export const ALL_NETWORK_KEYS: readonly NetworkKey[] = [
   "base-mainnet",
   "ethereum-mainnet",
   "elysium-mainnet",
+  "bnb-mainnet",
   "robinhood",
   "tempo",
   "base",
