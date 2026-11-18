@@ -34,6 +34,7 @@ On mainnet:
 
 **Ethereum.** `GLOAM_NETWORK=ethereum-mainnet` runs on Ethereum mainnet (`1`: USDC, USDT, USDG, PYUSD, EURC and ETH, 50,000 per stablecoin and 20 ETH per deposit), live since 26 October 2026. Its testnet is Ethereum Sepolia (`ethereum`), below. Gas costs more there: the Gloam relay waits while Ethereum gas is above its ceiling (3 gwei by default) and answers `gas_high`. A USDT shield clears an old USDT approval first, since Tether's token refuses to change one non-zero approval into another. `GLOAM_RPC_URL_1` points it at your own RPC.
 **Ethereum Sepolia.** `GLOAM_NETWORK=ethereum` runs on Ethereum Sepolia (`11155111`: test USDC, USDG, PYUSD, EURC and ETH on the mainnet pool and final keys). `GLOAM_RPC_URL_11155111` points it at your own RPC.
+**BNB Chain.** `GLOAM_NETWORK=bnb-mainnet` (chain `56`, gas in BNB: USDT and USDC with 18 decimals each, BNB, and BDX) works once a release has its pool, and is refused by name before. Its public RPCs keep about a day of logs and answer an empty list for anything older, so this server checks an empty answer about old blocks and fails loudly instead of reading it as "no payments". Set `GLOAM_RPC_URL_56` to an RPC that keeps every log. Leave `decimals` out on tools there: a listed asset always counts in its own, and a value that disagrees is refused.
 
 ## Install
 
