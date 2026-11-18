@@ -45,7 +45,7 @@ const PNG_LOGO_IDS = new Set([
 ]);
 
 /** Round marks (a full disc): shown as a circle with no plate, so no white corners. */
-const DISC_LOGO_IDS = new Set(["usdg", "usdce", "usdc", "eurc", "usdt", "pyusd", "eth", "weth", "avgo", "mstr", "sbux", "usde", "u", "cbbtc", "bdx"]);
+const DISC_LOGO_IDS = new Set(["usdg", "usdce", "usdc", "eurc", "usdt", "pyusd", "eth", "weth", "avgo", "mstr", "sbux", "usde", "u", "cbbtc", "bdx", "bnb"]);
 
 /**
  * White marks on a clear ground. On the usual white plate they vanish and leave
@@ -65,6 +65,8 @@ const SPECIAL_LOGOS: Record<string, string> = {
   elysium: "/brand/chains/elysium.png",
   // HYPE, Elysium's gas coin
   hype: "/brand/tokens/hype.png",
+  // BNB, BNB Chain's gas coin (the mark the bridge list already uses)
+  bnb: "/brand/tokens/bnb.png",
   kntq: "/brand/tokens/kntq.png",
   // Circle's USDC, Tether's USDT and PayPal's PYUSD, the marks the bridge list uses
   usdc: "/brand/tokens/usdc.png",

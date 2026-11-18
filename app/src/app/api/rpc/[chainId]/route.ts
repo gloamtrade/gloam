@@ -7,8 +7,10 @@ export const maxDuration = 30;
 
 /**
  * gloam.trade's JSON-RPC proxy for the mainnets with one public RPC (Robinhood
- * Chain, Tempo, Elysium). The browser asks it only after that RPC failed for it
- * (lib/rpcProxy), for reads only; the rules and limits are in lib/rpcProxyServer.
+ * Chain, Tempo, Elysium), and for BNB Chain's older logs once it is on (its
+ * public RPCs keep about a day of them). The browser asks it only after a public
+ * RPC failed for it (lib/rpcProxy), for reads only; the rules and limits are in
+ * lib/rpcProxyServer.
  */
 export async function POST(req: Request, ctx: { params: Promise<{ chainId: string }> }) {
   const { chainId } = await ctx.params;

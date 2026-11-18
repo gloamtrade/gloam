@@ -227,6 +227,16 @@ export async function loadHypeUsd(): Promise<number | null> {
   }
 }
 
+/** BNB in USD (CoinGecko "binancecoin"): BNB Chain's gas coin. Null when unknown, never ETH's price. */
+export async function loadBnbUsd(): Promise<number | null> {
+  try {
+    const map = await fetchCoinGeckoSimple(["binancecoin"]);
+    return map.get("binancecoin")?.mark ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadEthUsd(): Promise<number | null> {
   try {
     const map = await fetchCoinGeckoSimple(["ethereum"]);

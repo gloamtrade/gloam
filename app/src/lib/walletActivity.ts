@@ -8,7 +8,7 @@
  *
  * Runs in the browser against the chain's public RPC, the same one the app
  * already reads balances from. Where that is the chain's only public RPC
- * (Robinhood Chain, Tempo, Elysium) and it fails for this browser (a blocked
+ * (Robinhood Chain, Tempo, Elysium), or keeps little history (BNB Chain), and it fails for this browser (a blocked
  * host, a refused IP), the reads go through gloam.trade's own RPC proxy instead
  * (lib/rpcProxy), which passes them on and logs neither the requests nor the
  * address. The address goes nowhere else. Logs are read in

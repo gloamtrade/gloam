@@ -32,6 +32,7 @@ import {
   type OnchainToken,
 } from "@/lib/tokens";
 import { isElysiumChainId } from "@/lib/elysium";
+import { isBnbChainId } from "@/lib/bnb";
 import { COINGECKO_MARKED, hasCoingeckoMarks, useCoingeckoMarks } from "@/hooks/useCoingeckoMarks";
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
 import {
@@ -215,10 +216,17 @@ export function PortfolioView() {
   // chain's own symbol rather than a hardcoded "ETH".
   const nativeSymbol = network.primaryAsset.symbol;
   const isElysium = isElysiumChainId(network.chainId);
-  // The gas coin's own price: HYPE on Elysium, never ETH's.
-  const nativeUsdRate: number | null = isTempo ? 1 : isElysium ? (marketData?.hypeUsd ?? null) : ethUsd;
-  const nativeId = isElysium ? "hype" : "eth";
-  const nativeName = isElysium ? "Hyperliquid" : "Ether";
+  const isBnb = isBnbChainId(network.chainId);
+  // The gas coin's own price: HYPE on Elysium, BNB on BNB Chain, never ETH's.
+  const nativeUsdRate: number | null = isTempo
+    ? 1
+    : isElysium
+      ? (marketData?.hypeUsd ?? null)
+      : isBnb
+        ? (marketData?.bnbUsd ?? null)
+        : ethUsd;
+  const nativeId = isElysium ? "hype" : isBnb ? "bnb" : "eth";
+  const nativeName = isElysium ? "Hyperliquid" : isBnb ? "BNB" : "Ether";
   // $GLOAM and the swap tokens on Robinhood Chain mainnet, and BDX on Base and Ethereum, priced like Transparency does.
   const { marks: geckoMarks, pending: geckoPending } = useCoingeckoMarks(hasCoingeckoMarks(network.chainId));
   // BDX, or ETH on Robinhood Chain, is offered to Add only once the vault's live limit for it is open.

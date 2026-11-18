@@ -24,14 +24,16 @@ import { holdableTokens } from "@/lib/vaultAssets";
 /**
  * Robinhood Chain first: its read has to work. Base and Ethereum add to the
  * total when they answer, and Elysium (an Orbit chain with Multicall3, read the
- * same way) once it is a network (lib/elysium.ts). Tempo has no gas coin and
- * reads differently, so it is not here.
+ * same way) once it is a network (lib/elysium.ts), and BNB Chain once it is one
+ * (lib/bnb.ts; balances only, no logs). Tempo has no gas coin and reads
+ * differently, so it is not here.
  */
 const CHAINS: NetworkKey[] = [
   "robinhood-mainnet",
   "base-mainnet",
   "ethereum-mainnet",
   ...(NETWORK_KEYS.includes("elysium-mainnet") ? (["elysium-mainnet"] as const) : []),
+  ...(NETWORK_KEYS.includes("bnb-mainnet") ? (["bnb-mainnet"] as const) : []),
 ];
 const REQUIRED: NetworkKey = "robinhood-mainnet";
 

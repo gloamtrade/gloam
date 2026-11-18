@@ -81,11 +81,11 @@ export function ShieldView() {
     networkNow.current = network;
   }, [network]);
   const onProduct = chainId === network.chainId;
-  const { ethUsd, hypeUsd } = useEthPrice();
+  const { ethUsd, hypeUsd, bnbUsd } = useEthPrice();
   const { data: marketData } = useLiveMarkets();
-  // The chain's own coin (HYPE on Elysium, ETH elsewhere): its name, logo and price.
+  // The chain's own coin (HYPE on Elysium, BNB on BNB Chain, ETH elsewhere): its name, logo and price.
   const nativeToken = nativeTokenFor(network.chainId);
-  const nativeUsd = network.family === "elysium" ? hypeUsd : ethUsd;
+  const nativeUsd = network.family === "elysium" ? hypeUsd : network.family === "bnb" ? bnbUsd : ethUsd;
   // $GLOAM, PONS, AI and the like: the markets feed has no price for them.
   const { marks: geckoMarks } = useCoingeckoMarks(hasCoingeckoMarks(network.chainId));
   const deployed = isShieldDeployed() && Boolean(network.pool);

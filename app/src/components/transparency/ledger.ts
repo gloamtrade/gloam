@@ -131,6 +131,8 @@ const HEAD_LAG: Record<number, bigint> = {
   // Elysium mainnet and testnet: blocks every ~100 ms, so 20 blocks is about 2 s.
   99901: 20n,
   99801: 20n,
+  // BNB Chain: blocks every ~0.45 s, so 20 blocks is about 9 s.
+  56: 20n,
 };
 const FRESH_MS = 30_000;
 const CACHE_PREFIX = "gloam_transparency_v1";
@@ -164,9 +166,14 @@ const clients = new Map<string, PublicClient>();
  * lib/walletActivity) adds gloam.trade's RPC proxy after them where the chain
  * has one public RPC (lib/rpcProxy), so a blocked RPC host does not leave the
  * history empty. In the browser only; on the server there is no proxy.
+ *
+ * BNB Chain is the exception, and the page says so: its public nodes keep about
+ * a day of logs and answer an empty list for older blocks, so its reads always
+ * carry the proxy, which the pruned-logs check (lib/readTransport) asks for those
+ * older blocks only. Without it the read fails loudly rather than count nothing.
  */
 export function clientFor(n: GloamNetwork, opts: { proxyFallback?: boolean } = {}): PublicClient {
-  const proxy = opts.proxyFallback ? rpcProxyUrl(n.chainId) : null;
+  const proxy = opts.proxyFallback || n.logCanary ? rpcProxyUrl(n.chainId) : null;
   const key = `${n.chainId}:${proxy ? "proxy" : "direct"}`;
   const hit = clients.get(key);
   if (hit) return hit;

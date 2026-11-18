@@ -1,19 +1,20 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DocsLayout } from "@/components/DocsLayout";
-import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, liveMainnetCountWords, liveMainnetNames, mainnetPool, type MainnetChainId } from "@/lib/mainnet";
-import { BASE_MAINNET_TOKENS, BASE_SEPOLIA_TOKENS, ELYSIUM_MAINNET_TOKENS, ETHEREUM_MAINNET_TOKENS, ETHEREUM_SEPOLIA_TOKENS, RH_MAINNET_TOKENS, TEMPO_MAINNET_TOKENS } from "@/lib/tokens";
+import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, joinNames, liveMainnetCountWords, liveMainnetNames, mainnetPool, type MainnetChainId } from "@/lib/mainnet";
+import { BASE_MAINNET_TOKENS, BASE_SEPOLIA_TOKENS, BNB_MAINNET_TOKENS, ELYSIUM_MAINNET_TOKENS, ETHEREUM_MAINNET_TOKENS, ETHEREUM_SEPOLIA_TOKENS, RH_MAINNET_TOKENS, TEMPO_MAINNET_TOKENS } from "@/lib/tokens";
 import { DEFAULT_MAX_GAS_GWEI } from "@/lib/relay/gasCeiling";
 import { getNetwork } from "@/lib/networks";
 import { VAULT_SWAP_ROUTERS, swapMainnets, swapV3Live } from "@/lib/vaultSwap";
 import { GLOAM_OWNER, GLOAM_RELAYERS, GLOAM_TREASURY, MAINNET_POSEIDON_T3 } from "@/lib/contractDirectory";
 import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_LIVE_SINCE, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET, ELYSIUM_TESTNET_FLAG } from "@/lib/elysium";
+import { BNB, BNB_LIVE_SINCE } from "@/lib/bnb";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 
 export const metadata: Metadata = {
   title: "Networks",
   description:
-    `Gloam runs one private core on ${liveMainnetCountWords()}, ${liveMainnetNames()}, ${ELYSIUM && !ELYSIUM_TESTNET ? "each but Elysium with a testnet" : "each with a testnet"}. Chain IDs, RPCs, pools, assets, deposit limits, and the integration details for each chain.`,
+    `Gloam runs one private core on ${liveMainnetCountWords()}, ${liveMainnetNames()}, ${testnetPhrase()}. Chain IDs, RPCs, pools, assets, deposit limits, and the integration details for each chain.`,
 };
 
 /** A mainnet pool address, or a placeholder until it is filled in on deploy day. */
@@ -48,6 +49,15 @@ const ETHEREUM_SEPOLIA_MEMO = ethereumSepoliaPayMemo();
 
 /** "Four mainnets", "Five mainnets": the count as the heading writes it. */
 const MAINNETS_HEADING = liveMainnetCountWords().replace(/^./, (c) => c.toUpperCase());
+/**
+ * "each with a testnet", or naming the mainnets that have none: Elysium (until
+ * its testnet is on) and BNB Chain (while it is on: Gloam has no testnet there).
+ */
+function testnetPhrase(): string {
+  const none = [...(ELYSIUM && !ELYSIUM_TESTNET ? ["Elysium"] : []), ...(BNB ? ["BNB Chain"] : [])];
+  return none.length ? `each but ${joinNames(none)} with a testnet` : "each with a testnet";
+}
+
 /** Elysium's vault sits at the address the other mainnets share, when its deployer nonce was 0 (DEPLOY-ELYSIUM.md). */
 const ELYSIUM_SAME_VAULT = ELYSIUM !== null && ELYSIUM.pool.toLowerCase() === "0x39e28cde55cab798874746ac52cb4b5cc99a0194";
 
@@ -61,15 +71,16 @@ export default function DocsNetworksPage() {
   return (
     <DocsLayout
       title="Networks"
-      lede={`One private core, ${liveMainnetCountWords()}. ${liveMainnetNames()}, ${ELYSIUM && !ELYSIUM_TESTNET ? "each but Elysium with a testnet" : "each with a testnet"}.`}
+      lede={`One private core, ${liveMainnetCountWords()}. ${liveMainnetNames()}, ${testnetPhrase()}.`}
       glance={[
         { label: "Robinhood Chain mainnet", value: "4663" },
         { label: "Tempo mainnet", value: "4217" },
         { label: "Base mainnet", value: "8453" },
         { label: "Ethereum mainnet", value: "1" },
         ...(ELYSIUM ? [{ label: "Elysium mainnet", value: String(ELYSIUM.chainId) }] : []),
+        ...(BNB ? [{ label: "BNB Chain mainnet", value: String(BNB.chainId) }] : []),
         { label: "Testnets", value: ELYSIUM_TESTNET ? "46630 · 42431 · 84532 · 11155111 · 99801" : "46630 · 42431 · 84532 · 11155111" },
-        { label: "Gas", value: ELYSIUM ? "ETH; stablecoins on Tempo; HYPE on Elysium" : "ETH; stablecoins on Tempo" },
+        { label: "Gas", value: `ETH; stablecoins on Tempo${ELYSIUM ? "; HYPE on Elysium" : ""}${BNB ? "; BNB on BNB Chain" : ""}` },
       ]}
     >
       <h2>{MAINNETS_HEADING}, one shielded pool design</h2>
@@ -79,7 +90,8 @@ export default function DocsNetworksPage() {
         the same vault design, and the same SDK run on every network. What
         differs is the asset each chain leads with: USDG, $GLOAM, PONS and CASHCAT
         on Robinhood Chain, dollar stablecoins on Tempo, USDC, EURC, USDT and ETH on Base and
-        Ethereum, with USDG and PYUSD on Ethereum too{ELYSIUM ? ", and USDC on Elysium" : ""}. The app switches networks at runtime
+        Ethereum, with USDG and PYUSD on Ethereum too{ELYSIUM ? ", and USDC on Elysium" : ""}
+        {BNB ? ", and USDT, USDC, BNB and BDX on BNB Chain" : ""}. The app switches networks at runtime
         and points at the right pool for each.
       </p>
 
@@ -87,9 +99,11 @@ export default function DocsNetworksPage() {
       <p>
         Gloam went live on Robinhood Chain and Tempo mainnet on 21 October 2026,
         13:00 UTC, and on Base and Ethereum mainnet on 26 October 2026
-        {ELYSIUM ? `, then on Elysium mainnet on ${ELYSIUM_LIVE_SINCE}` : ""}. The
+        {ELYSIUM ? `, then on Elysium mainnet on ${ELYSIUM_LIVE_SINCE}` : ""}
+        {BNB ? `, and on BNB Chain mainnet on ${BNB_LIVE_SINCE}` : ""}. The
         vault has the same address on{" "}
-        {ELYSIUM && !ELYSIUM_SAME_VAULT ? "the first four" : `all ${liveMainnetCountWords().split(" ")[0]}`}. The mainnet pools
+        {(ELYSIUM && !ELYSIUM_SAME_VAULT) || BNB ? "the first four" : `all ${liveMainnetCountWords().split(" ")[0]}`}
+        {BNB && ELYSIUM && BNB.pool.toLowerCase() === ELYSIUM.pool.toLowerCase() ? "; Elysium and BNB Chain share another" : ""}. The mainnet pools
         (<code>ShieldPoolPayments</code>) take shield, private send, cash out
         and proofs, and have no swap code.{" "}
         <Link href="/docs/private-swaps">Private swaps</Link>{" "}
@@ -109,6 +123,7 @@ export default function DocsNetworksPage() {
               <th>Base</th>
               <th>Ethereum</th>
               {ELYSIUM && <th>Elysium</th>}
+              {BNB && <th>BNB Chain</th>}
             </tr>
           </thead>
           <tbody>
@@ -131,6 +146,11 @@ export default function DocsNetworksPage() {
                   {<code>{ELYSIUM.chainId}</code>}
                 </td>
               )}
+              {BNB && (
+                <td>
+                  <code>{BNB.chainId}</code>
+                </td>
+              )}
             </tr>
             <tr>
               <td>RPC</td>
@@ -149,6 +169,11 @@ export default function DocsNetworksPage() {
               {ELYSIUM && (
                 <td>
                   <code>{ELYSIUM_RPC_DISPLAY}</code>
+                </td>
+              )}
+              {BNB && (
+                <td>
+                  <code>{BNB.rpcUrls[0]}</code>
                 </td>
               )}
             </tr>
@@ -181,6 +206,13 @@ export default function DocsNetworksPage() {
                   </a>}
                 </td>
               )}
+              {BNB && (
+                <td>
+                  <a href={BNB.explorerUrl} target="_blank" rel="noreferrer">
+                    {BNB.explorerUrl.replace(/^https:\/\//, "")}
+                  </a>
+                </td>
+              )}
             </tr>
             <tr>
               <td>Pool</td>
@@ -199,6 +231,11 @@ export default function DocsNetworksPage() {
               {ELYSIUM && (
                 <td>
                   {<code>{ELYSIUM.pool}</code>}
+                </td>
+              )}
+              {BNB && (
+                <td>
+                  <code>{BNB.pool}</code>
                 </td>
               )}
             </tr>
@@ -221,6 +258,11 @@ export default function DocsNetworksPage() {
                   {<code>{ELYSIUM.deployBlock.toString()}</code>}
                 </td>
               )}
+              {BNB && (
+                <td>
+                  <code>{BNB.deployBlock.toString()}</code>
+                </td>
+              )}
             </tr>
             <tr>
               <td>Swap router</td>
@@ -237,6 +279,7 @@ export default function DocsNetworksPage() {
                 <SwapRouterAddress chainId={1} />
               </td>
               {ELYSIUM && <td>Not deployed</td>}
+              {BNB && <td>Not deployed</td>}
             </tr>
             <tr>
               <td>Swaps on</td>
@@ -245,6 +288,7 @@ export default function DocsNetworksPage() {
               <td>{swapV3Live(8453) ? "Uniswap v4 (USDC, USDT, EURC, ETH)" : "Not yet"}</td>
               <td>{swapV3Live(1) ? "Uniswap v4 (USDC, USDT, USDG, EURC, ETH)" : "Not yet"}</td>
               {ELYSIUM && <td>Not yet</td>}
+              {BNB && <td>Not yet</td>}
             </tr>
             <tr>
               <td>Gas</td>
@@ -253,6 +297,7 @@ export default function DocsNetworksPage() {
               <td>ETH, also a pool asset</td>
               <td>ETH, also a pool asset; the relay waits while gas is above {DEFAULT_MAX_GAS_GWEI[1]} gwei</td>
               {ELYSIUM && <td>HYPE, not a pool asset</td>}
+              {BNB && <td>BNB, also a pool asset; the relay waits while gas is above {DEFAULT_MAX_GAS_GWEI[56]} gwei</td>}
             </tr>
           </tbody>
         </table>
@@ -322,6 +367,24 @@ export default function DocsNetworksPage() {
                 <td>{t.decimals}</td>
               </tr>
             ))}
+            {BNB_MAINNET_TOKENS.map((t) => (
+              <tr key={`bnb-${t.address}`}>
+                <td>{t.symbol}</td>
+                <td>BNB Chain</td>
+                <td>
+                  <code>{t.address}</code>
+                </td>
+                <td>{t.decimals}</td>
+              </tr>
+            ))}
+            {BNB && (
+              <tr key="bnb-native">
+                <td>BNB</td>
+                <td>BNB Chain</td>
+                <td>Native, no token address</td>
+                <td>18</td>
+              </tr>
+            )}
             {["Robinhood Chain", BASE_MAINNET_LIVE ? "Base" : null, ETHEREUM_LIVE ? "Ethereum" : null]
               .filter((c): c is string => c !== null)
               .map((c) => (
@@ -341,7 +404,11 @@ export default function DocsNetworksPage() {
           deposit and 2,500,000 in total. ETH on Base and Ethereum: 20 per
           deposit and 1,000 in total. $GLOAM: 2,500,000 per deposit and
           25,000,000 in total. PONS: 390,000 and 9,800,000. CASHCAT: 960,000 and
-          24,000,000.{ELYSIUM ? " USDC on Elysium: 500 per deposit and 25,000 in total at launch." : ""} The app
+          24,000,000.{ELYSIUM ? " USDC on Elysium: 500 per deposit and 25,000 in total at launch." : ""}
+          {BNB
+            ? " On BNB Chain, USDT, USDC and BNB have no limit, and BDX is capped at 100,000 per deposit and 2,000,000 in total. USDT and USDC have 18 decimals there, not 6."
+            : ""}{" "}
+          The app
           shows the room left before you sign.
         </li>
         <li>
@@ -913,6 +980,61 @@ export default function DocsNetworksPage() {
             <li>
               <strong>Blocks</strong>, about every 100 ms. The public RPCs cap a log read at 10,000 logs, not at a
               block range.
+            </li>
+          </ul>
+        </>
+      )}
+
+      {BNB && (
+        <>
+          <h2 id="bnb">BNB Chain</h2>
+          <p>
+            BNB Chain is BNB Smart Chain mainnet, an EVM chain with BNB as its gas
+            coin and a block about every 0.45 seconds. Gloam there is the same
+            vault as on the other mainnets: <code>ShieldPoolPayments</code>, the
+            ceremony&apos;s final keys, deposit limits and the {CASH_OUT_FEE_PERCENT} cash-out
+            fee. Like Elysium, its owner is a <code>VaultOwnerGuard</code> from the
+            deploy itself, so its proof checkers can never be replaced and its
+            ownership can never move. The guard is run by the Gloam Owner Safe, 2
+            of 3. There is no Gloam testnet on BNB Chain.
+          </p>
+          <ul>
+            <li>
+              <strong>Chain ID</strong>, {BNB.chainId}
+            </li>
+            <li>
+              <strong>RPC</strong>, <code>{BNB.rpcUrls[0]}</code>
+            </li>
+            <li>
+              <strong>Explorer</strong>, <code>{BNB.explorerUrl}</code>
+            </li>
+            <li>
+              <strong>Pool</strong>, <code>{BNB.pool}</code>, from block <code>{BNB.deployBlock.toString()}</code>
+            </li>
+            <li>
+              <strong>Payment-message board</strong>, {BNB.payMemo ? <code>{BNB.payMemo.address}</code> : <>Not deployed yet</>}
+            </li>
+            <li>
+              <strong>Assets</strong>, USDT and USDC ({BNB.usdt.decimals} decimals each, not 6),
+              BNB, the gas coin, and BDX ({BNB.bdx.decimals} decimals), Beldex&apos;s token as its
+              canonical LayerZero contract, the same address as on Base and Ethereum.
+            </li>
+            <li>
+              <strong>Deposit limits</strong>, none on USDT, USDC and BNB, and 100,000 BDX per
+              deposit and 2,000,000 in total. Raising one waits the vault&apos;s 3-day timelock.
+            </li>
+            <li>
+              <strong>Reads.</strong> BNB Chain&apos;s public RPCs keep about a day of logs and
+              answer an empty list for older blocks. Rebuilding the vault tree needs every log
+              since the deploy block, so use an RPC that keeps them all. Gloam&apos;s app reads
+              older blocks through its own server, and the SDK&apos;s{" "}
+              <code>gloamReadTransport(network)</code> refuses an empty answer the chain does not
+              back, so a missing history fails loudly instead of showing no payments.
+            </li>
+            <li>
+              <strong>Not on BNB Chain yet.</strong> Private swaps and bringing money over into
+              the vault there. Payments, payroll, payment requests, claim links and proofs work as
+              on the other chains.
             </li>
           </ul>
         </>

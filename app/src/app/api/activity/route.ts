@@ -3,6 +3,7 @@ import { isAddress } from "viem";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { NETWORK_KEYS } from "@/lib/networks";
 import { ELYSIUM } from "@/lib/elysium";
+import { BNB } from "@/lib/bnb";
 
 const EXPLORER_API = "https://explorer.testnet.chain.robinhood.com/api";
 /** Robinhood Chain mainnet's explorer answers the same account API (checked 2026-10-20). */
@@ -30,6 +31,8 @@ function explorerFor(chainId: string | null): string | null | "bad" {
   if (ELYSIUM && chainId === String(ELYSIUM.chainId) && NETWORK_KEYS.includes("elysium-mainnet")) return null;
   // Elysium testnet too, once on.
   if (chainId === "99801" && NETWORK_KEYS.includes("elysium")) return null;
+  // BNB Chain, once on (lib/bnb): read from the chain; BscScan's API needs a key.
+  if (BNB && chainId === String(BNB.chainId) && NETWORK_KEYS.includes("bnb-mainnet")) return null;
   return "bad";
 }
 
