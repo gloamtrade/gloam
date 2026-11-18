@@ -44,6 +44,7 @@ import {
 import { POOL_STATE_ABI } from "./sweep.js";
 import { ethereumSepoliaPayMemo } from "./mainnet.js";
 import { elysiumMainnetConfig, elysiumTestnetConfig } from "./elysium.js";
+import { bnbMainnetConfig } from "./bnb.js";
 
 /** A payment-message board: where payers post sealed payments for their payees to find. */
 export interface PayMemoBoard {
@@ -82,6 +83,10 @@ if (ELYSIUM?.payMemo) PAY_MEMO_BOARDS[ELYSIUM.chainId] = { address: ELYSIUM.payM
 // And Elysium testnet's, once its pool and board are in.
 const ELYSIUM_TESTNET = elysiumTestnetConfig();
 if (ELYSIUM_TESTNET?.payMemo) PAY_MEMO_BOARDS[ELYSIUM_TESTNET.chainId] = { address: ELYSIUM_TESTNET.payMemo.address, deployBlock: ELYSIUM_TESTNET.payMemo.deployBlock, emitsPoster: false };
+// BNB Chain's, once its pool and board are in (src/bnb.ts). Read its board through
+// gloamReadTransport(network): its public RPCs keep about a day of logs.
+const BNB = bnbMainnetConfig();
+if (BNB?.payMemo) PAY_MEMO_BOARDS[BNB.chainId] = { address: BNB.payMemo.address, deployBlock: BNB.payMemo.deployBlock, emitsPoster: false };
 
 function ethereumSepoliaBoard(): PayMemoBoard | null {
   const m = ethereumSepoliaPayMemo();
