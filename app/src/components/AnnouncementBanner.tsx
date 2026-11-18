@@ -12,7 +12,7 @@ const ANNOUNCEMENT_URL = "https://x.com/gloamtrade/status/2119148611095433322";
 const KEY = ELYSIUM_ENABLED ? "gloam:announce-dismissed:elysium-live-v1" : "gloam:announce-dismissed:elysium-v1";
 
 // Keep the note on marketing + docs; stay out of the working app (it has its own notices).
-const HIDDEN_ON = ["/app", "/admin", "/verify", "/pitch", "/claim", "/mainnet"];
+const HIDDEN_ON = ["/app", "/admin", "/verify", "/pitch", "/claim", "/mainnet", "/status"];
 
 const DISMISSED_EVENT = "gloam-announce-dismissed";
 
@@ -60,7 +60,7 @@ export function AnnouncementBanner() {
   };
 
   return (
-    <div className="relative z-[60] w-full border-b border-transparent bg-[#0b0c0e] text-white dark:border-line dark:bg-[#111214]">
+    <div data-announcement="" className="relative z-[60] w-full border-b border-transparent bg-[#0b0c0e] text-white dark:border-line dark:bg-[#111214]">
       <div className="mx-auto flex max-w-[1400px] items-center justify-center gap-3 py-2 pl-4 pr-12 sm:px-14">
         <Image src="/brand/chains/elysium.png" alt="" width={16} height={16} className="shrink-0 rounded-full" />
         <p className="min-w-0 truncate text-[13px] leading-tight">

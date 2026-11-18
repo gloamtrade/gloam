@@ -9,6 +9,9 @@ import {
   embeddedWalletsBuild,
 } from "./csp.config.mjs";
 
+/** The status page's own host (app/status). */
+const STATUS_HOST = [{ type: "host" as const, value: "status.gloam.trade" }];
+
 /**
  * When this package is the Vercel Root Directory (`app`), keep tracing
  * inside the monorepo without pointing output at a broken `.next` path.
@@ -92,16 +95,34 @@ const nextConfig: NextConfig = {
         : []),
     ];
   },
-  // The sealed trade is retired; its page now lives as a section of Private swaps.
   async redirects() {
-    return [{ source: "/docs/sealed-trade", destination: "/docs/private-swaps#sealed-trade", permanent: true }];
-  },
-  // The pitch deck is one static page in public/pitch.
-  async rewrites() {
     return [
-      { source: "/pitch", destination: "/pitch/index.html" },
-      { source: "/pitch/report", destination: "/pitch/report.html" },
+      // The sealed trade is retired; its page now lives as a section of Private swaps.
+      { source: "/docs/sealed-trade", destination: "/docs/private-swaps#sealed-trade", permanent: true },
+      // status.gloam.trade is the status page alone: its root shows it (rewrites, below),
+      // and any other page asked for there opens on www. Files the page itself loads,
+      // the API and Next's own paths stay.
+      { source: "/status", has: STATUS_HOST, destination: "/", permanent: false },
+      {
+        source:
+          "/:path((?!_next/|_vercel/|__nextjs|\\.well-known/|api/|fonts/|brand/|favicon|apple-touch-icon|icon\\.png|manifest\\.webmanifest|robots\\.txt).+)",
+        has: STATUS_HOST,
+        destination: "https://www.gloam.trade/:path",
+        permanent: false,
+      },
     ];
+  },
+  async rewrites() {
+    return {
+      // before the pages, so the status host's "/" is the status page, not the home page
+      beforeFiles: [{ source: "/", has: STATUS_HOST, destination: "/status" }],
+      // The pitch deck is one static page in public/pitch.
+      afterFiles: [
+        { source: "/pitch", destination: "/pitch/index.html" },
+        { source: "/pitch/report", destination: "/pitch/report.html" },
+      ],
+      fallback: [],
+    };
   },
   webpack: (config) => {
     // WalletConnect optional deps — silence missing optional modules
