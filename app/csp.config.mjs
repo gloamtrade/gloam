@@ -311,6 +311,7 @@ export function claimPagesCsp(env = process.env) {
     ...GLOAM_NETWORK_RPCS,
     ...elysiumConnectSources(env),
     ...elysiumTestnetConnectSources(env),
+    ...bnbConnectSources(env),
     ...rpcOverrideSources(env),
   ]);
   return [

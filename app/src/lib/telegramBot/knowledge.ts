@@ -488,7 +488,7 @@ function mainnetLiveFacts(): string {
   const usdc = usdcMainnets();
   const lines = [
     "MAINNET IS LIVE (this overrides any line below that says the app is testnet only, that mainnet is coming, or that names fewer mainnets)",
-    `- Gloam is live on ${liveMainnetsSummary()}. It went live on mainnet on Wednesday 21 October 2026 at 13:00 UTC, on ${launchNames()}.${joined} The vault has the same address on every mainnet; it is listed on gloam.trade/docs/chain, so point there instead of writing it out. Say so plainly when asked, and point to gloam.trade/app.`,
+    `- Gloam is live on ${liveMainnetsSummary()}. It went live on mainnet on Wednesday 21 October 2026 at 13:00 UTC, on ${launchNames()}.${joined} ${BNB ? "The vault has one address on Robinhood Chain, Tempo, Base and Ethereum, and its own on each newer chain" : "The vault has the same address on every mainnet"}; it is listed on gloam.trade/docs/chain, so point there instead of writing it out. Say so plainly when asked, and point to gloam.trade/app.`,
     ...(rh
       ? ["- Robinhood Chain mainnet (chain ID 4663): the vault takes USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO (ETH, AI and ORBIO opened on 3 November 2026, and AI and ORBIO also swap privately with USDG). GRIFT is listed too and opens once its deposit limit lands through the public three-day timelock: the app offers it only once the vault takes it. Details, if someone adds the chain by hand: RPC https://rpc.mainnet.chain.robinhood.com, chain ID 4663, currency ETH, explorer RobinScan https://robin.etherscan.io (a transaction is at robin.etherscan.io/tx/ and its hash, an address at robin.etherscan.io/address/ and the address)."]
       : []),
