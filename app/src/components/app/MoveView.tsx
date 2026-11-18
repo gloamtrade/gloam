@@ -1,14 +1,11 @@
 "use client";
 
-import { useHideAmounts } from "@/lib/hideAmounts";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { formatUnits, isAddress, type Address, type Hex } from "viem";
 import { useConfig, useReadContract, useWriteContract } from "wagmi";
 import { writeContract as writeContractNow } from "wagmi/actions";
-import { SealedField } from "@/components/ui/SealedField";
-import { SealDots } from "@/components/ui/SealDots";
 import { amountTextError } from "@/lib/amountText";
 import { AmountProblem } from "./AmountProblem";
 import { shortAddress } from "@/lib/chain";
@@ -36,7 +33,6 @@ import { proveCashOut } from "@/lib/cashOutProof";
 import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
 import { screenWallets } from "@/lib/screeningClient";
 import { cashOutTargetProblem } from "@/lib/cashOutTarget";
-import { IssuerPolicyRow } from "./IssuerPolicyRow";
 import { noteCommitmentPoseidon, noteNullifierPoseidon } from "@/lib/notePoseidon";
 import { fieldToHex, hexToField } from "@/lib/poseidon";
 import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
@@ -85,7 +81,6 @@ import {
   type RelayNetworkStatus,
 } from "@/lib/relay/client";
 import { gasHighMessage } from "@/lib/relay/gasCeiling";
-import { RelayToggle } from "./RelayToggle";
 import { RelayGasNotice } from "./RelayGasNotice";
 import { PaymentRequestBanner, RequestPaymentCard } from "./PaymentRequest";
 import { queuePartnerJobs, registerLinkSpend, settlePartnerTx, usePartnerName } from "@/lib/partnerLinkClient";
@@ -1139,7 +1134,6 @@ export function MoveView() {
     return isAddress(v) ? (v as Address) : null;
   });
   const piecesReady = pieceTargets.length > 0 && pieceTargets.every(Boolean);
-  const distinctTargets = new Set(pieceTargets.filter(Boolean).map((a) => a!.toLowerCase())).size;
   // Honest about what splitting can't hide: pieces that meet at one address add up there.
   // Only when it matters: a piece landing at a wallet tied to you can be linked back.
   const whereLine =
@@ -2555,20 +2549,6 @@ export function MoveView() {
     );
   };
 
-  const totals = (() => {
-    const m = new Map<string, bigint>();
-    for (const n of notes) {
-      const k = n.asset.toLowerCase();
-      m.set(k, (m.get(k) ?? 0n) + BigInt(n.amountWei || "0"));
-    }
-    return Array.from(m.entries()).map(([asset, amt]) => ({
-      asset,
-      label: assetLabel(asset),
-      logoId: logoIdFor(asset),
-      amount: formatAssetAmount(amt, asset),
-    }));
-  })();
-
   const connectPrompt = (action: string) => (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-[16px] bg-surface px-4 py-3">
       <p className="text-[14px] text-mute">
@@ -2582,23 +2562,9 @@ export function MoveView() {
     </div>
   );
 
-  const relayToggle = (
-    <>
-      {gasHigh && <RelayGasNotice status={relayStatus} label={network.label} later={mode === "cashout"} />}
-      <RelayToggle
-        available={relayAvailable}
-        on={relayOn}
-        onChange={(v) => {
-          setRelayOn(v);
-          setRelayPreferred(v);
-        }}
-      />
-    </>
-  );
-
   return (
     <>
-      <div className={`grid items-start gap-6 ${mode === "receive" ? "lg:grid-cols-[minmax(0,1fr)_340px]" : ""}`}>
+      <div className="grid items-start gap-6">
         {/* Send, Receive and Cash out are picked in the Vault's own row
             (VaultHub: Pay privately, Receive, Cash out) through ?mode=, so
             the card has no row of its own; the first block sits at the top. */}
@@ -3622,7 +3588,7 @@ export function MoveView() {
           {mode === "send" && shieldLive && isConnected && <SentLinks onTakeBack={takeBackLink} />}
 
           {mode === "receive" && (
-            <div className="mt-6 space-y-7">
+            <div className="mt-6 grid gap-x-10 gap-y-7 lg:grid-cols-2 [&>*]:min-w-0">
               <section id="gloam-address" tabIndex={-1} aria-labelledby="gloam-address-title" className="scroll-mt-24 outline-none">
                 <div className="flex items-center justify-between gap-3">
                   <h3 id="gloam-address-title" className="text-[15px] font-medium text-foreground">
@@ -3642,10 +3608,7 @@ export function MoveView() {
                   )}
                 </div>
                 <p className="mt-1 text-[13px] leading-relaxed text-mute">
-                  Share it once. People paste it to pay you privately. Payments
-                  open only in{" "}
-                  <strong className="font-medium text-foreground">this browser</strong>,
-                  so back up your account before you clear your data.
+                  People use it to pay you privately. Back up your account in Settings.
                 </p>
                 {myIdentity ? (
                   <>
@@ -3699,20 +3662,117 @@ export function MoveView() {
                 )}
               </section>
 
+              <section id="claim-payment" className="scroll-mt-24 max-lg:border-t max-lg:border-line max-lg:pt-6">
+                <h3 className="text-[15px] font-medium text-foreground">
+                  Claim a payment
+                </h3>
+                <p className="mt-1 text-[13px] leading-relaxed text-mute">
+                  Paste the link or code you were sent. It moves into a balance only you hold.
+                </p>
+                <label htmlFor="claim-code" className="sr-only">
+                  Claim link or payment code
+                </label>
+                <textarea
+                  id="claim-code"
+                  value={importText}
+                  onChange={(e) => {
+                    setImportText(e.target.value);
+                    dropClaimLink();
+                  }}
+                  rows={4}
+                  spellCheck={false}
+                  className="gl-input tnum mt-3 h-auto min-h-[108px] resize-none py-3 text-[13px] leading-relaxed"
+                  placeholder="gloam.trade/c#…, gloam3… or gloam1…"
+                />
+                {claimPreview && (
+                  <div className="mt-2 rounded-xl bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-soft" aria-live="polite">
+                    <p>{claimPreview.text}</p>
+                    {claimPreview.note && (
+                      <PaymentNoteLine
+                        note={claimPreview.note}
+                        label="Their note"
+                        className="mt-1 text-foreground"
+                      />
+                    )}
+                  </div>
+                )}
+                {(paymentCodeIn(importText).startsWith("gloam1e.") ||
+                  (isEncryptedPackage(importText) &&
+                    !isPayToTagSealed(importText))) && (
+                  <div className="mt-4">
+                    <label htmlFor="recv-pass" className="text-[13px] text-mute">
+                      Phrase
+                    </label>
+                    <input
+                      id="recv-pass"
+                      type="text"
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      value={importPassphrase}
+                      onChange={(e) => setImportPassphrase(e.target.value)}
+                      placeholder="The phrase the sender gave you"
+                      className="gl-input mt-2"
+                    />
+                  </div>
+                )}
+                <div className="mt-4 space-y-4">
+                  {gasHigh && <RelayGasNotice status={relayStatus} label={network.label} />}
+                  <PrivacyCard
+                    title="Hide my wallet"
+                    line={relayOn ? "Gloam claims it for you, so your wallet never shows up next to it." : "Your wallet shows on the explorer when you claim."}
+                    on={relayOn}
+                    available={relayAvailable}
+                    reason="The relay that hides your wallet is offline right now."
+                    onToggle={(v) => {
+                      setRelayOn(v);
+                      setRelayPreferred(v);
+                    }}
+                    disabled={working}
+                  />
+                  {!isConnected ? (
+                    connectPrompt("claim it")
+                  ) : (
+                    <button
+                      id="claim-submit"
+                      type="button"
+                      onClick={() => void onImportNote()}
+                      disabled={!importText.trim() || !isConnected || working || claimOpening}
+                      className="btn btn-ink btn-lg btn-block"
+                    >
+                      {securingId ? (
+                        <>
+                          <Spinner />
+                          <span className="truncate">{status || "Securing…"}</span>
+                        </>
+                      ) : claimOpening ? (
+                        <>
+                          <Spinner />
+                          <span className="truncate">Opening the payment…</span>
+                        </>
+                      ) : (
+                        "Claim and secure"
+                      )}
+                    </button>
+                  )}
+                  {relayChecked && <ClaimSafetyLine free={relayAvailable && relayOn} />}
+                </div>
+              </section>
+
               {myIdentity && (
-                <section className="border-t border-line pt-6">
+                <section className="border-t border-line pt-6 lg:col-span-2">
                   <h3 className="text-[15px] font-medium text-foreground">
                     Request a payment
                   </h3>
                   <p className="mt-1 text-[13px] leading-relaxed text-mute">
-                    Make a link with the amount and a note filled in, like an
-                    invoice. They open it, check it and pay you privately.
+                    A link with the amount and a note, like an invoice.
                   </p>
                   <RequestPaymentCard tag={myIdentity.tag} />
                 </section>
               )}
 
-              <section className="border-t border-line pt-6">
+              <section className="border-t border-line pt-6 lg:col-span-2">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="text-[15px] font-medium text-foreground">
                     Payments to you
@@ -3735,13 +3795,11 @@ export function MoveView() {
                     </button>
                   )}
                 </div>
-                <p className="mt-1 text-[13px] leading-relaxed text-mute">
-                  When someone pays your Gloam address, it shows up here on its
-                  own. No QR needed.
-                  {memoLive
-                    ? ""
-                    : " Not available on this network yet, so paste the claim link below."}
-                </p>
+                {!memoLive && (
+                  <p className="mt-1 text-[13px] leading-relaxed text-mute">
+                    Not on this network yet. Paste the claim link under Claim a payment.
+                  </p>
+                )}
                 {!address && memoLive && (
                   <p className="mt-3 text-[13px] text-soft">Connect a wallet to see payments to you.</p>
                 )}
@@ -3797,94 +3855,6 @@ export function MoveView() {
                 )}
               </section>
 
-              <section id="claim-payment" className="scroll-mt-24 border-t border-line pt-6">
-                <h3 className="text-[15px] font-medium text-foreground">
-                  Claim a payment
-                </h3>
-                <p className="mt-1 text-[13px] leading-relaxed text-mute">
-                  Paste the claim link or payment code you were sent. Codes start
-                  with gloam3, gloam1, gloam1e or gloam2t. Claiming also secures it: the
-                  payment moves into a balance only you hold, so the person who
-                  sent it can no longer take it back.
-                </p>
-                <label htmlFor="claim-code" className="sr-only">
-                  Claim link or payment code
-                </label>
-                <textarea
-                  id="claim-code"
-                  value={importText}
-                  onChange={(e) => {
-                    setImportText(e.target.value);
-                    dropClaimLink();
-                  }}
-                  rows={4}
-                  spellCheck={false}
-                  className="gl-input tnum mt-3 h-auto min-h-[108px] resize-none py-3 text-[13px] leading-relaxed"
-                  placeholder="gloam.trade/c#…, gloam3… or gloam1…"
-                />
-                {claimPreview && (
-                  <div className="mt-2 rounded-xl bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed text-soft" aria-live="polite">
-                    <p>{claimPreview.text}</p>
-                    {claimPreview.note && (
-                      <PaymentNoteLine
-                        note={claimPreview.note}
-                        label="Their note"
-                        className="mt-1 text-foreground"
-                      />
-                    )}
-                  </div>
-                )}
-                {(paymentCodeIn(importText).startsWith("gloam1e.") ||
-                  (isEncryptedPackage(importText) &&
-                    !isPayToTagSealed(importText))) && (
-                  <div className="mt-4">
-                    <label htmlFor="recv-pass" className="text-[13px] text-mute">
-                      Phrase
-                    </label>
-                    <input
-                      id="recv-pass"
-                      type="text"
-                      autoComplete="off"
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      value={importPassphrase}
-                      onChange={(e) => setImportPassphrase(e.target.value)}
-                      placeholder="The phrase the sender gave you"
-                      className="gl-input mt-2"
-                    />
-                  </div>
-                )}
-                <div className="mt-4 space-y-4">
-                  {relayToggle}
-                  {!isConnected ? (
-                    connectPrompt("claim it")
-                  ) : (
-                    <button
-                      id="claim-submit"
-                      type="button"
-                      onClick={() => void onImportNote()}
-                      disabled={!importText.trim() || !isConnected || working || claimOpening}
-                      className="btn btn-ink btn-lg btn-block"
-                    >
-                      {securingId ? (
-                        <>
-                          <Spinner />
-                          <span className="truncate">{status || "Securing…"}</span>
-                        </>
-                      ) : claimOpening ? (
-                        <>
-                          <Spinner />
-                          <span className="truncate">Opening the payment…</span>
-                        </>
-                      ) : (
-                        "Claim and secure"
-                      )}
-                    </button>
-                  )}
-                  {relayChecked && <ClaimSafetyLine free={relayAvailable && relayOn} />}
-                </div>
-              </section>
             </div>
           )}
 
@@ -3911,120 +3881,7 @@ export function MoveView() {
           )}
         </div>
 
-        {mode === "receive" && (
-        <aside className="space-y-4">
-          {mode === "receive" ? (
-            <div className="gl-card p-5">
-              <p className="text-[13px] text-mute">About your Gloam address</p>
-              <ul className="mt-3 divide-y divide-line text-[13.5px] leading-relaxed">
-                <li className="py-3">
-                  <p className="text-foreground">Not a wallet address</p>
-                  <p className="mt-0.5 text-mute">
-                    It never shows up on the explorer, so nobody can look up what
-                    you receive.
-                  </p>
-                </li>
-                <li className="py-3">
-                  <p className="text-foreground">Opens in this browser</p>
-                  <p className="mt-0.5 text-mute">
-                    Back up your account in{" "}
-                    <Link
-                      href="/app/settings"
-                      className="text-foreground underline underline-offset-4"
-                    >
-                      Settings
-                    </Link>{" "}
-                    so you can open payments on another device.
-                  </p>
-                </li>
-                <li className="py-3">
-                  <p className="text-foreground">Requests stay private</p>
-                  <p className="mt-0.5 text-mute">
-                    A request link carries your address, the amount and a note.
-                    When they pay, the note comes back sealed inside the
-                    payment, so only the two of you can read it.
-                  </p>
-                </li>
-                <li className="pt-3">
-                  <p className="text-foreground">Claim links work too</p>
-                  <p className="mt-0.5 text-mute">
-                    Paste one under Claim a payment. It lands in your private
-                    balance and is secured straight away, so the person who sent
-                    it cannot take it back.
-                  </p>
-                </li>
-              </ul>
-            </div>
-          ) : (
-            <>
-              <PrivateBalanceCard rows={totals} signedOut={!isConnected} />
-              <div className="gl-card p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-[13px] text-mute">What the explorer shows</p>
-                  {mode === "send" ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-sealed-soft px-2.5 py-0.5 text-[12px] font-medium text-sealed">
-                      <LockIcon size={10} />
-                      Private
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center rounded-full bg-surface px-2.5 py-0.5 text-[12px] text-mute">
-                      Public
-                    </span>
-                  )}
-                </div>
-                <dl className="mt-3 divide-y divide-line text-[14px]">
-                  <div className="flex h-11 items-center justify-between gap-3">
-                    <dt className="text-mute">Sent by</dt>
-                    <dd className="truncate text-foreground">
-                      {relayOn ? "Gloam relay" : "Your wallet"}
-                    </dd>
-                  </div>
-                  <div className="flex h-11 items-center justify-between gap-3">
-                    <dt className="text-mute">To</dt>
-                    <dd className="tnum truncate text-foreground">
-                      {mode === "send" ? (
-                        <SealDots n={6} className="text-foreground/60" />
-                      ) : planActive && perPiece && distinctTargets > 1 ? (
-                        `${distinctTargets} addresses`
-                      ) : cashOutTo ? (
-                        shortAddress(cashOutTo, 4)
-                      ) : (
-                        "Your wallet"
-                      )}
-                    </dd>
-                  </div>
-                  <div className="flex h-11 items-center justify-between gap-3">
-                    <dt className="text-mute">Amount</dt>
-                    <dd className="tnum truncate text-foreground">
-                      {mode === "send" ? (
-                        <SealDots n={6} className="text-foreground/60" />
-                      ) : planActive ? (
-                        `${planPieceList.length} separate amounts`
-                      ) : selected && !cashOutAmountInvalid ? (
-                        formatAssetLabel(cashOutAmount, selected.asset)
-                      ) : (
-                        "The full amount"
-                      )}
-                    </dd>
-                  </div>
-                  <IssuerPolicyRow chainId={network.chainId} asset={null} flow="cashout" />
-                </dl>
-                <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
-                  {mode === "send"
-                    ? relayOn
-                      ? "Nothing on the explorer links this payment to you or to them."
-                      : relayAvailable
-                        ? "Turn on Hide my wallet so your wallet stays off it too."
-                        : "The amount and the person you pay stay hidden. Your wallet shows as the sender while the relay is offline."
-                    : planActive
-                      ? "Each piece is a public transfer at its own time. Together they end privacy for this amount."
-                      : "A cash out is a public transfer. It ends privacy for this amount."}
-                </p>
-              </div>
-            </>
-          )}
-        </aside>
-        )}
+
       </div>
 
       <SuccessModal
@@ -4241,69 +4098,6 @@ function PayNoteField({
   );
 }
 
-type BalanceRow = {
-  asset: string;
-  label: string;
-  logoId: string | null;
-  amount: string;
-};
-
-/** The private balance, only visible to its owner. Carries the sealed glow. */
-function PrivateBalanceCard({ rows, signedOut }: { rows: BalanceRow[]; signedOut: boolean }) {
-  const [hidden, toggleHidden] = useHideAmounts();
-  return (
-    <div className="gl-card relative overflow-hidden p-5">
-      <SealedField tone="soft" />
-      <div className="relative">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[13px] text-mute">Private balance</p>
-          <div className="flex items-center gap-1">
-            <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-sealed">
-              <span className="h-1.5 w-1.5 rounded-full bg-sealed" aria-hidden />
-              Only you
-            </span>
-            {rows.length > 0 && (
-              <button
-                type="button"
-                onClick={toggleHidden}
-                aria-pressed={hidden}
-                aria-label={hidden ? "Show amounts" : "Hide amounts"}
-                className="-mr-2 grid h-9 w-9 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground"
-              >
-                <EyeIcon off={hidden} />
-              </button>
-            )}
-          </div>
-        </div>
-        {rows.length > 0 ? (
-          <ul className="mt-4 space-y-3.5">
-            {rows.map((r) => (
-              <li key={r.asset} className="flex items-center gap-3">
-                <AssetMark id={r.logoId} symbol={r.label} size={32} />
-                <p className="tnum min-w-0 truncate text-[26px] font-light leading-none tracking-[-0.02em] text-foreground">
-                  {hidden ? <SealDots n={6} className="text-foreground/60" /> : r.amount}{" "}
-                  <span className="text-[14px] tracking-normal text-mute">{r.label}</span>
-                </p>
-              </li>
-            ))}
-          </ul>
-        ) : signedOut ? (
-          <p className="mt-4 max-w-[30ch] text-[13px] leading-relaxed text-mute">{SIGNED_OUT_BALANCE_MESSAGE}</p>
-        ) : (
-          <div className="mt-4">
-            <p className="tnum text-[34px] font-light leading-none tracking-[-0.02em] text-foreground">
-              0
-            </p>
-            <p className="mt-2 max-w-[30ch] text-[13px] leading-relaxed text-mute">
-              Add money or claim a payment to start. Nobody else can see this.
-            </p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function AssetMark({
   id,
   symbol,
@@ -4320,21 +4114,6 @@ function AssetMark({
 /** ETH's real mark, the same one Portfolio and every token list show. */
 function EthMark({ size = 28 }: { size?: number }) {
   return <TokenLogo id="eth" symbol="ETH" size={size} />;
-}
-
-function EyeIcon({ off = false }: { off?: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <circle cx="12" cy="12" r="2.75" stroke="currentColor" strokeWidth="1.6" />
-      {off && <path d="M4 20L20 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />}
-    </svg>
-  );
 }
 
 function LockIcon({ size = 16 }: { size?: number }) {
