@@ -767,7 +767,7 @@ export function VaultSwapView() {
                           : { key: "swap", label: "Swap privately", ready: Boolean(shownPlan && relayOk === true) };
 
   return (
-    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+    <div className="grid items-start gap-6">
       <div className="gl-card min-w-0 p-5 sm:p-7">
         <div className="flex items-start justify-between gap-3 px-1 pb-5">
           <div className="min-w-0">
@@ -860,6 +860,19 @@ export function VaultSwapView() {
                       {p === 100 ? "Max" : `${p}%`}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      const el = document.getElementById("swap-amount") as HTMLInputElement | null;
+                      if (!el) return;
+                      el.focus();
+                      requestAnimationFrame(() => el.select());
+                    }}
+                    className="gl-chip min-h-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/15"
+                  >
+                    Custom
+                  </button>
                 </div>
               </div>
               {held && payAsset && refundCap != null && refundCap < held.largest ? (
@@ -1088,11 +1101,11 @@ export function VaultSwapView() {
         )}
       </div>
 
-      <aside className="min-w-0 space-y-4">
-        <ExplorerCard />
+      {/* The token check (Blocktronics) and the privacy notes sit under the swap, side by side on wide screens. */}
+      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2 [&>*]:min-w-0">
         <TokenCheckCard chainId={network.chainId} asset={toAsset} />
         <PrivacyNotes venue={venue} />
-      </aside>
+      </div>
 
       {picker && (
         <TokenPicker
@@ -1414,39 +1427,6 @@ function TokenPicker({
  * What stays private, what is public, and what happens if a swap can't finish.
  * Kept in full, folded under the swap: the one-line summary always shows.
  */
-/** What anyone can see of a private swap, laid out like the Pay tab's card. */
-function ExplorerCard() {
-  return (
-    <div className="gl-card p-5">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[13px] text-mute">What the explorer shows</p>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-sealed-soft px-2.5 py-0.5 text-[12px] font-medium text-sealed">
-          <LockIcon />
-          Private
-        </span>
-      </div>
-      <dl className="mt-3 divide-y divide-line text-[14px]">
-        <div className="flex h-11 items-center justify-between gap-3">
-          <dt className="text-mute">Swapped by</dt>
-          <dd className="truncate text-foreground">Gloam relay</dd>
-        </div>
-        <div className="flex h-11 items-center justify-between gap-3">
-          <dt className="text-mute">Your wallet</dt>
-          <dd className="truncate text-foreground">Never shows</dd>
-        </div>
-        <div className="flex h-11 items-center justify-between gap-3">
-          <dt className="text-mute">Tokens and amounts</dt>
-          <dd className="truncate text-foreground">Public</dd>
-        </div>
-        <div className="flex h-11 items-center justify-between gap-3">
-          <dt className="text-mute">Lands in</dt>
-          <dd className="truncate text-foreground">Your private balance</dd>
-        </div>
-      </dl>
-    </div>
-  );
-}
-
 function PrivacyNotes({ venue }: { venue: string }) {
   const [open, setOpen] = useState(false);
   return (
