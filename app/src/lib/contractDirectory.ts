@@ -15,7 +15,7 @@
  * the CSV show the same thing.
  */
 import { getAddress, isAddressEqual, parseAbi, zeroAddress, type Address, type PublicClient } from "viem";
-import { getNetwork, isNetworkKey, networkName, type GloamNetwork, type NetworkKey } from "./networks";
+import { getNetwork, isNetworkKey, networkName, type ChainFamily, type GloamNetwork, type NetworkKey } from "./networks";
 import { swapRoutersOn } from "./vaultSwap";
 import { ELYSIUM_FLAG, ELYSIUM_TESTNET_FLAG } from "./elysium";
 import { SHOW_TESTNETS } from "./showTestnets";
@@ -55,8 +55,31 @@ export const GLOAM_RELAYERS: readonly Address[] = ["0xb1E994586E62994648a0b866BF
 /** Created the mainnet-pool contracts and handed ownership to GLOAM_OWNER. */
 export const GLOAM_DEPLOYER: Address = "0x891E74a11abC5D0eC2EE855B2BD521fF9D18F411";
 
-/** The Poseidon hash library every mainnet-pool vault uses. */
+/** The Poseidon hash library the first four mainnet vaults use (BORN_GUARDED has the others'). */
 export const MAINNET_POSEIDON_T3: Address = "0x1a32C2c2A77225EC2dD3BF7be1018819b1039Cb4";
+
+/**
+ * Mainnet vaults born guarded, from a deployer of their own, so their addresses
+ * differ from the first four mainnets': the deployer, the PoseidonT3 it made
+ * (the same code as MAINNET_POSEIDON_T3, another address) and the
+ * VaultOwnerGuard that has owned the vault since its deploy, with the account
+ * that runs that guard. From contracts/deployments/<network>-mainnet.json;
+ * selftest-contract-directory fails if they and the file disagree.
+ */
+export const BORN_GUARDED: Partial<Record<GloamNetwork["family"], { deployer: Address; poseidon: Address; guard: Address; controller: Address }>> = {
+  elysium: {
+    deployer: "0xec9993765e249e8e9DC677B7BCB61F78b31c6b60",
+    poseidon: "0x62c435CE6886fa91e3b0e91500c6dC9219723457",
+    guard: "0x268D7CAd645282D1e77461b5B2dd997bd54eFAf5",
+    // The owner wallet took over the guard after the deploy (acceptController).
+    controller: "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8",
+  },
+};
+
+/** A mainnet vault's BORN_GUARDED entry, if it has one. Testnets keep their own addresses. */
+export function bornGuarded(n: GloamNetwork): (typeof BORN_GUARDED)[ChainFamily] {
+  return n.testnet ? undefined : BORN_GUARDED[n.family];
+}
 
 /** CHANGE_DELAY in the vault: a rule change waits this long in public. */
 export const CHANGE_DELAY_SECONDS = 3n * 24n * 60n * 60n;
@@ -180,10 +203,42 @@ function appRows(n: GloamNetwork): DirectoryRow[] {
       source: "app",
     });
   }
-  if (n.paymentsPool && n.family === "elysium") {
-    // Elysium's vault was born guarded: its owner is a VaultOwnerGuard made by the
-    // deploy itself (its address is in the live read above and in
-    // contracts/deployments/elysium-mainnet.json), never the owner wallet.
+  const own = bornGuarded(n);
+  if (n.paymentsPool && own) {
+    // Born guarded from its own deployer: the guard owns the vault from the deploy,
+    // and the controller runs the guard.
+    rows.push(
+      {
+        role: "owner",
+        name: "Owner guard",
+        contract: "VaultOwnerGuard",
+        what: "Has owned this vault since its deploy. Forwards deposit limit and fee changes and the sweep of coin sent by mistake, nothing else, so its proof checkers and ownership can never change.",
+        address: own.guard,
+        deployBlock: null,
+        source: "app",
+      },
+      {
+        role: "owner",
+        name: "Guard controller",
+        contract: null,
+        what: `${isAddressEqual(own.controller, GLOAM_OWNER) ? "The owner wallet. " : ""}Runs the guard: rule changes wait 3 days in public. Can lower a limit or the fee at once. Has no function to withdraw a balance.`,
+        address: own.controller,
+        deployBlock: null,
+        source: "app",
+      },
+      {
+        role: "fee_recipient",
+        name: "Treasury",
+        contract: null,
+        what: "Receives the cash-out fee.",
+        address: GLOAM_TREASURY,
+        deployBlock: null,
+        source: "app",
+      }
+    );
+  } else if (n.paymentsPool && n.family === "elysium") {
+    // Elysium's testnet, once deployed: born guarded too, by a guard of its own
+    // that is not listed here, never the owner wallet.
     rows.push({
       role: "fee_recipient",
       name: "Treasury",
@@ -242,8 +297,8 @@ function appRows(n: GloamNetwork): DirectoryRow[] {
       role: "deployer",
       name: "Deployer",
       contract: null,
-      what: "Created these contracts and handed the vault to the owner.",
-      address: GLOAM_DEPLOYER,
+      what: own ? "Created these contracts and handed the vault to its guard in the same run." : "Created these contracts and handed the vault to the owner.",
+      address: own?.deployer ?? GLOAM_DEPLOYER,
       deployBlock: null,
       source: "app",
     });
@@ -411,10 +466,13 @@ export function chainRows(n: GloamNetwork, r: VaultRead): DirectoryRow[] {
 
 export type VaultCheck = { label: string; ok: boolean; detail: string };
 
-/** Whether a mainnet vault's owner is the listed wallet or the owner guard. */
-export function ownerCheck(owner: Address, guard: Address | null = GLOAM_OWNER_GUARD): VaultCheck {
+/**
+ * Whether a mainnet vault's owner is the listed wallet or the owner guard. A
+ * vault born guarded passes `wallet` null: only its own guard is listed as owner.
+ */
+export function ownerCheck(owner: Address, guard: Address | null = GLOAM_OWNER_GUARD, wallet: Address | null = GLOAM_OWNER): VaultCheck {
   const held = guard !== null && isAddressEqual(owner, guard);
-  const listed = held || isAddressEqual(owner, GLOAM_OWNER);
+  const listed = held || (wallet !== null && isAddressEqual(owner, wallet));
   return {
     label: "Owner as listed",
     ok: listed,
@@ -440,8 +498,9 @@ export function vaultChecks(n: GloamNetwork, r: VaultRead): VaultCheck[] {
       detail: `The vault's delay is ${formatDelay(r.changeDelay)}.`,
     },
   ];
+  const own = bornGuarded(n);
   if (n.paymentsPool) {
-    checks.push(ownerCheck(r.owner));
+    checks.push(own ? ownerCheck(r.owner, own.guard, null) : ownerCheck(r.owner));
   }
   checks.push({
     label: "No handover pending",
@@ -460,10 +519,15 @@ export function vaultChecks(n: GloamNetwork, r: VaultRead): VaultCheck[] {
             ? `Cash-out fee ${formatBps(r.withdrawFeeBps)}.`
             : `Fees go to ${getAddress(r.feeRecipient)}.`,
     });
+    const poseidon = own?.poseidon ?? MAINNET_POSEIDON_T3;
     checks.push({
       label: "Hash library as listed",
-      ok: isAddressEqual(r.poseidon, MAINNET_POSEIDON_T3),
-      detail: isAddressEqual(r.poseidon, MAINNET_POSEIDON_T3) ? "PoseidonT3, the same on every mainnet vault." : `The vault uses ${getAddress(r.poseidon)}.`,
+      ok: isAddressEqual(r.poseidon, poseidon),
+      detail: isAddressEqual(r.poseidon, poseidon)
+        ? own
+          ? "PoseidonT3, the same code as on every mainnet vault, made by this vault's own deployer."
+          : "PoseidonT3, the same on every mainnet vault."
+        : `The vault uses ${getAddress(r.poseidon)}.`,
     });
   }
   return checks;

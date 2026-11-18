@@ -75,6 +75,24 @@ const RH_READ: import("../src/lib/contractDirectory").VaultRead = {
   cashOutVerifier: "0x35de99bcD26B0F25E5a3a3b1e76FA5a708a01DF1",
   sendVerifier: "0x4dCac25a820D0C9Ede8f056378C08e31042AB7b1",
 };
+/**
+ * What Elysium mainnet's vault answers (cast call, read only, 18 November 2026):
+ * born guarded, so its owner is its own VaultOwnerGuard and its PoseidonT3 is
+ * the one its own deployer made.
+ */
+const ELYSIUM_READ: import("../src/lib/contractDirectory").VaultRead = {
+  owner: "0x268D7CAd645282D1e77461b5B2dd997bd54eFAf5",
+  pendingOwner: "0x0000000000000000000000000000000000000000",
+  setupMode: false,
+  changeDelay: 259_200n,
+  verifier: "0x29053A713E3a7D37053374446869a6f55858FcEf",
+  shieldVerifier: "0xAEB8cb99B3BB43eB230F9fEB7293fB5E39080016",
+  poseidon: "0x62c435CE6886fa91e3b0e91500c6dC9219723457",
+  feeRecipient: "0xB3900ac9350903218e4c7597bAb0f008F01B30B8",
+  withdrawFeeBps: 50,
+  cashOutVerifier: "0x13b1A2C8b822e1Bd031D53A03E106B3632d3E91C",
+  sendVerifier: "0x0c350Dd2D7988E3c837431954Ea8994C3C877e07",
+};
 /** Robinhood Chain testnet's older vault: its own owner, no fee calls. */
 const RH_TESTNET_READ: import("../src/lib/contractDirectory").VaultRead = {
   owner: "0x7dB545c4f0247888b832644EA7165eAaC04635a9",
@@ -178,8 +196,8 @@ check("owner, treasury and deployer on the mainnet-pool vaults only; the relayer
   for (const e of entries.filter((x) => x.live)) {
     const roles = e.rows.map((r) => r.role);
     const payments = e.network.paymentsPool;
-    // Elysium's vault was born guarded: its owner is the VaultOwnerGuard from the live read, never the owner wallet row
-    assert.equal(roles.includes("owner"), payments && e.network.family !== "elysium", `${e.key} owner`);
+    // A vault born guarded (BORN_GUARDED) lists its own guard and controller; Elysium's testnet lists no owner
+    assert.equal(roles.includes("owner"), payments && (e.network.family !== "elysium" || !!dir.bornGuarded(e.network)), `${e.key} owner`);
     assert.equal(roles.includes("fee_recipient"), payments, `${e.key} treasury`);
     assert.equal(roles.includes("deployer"), payments, `${e.key} deployer`);
     assert.ok(roles.includes("relayer"), `${e.key} relayer`);
@@ -275,6 +293,73 @@ check("the checks pass on the vault as it stands and name what differs", () => {
   assert.deepEqual(t.map((c) => c.label), ["Setup is over", "Rule changes wait 3 days", "No handover pending"]);
 });
 
+check("Elysium mainnet, born guarded: its own guard, PoseidonT3 and deployer, as its deployment record has them", () => {
+  const rec = JSON.parse(readFileSync(new URL("../../contracts/deployments/elysium-mainnet.json", import.meta.url), "utf8"));
+  const own = dir.BORN_GUARDED.elysium;
+  assert.ok(own, "Elysium is in BORN_GUARDED");
+  assert.equal(rec.chainId, 99901);
+  assert.ok(same(own.deployer, rec.deployer), "deployer");
+  assert.ok(same(own.poseidon, rec.contracts.PoseidonT3), "PoseidonT3");
+  assert.ok(same(own.guard, rec.guard.address) && same(own.guard, rec.owner) && same(own.guard, rec.contracts.VaultOwnerGuard), "guard");
+  assert.ok(same(own.controller, rec.guard.controller), "guard controller");
+  assert.equal(rec.guard.pendingController, null, "no controller handover pending");
+  assert.ok(same(rec.feeRecipient, dir.GLOAM_TREASURY) && same(rec.relayer, dir.GLOAM_RELAYERS[0]!), "treasury and relayer");
+  // Its own addresses, the same PoseidonT3 code as Base's and Ethereum's.
+  assert.ok(!same(own.poseidon, dir.MAINNET_POSEIDON_T3) && !same(own.deployer, dir.GLOAM_DEPLOYER) && !same(own.guard, dir.GLOAM_OWNER_GUARD!));
+  for (const name of ["base-mainnet", "ethereum-mainnet"]) {
+    const other = JSON.parse(readFileSync(new URL(`../../contracts/deployments/${name}.json`, import.meta.url), "utf8"));
+    assert.equal(rec.contracts.PoseidonT3CodeHash, other.contracts.PoseidonT3CodeHash, `PoseidonT3 code as on ${name}`);
+  }
+
+  // The fixture is the vault the record describes.
+  assert.ok(same(ELYSIUM_READ.owner, rec.owner) && same(ELYSIUM_READ.poseidon, rec.contracts.PoseidonT3));
+  assert.ok(same(ELYSIUM_READ.verifier, rec.contracts.DualProofVerifier) && same(ELYSIUM_READ.shieldVerifier, rec.contracts.ShieldIVerifier));
+  assert.ok(same(ELYSIUM_READ.cashOutVerifier!, rec.contracts.UnshieldIVerifierFinal) && same(ELYSIUM_READ.sendVerifier!, rec.contracts.TransferIVerifierFinal));
+  assert.ok(same(ELYSIUM_READ.feeRecipient!, rec.feeRecipient) && ELYSIUM_READ.withdrawFeeBps === rec.withdrawFeeBps);
+
+  const n = nets.getNetwork("elysium-mainnet");
+  if (n.pool) assert.ok(same(n.pool, rec.contracts.ShieldPoolPayments), "the app's vault is the record's");
+  assert.equal(dir.bornGuarded(n), own);
+  assert.equal(dir.bornGuarded(nets.getNetwork("elysium")), undefined, "the testnet keeps its own addresses");
+  assert.equal(dir.bornGuarded(nets.getNetwork("robinhood-mainnet")), undefined);
+
+  const checks = dir.vaultChecks(n, ELYSIUM_READ);
+  assert.deepEqual(
+    checks.map((c) => c.label),
+    ["Setup is over", "Rule changes wait 3 days", "Owner as listed", "No handover pending", "Fees go to the treasury", "Hash library as listed"]
+  );
+  assert.ok(checks.every((c) => c.ok), JSON.stringify(checks));
+  assert.match(checks.find((c) => c.label === "Owner as listed")!.detail, /owner guard holds this vault/);
+  assert.match(checks.find((c) => c.label === "Hash library as listed")!.detail, /same code as on every mainnet vault/);
+  assert.equal(checks.find((c) => c.label === "Fees go to the treasury")!.detail, "Cash-out fee 0.5%.");
+
+  // Only its own guard and PoseidonT3 pass: not the owner wallet, not the first four mainnets'.
+  const failed = (r: Partial<typeof ELYSIUM_READ>) =>
+    dir.vaultChecks(n, { ...ELYSIUM_READ, ...r }).filter((c) => !c.ok).map((c) => c.label);
+  assert.deepEqual(failed({ owner: dir.GLOAM_OWNER }), ["Owner as listed"]);
+  assert.deepEqual(failed({ owner: dir.GLOAM_OWNER_GUARD! }), ["Owner as listed"]);
+  assert.deepEqual(failed({ poseidon: dir.MAINNET_POSEIDON_T3 }), ["Hash library as listed"]);
+  // And the other way round: Elysium's guard and PoseidonT3 do not pass on Robinhood Chain.
+  const rh = dir.vaultChecks(nets.getNetwork("robinhood-mainnet"), { ...RH_READ, owner: own.guard, poseidon: own.poseidon });
+  assert.deepEqual(rh.filter((c) => !c.ok).map((c) => c.label), ["Owner as listed", "Hash library as listed"]);
+
+  // The read's checkers are the final keys, and its owner and deployer are rows on the page.
+  assert.deepEqual(
+    dir.chainRows(n, ELYSIUM_READ).map((r) => r.contract),
+    ["ShieldIVerifierFinal", "DualProofVerifier", "UnshieldIVerifierFinal", "TransferIVerifierFinal", "PoseidonT3"]
+  );
+  const e = byKey["elysium-mainnet"];
+  if (e?.live) {
+    const owners = e.rows.filter((r) => r.role === "owner");
+    assert.deepEqual(owners.map((r) => r.name), ["Owner guard", "Guard controller"]);
+    assert.ok(same(owners[0]!.address, ELYSIUM_READ.owner) && same(owners[1]!.address, rec.guard.controller));
+    assert.match(owners[1]!.what, /^The owner wallet\. /);
+    assert.ok(same(e.rows.find((r) => r.role === "deployer")!.address, rec.deployer), "deployer row");
+    assert.ok(!e.rows.some((r) => same(r.address, dir.GLOAM_DEPLOYER)), "never the first four mainnets' deployer");
+    assert.ok(same(e.rows.find((r) => r.role === "fee_recipient")!.address, dir.GLOAM_TREASURY));
+  }
+});
+
 check("the CSV: one header, every app row, then what was read, with explorer links", () => {
   const csv = dir.directoryCsv(entries);
   const lines = csv.trimEnd().split("\r\n");
@@ -347,7 +432,8 @@ if (!CONFIGURED) {
       assert.equal(vault.deployBlock, pool.deployBlock);
       assert.deepEqual(
         e.rows.filter((r) => r.role !== "payment_messages" && r.role !== "swap_router").map((r) => r.role),
-        ["vault", "owner", "fee_recipient", "relayer", "deployer"]
+        // the owner wallet, then the owner guard once it is set (dir.GLOAM_OWNER_GUARD)
+        ["vault", "owner", ...(dir.GLOAM_OWNER_GUARD ? ["owner"] : []), "fee_recipient", "relayer", "deployer"]
       );
       const csv = dir.directoryCsv(dir.contractDirectory());
       assert.ok(csv.includes(`,${id},mainnet,vault,Vault,ShieldPoolPayments,${vault.address},${pool.deployBlock},${explorer}/address/${vault.address},app`), key);
