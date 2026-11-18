@@ -119,6 +119,24 @@ table.matrix td { padding: 18px 24px 18px 0; }
 .row p { color: var(--mute); }
 .quote { font-weight: 300; font-size: 96px; line-height: 1.06; letter-spacing: -0.03em; max-width: 20ch; }
 
+
+/* app screens */
+.shotwrap { position: relative; height: 760px; }
+.browser { position: absolute; left: 0; top: 40px; width: 1000px; border-radius: 22px; overflow: hidden; background: var(--white); box-shadow: 0 0 0 1px var(--line), 0 40px 80px -40px rgba(11,12,14,.35); }
+.bbar { height: 46px; display: flex; align-items: center; gap: 9px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.bbar i { width: 12px; height: 12px; border-radius: 50%; background: var(--surface2); }
+.bbar span { margin-left: 18px; font-size: 18px; color: var(--mute); background: var(--white); border-radius: 999px; padding: 5px 18px; }
+.browser img { display: block; width: 100%; }
+.s .phone { display: block; border-radius: 40px; background: var(--white); box-shadow: 0 0 0 1px var(--line), 0 40px 80px -40px rgba(11,12,14,.4); }
+.shotwrap .phone { position: absolute; right: 0; bottom: 0; height: 600px; border: 8px solid var(--ink); border-radius: 46px; }
+.howapp { gap: 56px; }
+.howapp > div { display: flex; flex-direction: column; align-items: center; gap: 24px; }
+.howapp .phone { height: 530px; border: 7px solid var(--ink); border-radius: 42px; }
+.howapp .cap { display: flex; gap: 18px; align-items: flex-start; width: 100%; max-width: 470px; }
+.howapp .cap b { flex: none; width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: var(--white); font-size: 20px; font-weight: 500; display: grid; place-items: center; }
+.howapp h3 { font-size: 30px; font-weight: 500; letter-spacing: -0.01em; }
+.howapp p { font-size: 22px; line-height: 1.4; color: var(--mute); margin-top: 6px; }
+
 @media print {
   @page { size: 1920px 1080px; margin: 0; }
   html, body { background: none; }
@@ -193,7 +211,7 @@ body.welcoming { overflow: hidden; }
     <div class="w-cards">
       <div class="w-card">
         <p class="w-k">Pitch deck</p>
-        <h2>Gloam in 22 slides</h2>
+        <h2>Gloam in 23 slides</h2>
         <p class="d">The problem, the product, traction on five mainnets, partners, the business model and the raise. Speaker notes included.</p>
         <div class="w-actions"><button type="button" class="w-primary" id="openDeck">View the deck</button><a href="/pitch/Gloam-Pitch-Deck.pdf" download>PDF</a></div>
       </div>
@@ -294,22 +312,35 @@ body.welcoming { overflow: hidden; }
   <p style="font-size:30px">Breach a committee and everyone is exposed, past payments too. <span class="mute">Breach one device and one person is.</span></p>
 </section></div>
 <aside class="notes"><b>Say:</b> Here's the idea. Privacy splits into two jobs. Things like sealed auctions and lending pools need someone to compute on lots of people's hidden data, so FHE and MPC networks like Zama and Arcium use a committee that holds the keys. A payment is different: it has one owner. The owner can prove it on their own device, and nobody else ever needs a key. Breach a committee and everyone is exposed, including past payments. Breach one phone and it's one person. We don't invent new cryptography. We use the proven maths from the Zcash lineage and build the payments product on top, like Stripe built on card networks.</aside>
-<!-- 7 how it works -->
+<!-- 7 the app -->
+<div class="frame"><section class="s light glow" aria-label="The app">
+  <div style="display:grid;grid-template-columns:500px 1fr;gap:64px;height:100%;align-items:center">
+    <div>
+      <p class="eyebrow">The app</p>
+      <h2 class="h2" style="margin-top:40px">Live at<br>gloam.trade</h2>
+      <p class="lede" style="margin-top:36px">Connect any wallet or sign in with email. Your private balance sits next to your public wallet.</p>
+    </div>
+    <div class="shotwrap">
+      <div class="browser"><div class="bbar"><i></i><i></i><i></i><span>gloam.trade</span></div><img src="/pitch/screens/front-page.jpg" alt="The gloam.trade front page"></div>
+      <img class="phone" src="/pitch/screens/portfolio.jpg" alt="The app's portfolio: a private balance only you can see">
+    </div>
+  </div>
+  <div class="foot"><span>Screens from the live app, shown with a sample wallet.</span><span></span></div>
+</section></div>
+<aside class="notes"><b>Say:</b> This is Gloam, live at gloam.trade. Connect any wallet, or sign in with email or a passkey. The portfolio shows your private balance, which only you can see, next to your public wallet.</aside>
+<!-- 8 how it works -->
 <div class="frame"><section class="s grey" aria-label="How it works">
   <p class="eyebrow">How it works</p>
-  <h2 class="h2" style="margin-top:40px">One private balance you can<br>pay from and prove from.</h2>
-  <div class="grow"></div>
-  <div class="steps">
-    <div class="card"><span class="ic"><svg viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4v13M8 12l5 5 5-5M5 21h16"/></svg></span><h3>Add money</h3><p>Stablecoins, ETH, HYPE or stock tokens, from any wallet or bridged in from another chain.</p></div>
-    <div class="arrow"><svg viewBox="0 0 34 34" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 17h18M20 11l6 6-6 6"/></svg></div>
-    <div class="card"><span class="ic"><svg viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="16" height="11" rx="3"/><path d="M8.5 11V8.5a4.5 4.5 0 0 1 9 0V11"/></svg></span><h3>Pay privately</h3><p>Send, swap, run payroll or let an agent pay. Amounts and people stay hidden.</p></div>
-    <div class="arrow"><svg viewBox="0 0 34 34" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 17h18M20 11l6 6-6 6"/></svg></div>
-    <div class="card"><span class="ic"><svg viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m6 13.5 4.5 4.5L20 8"/></svg></span><h3>Prove what's needed</h3><p>Show a bank, landlord or accountant one fact, and nothing else.</p></div>
+  <h2 class="h2" style="margin-top:28px">Add, pay, prove.</h2>
+  <div style="height:40px;flex:none"></div>
+  <div class="cols c3 howapp">
+    <div><img class="phone" src="/pitch/screens/add.jpg" alt="Add privately: move USDG from your wallet into your private balance"><div class="cap"><b>1</b><div><h3>Add privately</h3><p>Move stablecoins, ETH or stock tokens into a balance only you can see.</p></div></div></div>
+    <div><img class="phone" src="/pitch/screens/pay.jpg" alt="Pay privately: pay a Gloam address, the amount never shows on the explorer"><div class="cap"><b>2</b><div><h3>Pay privately</h3><p>Pay an address or send a claim link. The amount never shows on chain.</p></div></div></div>
+    <div><img class="phone" src="/pitch/screens/prove.jpg" alt="Prove: show one balance exactly and nothing else"><div class="cap"><b>3</b><div><h3>Prove what's needed</h3><p>Show a bank or accountant one fact, and nothing else.</p></div></div></div>
   </div>
-  <div class="grow"></div>
-  <p style="font-size:30px">Proofs are made on your device, never on our servers. <span class="mute">Sign in with email or a passkey, no seed phrase.</span></p>
+  <div class="foot"><span>Proofs are made on your device, never on our servers. Sample wallet.</span><span></span></div>
 </section></div>
-<aside class="notes"><b>Say:</b> Gloam is a self-custodial vault. You put money in, from any wallet or bridged in from another chain, and get a private balance only you can see. From there you pay people, swap, run payroll, or let an agent pay, without showing amounts or who got paid. When someone needs to know something, like an accountant needing a payroll total, you prove exactly that and nothing more. Every proof is made on your device, and you can sign in with email or a passkey, no seed phrase.</aside>
+<aside class="notes"><b>Say:</b> Three steps. You add money privately from any wallet, or bridge it in from another chain. You pay from that private balance, to a Gloam address or with a claim link anyone can open, and the amount never shows on the explorer. When someone needs to know something, like an accountant needing a payroll total, you prove exactly that and nothing more. Every proof is made on your device.</aside>
 <!-- 8 built to be trusted -->
 <div class="frame"><section class="s dark glow" aria-label="Built to be trusted">
   <div class="cols c2" style="align-items:center;gap:120px;height:100%">
@@ -339,7 +370,7 @@ body.welcoming { overflow: hidden; }
     <div class="kv"><h3>Limits</h3><p>Deposit limits on every chain, raised as the vaults prove themselves.</p></div>
   </div>
   <div class="grow"></div>
-  <div class="foot"><span>Details and reports: gloam.trade/security</span><span>9</span></div>
+  <div class="foot"><span>Details and reports: gloam.trade/security</span><span>10</span></div>
 </section></div>
 <aside class="notes"><b>Say:</b> On security we try to be plain. Kann Audits reviewed the vault contracts, report dated 1 November, with no Critical, High or Medium findings. That review covered the vault contracts, not everything, so we've requested a second independent review of the vault and the circuits. Mainnet keys come from a 13-contributor ceremony, and every chain has deposit limits that we raise as the vaults prove themselves. Everything is on gloam.trade/security.</aside>
 <!-- 10 competition -->
@@ -357,7 +388,7 @@ body.welcoming { overflow: hidden; }
     <tr class="us"><td><b style="font-weight:500">Gloam</b></td><td>Only you</td><td>Both, on mainnet</td><td>Yes, with an expiry</td><td>Yes</td></tr>
   </table>
   <div class="grow"></div>
-  <div class="foot"><span>"Not found" means not found in their public docs, October 2026.</span><span>10</span></div>
+  <div class="foot"><span>"Not found" means not found in their public docs, October 2026.</span><span>11</span></div>
 </section></div>
 <aside class="notes"><b>Say:</b> Here's the field. Zama uses one global key shared by a 13-node committee. Arcium uses node clusters. Tempo Zones have an operator who sees everything in the zone. Helius Privacy makes proofs on its own server, so the server sees your amounts. Railgun is the closest to us: only you hold the key, but its viewing keys show your whole history. Gloam keeps the key with you, lets you prove one fact to one reader with an expiry, and has payroll and agent payments, live on Tempo and Robinhood Chain mainnet.</aside>
 <!-- 11 where they win -->
@@ -389,7 +420,7 @@ body.welcoming { overflow: hidden; }
   </div>
   <div class="grow"></div>
   <p style="font-size:30px">Private payments you can prove. <span class="mute">As far as our research found, these three are new.</span></p>
-  <div class="foot"><span>Not new: the Zcash-lineage private pool and viewing keys. We build on them.</span><span>12</span></div>
+  <div class="foot"><span>Not new: the Zcash-lineage private pool and viewing keys. We build on them.</span><span>13</span></div>
 </section></div>
 <aside class="notes"><b>Say:</b> So what's actually new? Not the cryptography. Three things on top of it. First, a payroll total proof: it proves a run of up to 32 payments added up to exactly a total, without showing who got what. Second, proofs for one reader: who it's for and when it expires are sealed into the proof, change either and it fails, and anyone can check it in a browser with no wallet. Third, private payments for agents: our own private payment method for MPP, the machine payments standard from Tempo and Stripe, plus private x402 and an MCP server with spending limits.</aside>
 <!-- 13 product -->
@@ -428,7 +459,7 @@ body.welcoming { overflow: hidden; }
   </div>
   <div class="grow"></div>
   <p style="font-size:28px">Every number is read straight from the chain. <span class="mute">Check them live at gloam.trade/transparency.</span></p>
-  <div class="foot"><span>Mainnet, 21 Oct to 14 Nov 2026 · gloam.trade/transparency · DefiLlama privacy category, 24-hour revenue, 14 Nov</span><span>14</span></div>
+  <div class="foot"><span>Mainnet, 21 Oct to 14 Nov 2026 · gloam.trade/transparency · DefiLlama privacy category, 24-hour revenue, 14 Nov</span><span>15</span></div>
 </section></div>
 <aside class="notes"><b>Say:</b> We launched on Robinhood Chain and Tempo mainnet on 21 October, added Base and Ethereum on the 26th and Elysium on 9 November. Since launch, 555 different wallets have used Gloam, and 31,500 dollars has moved in and out of the vaults. That doesn't count private payments, because their amounts are hidden. There have been 492 private transfers, and on DefiLlama we're the eighth privacy protocol by daily revenue. Anyone can check our numbers live at gloam.trade/transparency, read straight from the chain.</aside>
 <!-- 15 the wedge: ai agents -->

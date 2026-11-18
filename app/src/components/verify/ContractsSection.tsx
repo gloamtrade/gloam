@@ -35,14 +35,12 @@ const ENTRIES = contractDirectory();
 const READ_TIMEOUT_MS = 20_000;
 
 const LOGOS: Record<ChainFamily, string> = {
-  robinhood: "/brand/chains/4663.png",
-  tempo: "/brand/logos/tempo.svg",
-  base: "/brand/chains/8453.png",
-  ethereum: "/brand/chains/1.png",
-  // Elysium's mark, its official avatar circle-cropped
-  elysium: "/brand/chains/elysium.png",
-  // BNB Chain's mark, already used for the bridge
-  bnb: "/brand/chains/56.png",
+  robinhood: "/brand/networks/robinhood.png",
+  tempo: "/brand/networks/tempo.svg",
+  base: "/brand/networks/base.svg",
+  ethereum: "/brand/networks/ethereum.svg",
+  elysium: "/brand/networks/elysium.png",
+  bnb: "/brand/networks/bnb.png",
 };
 
 type Side = "mainnet" | "testnet";
@@ -178,7 +176,7 @@ function ChainChoice({ entries, value, onChange }: { entries: DirectoryEntry[]; 
                 : "border-line bg-panel text-soft hover:border-line-strong hover:text-foreground"
             }`}
           >
-            <Image src={LOGOS[e.network.family]} alt="" width={28} height={28} className="h-7 w-7 rounded-full ring-1 ring-line" />
+            <Image src={LOGOS[e.network.family]} alt="" width={28} height={28} className="h-7 w-7 rounded-full object-cover outline outline-1 -outline-offset-1 outline-black/5 dark:outline-white/10" />
             {e.network.label}
             {!e.live && <span className="text-[12px] font-normal text-mute">Next</span>}
           </button>
@@ -300,7 +298,7 @@ function NetworkCard({ entry, state, onRetry }: { entry: DirectoryEntry; state: 
     <div className="gl-card overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4 sm:px-6">
         <div className="flex items-center gap-3">
-          <Image src={LOGOS[n.family]} alt="" width={28} height={28} className="h-7 w-7 rounded-lg ring-1 ring-line" />
+          <Image src={LOGOS[n.family]} alt="" width={28} height={28} className="h-7 w-7 rounded-lg object-cover outline outline-1 -outline-offset-1 outline-black/5 dark:outline-white/10" />
           <div>
             <p className="text-[16px] text-foreground">{entry.name}</p>
             <p className="tnum text-[12.5px] text-mute">

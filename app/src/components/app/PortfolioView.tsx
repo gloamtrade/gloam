@@ -54,6 +54,9 @@ import { isClaimedNote, isSecuredClaim, isUnsecuredClaim } from "@/lib/claimSwee
 import { canExitVaultSwap } from "@/lib/vaultSwap";
 import { SwapExit } from "./SwapExit";
 import { SealedField } from "@/components/ui/SealedField";
+import { SealDots } from "@/components/ui/SealDots";
+import { AmountToggle } from "@/components/ui/AmountToggle";
+import { useHideAmounts } from "@/lib/hideAmounts";
 import { ActivityFeed } from "./ActivityFeed";
 import { AddressChip } from "./AddressChip";
 import { FirstPaymentCard } from "./FirstPaymentCard";
@@ -457,6 +460,8 @@ export function PortfolioView() {
   // chain (and can be absurdly large), so hold everything at zero until the
   // wallet is switched, which is exactly what the wrong-network banner says.
   const balancesVisible = isConnected && onProduct;
+  // The eye: hides every amount on screen (this browser only, nothing on chain).
+  const [amountsHidden] = useHideAmounts();
 
   // The wallet card: the gas coin (never on Tempo) and every token the vault
   // takes, in one list and one order, the zero balances folded after the rest.
@@ -592,6 +597,7 @@ export function PortfolioView() {
             </div>
             <div className="-mr-2 flex items-center gap-0.5">
               <NetworkPulse />
+              {balancesVisible && <AmountToggle />}
               <button
                 type="button"
                 onClick={() => void refreshAll()}
@@ -627,11 +633,15 @@ export function PortfolioView() {
           >
             {restoring && !hasShield ? (
               <span className="gl-skeleton inline-block h-[0.85em] w-[min(14rem,60%)] align-baseline" aria-label="Loading your private balance" />
+            ) : amountsHidden && balancesVisible ? (
+              <SealDots n={7} dot={14} label="Private balance hidden" className="h-[1em]" />
             ) : (
               privateDisplay
             )}
           </p>
-          <p className="mt-4 max-w-[64ch] text-[15px] leading-relaxed text-mute">{privateSub}</p>
+          <p className="mt-4 max-w-[64ch] text-[15px] leading-relaxed text-mute">
+            {amountsHidden && balancesVisible && hasShield ? "Amounts hidden on this screen. Tap the eye to show them." : privateSub}
+          </p>
 
           {/* One primary action; the other three money moves sit beside it,
               quiet. The same names as the nav under Vault, so Pay is never a
@@ -668,16 +678,22 @@ export function PortfolioView() {
               <dl className="tnum flex min-w-0 flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px]">
                 <div className="flex items-baseline gap-2">
                   <dt className="text-mute">In your wallet</dt>
-                  <dd className="text-foreground">{publicDisplay}</dd>
+                  <dd className="text-foreground">{amountsHidden ? <SealDots n={5} /> : publicDisplay}</dd>
                 </div>
                 <div className="flex items-baseline gap-2">
                   <dt className="text-mute">Total</dt>
                   <dd className="text-foreground">
-                    {totalDisplay}
-                    {sealedPct != null && <span className="text-mute">, {sealedPct}% private</span>}
+                    {amountsHidden ? (
+                      <SealDots n={5} />
+                    ) : (
+                      <>
+                        {totalDisplay}
+                        {sealedPct != null && <span className="text-mute">, {sealedPct}% private</span>}
+                      </>
+                    )}
                   </dd>
                 </div>
-                {settings.showUsd && unpriced.length > 0 && (
+                {settings.showUsd && unpriced.length > 0 && !amountsHidden && (
                   <div className="text-mute">Not in the total: {unpriced.join(", ")}, no dollar price</div>
                 )}
               </dl>
@@ -733,9 +749,13 @@ export function PortfolioView() {
                       />
                       <div className="min-w-0">
                         <p className="tnum truncate text-[15px] text-foreground">
-                          {isNativeAsset(n.asset)
-                            ? formatEth(BigInt(n.amountWei))
-                            : formatAssetAmount(BigInt(n.amountWei), n.asset)}{" "}
+                          {amountsHidden ? (
+                            <SealDots n={5} className="text-foreground/60" />
+                          ) : isNativeAsset(n.asset) ? (
+                            formatEth(BigInt(n.amountWei))
+                          ) : (
+                            formatAssetAmount(BigInt(n.amountWei), n.asset)
+                          )}{" "}
                           <span className="text-mute">{assetLabel(n.asset)}</span>
                         </p>
                         <p className="mt-0.5 truncate text-[12.5px] text-mute">
@@ -843,9 +863,9 @@ export function PortfolioView() {
                 <div className="shrink-0 text-right">
                   <p className="tnum text-[17px] text-foreground">
                     <span className="sr-only">Total in your wallet: </span>
-                    {walletSum.figure}
+                    {amountsHidden ? <SealDots n={5} /> : walletSum.figure}
                   </p>
-                  {walletSum.extra && (
+                  {walletSum.extra && !amountsHidden && (
                     <p className="tnum mt-0.5 text-[13px] text-mute">
                       {walletSum.extra}
                       <span className="sr-only">, no dollar price</span>
@@ -943,9 +963,15 @@ export function PortfolioView() {
                         )}
                         <div className="w-28 text-right">
                           <p className="tnum text-[14px] text-foreground">
-                            {r.native ? formatEth(r.raw) : formatTokenAmount(r.raw, r.decimals)}
+                            {amountsHidden ? (
+                              <SealDots n={4} className="text-foreground/60" />
+                            ) : r.native ? (
+                              formatEth(r.raw)
+                            ) : (
+                              formatTokenAmount(r.raw, r.decimals)
+                            )}
                           </p>
-                          {value && <p className="tnum text-[12.5px] text-mute">{value}</p>}
+                          {value && !amountsHidden && <p className="tnum text-[12.5px] text-mute">{value}</p>}
                         </div>
                         <div className="flex gap-1 @max-xl:w-full @max-xl:justify-start @max-xl:pl-[46px] @max-xl:empty:hidden @xl:w-[200px] @xl:justify-end">
                           {r.native ? (

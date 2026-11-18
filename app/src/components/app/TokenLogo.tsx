@@ -53,16 +53,20 @@ const DISC_LOGO_IDS = new Set(["usdg", "usdce", "usdc", "eurc", "usdt", "pyusd",
  */
 const INK_PLATE_LOGO_IDS = new Set(["dis", "hims", "ibm", "nke", "rblx", "uber", "v"]);
 
+/**
+ * Network marks drawn as full-bleed tiles (lib/networks families). They fill the
+ * tile edge to edge, so they get no plate and no border, only a hairline drawn
+ * over the image so a dark tile keeps its edge on a dark panel.
+ */
+const FULL_TILE_LOGO_IDS = new Set(["robinhood", "tempo", "base", "ethereum", "elysium"]);
+
 const SPECIAL_LOGOS: Record<string, string> = {
-  tempo: "/brand/logos/tempo.svg",
-  // Robinhood Chain's own app icon: a full tile, so no white plate shows
-  robinhood: "/brand/chains/4663.png",
-  // Base's square, the same full-tile treatment
-  base: "/brand/chains/8453.png",
-  // Ethereum's mark, the same full-tile treatment
-  ethereum: "/brand/chains/1.png",
-  // Elysium's mark, its official avatar circle-cropped
-  elysium: "/brand/chains/elysium.png",
+  // Networks: full-bleed tiles in /brand/networks, edge to edge, no plate
+  tempo: "/brand/networks/tempo.svg",
+  robinhood: "/brand/networks/robinhood.png",
+  base: "/brand/networks/base.svg",
+  ethereum: "/brand/networks/ethereum.svg",
+  elysium: "/brand/networks/elysium.png",
   // HYPE, Elysium's gas coin
   hype: "/brand/tokens/hype.png",
   // BNB, BNB Chain's gas coin (the mark the bridge list already uses)
@@ -138,6 +142,21 @@ export function TokenLogo({
         height={size}
         onError={() => setBroken(true)}
         className={`shrink-0 rounded-full object-cover ${className}`}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+
+  if (src && !broken && FULL_TILE_LOGO_IDS.has(id.toLowerCase())) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={`${symbol} logo`}
+        width={size}
+        height={size}
+        onError={() => setBroken(true)}
+        className={`shrink-0 rounded-[22%] object-cover outline outline-1 -outline-offset-1 outline-black/5 dark:outline-white/10 ${className}`}
         style={{ width: size, height: size }}
       />
     );

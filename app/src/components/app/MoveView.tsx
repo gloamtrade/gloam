@@ -1,5 +1,6 @@
 "use client";
 
+import { useHideAmounts } from "@/lib/hideAmounts";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -4321,7 +4322,7 @@ type BalanceRow = {
 
 /** The private balance, only visible to its owner. Carries the sealed glow. */
 function PrivateBalanceCard({ rows, signedOut }: { rows: BalanceRow[]; signedOut: boolean }) {
-  const [hidden, setHidden] = useState(false);
+  const [hidden, toggleHidden] = useHideAmounts();
   return (
     <div className="gl-card relative overflow-hidden p-5">
       <SealedField tone="soft" />
@@ -4336,7 +4337,7 @@ function PrivateBalanceCard({ rows, signedOut }: { rows: BalanceRow[]; signedOut
             {rows.length > 0 && (
               <button
                 type="button"
-                onClick={() => setHidden((v) => !v)}
+                onClick={toggleHidden}
                 aria-pressed={hidden}
                 aria-label={hidden ? "Show amounts" : "Hide amounts"}
                 className="-mr-2 grid h-9 w-9 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground"

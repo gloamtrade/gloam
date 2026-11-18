@@ -15,14 +15,12 @@ import { SHOWN_NETWORK_KEYS, getNetwork, type ChainFamily, type NetworkKey } fro
 type Side = "mainnet" | "testnet";
 
 const LOGOS: Record<ChainFamily, string> = {
-  robinhood: "/brand/chains/4663.png",
-  tempo: "/brand/logos/tempo.svg",
-  base: "/brand/chains/8453.png",
-  ethereum: "/brand/chains/1.png",
-  // Elysium's mark, its official avatar circle-cropped
-  elysium: "/brand/chains/elysium.png",
-  // BNB Chain's mark, already used for the bridge
-  bnb: "/brand/chains/56.png",
+  robinhood: "/brand/networks/robinhood.png",
+  tempo: "/brand/networks/tempo.svg",
+  base: "/brand/networks/base.svg",
+  ethereum: "/brand/networks/ethereum.svg",
+  elysium: "/brand/networks/elysium.png",
+  bnb: "/brand/networks/bnb.png",
 };
 
 const sideOf = (k: NetworkKey): Side => (getNetwork(k).testnet ? "testnet" : "mainnet");
@@ -191,7 +189,7 @@ function ChainMenu({ value, onChange }: { value: NetworkKey; onChange: (k: Netwo
         onKeyDown={onButtonKey}
         className="flex h-[52px] w-full items-center gap-2.5 rounded-full bg-surface-2 pl-2.5 pr-4 text-[14px] font-medium text-foreground transition-colors duration-200 hover:bg-surface dark:bg-panel dark:ring-1 dark:ring-line dark:hover:bg-surface-2 sm:min-w-[208px]"
       >
-        <Image src={LOGOS[current.family]} alt="" width={28} height={28} className="h-7 w-7 rounded-lg ring-1 ring-line" />
+        <Image src={LOGOS[current.family]} alt="" width={28} height={28} className="h-7 w-7 rounded-lg object-cover outline outline-1 -outline-offset-1 outline-black/5 dark:outline-white/10" />
         <span className="flex-1 whitespace-nowrap text-left">{current.label}</span>
         <Chevron open={open} />
       </button>
@@ -221,7 +219,7 @@ function ChainMenu({ value, onChange }: { value: NetworkKey; onChange: (k: Netwo
                   i === cursor ? "bg-surface-2 text-foreground dark:bg-surface" : "text-soft"
                 }`}
               >
-                <Image src={LOGOS[n.family]} alt="" width={24} height={24} className="h-6 w-6 rounded-md ring-1 ring-line" />
+                <Image src={LOGOS[n.family]} alt="" width={24} height={24} className="h-6 w-6 rounded-md object-cover outline outline-1 -outline-offset-1 outline-black/5 dark:outline-white/10" />
                 <span className="flex-1 whitespace-nowrap">{n.label}</span>
                 {selected && <Check />}
               </li>
