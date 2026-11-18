@@ -151,8 +151,9 @@ import {
   SpreadOver,
   aboutTime,
 } from "./PrivateCashOut";
-import { cashOutPrivacyWarnings, cashOutSender, depositWallets } from "@/lib/cashOutPrivacy";
-import { CashOutPercentChips, CashOutPrivacyLine, CashOutWarnings } from "./CashOutPrivacy";
+import { cashOutPrivacyWarnings, depositWallets } from "@/lib/cashOutPrivacy";
+import { CashOutPercentChips, CashOutWarnings } from "./CashOutPrivacy";
+import { BalancePicker } from "./BalancePicker";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { codeFromHash } from "@/lib/claimLink";
 import { dropClaimLink, keepClaimLink, keptClaimLink, onForgetClaim, onGoToClaim, setClaimWaiting } from "@/lib/claimLinkStore";
@@ -272,6 +273,8 @@ export function MoveView() {
   const [cashOutInput, setCashOutInput] = useState("");
   const cashOutInputRef = useRef<HTMLInputElement>(null);
   const [cashOutWhen, setCashOutWhen] = useState<"now" | CashOutWindow>("now");
+  // Cash out keeps to the basics; timing, pieces, Hide my wallet and the privacy notes sit under More options.
+  const [cashOutMore, setCashOutMore] = useState(false);
   const [cashOutDest, setCashOutDest] = useState<"mine" | "other">("mine");
   const [otherTo, setOtherTo] = useState("");
   // The cash-out address's sweep check (lib/sweepCheck), keyed by network, address and token.
@@ -1084,6 +1087,8 @@ export function MoveView() {
       : null;
   const planOffered = plan != null && relayAvailable && poseidonMode && !xActive;
   const planActive = planOffered && privatePref;
+  // Open whenever a choice inside it is already in use, so nothing set is hidden.
+  const cashOutMoreOpen = cashOutMore || planActive || cashOutWhen !== "now";
   // While a run is setting pieces up, the card shows that run (the note it
   // started from is spent part way, so the selection moves on underneath).
   const planPieceList = planRun ? planRun.map((p) => p.amount) : (plan?.pieces ?? []);
@@ -2696,16 +2701,11 @@ export function MoveView() {
           {shieldLive && notes.length > 0 && mode !== "receive" ? (
             <>
               <section className="mt-6">
-                <p className="text-[13px] text-mute">
-                  {mode === "cashout" ? "Cash out from" : "Pay from"}
-                </p>
-                <ul
-                  role="radiogroup"
-                  aria-label={mode === "cashout" ? "Cash out from" : "Pay from"}
-                  className="mt-2 max-h-[300px] space-y-2 overflow-y-auto"
-                >
-                  {notes.map((n) => {
-                    const active = selected?.id === n.id;
+                <BalancePicker
+                  label={mode === "cashout" ? "Cash out from" : "Pay from"}
+                  value={selected?.id ?? null}
+                  onChange={setSelectedId}
+                  options={notes.map((n) => {
                     const exposed = isUnsecuredClaim(n);
                     const kind = exposed
                       ? "Claimed, not secured yet"
@@ -2716,52 +2716,21 @@ export function MoveView() {
                           : n.id.startsWith("chg-")
                             ? "Change from a payment"
                             : "Added";
-                    return (
-                      <li key={n.id}>
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={active}
-                          onClick={() => setSelectedId(n.id)}
-                          className={`flex min-h-[60px] w-full items-center gap-3 rounded-[14px] border px-4 py-2.5 text-left transition-colors ${
-                            active
-                              ? "border-foreground bg-panel"
-                              : "border-line hover:border-line-strong hover:bg-surface"
-                          }`}
-                        >
-                          <AssetMark id={logoIdFor(n.asset)} symbol={assetLabel(n.asset)} size={32} />
-                          <span className="min-w-0 flex-1">
-                            <span className="tnum block truncate text-[16px] text-foreground">
-                              {formatAssetAmount(n.amountWei, n.asset)}{" "}
-                              <span className="text-mute">{assetLabel(n.asset)}</span>
-                            </span>
-                            <span className={`block truncate text-[12px] ${exposed ? "text-warn" : "text-mute"}`}>
-                              {kind},{" "}
-                              {new Date(n.createdAt).toLocaleDateString("en-US", {
-                                month: "short",
-                                day: "numeric",
-                              })}
-                            </span>
-                            {n.note && (
-                              <PaymentNoteLine
-                                note={n.note}
-                                className="mt-0.5 text-[12px] text-soft"
-                              />
-                            )}
-                          </span>
-                          <span
-                            aria-hidden
-                            className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border transition-colors ${
-                              active ? "border-foreground bg-foreground" : "border-line-strong"
-                            }`}
-                          >
-                            {active && <span className="h-2 w-2 rounded-full bg-panel" />}
-                          </span>
-                        </button>
-                      </li>
-                    );
+                    const day = new Date(n.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                    return {
+                      id: n.id,
+                      mark: <AssetMark id={logoIdFor(n.asset)} symbol={assetLabel(n.asset)} size={32} />,
+                      title: (
+                        <>
+                          {formatAssetAmount(n.amountWei, n.asset)} <span className="text-mute">{assetLabel(n.asset)}</span>
+                        </>
+                      ),
+                      sub: exposed ? `${kind}, ${day}` : day,
+                      warn: exposed,
+                      extra: n.note ? <PaymentNoteLine note={n.note} className="mt-0.5 text-[12px] text-soft" /> : undefined,
+                    };
                   })}
-                </ul>
+                />
               </section>
 
               {mode === "send" && (
@@ -3092,15 +3061,6 @@ export function MoveView() {
 
               {mode === "cashout" && (
                 <div className="mt-6 space-y-4">
-                  <div className="rounded-[16px] bg-warn-soft px-4 py-3.5 text-[13px] leading-relaxed">
-                    <p className="font-medium text-warn">
-                      Cashing out makes the amount and where it goes public
-                    </p>
-                    <p className="mt-1 text-soft">
-                      A round amount, a later time or a fresh wallet makes it
-                      harder to link back to you.
-                    </p>
-                  </div>
 
                   {returnedRows.map((n) => (
                     <div key={n.id} className="rounded-[16px] bg-surface px-4 py-3.5 text-[13px] leading-relaxed">
@@ -3196,7 +3156,7 @@ export function MoveView() {
                           ) : null
                         }
                       />
-                      <CashOutWarnings
+                      {cashOutMoreOpen && <CashOutWarnings
                         warnings={amountWarnings}
                         scope={selected.id}
                         disabled={working}
@@ -3212,9 +3172,9 @@ export function MoveView() {
                             </button>
                           ) : null
                         }
-                      />
+                      />}
                       {/* the broader note (close amounts, payments received, timing) when the exact-deposit warning has not said it */}
-                      {cashOutLink && amountWarnings.length === 0 && (
+                      {cashOutMoreOpen && cashOutLink && amountWarnings.length === 0 && (
                         <CashOutLinkNote
                           text={linkMessage(cashOutLink)}
                           action={
@@ -3343,10 +3303,10 @@ export function MoveView() {
                         )}
                       </>
                     )}
-                    {selected && (
+                    {selected && cashOutMoreOpen && (
                       <CashOutWarnings warnings={addressWarnings} scope={selected.id} onElsewhere={cashOutElsewhere} disabled={working} />
                     )}
-                    {addressWarnings.length === 0 && cashOutDest === "other" && cashOutTo ? (
+                    {cashOutMoreOpen && addressWarnings.length === 0 && cashOutDest === "other" && cashOutTo ? (
                       <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
                         For privacy, a fresh wallet that never added money to Gloam is best.
                       </p>
@@ -3402,6 +3362,24 @@ export function MoveView() {
                     />
                   )}
 
+                  {selected && (
+                    <button
+                      type="button"
+                      aria-expanded={cashOutMoreOpen}
+                      aria-controls="cashout-more"
+                      disabled={working || (cashOutMoreOpen && !cashOutMore)}
+                      onClick={() => setCashOutMore((v) => !v)}
+                      className="-my-1 inline-flex min-h-10 items-center gap-1.5 text-[13.5px] font-medium text-foreground disabled:opacity-60"
+                    >
+                      {cashOutMoreOpen ? "Fewer options" : "More options"}
+                      <svg aria-hidden width="14" height="14" viewBox="0 0 24 24" fill="none" className={`transition-transform ${cashOutMoreOpen ? "rotate-180" : ""}`}>
+                        <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                  )}
+
+                  {cashOutMoreOpen && (
+                  <div id="cashout-more" className="space-y-4">
                   {planOffered && plan && (
                     <HowChoice
                       privately={privatePref}
@@ -3532,11 +3510,7 @@ export function MoveView() {
                   )}
 
                   {!planActive && relayToggle}
-                  {selected && (
-                    <CashOutPrivacyLine
-                      pieces={planActive}
-                      sender={cashOutSender({ relayOn, pieces: planActive, later: cashOutWhen !== "now", partial: cashOutPartial })}
-                    />
+                  </div>
                   )}
                   {!connectedOk ? (
                     connectPrompt("cash out")
@@ -3591,6 +3565,9 @@ export function MoveView() {
                         "Cash out to my wallet"
                       )}
                     </button>
+                  )}
+                  {connectedOk && !planActive && (
+                    <p className="-mt-1 text-center text-[12.5px] text-mute">Cashing out is public.</p>
                   )}
                   {planActive && connectedOk && (
                     <div className="-mt-1 text-center">
@@ -4024,6 +4001,7 @@ export function MoveView() {
           ) : (
             <>
               <PrivateBalanceCard rows={totals} signedOut={!isConnected} />
+              {mode !== "cashout" && (
               <div className="gl-card p-5">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-[13px] text-mute">What the explorer shows</p>
@@ -4042,7 +4020,7 @@ export function MoveView() {
                   <div className="flex h-11 items-center justify-between gap-3">
                     <dt className="text-mute">Sent by</dt>
                     <dd className="truncate text-foreground">
-                      {relayOn || (mode === "cashout" && (planActive || cashOutWhen !== "now")) ? "Gloam relay" : "Your wallet"}
+                      {relayOn ? "Gloam relay" : "Your wallet"}
                     </dd>
                   </div>
                   <div className="flex h-11 items-center justify-between gap-3">
@@ -4073,7 +4051,7 @@ export function MoveView() {
                       )}
                     </dd>
                   </div>
-                  <IssuerPolicyRow chainId={network.chainId} asset={mode === "cashout" ? selected?.asset : null} flow="cashout" />
+                  <IssuerPolicyRow chainId={network.chainId} asset={null} flow="cashout" />
                 </dl>
                 <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
                   {mode === "send"
@@ -4087,6 +4065,7 @@ export function MoveView() {
                       : "A cash out is a public transfer. It ends privacy for this amount."}
                 </p>
               </div>
+              )}
             </>
           )}
         </aside>
