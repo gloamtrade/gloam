@@ -13,7 +13,7 @@ license: MIT
 Gloam gives the agent private stablecoin payments on Tempo, Robinhood Chain, Base, Ethereum and Elysium
 through the `gloam` MCP server: the public chain sees a shielded transfer, not who paid whom or how much.
 
-Each chain has a mainnet and, all but Elysium, a testnet, and tools take a `network`:
+Each chain has a mainnet and, all but Elysium and BNB Chain, a testnet, and tools take a `network`:
 
 - `tempo-mainnet`, `robinhood-mainnet`, `base-mainnet` and `ethereum-mainnet` are **mainnet**.
   Deposits are capped at 50,000 of a stablecoin (20 ETH on Base and Ethereum, 11 ETH on Robinhood Chain, 2,500,000 GLOAM) per deposit.
@@ -22,6 +22,8 @@ Each chain has a mainnet and, all but Elysium, a testnet, and tools take a `netw
 - `elysium-mainnet` (Elysium, USDC only, gas in HYPE) is **mainnet** too, live since 9 November 2026, with
   deposits capped at 500 USDC at launch. `elysium` (Elysium testnet) is not deployed yet: use it only if
   `gloam_info` lists it.
+- `bnb-mainnet` (BNB Chain, USDT, USDC, BNB and BDX, gas in BNB) is **mainnet** too, live since 19 November 2026,
+  once the MCP server's release knows it: use it only if `gloam_info` lists it.
 - `tempo`, `robinhood`, `base` (Base Sepolia) and `ethereum` (Ethereum Sepolia) are the testnets.
 
 `gloam_info` lists the networks this server has and its default. Always say which network a payment

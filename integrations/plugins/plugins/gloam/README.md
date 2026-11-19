@@ -4,7 +4,7 @@ Private stablecoin payments for AI agents. With this plugin an agent can pay for
 resources from a private (shielded) balance, get paid, check payments and proofs, and report what
 it has spent, while amounts and counterparties stay off the public block explorer. Gloam runs on
 Tempo, Robinhood Chain, Base and Ethereum mainnet (deposits capped at 50,000 of a stablecoin
-each, cashing out costs 0.5%), and on their testnets. It runs on Elysium mainnet too (USDC only, gas in HYPE).
+each, cashing out costs 0.5%), and on their testnets. It runs on Elysium mainnet too (USDC only, gas in HYPE), and on BNB Chain mainnet once its MCP release is out (gas in BNB).
 Reviewed internally before launch; Kann Audits has since reviewed the vault contracts and found no
 Critical, High or Medium issues (report: gloam.trade/security).
 

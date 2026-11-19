@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArticleLayout } from "@/components/blog/ArticleLayout";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { CodeBlock } from "@/components/ui/CodeBlock";
+import { BNB_ENABLED } from "@/lib/bnb";
 import { ELYSIUM } from "@/lib/elysium";
 
 const title = "Come build with Gloam at the NEAR hackathon";
@@ -85,6 +86,13 @@ export default function BuildWithGloamAtTheNearHackathonPost() {
         </>
       }
     >
+      {ELYSIUM && BNB_ENABLED && (
+        <p>
+          <strong>Update, 19 November 2026.</strong> BNB Chain went live on 19
+          November 2026, so Gloam now runs on six mainnets: Robinhood Chain,
+          Tempo, Base, Ethereum, Elysium and BNB Chain.
+        </p>
+      )}
       {ELYSIUM && (
         <p>
           <strong>Update, 10 November 2026.</strong> Elysium went live on 9
