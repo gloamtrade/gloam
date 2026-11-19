@@ -37,6 +37,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MODE = process.env.GLOAM_SELFTEST_BNB_EVERYWHERE ?? "unset";
+/** Is the pool written into the SDK file yet (bnb-mainnet-after-deploy.sh)? The CSP reads the same file. */
+const SDK_POOL_IN = /^\s*pool:\s*"0x[0-9a-fA-F]{40}",\s*$/m.test((await import("node:fs")).readFileSync(new URL("../../packages/sdk/src/bnb.ts", import.meta.url), "utf8"));
 const CHAIN_ID = 56;
 const POOL = "0x89d3042390204f57b8b4F8949D3c2203E4002164";
 const USDT = "0x55d398326f99059fF775485246999027B3197955";
@@ -164,7 +166,8 @@ ok(!swapMainnets().includes("BNB Chain"), "the swap chains leave BNB Chain out")
 for (const raw of ["1", "true", "TRUE", "on", "yes", " 1 "]) {
   ok(bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} turns it on`);
   ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw, NEXT_PUBLIC_BNB_POOL: "0x89d3042390204f57b8b4F8949D3c2203E4002164" } as unknown as NodeJS.ProcessEnv).length === 2, `${JSON.stringify(raw)} with a pool: the CSP allows its two public RPCs`);
-  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === 0, `${JSON.stringify(raw)} with no pool: nothing to allow yet`);
+  // Without NEXT_PUBLIC_BNB_POOL the CSP falls back to the SDK file: nothing to allow before the deploy, the two RPCs after it.
+  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === (SDK_POOL_IN ? 2 : 0), `${JSON.stringify(raw)} with no pool in the env: ${SDK_POOL_IN ? "the SDK's pool, its two public RPCs" : "nothing to allow yet"}`);
 }
 for (const raw of [undefined, "", "0", "false", "off", "no", "enabled", "2"]) {
   ok(!bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} leaves it off`);

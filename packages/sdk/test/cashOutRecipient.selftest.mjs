@@ -60,6 +60,8 @@ const BOARDS = {
 };
 // Elysium mainnet's board (deployed by Cloak from GloamPayMemo, unchanged) is in its own record.
 if (getGloamNetwork("elysium-mainnet")) BOARDS["elysium-mainnet"] = deployed("elysium-mainnet.json").contracts.GloamPayMemo ?? null;
+// BNB Chain mainnet's board, once its pool is in (bnb-mainnet-after-deploy.sh writes both).
+if (getGloamNetwork("bnb-mainnet")) BOARDS["bnb-mainnet"] = deployed("bnb-mainnet.json").contracts.GloamPayMemo ?? null;
 const ROUTERS = { "robinhood-mainnet": [RH_V1, RH_V2], "tempo-mainnet": [TEMPO_ROUTER] };
 
 const nets = gloamNetworks();

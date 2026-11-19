@@ -210,7 +210,11 @@ if (MODE === "testnet") {
     assert(net.explorerUrl === "https://explorer.elysium.example", "filled: explorer without the slash");
   }
   assert(sdk.testnetNetwork("elysium") === null, "filled: no testnet");
-  assert(sdk.gloamNetworks().filter((n) => !n.testnet).at(-1) === net, "filled: listed after the other mainnets");
+  // BNB Chain, once its pool is in, is listed after Elysium; every other mainnet comes before it.
+  const mains = sdk.gloamNetworks().filter((n) => !n.testnet);
+  const afterElysium = sdk.getGloamNetwork("bnb-mainnet") ? 1 : 0;
+  assert(mains.at(-1 - afterElysium) === net, "filled: listed after the other mainnets");
+  if (afterElysium) assert(mains.at(-1).key === "bnb-mainnet", "filled: only BNB Chain comes after it");
   throws(() => sdk.assertDepositAllowed(id, sdk.NATIVE_ASSET, 1n), /no native deposits/, "filled: a HYPE deposit is refused");
   throws(() => sdk.assertDepositAllowed(id, "0x00000000000000000000000000000000000000aa", 1n), /does not list/, "filled: an unlisted token is refused");
   sdk.assertDepositAllowed(id, net.assets[0].address, 1n);

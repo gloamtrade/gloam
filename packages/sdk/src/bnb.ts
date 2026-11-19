@@ -79,10 +79,10 @@ export const BNB_MAINNET: BnbMainnetInput = {
   usdt: { address: "0x55d398326f99059fF775485246999027B3197955", decimals: 18 },
   usdc: { address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", decimals: 18 },
   bdx: { address: "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181", decimals: 9 },
-  pool: null,
-  deployBlock: null,
-  payMemo: null,
-  payMemoBlock: null,
+  pool: "0x89d3042390204f57b8b4F8949D3c2203E4002164",
+  deployBlock: 134431196n,
+  payMemo: "0xb692c86B13f65a123f45cF9A21580b2dDC7B8a79",
+  payMemoBlock: 134431743n,
 };
 
 /** BNB Smart Chain mainnet's chain id (0x38). */

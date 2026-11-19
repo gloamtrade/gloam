@@ -94,9 +94,14 @@ assert.equal(decodeNotePackage(encodeNotePackage({ ...w.paymentNote, pool: "0x39
 n += 6;
 
 // every network and token, seed and 32-byte secret forms
+const NO_IDS_YET = new Set([56]);
 for (const net of gloamNetworks()) {
   for (const [i, asset] of net.assets.entries()) {
-    assert.ok(SHORT_LINK_WHERE.some((x) => x.chainId === net.chainId && x.pool.toLowerCase() === net.pool.toLowerCase() && x.asset.toLowerCase() === asset.address.toLowerCase()), `${net.key} ${asset.symbol} has an id`);
+    const hasId = SHORT_LINK_WHERE.some((x) => x.chainId === net.chainId && x.pool.toLowerCase() === net.pool.toLowerCase() && x.asset.toLowerCase() === asset.address.toLowerCase());
+    // BNB Chain has no table ids yet (DEPLOY-BNB.md): its links are written out in full (id 0) and
+    // must still read back below. Ids are forever, so they are given in a later release, once.
+    if (NO_IDS_YET.has(net.chainId)) assert.ok(!hasId, `${net.key} ${asset.symbol}: no id yet, written out in full`);
+    else assert.ok(hasId, `${net.key} ${asset.symbol} has an id`);
     for (const useSeed of [true, false]) {
       const s = useSeed ? randomNoteSeed() : { seed: undefined, secret: BigInt(`0x${(i + 1).toString(16).repeat(62)}`) };
       const amount = (10n ** BigInt(asset.decimals) * BigInt(i + 3)).toString();
