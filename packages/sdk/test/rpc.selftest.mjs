@@ -49,7 +49,13 @@ for (const n of [...gloamNetworks(), GLOAM_NETWORKS.robinhood, GLOAM_NETWORKS.te
     assert(gloamReadTransport(n)({}).config.type === "gloamRead", "Sepolia reads through the split");
   } else {
     assert(n.historyRpc === null, `${n.key}: one RPC keeps everything, no history RPC`);
-    assert(gloamReadTransport(n)({}).config.type === "http", `${n.key}: plain http, as before`);
+    if (n.chainId === 56) {
+      // BNB Chain (once its pool is in): its public RPCs drop old logs, so reads go through the
+      // pruned-logs guard (bnb.selftest.mjs checks the guard itself).
+      assert(n.logCanary !== null && gloamReadTransport(n)({}).config.type === "gloamPrunedGuard", `${n.key}: reads through the pruned-logs guard`);
+    } else {
+      assert(gloamReadTransport(n)({}).config.type === "http", `${n.key}: plain http, as before`);
+    }
   }
 }
 const sepolia = testnetNetwork("ethereum");

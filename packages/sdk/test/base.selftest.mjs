@@ -108,7 +108,7 @@ assert(baseSepoliaPool()?.pool === TEST_POOL, "baseSepoliaPool reads BASE_SEPOLI
 // Base Sepolia once its pool is in (ethereum-sepolia.selftest.mjs); nothing here needs editing then.
 // Elysium's place in the list is checked in elysium.selftest.mjs.
 const keys = gloamNetworks().map((n) => n.key).filter((k) => k !== "ethereum" && !k.startsWith("elysium"));
-const order = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", ...(mainnetPoolFor(1) ? ["ethereum-mainnet"] : []), "robinhood", "tempo", "base"];
+const order = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", ...(mainnetPoolFor(1) ? ["ethereum-mainnet"] : []), ...(getGloamNetwork("bnb-mainnet") ? ["bnb-mainnet"] : []), "robinhood", "tempo", "base"];
 assert(keys.join() === order.join(), `network order (${keys.join()})`);
 assert(getGloamNetwork("base") === test && getGloamNetwork("base-mainnet") === main, "by key");
 assert(networkForChainId(84532) === test && networkForChainId(8453) === main, "by chain id");
