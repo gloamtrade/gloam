@@ -3,7 +3,7 @@
  * Gloam MCP server, over stdio. Also the `gloam-mcp` command line.
  *
  * Private payment tools for AI agents across Gloam's networks: private
- * stablecoin payments on Tempo, Robinhood Chain, Base, Ethereum and Elysium,
+ * stablecoin payments on Tempo, Robinhood Chain, Base, Ethereum, Elysium and BNB Chain,
  * on mainnet and testnet. The tools live in src/server.ts; this file
  * loads settings and connects them to stdio.
  *

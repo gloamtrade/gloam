@@ -2,7 +2,7 @@
 name: gloam
 description: >
   Use when the user wants an agent to pay for an x402 or MPP resource privately, fetch a paid URL,
-  hold or check a private (shielded) stablecoin balance on Tempo, Robinhood Chain, Base, Ethereum or Elysium, charge for a
+  hold or check a private (shielded) stablecoin balance on Tempo, Robinhood Chain, Base, Ethereum, Elysium or BNB Chain, charge for a
   resource and verify a private payment, or see the agent's spending limits and spending report.
   For installing Gloam, keys, access keys and limits, use gloam-setup.
 license: MIT
@@ -10,7 +10,7 @@ license: MIT
 
 # Gloam
 
-Gloam gives the agent private stablecoin payments on Tempo, Robinhood Chain, Base, Ethereum and Elysium
+Gloam gives the agent private stablecoin payments on Tempo, Robinhood Chain, Base, Ethereum, Elysium and BNB Chain
 through the `gloam` MCP server: the public chain sees a shielded transfer, not who paid whom or how much.
 
 Each chain has a mainnet and, all but Elysium and BNB Chain, a testnet, and tools take a `network`:
