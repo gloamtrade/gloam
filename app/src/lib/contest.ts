@@ -49,8 +49,8 @@ export const CONTEST_RESULTS: {
   entries: 123,
   judges: 5,
   winners: [
-    { name: "raw dawg", handle: "raw1894", postUrl: "https://x.com/raw1894/status/2121160148630556865", usd: 250 },
-    { name: "0xJedi", handle: "mel_sol1", postUrl: "https://x.com/mel_sol1/status/2120774779074384276", usd: 150 },
+    { name: "0xJedi", handle: "mel_sol1", postUrl: "https://x.com/mel_sol1/status/2120774779074384276", usd: 250 },
+    { name: "raw dawg", handle: "raw1894", postUrl: "https://x.com/raw1894/status/2121160148630556865", usd: 150 },
     { name: "Vonyll", handle: "vonyll", postUrl: "https://x.com/vonyll/status/2122371251742105763", usd: 100 },
     { name: "Raniii", handle: "ranimth07", postUrl: "https://x.com/ranimth07/status/2122335462698463267", usd: 100 },
   ],
