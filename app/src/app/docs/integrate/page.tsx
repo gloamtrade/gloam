@@ -151,8 +151,8 @@ for (const t of gloam.definitions) {
       </div>
       <p>
         The pack lives in the repo today. Its engine entry (
-        <code>@gloamtrade/game-plugin-gloam/engine</code>) ships to npm with the
-        plugin&apos;s next release; until then, run it from a checkout. The{" "}
+        <code>@gloamtrade/game-plugin-gloam/engine</code>) is on npm from the
+        plugin&apos;s 0.3.0. The{" "}
         <a href={PACK} target="_blank" rel="noreferrer">
           README
         </a>{" "}

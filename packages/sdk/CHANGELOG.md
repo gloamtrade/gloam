@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.0 (19 November 2026)
+
+**BNB Chain mainnet**, live since 19 November 2026.
+
+- `bnb-mainnet` (chain `56`, gas in BNB): `mainnetNetwork("bnb")`, `getGloamNetwork("bnb-mainnet")`, `BNB_MAINNET`, `bnbMainnetConfig()`, `BNB_MAINNET_CHAIN` and the other exports of `src/bnb.ts`. The vault is `0x89d3042390204f57b8b4F8949D3c2203E4002164` (deploy block `134431196`), the same address and code as Elysium's. It is owned by a `VaultOwnerGuard` (`0x633B24cf4C48CF68cB815BC87C110c47E218B4af`) whose controller is the Gloam Owner Safe (2 of 3). Its payment-message board is `0xb692c86B13f65a123f45cF9A21580b2dDC7B8a79` (block `134431743`, `payMemoBoardFor(56)`).
+- Assets: USDT and USDC with **18 decimals** each (not 6), BNB, and BDX (9 decimals, 100,000 per deposit and 2,000,000 in total). USDT, USDC and BNB have no deposit limit.
+- Deposit limits are now built in each token's own decimals (`stableLimitFor(decimals)`, `bdxCapFor(decimals)`), so an 18-decimal stablecoin is never capped as if it had 6.
+- Private swaps are refused on BNB Chain by name, as on Elysium; there is no router there yet. BNB Chain has no Gloam testnet.
+
+**Reads fail loudly on pruned logs**
+
+- BNB Chain's public RPCs keep only about a day of logs and answer an empty list for anything older. A read through `gloamReadTransport(network)` now checks old ranges against a canary contract that logs in every block (`BNB_LOG_CANARY`). When an RPC has dropped that history it throws `PrunedLogsError` instead of returning "no events". So a balance or a tree is never built from a partial history.
+- New `guardPrunedLogs(transport, canary, opts)` and `PrunedLogsError` for your own transports. Every old log answer is checked, not only empty ones, so a range that straddles the oldest block an RPC keeps fails instead of passing its newer half. `archiveOnError` sends a failed read to the archive RPC you pass. Each RPC's proven block is cached for 10 minutes, and BNB Chain trusts a log answer without the canary only for the last 1,000 blocks.
+- For BNB Chain, set an RPC that keeps every log (for example `GLOAM_RPC_URL_56` in the MCP server, or your own `historyRpc`).
+
+No change on the other chains.
+
 ## 0.7.1 (16 November 2026)
 
 Security fixes. If you check payment receipts with `checkPaymentReceipt`, or run a gateway that takes x402 `gloam-cashout` payments, upgrade.

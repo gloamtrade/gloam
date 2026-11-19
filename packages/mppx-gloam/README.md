@@ -4,7 +4,7 @@ Private payments for the [Machine Payments Protocol](https://mpp.dev) (MPP).
 
 MPP is HTTP 402 done properly: a server answers `WWW-Authenticate: Payment …`, the client pays and retries with `Authorization: Payment …`, and gets a `Payment-Receipt`. Every method so far (tempo, evm, stripe, solana) settles in public, so the ledger shows which agent paid which service, how much, how often.
 
-This package adds the **`gloam`** method. A charge is paid with a private transfer inside a Gloam shielded pool on Tempo, Robinhood Chain, Base, Ethereum, Elysium or BNB Chain, on mainnet or testnet (Elysium mainnet with SDK 0.7.0 or later, BNB Chain mainnet with the SDK release that has its pool):
+This package adds the **`gloam`** method. A charge is paid with a private transfer inside a Gloam shielded pool on Tempo, Robinhood Chain, Base, Ethereum, Elysium or BNB Chain, on mainnet or testnet (Elysium mainnet with SDK 0.7.0 or later, BNB Chain mainnet from 0.6.0 with SDK 0.8.0 or later):
 
 - the payment note is sealed to the payee's receive tag, so only the payee can open it;
 - the server checks it binds the price, that it is the payment output of a `Transferred` event in the official pool, and that the credential is bound to this exact challenge;
@@ -144,7 +144,7 @@ Ethereum too (0.3.0): `"ethereum-mainnet"` (Ethereum `1`, USDC by default, also 
 
 Elysium: `"elysium-mainnet"` (Elysium mainnet, live since 9 November 2026, USDC only, gas in HYPE, final keys) works with SDK 0.7.0 or later, which has Elysium's values. `"elysium"` (Elysium testnet `99801`, test USDC) works once its pool is in the SDK. Without them each is refused with a plain error.
 
-BNB Chain: `"bnb-mainnet"` (chain `56`, gas in BNB) works once an SDK release has its pool, and is refused by name before. Its USDT and USDC have 18 decimals, not 6, so leave `decimals` out and let each asset use its own: a value that disagrees with a listed asset is refused, and a chain id the SDK has no network for has no default currency (pass `currency`).
+BNB Chain: `"bnb-mainnet"` (chain `56`, gas in BNB) works from 0.6.0 with SDK 0.8.0 or later, live since 19 November 2026; an older SDK refuses it by name. Its USDT and USDC have 18 decimals, not 6, so leave `decimals` out and let each asset use its own: a value that disagrees with a listed asset is refused, and a chain id the SDK has no network for has no default currency (pass `currency`).
 
 Ethereum Sepolia: `"ethereum"` (`11155111`, test USDC by default, also USDG, PYUSD, EURC and ETH, on the final keys) is known to 0.3.0 and works with SDK 0.4.0, which has its pool (deployed 25 October 2026). Built with an older SDK it is refused with a plain error.
 

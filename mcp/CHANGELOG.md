@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.0 (19 November 2026)
+
+- **BNB Chain mainnet:** `GLOAM_NETWORK=bnb-mainnet` (chain `56`, gas in BNB), live since 19 November 2026. It takes USDT and USDC (18 decimals each), BNB and BDX. Its public RPCs keep about a day of logs, so set `GLOAM_RPC_URL_56` to an RPC that keeps them all. A read that hits pruned history fails loudly instead of reporting no payments. No private swaps there yet.
+- **A listed asset always counts in its own decimals.** A `decimals` argument that disagrees with a listed asset is refused with the asset's real decimals (for example 6 for USDT on BNB Chain). It is only used for an asset Gloam does not list. Spending limits naming `bnb-mainnet` count USDT and USDC in 18 decimals.
+- `--help` lists every live mainnet.
+- Built with `@gloamtrade/sdk` 0.8.0 and `@gloamtrade/mppx-gloam` 0.6.0.
+
 ## 0.9.1 (16 November 2026)
 
 - Built with `@gloamtrade/sdk` 0.7.1: Elysium mainnet's payment-message board is in the network data, and the SDK's `checkPaymentReceipt` refuses testnet receipts unless `allowTestnet` is passed ([advisory](https://github.com/gloamtrade/gloam/blob/main/SECURITY.md#advisories)). No tool's behavior changes.

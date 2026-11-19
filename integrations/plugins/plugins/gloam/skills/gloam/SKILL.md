@@ -22,8 +22,8 @@ Each chain has a mainnet and, all but Elysium and BNB Chain, a testnet, and tool
 - `elysium-mainnet` (Elysium, USDC only, gas in HYPE) is **mainnet** too, live since 9 November 2026, with
   deposits capped at 500 USDC at launch. `elysium` (Elysium testnet) is not deployed yet: use it only if
   `gloam_info` lists it.
-- `bnb-mainnet` (BNB Chain, USDT, USDC, BNB and BDX, gas in BNB) is **mainnet** too, live since 19 November 2026,
-  once the MCP server's release knows it: use it only if `gloam_info` lists it.
+- `bnb-mainnet` (BNB Chain, USDT, USDC, BNB and BDX, gas in BNB) is **mainnet** too, live since 19 November 2026
+  (MCP 0.10.0 and later): use it only if `gloam_info` lists it.
 - `tempo`, `robinhood`, `base` (Base Sepolia) and `ethereum` (Ethereum Sepolia) are the testnets.
 
 `gloam_info` lists the networks this server has and its default. Always say which network a payment

@@ -34,7 +34,7 @@ On mainnet:
 
 **Ethereum.** `GLOAM_NETWORK=ethereum-mainnet` runs on Ethereum mainnet (`1`: USDC, USDT, USDG, PYUSD, EURC and ETH, 50,000 per stablecoin and 20 ETH per deposit), live since 26 October 2026. Its testnet is Ethereum Sepolia (`ethereum`), below. Gas costs more there: the Gloam relay waits while Ethereum gas is above its ceiling (3 gwei by default) and answers `gas_high`. A USDT shield clears an old USDT approval first, since Tether's token refuses to change one non-zero approval into another. `GLOAM_RPC_URL_1` points it at your own RPC.
 **Ethereum Sepolia.** `GLOAM_NETWORK=ethereum` runs on Ethereum Sepolia (`11155111`: test USDC, USDG, PYUSD, EURC and ETH on the mainnet pool and final keys). `GLOAM_RPC_URL_11155111` points it at your own RPC.
-**BNB Chain.** `GLOAM_NETWORK=bnb-mainnet` (chain `56`, gas in BNB: USDT and USDC with 18 decimals each, BNB, and BDX) works once a release has its pool, and is refused by name before. Its public RPCs keep about a day of logs and answer an empty list for anything older, so this server checks an empty answer about old blocks and fails loudly instead of reading it as "no payments". Set `GLOAM_RPC_URL_56` to an RPC that keeps every log. Leave `decimals` out on tools there: a listed asset always counts in its own, and a value that disagrees is refused.
+**BNB Chain.** `GLOAM_NETWORK=bnb-mainnet` (chain `56`, gas in BNB: USDT and USDC with 18 decimals each, BNB, and BDX) runs on BNB Chain mainnet, live since 19 November 2026, from 0.10.0 (0.9.1 and older refuse it by name). Its public RPCs keep about a day of logs and answer an empty list for anything older, so this server checks an empty answer about old blocks and fails loudly instead of reading it as "no payments". Set `GLOAM_RPC_URL_56` to an RPC that keeps every log. Leave `decimals` out on tools there: a listed asset always counts in its own, and a value that disagrees is refused.
 
 ## Install
 
@@ -70,7 +70,7 @@ The server reads its environment, then `~/.gloam/agent.env` (or the file in `GLO
 
 | Setting | Meaning |
 | --- | --- |
-| `GLOAM_NETWORK` | Default network for tools: `tempo-mainnet`, `robinhood-mainnet`, `base-mainnet`, `ethereum-mainnet` `elysium-mainnet` (mainnet; Elysium from 0.9.0) or `bnb-mainnet` (mainnet; BNB Chain from the next release), `tempo`, `robinhood`, `base` or `ethereum` (testnet; `elysium`, Elysium testnet, once its pool is in). Default `robinhood`. A mainnet here also puts the Tempo access key on Tempo mainnet |
+| `GLOAM_NETWORK` | Default network for tools: `tempo-mainnet`, `robinhood-mainnet`, `base-mainnet`, `ethereum-mainnet` `elysium-mainnet` (mainnet; Elysium from 0.9.0) or `bnb-mainnet` (mainnet; BNB Chain from 0.10.0), `tempo`, `robinhood`, `base` or `ethereum` (testnet; `elysium`, Elysium testnet, once its pool is in). Default `robinhood`. A mainnet here also puts the Tempo access key on Tempo mainnet |
 | `GLOAM_AGENT_PRIVATE_KEY` | The agent's key. Without it the execute tools return plans |
 | `GLOAM_TEMPO_ACCOUNT` | The owner's Tempo account. With it, the key is a Tempo access key acting for that account |
 | `GLOAM_TEMPO_FEE_TOKEN` | Token to pay Tempo fees in, in access-key mode. Default: the protocol's choice |
@@ -462,7 +462,7 @@ Then the agent can shield into a private balance, pay for x402 and MPP resources
 
 ## Status
 
-- **Mainnet:** Tempo, Robinhood Chain, Base, Ethereum, Elysium (from 0.9.0) and BNB Chain (from the next release), payments only, deposit limits, the trusted setup's final keys. Reviewed internally before launch and independently on 23 October; Kann Audits reviewed the vault contracts (report, 1 November 2026) and found no Critical, High or Medium issues.
+- **Mainnet:** Tempo, Robinhood Chain, Base, Ethereum, Elysium (from 0.9.0) and BNB Chain (from 0.10.0), payments only, deposit limits, the trusted setup's final keys. Reviewed internally before launch and independently on 23 October; Kann Audits reviewed the vault contracts (report, 1 November 2026) and found no Critical, High or Medium issues.
 - **Testnet:** Tempo Moderato and Robinhood Chain testnet on dev keys; Base Sepolia and Ethereum Sepolia on the final keys.
 - **Circuit files** are fetched from `https://www.gloam.trade/circuits` (final keys under `/final`) on first use, checked against pinned SHA-256 and cached locally (`~/.gloam/circuits`, or `GLOAM_ARTIFACTS_DIR`); `GLOAM_ARTIFACTS_SOURCE` fetches them from another base URL with the same layout.
 - **The vault's tree** is kept for the life of the server, one per chain and vault, so a payment, sweep or swap reads only the blocks since the last one. On a cold start the server fetches the vault's public leaf list from `https://www.gloam.trade/api/vault-leaves` (one request naming only the network, the same for everyone). The list is not trusted: the rebuilt root is checked against the vault, and the server walks the chain itself when it does not match or can't be fetched.

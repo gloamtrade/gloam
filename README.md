@@ -152,7 +152,7 @@ BNB Chain mainnet (`56`) is the sixth chain, live since 19 November 2026, with g
 - **Contracts.** Vault `0x89d3042390204f57b8b4F8949D3c2203E4002164` (deploy block `134431196`), owned by the guard `0x633B24cf4C48CF68cB815BC87C110c47E218B4af`. Payment-message board `0xb692c86B13f65a123f45cF9A21580b2dDC7B8a79` (block `134431743`). `PoseidonT3` `0x62c435CE6886fa91e3b0e91500c6dC9219723457`. The guard's controller is the Gloam Owner Safe `0x8E74b2b85b40f36771f92392b42BBaeacDC75507` (2 of 3). Every contract is source-verified on Sourcify. Addresses: [`contracts/deployments/bnb-mainnet.json`](./contracts/deployments/bnb-mainnet.json).
 - **Assets.** USDT and USDC (both 18 decimals on BNB Chain) and BNB with no deposit limit, and BDX at 100,000 per deposit and 2,000,000 in total.
 - **Not on BNB Chain yet.** Private swaps (no router there), and a private landing in the BNB Chain vault through Relay (BNB Chain is a source chain for bringing money over, as before).
-- **SDK and MCP.** The SDK and the local MCP server in this repo know BNB Chain mainnet as `bnb-mainnet`; on npm from their next release.
+- **SDK and MCP.** The SDK and the local MCP server in this repo know BNB Chain mainnet as `bnb-mainnet`, on npm from `@gloamtrade/sdk` 0.8.0 and `@gloamtrade/mcp` 0.10.0 (and `@gloamtrade/mppx-gloam` 0.6.0, `@gloamtrade/game-plugin-gloam` 0.4.0).
 
 Runbook: [`DEPLOY-BNB.md`](./DEPLOY-BNB.md).
 
@@ -199,7 +199,7 @@ await wallet.writeContract({
 });
 ```
 
-- Pass a mainnet network explicitly: for backward compatibility the SDK still defaults to the testnet. `getGloamNetwork(key)` takes `"robinhood-mainnet"`, `"tempo-mainnet"`, `"base-mainnet"`, `"ethereum-mainnet"` (the last two from SDK 0.4.1) `"elysium-mainnet"` (from 0.7.0) or `"bnb-mainnet"` (from the next release), and `circuitArtifactUrls` picks the final keys for a mainnet chain.
+- Pass a mainnet network explicitly: for backward compatibility the SDK still defaults to the testnet. `getGloamNetwork(key)` takes `"robinhood-mainnet"`, `"tempo-mainnet"`, `"base-mainnet"`, `"ethereum-mainnet"` (the last two from SDK 0.4.1) `"elysium-mainnet"` (from 0.7.0) or `"bnb-mainnet"` (from 0.8.0), and `circuitArtifactUrls` picks the final keys for a mainnet chain.
 - To take payments, `scanIncomingPayments` reads the payment board for payments sealed to your Gloam address, and `sweepReceivedNote` moves each into a fresh note so the payer cannot spend it back. See [`packages/sdk/examples/receive-and-credit.ts`](./packages/sdk/examples/receive-and-credit.ts).
 - `cashOutFee(amount)` returns what the pool keeps on a mainnet cash out (`CASH_OUT_FEE_BPS = 50`, 0.5%). `readCashOutFeeBps(client, pool)` reads a vault's live rate.
 
