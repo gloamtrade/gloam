@@ -4,7 +4,7 @@
  * Relay gives a one-time deposit address on the source chain. The person sends
  * a stablecoin or the chain's own coin there, from any wallet or exchange, and
  * Relay delivers the matching stablecoin (swapping if needed) to their own
- * wallet on Robinhood Chain or Tempo. From there they add it to their private
+ * wallet on the network's chain (BRIDGE_DESTINATIONS). From there they add it to their private
  * balance as usual. Nothing here touches the shielded pool: the bridge is a
  * public step, like any deposit.
  *
@@ -24,6 +24,7 @@
 import { formatUnits, isAddress } from "viem";
 import type { ChainFamily, GloamNetwork } from "./networks";
 import { ELYSIUM } from "./elysium";
+import { BNB } from "./bnb";
 import { chainLogoSrc } from "./chainLogo";
 
 export type BridgeChainKind = "evm" | "svm" | "tvm" | "bvm";
@@ -124,6 +125,20 @@ export const BRIDGE_DESTINATIONS: Partial<Record<ChainFamily, BridgeDestination>
         },
       }
     : {}),
+  // BNB Chain, while it is on (lib/bnb): USDT, with 18 decimals there. Live quotes
+  // on 2026-11-19 gave deposit addresses into it from Base, Arbitrum, Ethereum,
+  // Polygon, Robinhood Chain and Tempo (20 USDC in, about 19.94 USDT out from Base),
+  // and EXACT_OUTPUT orders carrying [approve, shieldBound] into its vault from EVM
+  // wallets and a Solana wallet, so it lands in the private balance in one step.
+  ...(BNB
+    ? {
+        bnb: {
+          chainId: BNB.chainId,
+          chain: "BNB Chain",
+          token: { symbol: "USDT", address: "0x55d398326f99059fF775485246999027B3197955", decimals: 18, logo: "/brand/tokens/usdt.png" },
+        },
+      }
+    : {}),
 };
 
 /** The chains money can come from into `destChainId`: every listed chain but that one. */
@@ -169,6 +184,19 @@ export const SWAP_SOURCES: Partial<Record<ChainFamily, BridgeChain>> = {
           kind: "evm" as const,
           swap: true,
           tokens: [{ symbol: "HYPE", address: "0x0000000000000000000000000000000000000000", decimals: 18, logo: "/brand/tokens/hype.png" }],
+        },
+      }
+    : {}),
+  // BNB to USDT on BNB Chain (live quote 2026-11-19: about 0.0085 BNB bought 5 USDT,
+  // the approve and shieldBound inside the one swap transaction)
+  ...(BNB
+    ? {
+        bnb: {
+          id: BNB.chainId,
+          name: "BNB Chain",
+          kind: "evm" as const,
+          swap: true,
+          tokens: [{ symbol: "BNB", address: "0x0000000000000000000000000000000000000000", decimals: 18, logo: "/brand/tokens/bnb.png" }],
         },
       }
     : {}),
@@ -365,7 +393,7 @@ export function walletBridgeTxs(
 /**
  * Chains a connected wallet can pay from straight into the private balance:
  * the wallet signs and Relay makes the deposit when the money arrives (an
- * approve and shieldBound run by Relay's router on Robinhood Chain or Tempo).
+ * approve and shieldBound run by Relay's router on the vault's chain).
  * That covers a Solana wallet, an EVM wallet on any listed chain, and the swap
  * on the network's own chain. A deposit address can't carry that call, so
  * sending from an exchange still lands in the wallet first.

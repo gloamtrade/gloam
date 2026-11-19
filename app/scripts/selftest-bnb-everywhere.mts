@@ -179,6 +179,20 @@ for (const raw of [undefined, "", "0", "false", "off", "no", "enabled", "2"]) {
 // A proof's amount reads in its own chain's decimals, whatever network the browser has open.
 ok(amountOf("1250000000", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 8453) === "1,250", "a Base USDC proof reads in 6 decimals");
 
+// Bring money over lands on BNB Chain exactly while it is on: as USDT in 18 decimals,
+// and BNB already in the wallet there swaps into it (lib/bridge).
+const { BRIDGE_DESTINATIONS, SWAP_SOURCES, bridgeVisible, swapSource } = await import("../src/lib/bridge");
+ok(("bnb" in BRIDGE_DESTINATIONS) === bnb.BNB_ENABLED, `${MODE}: a bridge destination on BNB Chain exactly when it is on`);
+ok(("bnb" in SWAP_SOURCES) === bnb.BNB_ENABLED, `${MODE}: the BNB swap exactly when it is on`);
+if (bnb.BNB_ENABLED) {
+  const d = BRIDGE_DESTINATIONS.bnb!;
+  ok(d.chainId === CHAIN_ID && d.chain === "BNB Chain", "on: the bridge lands on BNB Chain");
+  ok(d.token.symbol === "USDT" && d.token.address === USDT && d.token.decimals === 18, "on: as USDT, with 18 decimals");
+  ok(bridgeVisible(nets.getNetwork("bnb-mainnet")), "on: Bring money over shows on BNB Chain");
+  const swap = swapSource(nets.getNetwork("bnb-mainnet"));
+  ok(swap?.id === CHAIN_ID && swap.swap === true && swap.tokens.length === 1 && swap.tokens[0]!.symbol === "BNB" && swap.tokens[0]!.address === ZERO && swap.tokens[0]!.decimals === 18, "on: BNB in the wallet swaps into it");
+}
+
 if (MODE !== "on") {
   ok(bnb.BNB === null && !bnb.BNB_ENABLED && !bnb.BNB_FLAG, `${MODE}: BNB Chain is off`);
   ok(!nets.NETWORK_KEYS.some((k) => nets.getNetwork(k).family === "bnb") && !nets.isNetworkKey("bnb-mainnet"), `${MODE}: no BNB Chain network key`);

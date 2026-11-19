@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ELYSIUM_ENABLED } from "@/lib/elysium";
+import { BNB_ENABLED } from "@/lib/bnb";
 import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
@@ -14,14 +15,24 @@ export const metadata: Metadata = {
 
 const usd = (n: number) => `$${n.toLocaleString("en-US")}`;
 
+/** "a, b and c" */
+const listed = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`);
+
+/** What the bridge lands as on each chain that has one. */
+const LANDS = listed([
+  "USDG on Robinhood Chain",
+  `USDC on Tempo, Base${ELYSIUM_ENABLED ? ", Ethereum and Elysium" : " and Ethereum"}`,
+  ...(BNB_ENABLED ? ["USDT on BNB Chain"] : []),
+]);
+
 export default function DocsBridgePage() {
   return (
     <DocsLayout
       title="Deposit from another chain"
-      lede={`Pay in from the chain your money is already on. Gloam's bridge runs on Relay and lands your money as the vault's stablecoin: USDG on Robinhood Chain, USDC on Tempo, Base and Ethereum${ELYSIUM_ENABLED ? ", and USDC on Elysium" : ""}.`}
+      lede={`Pay in from the chain your money is already on. Gloam's bridge runs on Relay and lands your money as the vault's stablecoin: ${LANDS}.`}
       glance={[
         { label: "From", value: "Bitcoin, Solana, Tron, 22 EVM" },
-        { label: "Lands as", value: "USDG or USDC" },
+        { label: "Lands as", value: BNB_ENABLED ? "USDG, USDC or USDT" : "USDG or USDC" },
         { label: "Per bridge", value: `${usd(BRIDGE_MIN_USD)} to ${usd(BRIDGE_MAX_USD)}` },
         { label: "Run by", value: "Relay" },
       ]}
@@ -41,7 +52,7 @@ export default function DocsBridgePage() {
         A deposit address can&apos;t make the private deposit itself, so these
         take two steps. You get a one-time address, send to it from any wallet
         or exchange, and the money arrives in your wallet on Robinhood Chain,
-        Tempo, Base or Ethereum. Bitcoin waits for its own confirmations first, usually 10 to 30
+        {BNB_ENABLED ? " Tempo, Base, Ethereum or BNB Chain." : " Tempo, Base or Ethereum."} Bitcoin waits for its own confirmations first, usually 10 to 30
         minutes. Then you add it privately with one more tap.
       </p>
       <p>
