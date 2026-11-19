@@ -126,11 +126,17 @@ export function SuccessModal({
   footer,
   detail,
   hold,
+  logo,
+  amount,
   onClose,
 }: {
   open: boolean;
   title: string;
   body: React.ReactNode;
+  /** The token's own mark under the check (see SuccessReceipt). */
+  logo?: React.ReactNode;
+  /** The amount as the big line, with the title as its label. */
+  amount?: React.ReactNode;
   primaryHref?: string;
   primaryLabel?: string;
   secondaryLabel?: string;
@@ -195,7 +201,7 @@ export function SuccessModal({
       >
         <SealedField tone="soft" />
         <div className="relative max-h-[min(88dvh,680px)] overflow-y-auto overflow-x-hidden px-6 pb-6 pt-9 text-center sm:px-8 sm:pb-8">
-          <SuccessReceipt title={title} body={body} detail={detail} />
+          <SuccessReceipt title={title} body={body} detail={detail} logo={logo} amount={amount} />
 
           <div className="mt-8 flex gap-2 max-sm:flex-col">
             {primaryHref &&
