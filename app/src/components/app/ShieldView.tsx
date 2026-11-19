@@ -338,6 +338,10 @@ export function ShieldView() {
   const [pendingNote, setPendingNote] = useState<LocalNote | null>(null);
   const [pendingKind, setPendingKind] = useState<TxKind>(null);
   const [sentLabel, setSentLabel] = useState("");
+  /** The asset of the deposit under way, for its mark on the receipt. */
+  const [sentMark, setSentMark] = useState<{ id: string | null; symbol: string } | null>(null);
+  /** The receipt's big line and mark: a finished deposit only. */
+  const [successAmount, setSuccessAmount] = useState<{ label: string; mark: { id: string | null; symbol: string } | null } | null>(null);
   const autoShieldAfterApprove = useRef(false);
   /** Approvals still to send before the deposit: the exact amount, after USDT's stale allowance is set to 0. */
   const approvalsLeft = useRef<{ token: `0x${string}`; values: bigint[] } | null>(null);
@@ -410,6 +414,7 @@ export function ShieldView() {
       void refetchPool();
       // eslint-disable-next-line react-hooks/set-state-in-effect -- a transaction's receipt arrived: update the notes and show the result once per transaction
       setSuccessTitle("Pulled back");
+      setSuccessAmount(null);
       setSuccessBody(
         <>
           <p>
@@ -518,13 +523,11 @@ export function ShieldView() {
       });
     });
     setSuccessTitle("Added privately");
+    setSuccessAmount({ label: sentLabel, mark: sentMark });
     setSuccessBody(
-      <>
-        <span className="inline-flex items-center rounded-full bg-sealed-soft px-3 py-1 text-[13px] font-medium text-sealed">
-          In your private balance
-        </span>
-        <p className="tnum mt-3 text-[15px] text-foreground">{sentLabel}</p>
-      </>
+      <span className="inline-flex items-center rounded-full bg-sealed-soft px-3 py-1 text-[13px] font-medium text-sealed">
+        In your private balance
+      </span>
     );
     setShowSuccess(true);
     void import("@/lib/onboarding").then(({ markOnboardingStep }) => {
@@ -572,6 +575,17 @@ export function ShieldView() {
         : BigInt(0)
       : gasReserve;
     return walletBalance > leave ? walletBalance - leave : BigInt(0);
+  })();
+  /**
+   * Max as it is typed in: the spendable amount floored to 6 decimals, so an
+   * 18-decimal coin (BNB, ETH, USDT and USDC on BNB Chain) reads 0.003868, not
+   * 0.003868049052992449. The dust left behind is under a millionth of a coin.
+   */
+  const maxPick: bigint = (() => {
+    if (decimals <= 6) return spendable;
+    const step = BigInt(10) ** BigInt(decimals - 6);
+    const floored = (spendable / step) * step;
+    return floored > BigInt(0) ? floored : spendable;
   })();
   const typedAdd = amount.trim() ? parseAmount() : null;
 
@@ -771,7 +785,8 @@ export function ShieldView() {
     setApproved(false);
     handledHash.current = null;
     txLog.clear();
-    setSentLabel(`${amount} ${symbol}`);
+    setSentLabel(`${shortAmount(value, decimals)} ${symbol}`);
+    setSentMark(selectedToken ? { id: selectedToken.id, symbol: selectedToken.symbol } : { id: nativeToken.id, symbol: nativeToken.symbol });
     pendingShieldArgs.current = { value, commitment, note };
     // Proved while any approval is mined, so the deposit goes out as soon as it lands.
     if (shieldVerifierLive) void proveDeposit(value, note, commitment, note.asset);
@@ -1167,9 +1182,9 @@ export function ShieldView() {
                   balance={spendable}
                   decimals={decimals}
                   current={typedAdd}
-                  maxActive={typedAdd !== null && typedAdd === spendable}
+                  maxActive={typedAdd !== null && typedAdd === maxPick}
                   onPick={setAmount}
-                  onMax={() => setAmount(formatUnits(spendable, decimals))}
+                  onMax={() => setAmount(formatUnits(maxPick, decimals))}
                   onCustom={() => {
                     const el = document.getElementById("shield-amount") as HTMLInputElement | null;
                     if (!el) return;
@@ -1330,6 +1345,8 @@ export function ShieldView() {
             {successBody}
           </>
         }
+        logo={successAmount?.mark ? <AssetMark id={successAmount.mark.id} symbol={successAmount.mark.symbol} size={56} /> : undefined}
+        amount={successAmount?.label}
         primaryHref={hash ? network.explorerTx(hash) : undefined}
         primaryLabel="View on explorer"
         secondaryLabel="Done"
@@ -1340,6 +1357,17 @@ export function ShieldView() {
       />
     </>
   );
+}
+
+/**
+ * An amount as the receipt shows it: floored to 6 decimals, trailing zeros cut,
+ * so an 18-decimal coin reads 0.003868 rather than 0.003868049052992449.
+ */
+function shortAmount(v: bigint, decimals: number): string {
+  const [whole, frac = ""] = formatUnits(v, decimals).split(".");
+  const f = frac.slice(0, 6).replace(/0+$/, "");
+  if (!f && whole === "0" && v > BigInt(0)) return "<0.000001";
+  return f ? `${whole}.${f}` : whole!;
 }
 
 function AssetMark({
