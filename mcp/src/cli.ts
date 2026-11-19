@@ -37,15 +37,13 @@ Settings
   Read from the environment, then from ~/.gloam/agent.env (GLOAM_ENV_FILE moves it). The
   environment wins. Only GLOAM_* lines are read from the file.
 
-  GLOAM_NETWORK             The network tools use when the agent names none: tempo-mainnet or
-                            robinhood-mainnet (mainnet), tempo or robinhood (testnet, the default).
-                            base-mainnet, ethereum-mainnet and ethereum (Ethereum Sepolia) work
-                            once a release has their pools; base (Base Sepolia) is live.
-                            elysium-mainnet and elysium (Elysium mainnet and testnet, gas
-                            in HYPE) are coming: each works once a release has its values.
-                            bnb-mainnet (BNB Chain, gas in BNB) works once a release has its
-                            pool; its public RPCs keep about a day of logs, so set
-                            GLOAM_RPC_URL_56 to one that keeps them all.
+  GLOAM_NETWORK             The network tools use when the agent names none. Mainnet:
+                            tempo-mainnet, robinhood-mainnet, base-mainnet, ethereum-mainnet,
+                            elysium-mainnet (gas in HYPE) and bnb-mainnet (gas in BNB; its
+                            public RPCs keep about a day of logs, so set GLOAM_RPC_URL_56 to
+                            one that keeps them all). Testnet: tempo, robinhood (the default),
+                            base (Base Sepolia) and ethereum (Ethereum Sepolia); elysium
+                            (Elysium testnet) once a release has its pool.
                             A mainnet here also puts the Tempo access key on Tempo mainnet.
   GLOAM_AGENT_PRIVATE_KEY   The agent's key. Without it, tools read and plan but never execute.
   GLOAM_TEMPO_ACCOUNT       Owner's Tempo account. With it, the key is an access key on Tempo and the

@@ -81,9 +81,8 @@ npm install @gloamtrade/sdk @gloamtrade/game-plugin-gloam viem snarkjs circomlib
 ```
 
 The pack imports `@gloamtrade/game-plugin-gloam/engine` and uses `payX402`,
-`noteBackend` and `apiKey`. Those land on npm with the next release of
-`@gloamtrade/game-plugin-gloam` (0.1.2 on npm today does not have them); until
-then, run it from this repo.
+`noteBackend` and `apiKey`, on npm from `@gloamtrade/game-plugin-gloam` 0.3.0
+(BNB Chain from 0.4.0).
 
 ## Tools
 

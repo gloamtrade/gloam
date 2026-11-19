@@ -2,7 +2,7 @@
 
 **Private stablecoin payments for apps and agents on Robinhood Chain, Tempo, Base and Ethereum, as a package.**
 
-Add shielded balances, private payments, and selective disclosure to any app or agent on Robinhood Chain, Tempo, Base, Ethereum, Elysium or BNB Chain. Live on all six mainnets, on the trusted setup's final keys (Elysium from 0.7.0, BNB Chain from the next release). Real zero-knowledge proofs, no proving stack to build from scratch.
+Add shielded balances, private payments, and selective disclosure to any app or agent on Robinhood Chain, Tempo, Base, Ethereum, Elysium or BNB Chain. Live on all six mainnets, on the trusted setup's final keys (Elysium from 0.7.0, BNB Chain from 0.8.0). Real zero-knowledge proofs, no proving stack to build from scratch.
 
 [![npm version](https://img.shields.io/npm/v/@gloamtrade/sdk?color=0B0C0E&label=npm)](https://www.npmjs.com/package/@gloamtrade/sdk)
 [![license](https://img.shields.io/npm/l/@gloamtrade/sdk?color=0B0C0E)](https://github.com/gloamtrade/gloam/blob/main/packages/sdk/LICENSE)
@@ -84,7 +84,7 @@ Gloam runs on six chains, each with a mainnet and, all but Elysium and BNB Chain
 | Base | `base-mainnet` | `8453` | `0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194` (block `53109632`) | USDC, EURC, USDT (50,000 / 2,500,000 each), ETH (20 / 1,000), BDX (no limit once its timelocked change lands) | Final |
 | Ethereum | `ethereum-mainnet` | `1` | `0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194` (block `26276183`) | USDC, USDT, USDG, PYUSD, EURC (50,000 / 2,500,000 each), ETH (20 / 1,000), BDX (no limit once its timelocked change lands) | Final |
 | Elysium | `elysium-mainnet` | `99901` | `0x89d3042390204f57b8b4F8949D3c2203E4002164` (block `3248495`) | USDC (500 / 25,000) | Final |
-| BNB Chain (from the next release) | `bnb-mainnet` | `56` | `0x89d3042390204f57b8b4F8949D3c2203E4002164` (block `134431196`) | USDT, USDC, BNB (no limit), BDX (100,000 / 2,000,000); USDT and USDC have 18 decimals here | Final |
+| BNB Chain (from 0.8.0) | `bnb-mainnet` | `56` | `0x89d3042390204f57b8b4F8949D3c2203E4002164` (block `134431196`) | USDT, USDC, BNB (no limit), BDX (100,000 / 2,000,000); USDT and USDC have 18 decimals here | Final |
 | Robinhood Chain testnet | `robinhood` | `46630` | `0x72406D9597807A46f730d8b4fDBC5aC45Dc1d740` | Test ETH, test USDG, stock tokens | Dev |
 | Tempo testnet (Moderato) | `tempo` | `42431` | `0x841DC046Ea3CC842BA3A855731472c6Eb0F2d5eb` | PathUSD and other test stablecoins | Dev |
 
