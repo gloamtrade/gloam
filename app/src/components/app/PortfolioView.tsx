@@ -66,7 +66,6 @@ import { PaymentNoteLine } from "./PaymentNote";
 import { TokenLogo } from "./TokenLogo";
 import { WalletMenu } from "./WalletMenu";
 import { NetworkPulse } from "./NetworkPulse";
-import { Sparkline } from "./Sparkline";
 import { BRIDGE_DESTINATIONS, bridgeVisible } from "@/lib/bridge";
 import { addAssetHref, pickAddAsset } from "@/lib/vaultHub";
 
@@ -851,8 +850,10 @@ export function PortfolioView() {
 
           {/* In your wallet: the public side, its total on the right. The rows
               follow the card's own width (a container), not the window's: at
-              1024 the card is narrow beside the activity feed, and fixed 24h
-              and action columns left the asset's name no room at all. */}
+              1024 the card is narrow beside the activity feed, and a fixed
+              action column left the asset's name no room at all. No 24h
+              column: most rows are stablecoins with no price history, so it
+              only ever showed an empty dashed line. */}
           <section className="gl-card @container overflow-hidden">
             <header className="flex items-start justify-between gap-4 max-sm:px-5 pb-3 pt-5 sm:px-6">
               <div className="min-w-0">
@@ -929,7 +930,6 @@ export function PortfolioView() {
               <>
                 <div className="flex items-center gap-x-3 border-t border-line py-2.5 max-sm:px-5 sm:px-6">
                   <span className="t-label flex-1">Asset</span>
-                  <span className="t-label hidden w-[88px] text-center @2xl:block">24h</span>
                   <span className="t-label w-28 text-right">Balance</span>
                   <span className="hidden w-[200px] @xl:block" aria-hidden />
                 </div>
@@ -948,19 +948,6 @@ export function PortfolioView() {
                             <p className="truncate text-[12.5px] text-mute">{r.name}</p>
                           </div>
                         </div>
-                        {r.native ? (
-                          <div className="hidden w-[88px] @2xl:block" aria-hidden />
-                        ) : (
-                          <div className="hidden w-[88px] justify-center @2xl:flex">
-                            <Sparkline
-                              // Real history only: without it the line stays a flat hairline.
-                              points={r.spark.length >= 2 ? r.spark : []}
-                              up={r.change24h >= 0}
-                              width={72}
-                              height={26}
-                            />
-                          </div>
-                        )}
                         <div className="w-28 text-right">
                           <p className="tnum text-[14px] text-foreground">
                             {amountsHidden ? (
