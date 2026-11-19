@@ -60,7 +60,9 @@ test("networks: older testnets always; a mainnet or Base Sepolia only once the S
   // Elysium (both networks) is checked in test-elysium.mts; here it only counts.
   const elysiumLive = NETWORK_KEYS.includes("elysium-mainnet");
   const elysiumTestLive = NETWORK_KEYS.includes("elysium");
-  assert.equal(MCP_MAINNETS.length, Number(rhLive) + Number(tempoLive) + Number(baseLive) + Number(ethLive) + Number(elysiumLive));
+  // BNB Chain is checked in test-bnb.mts; here it only counts.
+  const bnbLive = NETWORK_KEYS.includes("bnb-mainnet");
+  assert.equal(MCP_MAINNETS.length, Number(rhLive) + Number(tempoLive) + Number(baseLive) + Number(ethLive) + Number(elysiumLive) + Number(bnbLive));
   const firstTest = NETWORK_KEYS.indexOf("robinhood");
   assert.deepEqual(
     NETWORK_KEYS.slice(firstTest),

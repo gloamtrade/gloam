@@ -130,7 +130,9 @@ if (TESTNET) {
     assert.equal(nets.describeNetwork(n), "Elysium mainnet");
     assert.equal(nets.networkByChainId(id)?.key, "elysium-mainnet");
     const mains = nets.NETWORK_KEYS.filter((k) => !nets.networkByKey(k).testnet);
-    assert.equal(mains[mains.length - 1], "elysium-mainnet");
+    // BNB Chain, once its pool is in, comes after Elysium; until then Elysium is the last mainnet.
+    assert.equal(mains[mains.length - 1], nets.NETWORK_KEYS.includes("bnb-mainnet") ? "bnb-mainnet" : "elysium-mainnet");
+    if (nets.NETWORK_KEYS.includes("bnb-mainnet")) assert.equal(mains[mains.length - 2], "elysium-mainnet");
   });
 
   test("the facts name Elysium, with gas in HYPE and its USDC limits", () => {
