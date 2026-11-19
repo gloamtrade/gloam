@@ -27,7 +27,7 @@
       "environmentVariables": [
         {
           "name": "GLOAM_NETWORK",
-          "description": "Default network for tools: tempo-mainnet, robinhood-mainnet, base-mainnet, ethereum-mainnet or elysium-mainnet (mainnet); tempo, robinhood, base or ethereum (testnet; elysium for Elysium testnet once its pool is in; robinhood is the default when unset).",
+          "description": "Default network for tools: tempo-mainnet, robinhood-mainnet, base-mainnet, ethereum-mainnet, elysium-mainnet or bnb-mainnet (mainnet; bnb-mainnet from the next release); tempo, robinhood, base or ethereum (testnet; elysium for Elysium testnet once its pool is in; robinhood is the default when unset).",
           "isRequired": false,
           "isSecret": false,
           "format": "string"
