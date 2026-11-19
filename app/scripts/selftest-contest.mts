@@ -136,16 +136,36 @@ function fieldOf(body: unknown): string | null {
   n += 5;
 
   // the config
-  assert.equal(contest.CONTEST_TOTAL, 600, "prizes add up to $600");
+  assert.equal(contest.CONTEST_POOL, 600, "the four places add up to $600");
   assert.deepEqual(CONTEST.prizes, [250, 150, 100, 100]);
   assert.equal(CONTEST.minMinutes, 1);
   assert.equal(CONTEST.maxMinutes, 3);
   assert.equal(contest.contestDay(CONTEST.closesAt), "16 November 2026");
-  assert.equal(contest.contestTime(CONTEST.closesAt), "23:59 UTC");
-  assert.equal(contestClosed(Date.parse("2026-11-16T23:59:30Z")), false, "open through the last minute");
-  assert.equal(contestClosed(Date.parse("2026-11-17T00:00:00Z")), true);
+  assert.equal(contest.contestTime(CONTEST.closesAt), "23:00 UTC");
+  assert.equal(contestClosed(Date.parse("2026-11-16T22:59:30Z")), false, "open through the last minute");
+  assert.equal(contestClosed(Date.parse("2026-11-16T23:00:01Z")), true);
   assert.deepEqual([0, 1, 2, 3].map(contest.placeLabel), ["1st", "2nd", "3rd", "4th"]);
   n += 7;
+
+  // the results: four places paid as announced, four honourable mentions at $50, $800 in all,
+  // each a real X post by the same account, with its profile picture in public/
+  const r = contest.CONTEST_RESULTS;
+  assert.ok(r, "results are in");
+  assert.deepEqual(r.winners.map((w) => w.usd), [...CONTEST.prizes], "the places pay the announced prizes");
+  assert.equal(r.honourable.length, 4);
+  assert.ok(r.honourable.every((h) => h.usd === 50), "$50 per honourable mention");
+  assert.equal(contest.CONTEST_TOTAL, 800, "$800 paid in all");
+  assert.equal(r.judges, 5);
+  const { existsSync } = await import("node:fs");
+  const everyone = [...r.winners, ...r.honourable];
+  assert.equal(new Set(everyone.map((p) => p.handle.toLowerCase())).size, 8, "nobody listed twice");
+  for (const p of everyone) {
+    const post = contest.normalizeXPost(p.postUrl);
+    assert.ok(post && post.url === p.postUrl, `${p.handle}: a clean x.com post link`);
+    assert.equal(post!.user, p.handle.toLowerCase(), `${p.handle}: the post is their own`);
+    assert.ok(existsSync(new URL(`../public/contest/winners/${p.handle}.jpg`, import.meta.url)), `${p.handle}: profile picture`);
+  }
+  n += 8 + everyone.length * 3;
 }
 
 // ------------------------------------------------------------ the route
@@ -239,7 +259,7 @@ try {
   Date.now = () => Date.parse("2026-11-17T00:00:01Z");
   const late = await send({ ...GOOD, handle: "late" }, { ip: "203.0.113.50" });
   assert.equal(late.status, 403, "closed after the close time");
-  assert.match(late.json.error!.message, /closed on 16 November 2026 at 23:59 UTC/);
+  assert.match(late.json.error!.message, /closed on 16 November 2026 at 23:00 UTC/);
   assert.equal((await entries.listContestEntries()).some((e) => e.handle === "late"), false);
   n += 3;
 } finally {
