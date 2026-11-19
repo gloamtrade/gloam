@@ -46,7 +46,7 @@
 .bar {
   flex: 1 1 0;
   min-width: 0;
-  border-radius: 1px;
+  border-radius: 2px;
   background: var(--surface-2);
   cursor: default;
   transition: opacity 120ms ease;

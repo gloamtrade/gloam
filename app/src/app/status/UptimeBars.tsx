@@ -26,7 +26,7 @@ function detail(d: BarDay): string | null {
 const TOUCH_SHOW_MS = 2_500;
 
 /**
- * One part's 90 days, oldest first. The bars are thin in a card, so the day is
+ * One part's days or hours since its first check, oldest first. The bars are thin in a card, so the day is
  * picked from where the pointer is along the strip, by mouse or by touch.
  * Keyboard: one Tab stop per strip; the arrow keys, Home and End move a day.
  */
@@ -101,7 +101,7 @@ export function UptimeBars({ name, days }: { name: string; days: BarDay[] }) {
               bars.current[i] = el;
             }}
             role="img"
-            tabIndex={i === focusIdx ? 0 : -1}
+            tabIndex={i === Math.min(focusIdx, days.length - 1) ? 0 : -1}
             aria-label={`${day.label}: ${day.uptime ? `${day.uptime} up` : "no data"}${detail(day) ? `, ${detail(day)}` : ""}`}
             data-tone={day.tone}
             data-active={shown === i ? "true" : undefined}

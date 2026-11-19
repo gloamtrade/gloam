@@ -1,20 +1,20 @@
 import type { Metadata } from "next";
 import { Logo } from "@/components/Logo";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { runStatusChecks, statusParts } from "@/lib/status/checks";
-import { readHistory, type History } from "@/lib/status/history";
+import { statusView } from "@/lib/status/current";
 import { INCIDENTS, STATE_LABEL, ongoingIncidents, pastIncidents, type Incident } from "@/lib/status/incidents";
 import {
   GROUPS,
   HEALTH_LABEL,
   dayTone,
   dayUptime,
-  formatDay,
   formatLatency,
   formatPercent,
+  formatPeriod,
   formatUtc,
   overallTitle,
   rangeUptime,
+  sinceText,
   worst,
   type DayTally,
   type Health,
@@ -27,17 +27,17 @@ import css from "./status.module.css";
 
 /**
  * status.gloam.trade (next.config rewrites its root here; /status on www).
- * The checks run on the server when the page is regenerated, at most once a
- * minute (lib/status/checks); the bars are the cron's 90 days
- * (lib/status/history); incidents are kept by hand (lib/status/incidents).
- * Each part is a card in its group's grid, money first and the site last.
+ * Rendered per request from the cron's latest run and history in the store
+ * (lib/status/current), so it is never older than the last run, and the open
+ * tab fetches it again every minute. Incidents are kept by hand
+ * (lib/status/incidents). Each part is a card in its group's grid, money first
+ * and the site last; its bars start at its first check.
  */
-export const dynamic = "force-static";
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const DESCRIPTION =
-  "Live status of Gloam: the site and app, the API, the relay, each network and vault, the bridge and integrations, with 90 days of history.";
+  "Live status of Gloam: the relay, each network and vault, the bridge and API, integrations and the site, with their history.";
 
 export const metadata: Metadata = {
   title: "Status",
@@ -59,7 +59,7 @@ function barDays(tallies: DayTally[]): BarDay[] {
     const up = dayUptime(t);
     return {
       day: t.day,
-      label: formatDay(t.day),
+      label: formatPeriod(t.day),
       tone: dayTone(t),
       uptime: up === null ? null : formatPercent(up),
       down: t.down,
@@ -68,27 +68,8 @@ function barDays(tallies: DayTally[]): BarDay[] {
   });
 }
 
-function emptyDays(history: History | null, nowMs: number): DayTally[] {
-  if (history) return history.days.map((day) => ({ day, ok: 0, degraded: 0, down: 0 }));
-  const today = Date.UTC(new Date(nowMs).getUTCFullYear(), new Date(nowMs).getUTCMonth(), new Date(nowMs).getUTCDate());
-  return Array.from({ length: 90 }, (_, i) => ({
-    day: new Date(today - (89 - i) * 86_400_000).toISOString().slice(0, 10),
-    ok: 0,
-    degraded: 0,
-    down: 0,
-  }));
-}
-
-/** "99.98% uptime", or "100% since 19 Nov" while the history is younger than the bars. */
-function uptimeText(tallies: DayTally[]): string {
-  const uptime = rangeUptime(tallies);
-  if (uptime === null) return "No data yet";
-  const first = tallies.findIndex((t) => t.ok + t.degraded + t.down > 0);
-  if (first <= 0) return `${formatPercent(uptime)} uptime`;
-  return `${formatPercent(uptime)} since ${formatDay(tallies[first]!.day).replace(/ \d{4}$/, "")}`;
-}
-
 function PartCard({ part, tallies }: { part: PartCheck; tallies: DayTally[] }) {
+  const uptime = rangeUptime(tallies);
   return (
     <li className={css.card}>
       <div className="flex items-start justify-between gap-3">
@@ -105,9 +86,18 @@ function PartCard({ part, tallies }: { part: PartCheck; tallies: DayTally[] }) {
       </div>
       {part.reason ? <p className="mt-1.5 text-[13px] leading-snug text-soft">{part.reason}</p> : null}
       <div className="mt-auto pt-5">
-        <UptimeBars name={part.name} days={barDays(tallies)} />
+        {tallies.length ? (
+          <UptimeBars name={part.name} days={barDays(tallies)} />
+        ) : (
+          <p className="text-[12px] text-mute">No data yet</p>
+        )}
       </div>
-      <p className="tnum mt-2 text-right text-[12px] text-mute">{uptimeText(tallies)}</p>
+      {tallies.length ? (
+        <p className="tnum mt-2 flex justify-between gap-3 text-[12px] text-mute">
+          <span>{sinceText(tallies[0]!.day)}</span>
+          <span>{uptime === null ? "" : formatPercent(uptime)}</span>
+        </p>
+      ) : null}
     </li>
   );
 }
@@ -148,14 +138,12 @@ function affectedText(names: string[]): string {
 }
 
 export default async function StatusPage() {
-  const parts = statusParts();
-  const [snap, history] = await Promise.all([runStatusChecks(), readHistory(parts.map((p) => p.id))]);
+  const { snap, history } = await statusView();
   const ongoing = ongoingIncidents(INCIDENTS);
   const past = pastIncidents(snap.checkedAt, 90, INCIDENTS);
   const overall = worst([snap.overall, ...ongoing.map((i) => i.impact)]);
   const affected = snap.parts.filter((p) => p.status !== "operational").map((p) => p.name);
   const names = new Map(snap.parts.map((p) => [p.id, p.name]));
-  const fallbackDays = emptyDays(history, snap.checkedAt);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -205,8 +193,7 @@ export default async function StatusPage() {
 
         <div className="mt-12 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 text-[13px] text-mute sm:mt-16">
           <p>
-            Last 90 days
-            {history === null ? <span className="text-soft"> · History is not available right now.</span> : null}
+            {history === null ? "History is not available right now." : history.since ? sinceText(history.since) : "No history yet"}
           </p>
           <ul className="flex flex-wrap items-center gap-x-4 gap-y-2" aria-label="Legend">
             {(
@@ -235,7 +222,7 @@ export default async function StatusPage() {
               </h2>
               <ul className={`mt-4 ${css.grid}`}>
                 {cards.map((p) => (
-                  <PartCard key={p.id} part={p} tallies={history?.byPart.get(p.id) ?? fallbackDays} />
+                  <PartCard key={p.id} part={p} tallies={history?.byPart.get(p.id) ?? []} />
                 ))}
               </ul>
               {g.id === "integrations" ? (
@@ -269,7 +256,7 @@ export default async function StatusPage() {
         </section>
 
         <footer className="mt-16 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-t border-line pt-6 text-[13px] text-mute">
-          <p>Checked every minute. History every 5 minutes. Times in UTC.</p>
+          <p>Checked every 5 minutes. Times in UTC.</p>
           <div className="flex items-center gap-5">
             <a href="/api/status" className="inline-flex min-h-10 items-center underline decoration-line-strong underline-offset-4 hover:text-foreground">
               JSON
