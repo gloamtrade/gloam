@@ -20,7 +20,7 @@ import {
   type Health,
   type PartCheck,
 } from "@/lib/status/model";
-import { AutoRefresh } from "./AutoRefresh";
+import { AutoRefresh, RefreshButton } from "./AutoRefresh";
 import { CheckedAgo } from "./CheckedAgo";
 import { UptimeBars, type BarDay } from "./UptimeBars";
 import css from "./status.module.css";
@@ -156,6 +156,7 @@ export default async function StatusPage() {
           <span className="text-[19px] leading-none text-mute">Status</span>
         </div>
         <div className="flex items-center gap-2">
+          <RefreshButton className="h-10 w-10" />
           <ThemeToggle className="h-10 w-10" />
           <a href={SITE} className="gl-arrowlink min-h-10 text-[14px]">
             Open Gloam <span aria-hidden>→</span>
