@@ -32,6 +32,11 @@ import { fileURLToPath } from "node:url";
 const MODE = process.env.GLOAM_SELFTEST_BNB ?? "off";
 const CHAIN_ID = 56;
 const POOL = "0x89d3042390204f57b8b4F8949D3c2203E4002164";
+// Is the pool written into the SDK file yet (bnb-mainnet-after-deploy.sh)? The CSP reads the same file.
+const SDK_BNB_SRC = (await import("node:fs")).readFileSync(new URL("../../packages/sdk/src/bnb.ts", import.meta.url), "utf8");
+const SDK_POOL_IN = /^\s*pool:\s*"0x[0-9a-fA-F]{40}",\s*$/m.test(SDK_BNB_SRC);
+/** The deploy block the SDK file holds once the pool is in (bnb-mainnet-after-deploy.sh writes both). */
+const SDK_DEPLOY_BLOCK = SDK_POOL_IN ? BigInt(/^\s*deployBlock:\s*(\d+)n,\s*$/m.exec(SDK_BNB_SRC)?.[1] ?? "0") : null;
 const USDT = "0x55d398326f99059fF775485246999027B3197955";
 const USDC = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
 const BDX = "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181";
@@ -48,6 +53,9 @@ if (MODE === "on" || MODE === "nolivesince" || MODE === "badpool") {
   process.env.NEXT_PUBLIC_BNB_DEPLOY_BLOCK = "134300000";
 }
 if (MODE === "on" || MODE === "badpool") process.env.NEXT_PUBLIC_BNB_LIVE_SINCE = "21 November 2026";
+// Once the SDK file holds the pool, "no pool in the env" is no longer off: the flag alone turns BNB Chain on
+// with the SDK's pool, and the build then needs its live-since date like any other "on".
+if (MODE === "nopool" && SDK_POOL_IN) process.env.NEXT_PUBLIC_BNB_LIVE_SINCE = "19 November 2026";
 
 // ── fake RPCs: publicnode keeps logs from PRUNED_FROM on; the archive (the proxy) keeps all ──
 const HEAD = 135_000_000n;
@@ -158,7 +166,8 @@ if (MODE === "off") {
   for (const raw of ["1", "true", "TRUE", "on", "yes", " 1 "]) {
     ok(bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} is on`);
     ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw, NEXT_PUBLIC_BNB_POOL: POOL } as unknown as NodeJS.ProcessEnv).length === 2, `${JSON.stringify(raw)} with a pool: the CSP allows its two RPCs`);
-    ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === 0, `${JSON.stringify(raw)} with no pool: nothing to allow`);
+    // Without NEXT_PUBLIC_BNB_POOL the CSP falls back to the SDK file: nothing to allow before the deploy, the two RPCs after it.
+    ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === (SDK_POOL_IN ? 2 : 0), `${JSON.stringify(raw)} with no pool in the env: ${SDK_POOL_IN ? "the SDK's pool, its two RPCs" : "nothing to allow"}`);
   }
   for (const raw of [undefined, "", " ", "0", "false", "off", "no", "enabled", "2", "maybe"]) {
     ok(!bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} is off`);
@@ -167,7 +176,7 @@ if (MODE === "off") {
   ok(!bnb.BNB_FLAG, "off: no flag set");
 }
 
-if (MODE === "off" || MODE === "nopool") {
+if (MODE === "off" || (MODE === "nopool" && !SDK_POOL_IN)) {
   ok(bnb.BNB === null && !bnb.BNB_ENABLED, `${MODE}: BNB Chain is off`);
   ok(!nets.NETWORK_KEYS.includes("bnb-mainnet") && !nets.isNetworkKey("bnb-mainnet") && !nets.isShownNetworkKey("bnb-mainnet"), `${MODE}: not a network key, not shown`);
   ok(e.pool === null && e.deployBlock === null, `${MODE}: no pool`);
@@ -180,6 +189,14 @@ if (MODE === "off" || MODE === "nopool") {
   ok(tokens.shieldTokensFor(CHAIN_ID).every((t) => t.address.toLowerCase() !== USDT.toLowerCase()), `${MODE}: no BNB Chain USDT`);
   ok(gasFor(CHAIN_ID, SHIELD_BOUND_GAS_LIMIT) === undefined, `${MODE}: no fixed gas for a chain the build does not run`);
   ok(hourlySpendWei(CHAIN_ID, {}) === null || hourlySpendWei(CHAIN_ID, {}) === 0n || hourlySpendWei(CHAIN_ID, {}) === undefined, `${MODE}: no relay budget for BNB Chain`);
+}
+
+if (MODE === "nopool" && SDK_POOL_IN) {
+  ok(bnb.BNB_ENABLED && bnb.BNB?.chainId === CHAIN_ID && bnb.BNB_LIVE_SINCE === "19 November 2026", "nopool: the flag and the SDK file's pool turn BNB Chain on");
+  ok(e.pool === POOL && e.deployBlock === SDK_DEPLOY_BLOCK && SDK_DEPLOY_BLOCK !== null && SDK_DEPLOY_BLOCK > 0n, "nopool: the pool and block come from the SDK file");
+  ok(mainnet.mainnetChainPool(CHAIN_ID)?.pool === POOL, "nopool: its pool from lib/bnb");
+  ok(nets.NETWORK_KEYS.includes("bnb-mainnet") && nets.isShownNetworkKey("bnb-mainnet"), "nopool: a network key, shown");
+  ok(CSP_CONNECT_SOURCES.includes("https://bsc-rpc.publicnode.com"), "nopool: the CSP allows its public RPC");
 }
 
 if (MODE === "on") {
