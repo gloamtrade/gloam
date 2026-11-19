@@ -10,6 +10,9 @@
  *  - readCrossChainQuote takes a real strict quote (fixture captured from
  *    api.relay.link on 2026-11-09) and refuses one whose deposit address,
  *    amount, token, recipient, refund address, deadline or shape differ;
+ *  - BNB Chain: USDT and USDC land there with 18 decimals, read from a real
+ *    strict quote (captured 2026-11-19), and an 18-decimal answer read as 6
+ *    is refused instead of shown a trillion times too big;
  *  - crossChainProblem refuses a proof call that isn't bound to the quote:
  *    another address, another amount, a moved fee, another chain or asset;
  *  - the copy carries no em dashes.
@@ -52,20 +55,36 @@ const REFUND = "0x2222222222222222222222222222222222222222";
 const NOW = Date.UTC(2026, 10, 9, 12, 0, 0);
 
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/relay-xchain-strict-quote.json", import.meta.url), "utf8"));
+const bnbFixture = JSON.parse(readFileSync(new URL("./fixtures/relay-xchain-strict-quote-bnb.json", import.meta.url), "utf8"));
+const USDT_BNB = "0x55d398326f99059fF775485246999027B3197955";
+const USDC_BNB = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
 const DEPOSIT: string = fixture.steps[0].depositAddress;
 const base = crossChainDestination("base-usdc")!;
 const ask = { sourceChainId: 4663, asset: USDG_RH, amount: 9_950_000n, destination: base, recipient: RECIPIENT, refundTo: REFUND };
-const clone = () => JSON.parse(JSON.stringify(fixture));
 const padAddr = (a: string) => a.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 const transferData = (to: string, amount: bigint) => `0xa9059cbb${padAddr(to)}${amount.toString(16).padStart(64, "0")}`;
 
 // ------------------------------------------------------------- what can go where
 
-await test("Robinhood Chain USDG can land on Base, Ethereum, Arbitrum and Solana", () => {
+await test("Robinhood Chain USDG can land on Base, Ethereum, Arbitrum, Solana and BNB Chain", () => {
   const ids = crossChainDestinations(4663, USDG_RH).map((d) => d.id);
-  assert.deepEqual(ids, ["base-usdc", "ethereum-usdc", "arbitrum-usdc", "solana-usdc"]);
+  assert.deepEqual(ids, ["base-usdc", "ethereum-usdc", "arbitrum-usdc", "solana-usdc", "bnb-usdt", "bnb-usdc"]);
   // any case of the address
-  assert.equal(crossChainDestinations(4663, USDG_RH.toUpperCase().replace("0X", "0x")).length, 4);
+  assert.equal(crossChainDestinations(4663, USDG_RH.toUpperCase().replace("0X", "0x")).length, 6);
+});
+
+await test("Base and Ethereum stablecoins can land as USDT or USDC on BNB Chain", () => {
+  for (const [chainId, asset] of [
+    [8453, USDC_BASE],
+    [8453, "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2"],
+    [1, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"],
+    [1, "0xdac17f958d2ee523a2206206994597c13d831ec7"],
+    [1, "0xe343167631d89b6ffc58b88d6b7fb0228795491d"],
+    [1, "0x6c3ea9036406852006290770bedfcaba0e23a0e8"],
+  ] as const) {
+    const ids = crossChainDestinations(chainId, asset).map((d) => d.id);
+    assert.ok(ids.includes("bnb-usdt") && ids.includes("bnb-usdc"), `${chainId} ${asset}`);
+  }
 });
 
 await test("a destination on the vault's own chain is never offered (that is today's cash out)", () => {
@@ -82,13 +101,30 @@ await test("Tempo, testnets, ETH and unknown assets get no cross-chain option", 
   assert.equal(crossChainSource(4663, USDG_RH)?.symbol, "USDG");
 });
 
-await test("every destination is USDC, with an id the API can look up", () => {
+await test("every destination is USDC or USDT with an id the API can look up, 6 decimals or 18 on BNB Chain", () => {
+  const ids = new Set<string>();
   for (const d of CROSS_CHAIN_DESTINATIONS) {
-    assert.equal(d.token.symbol, "USDC");
+    assert.ok(d.token.symbol === "USDC" || d.token.symbol === "USDT", d.id);
+    assert.equal(d.token.decimals, d.chainId === 56 ? 18 : 6, `${d.id} decimals`);
+    assert.equal(d.id, `${d.chain === "BNB Chain" ? "bnb" : d.chain.toLowerCase()}-${d.token.symbol.toLowerCase()}`);
     assert.equal(crossChainDestination(d.id), d);
+    ids.add(d.id);
   }
+  assert.equal(ids.size, CROSS_CHAIN_DESTINATIONS.length, "ids are unique");
+  const usdt = crossChainDestination("bnb-usdt")!;
+  const usdc = crossChainDestination("bnb-usdc")!;
+  assert.equal(usdt.token.address, USDT_BNB);
+  assert.equal(usdc.token.address, USDC_BNB);
+  assert.equal(usdt.token.logo, "/brand/tokens/usdt.png");
+  assert.equal(usdt.explorerTx("0xabc"), "https://bscscan.com/tx/0xabc");
+  assert.equal(usdc.explorerTx("0xabc"), "https://bscscan.com/tx/0xabc");
   assert.equal(crossChainDestination("tempo-usdc"), null);
   assert.equal(crossChainDestination(undefined), null);
+});
+
+await test("the BNB Chain vault is no source yet, and never its own destination", () => {
+  assert.deepEqual(crossChainDestinations(56, USDT_BNB), []);
+  assert.deepEqual(crossChainDestinations(56, USDC_BNB), []);
 });
 
 await test("recipients: a 0x wallet for EVM chains, a Solana address for Solana", () => {
@@ -97,6 +133,10 @@ await test("recipients: a 0x wallet for EVM chains, a Solana address for Solana"
   assert.ok(!validCrossChainRecipient(base, "0x0000000000000000000000000000000000000000"));
   assert.ok(!validCrossChainRecipient(base, USDC_BASE), "the token contract itself");
   assert.ok(!validCrossChainRecipient(base, "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1"));
+  const bnbUsdt = crossChainDestination("bnb-usdt")!;
+  assert.ok(validCrossChainRecipient(bnbUsdt, RECIPIENT));
+  assert.ok(!validCrossChainRecipient(bnbUsdt, USDT_BNB.toLowerCase()), "the token contract itself");
+  assert.ok(!validCrossChainRecipient(bnbUsdt, "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1"));
   assert.ok(validCrossChainRecipient(sol, "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1"));
   assert.ok(!validCrossChainRecipient(sol, RECIPIENT));
   assert.ok(!validCrossChainRecipient(sol, "0OIl0OIl0OIl0OIl0OIl0OIl0OIl0OIl"));
@@ -157,8 +197,8 @@ await test("a real strict quote is read and bound to what was asked", () => {
 });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the fixture is Relay JSON, bent field by field
-function refused(mutate: (d: any) => void, a = ask, now = NOW): string {
-  const d = clone();
+function refused(mutate: (d: any) => void, a = ask, now = NOW, source: unknown = fixture): string {
+  const d = JSON.parse(JSON.stringify(source));
   mutate(d);
   const r = readCrossChainQuote(d, a, now);
   assert.equal(r.ok, false, "should be refused");
@@ -217,6 +257,53 @@ await test("refused: an order that ends too soon, odd shapes and odd amounts out
   refused((d) => (d.details.currencyOut.amount = "20000000"), ask);
   assert.equal(readCrossChainQuote(null, ask, NOW).ok, false);
   assert.equal(readCrossChainQuote({ message: "no route" }, ask, NOW).ok, false);
+});
+
+// ------------------------------------------------------------- BNB Chain, 18 decimals
+
+const bnbAsk = { ...ask, destination: crossChainDestination("bnb-usdt")! };
+
+await test("a real strict quote into BNB Chain USDT reads in 18 decimals", () => {
+  const r = readCrossChainQuote(bnbFixture, bnbAsk, NOW);
+  assert.ok(r.ok, r.ok ? "" : r.reason);
+  const q = r.quote;
+  assert.equal(q.depositAddress, bnbFixture.steps[0].depositAddress);
+  assert.equal(q.amountIn, "9950000", "what the vault pays stays in USDG's 6 decimals");
+  assert.equal(q.destination.id, "bnb-usdt");
+  assert.equal(q.destination.chain, "BNB Chain");
+  assert.equal(q.destination.symbol, "USDT");
+  assert.equal(q.destination.decimals, 18);
+  assert.equal(q.receive.amountRaw, "9900540005258612300");
+  assert.equal(q.receive.amount, "9.9005400052586123");
+  assert.equal(q.receive.minimum, "9.851037305232319239");
+  assert.ok(Number(q.receive.minimum) > 9.8 && Number(q.receive.amount) < 9.95, "about what went in, less Relay's cut");
+});
+
+await test("an 18-decimal answer read as 6 decimals is refused, never shown a trillion times too big", () => {
+  const sixes = { ...bnbAsk, destination: { ...bnbAsk.destination, token: { ...bnbAsk.destination.token, decimals: 6 } } };
+  const r = readCrossChainQuote(bnbFixture, sixes, NOW);
+  assert.equal(r.ok, false);
+  assert.equal(r.ok ? "" : r.reason, "amount out");
+});
+
+await test("refused: a BNB Chain quote for the other stablecoin, or for Base", () => {
+  assert.equal(readCrossChainQuote(bnbFixture, { ...bnbAsk, destination: crossChainDestination("bnb-usdc")! }, NOW).ok, false);
+  assert.equal(readCrossChainQuote(bnbFixture, ask, NOW).ok, false);
+  assert.equal(readCrossChainQuote(fixture, bnbAsk, NOW).ok, false);
+  // each change alone, on the BNB Chain answer that otherwise reads clean
+  assert.equal(refused((d) => (d.protocol.v2.orderData.output.payments[0].currency = USDC_BNB.toLowerCase()), bnbAsk, NOW, bnbFixture), "order output token");
+  assert.equal(refused((d) => (d.protocol.v2.orderData.output.payments[0].recipient = REFUND), bnbAsk, NOW, bnbFixture), "order recipient");
+  assert.equal(refused((d) => (d.protocol.v2.orderData.inputs[0].payment.amount = "9950001"), bnbAsk, NOW, bnbFixture), "order amount");
+  assert.equal(refused((d) => (d.protocol.v2.orderData.inputs[0].refunds[0].recipient = RECIPIENT), bnbAsk, NOW, bnbFixture), "refund address");
+});
+
+await test("a BNB Chain quote binds the proof the same way", () => {
+  const r = readCrossChainQuote(bnbFixture, bnbAsk, NOW);
+  assert.ok(r.ok);
+  const bnbCall = { chainId: 4663, asset: USDG_RH, gross: 10_000_000n, feeBps: 50, to: r.quote.depositAddress, destinationId: "bnb-usdt", recipient: RECIPIENT, refundTo: REFUND };
+  assert.equal(crossChainProblem(r.quote, bnbCall, NOW), null);
+  assert.ok(crossChainProblem(r.quote, { ...bnbCall, destinationId: "bnb-usdc" }, NOW));
+  assert.match(crossChainProblem(r.quote, { ...bnbCall, gross: 10_000_001n }, NOW) ?? "", /amount no longer matches/);
 });
 
 // ------------------------------------------------------------- binding the proof
@@ -282,6 +369,9 @@ if (process.env.XCHAIN_LIVE === "1") {
     ["base-usdc", 4663, USDG_RH],
     ["solana-usdc", 4663, USDG_RH],
     ["arbitrum-usdc", 8453, USDC_BASE],
+    ["bnb-usdt", 4663, USDG_RH],
+    ["bnb-usdc", 8453, USDC_BASE],
+    ["bnb-usdt", 1, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"],
   ] as const) {
     await test(`live: a strict quote ${chainId} to ${id} reads clean`, async () => {
       const destination = crossChainDestination(id)!;

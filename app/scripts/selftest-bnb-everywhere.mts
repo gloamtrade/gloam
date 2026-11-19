@@ -81,6 +81,9 @@ const ALLOWED: Record<string, string> = {
   "src/lib/docsCardArt.tsx": "pill map by MAINNET_CHAINS name",
   // BNB Chain as a place money is bridged FROM, long before its vault: not about the vault
   "src/lib/bridge.ts": "bridge origins (BRIDGE_CHAINS)",
+  // BNB Chain as a place a cash out lands through Relay: a wallet there, not the vault
+  "src/lib/cashOutCrossChain.ts": "cash-out destinations (CROSS_CHAIN_DESTINATIONS)",
+  "src/app/docs/bridge/page.tsx": "bridge origins and cash-out destinations",
   "src/lib/vote/config.ts": "a past holder vote's options",
   "src/lib/vote/optionArt.tsx": "a past holder vote's options",
   "src/app/docs/compare/page.tsx": "another project's audit names BNB Chain",
