@@ -27,8 +27,11 @@
  * Only chains where Relay offers strict deposit addresses are sources. Live
  * strict quotes on 2026-11-09 worked from Robinhood Chain (USDG), Base (USDC,
  * USDT) and Ethereum (USDC, USDT, USDG, PYUSD) into USDC on Base, Ethereum,
- * Arbitrum and Solana. Tempo answered "strict is not supported for this
- * origin chain", so a cash out on Tempo stays on Tempo for now.
+ * Arbitrum and Solana. On 2026-11-19 they worked into USDT and USDC on BNB
+ * Chain from Robinhood Chain USDG, Base USDC and USDT, and Ethereum USDC, USDT,
+ * USDG and PYUSD: 9.95 in came out at 9.85 to 9.91 from Robinhood Chain or
+ * Base, and 9.68 to 9.76 from Ethereum. Tempo answered "strict is not supported for
+ * this origin chain", so a cash out on Tempo stays on Tempo for now.
  *
  * Cross-chain is for "now" only. A cash out for later, or in pieces, stays on
  * its own chain: a scheduled proof can wait hours, and an order's price
@@ -70,17 +73,29 @@ export type CrossChainDestination = {
 };
 
 /**
- * USDC at one address, with its decimals written out: 6 on every chain below,
- * but 18 on BNB Chain, so a new destination states its own and never inherits 6.
+ * A dollar stablecoin at one address, with its decimals written out: 6 on most
+ * chains below, but 18 for both USDC and USDT on BNB Chain, so a new
+ * destination states its own and never inherits 6.
  */
 const usdc = (address: string, decimals: number): CrossChainToken => ({ symbol: "USDC", address, decimals, logo: "/brand/tokens/usdc.png" });
+const usdt = (address: string, decimals: number): CrossChainToken => ({ symbol: "USDT", address, decimals, logo: "/brand/tokens/usdt.png" });
 
-/** Where a cash out can land instead of its own chain. Checked with live strict quotes on 2026-11-09. */
+const bscscanTx = (h: string) => `https://bscscan.com/tx/${h}`;
+
+/**
+ * Where a cash out can land instead of its own chain. Checked with live strict
+ * quotes on 2026-11-09, and on 2026-11-19 for BNB Chain. A BNB Chain
+ * destination is only Relay delivering to a wallet there: it needs nothing
+ * from Gloam's BNB Chain vault, so it is offered whether that vault is on or not.
+ */
 export const CROSS_CHAIN_DESTINATIONS: readonly CrossChainDestination[] = [
   { id: "base-usdc", chainId: 8453, chain: "Base", kind: "evm", token: usdc("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 6), explorerTx: (h) => `https://basescan.org/tx/${h}` },
   { id: "ethereum-usdc", chainId: 1, chain: "Ethereum", kind: "evm", token: usdc("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", 6), explorerTx: (h) => `https://etherscan.io/tx/${h}` },
   { id: "arbitrum-usdc", chainId: 42161, chain: "Arbitrum", kind: "evm", token: usdc("0xaf88d065e77c8cc2239327c5edb3a432268e5831", 6), explorerTx: (h) => `https://arbiscan.io/tx/${h}` },
   { id: "solana-usdc", chainId: SOLANA_RELAY_ID, chain: "Solana", kind: "svm", token: usdc("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", 6), explorerTx: (h) => `https://solscan.io/tx/${h}` },
+  // BNB Chain (56): USDT first, the stablecoin most held there. Both have 18 decimals.
+  { id: "bnb-usdt", chainId: 56, chain: "BNB Chain", kind: "evm", token: usdt("0x55d398326f99059fF775485246999027B3197955", 18), explorerTx: bscscanTx },
+  { id: "bnb-usdc", chainId: 56, chain: "BNB Chain", kind: "evm", token: usdc("0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", 18), explorerTx: bscscanTx },
 ];
 
 /**

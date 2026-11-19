@@ -83,10 +83,11 @@ export default function DocsBridgePage() {
       <h2 id="cash-out">Cash out to another chain</h2>
       <p>
         It works the other way too. On Robinhood Chain, Base or Ethereum, a
-        cash out can land as USDC on Base, Ethereum, Arbitrum or Solana in one
-        step. Under <strong>Lands on</strong>, pick the chain, then the address
-        there. The vault pays a one-time Relay address for exactly the amount
-        after the {CASH_OUT_FEE_PERCENT} cash-out fee, and Relay sends the USDC on.
+        cash out can land as USDC on Base, Ethereum, Arbitrum or Solana, or as
+        USDT or USDC on BNB Chain, in one step. Under <strong>Lands on</strong>,
+        pick the chain, then the address there. The vault pays a one-time Relay
+        address for exactly the amount after the {CASH_OUT_FEE_PERCENT} cash-out
+        fee, and Relay sends the stablecoin on.
       </p>
       <p>
         Before you confirm you see what arrives, the least that will arrive,
