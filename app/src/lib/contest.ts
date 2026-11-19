@@ -30,7 +30,44 @@ export const CONTEST = {
   telegramUrl: "https://t.me/gloamhq/28002",
 } as const;
 
-export const CONTEST_TOTAL = CONTEST.prizes.reduce((a, b) => a + b, 0);
+/** One prize-winning entry: the creator's X name and handle (no @), the post and the prize in US dollars. */
+export type ContestPlace = { name: string; handle: string; postUrl: string; usd: number };
+
+/**
+ * The results, announced on 19 November 2026. While this is null the page shows
+ * the contest as it ran; once it is set the winners lead the page and the entry
+ * sections go. Profile pictures are app/public/contest/winners/<handle>.jpg.
+ */
+export const CONTEST_RESULTS: {
+  announcedAt: string;
+  entries: number;
+  judges: number;
+  winners: ContestPlace[];
+  honourable: ContestPlace[];
+} | null = {
+  announcedAt: "2026-11-19T00:00:00Z",
+  entries: 123,
+  judges: 5,
+  winners: [
+    { name: "raw dawg", handle: "raw1894", postUrl: "https://x.com/raw1894/status/2121160148630556865", usd: 250 },
+    { name: "0xJedi", handle: "mel_sol1", postUrl: "https://x.com/mel_sol1/status/2120774779074384276", usd: 150 },
+    { name: "Vonyll", handle: "vonyll", postUrl: "https://x.com/vonyll/status/2122371251742105763", usd: 100 },
+    { name: "Raniii", handle: "ranimth07", postUrl: "https://x.com/ranimth07/status/2122335462698463267", usd: 100 },
+  ],
+  honourable: [
+    { name: "PreciousGold", handle: "idk_precious", postUrl: "https://x.com/idk_precious/status/2120609032733942055", usd: 50 },
+    { name: "Tee_X", handle: "shewrites_1", postUrl: "https://x.com/shewrites_1/status/2122215592119709848", usd: 50 },
+    { name: "Paulknowsball", handle: "Paulknowsballl", postUrl: "https://x.com/Paulknowsballl/status/2121498813831455017", usd: 50 },
+    { name: "Miss Crypt", handle: "i_am_treasure07", postUrl: "https://x.com/i_am_treasure07/status/2122198507272507458", usd: 50 },
+  ],
+};
+
+/** The prize pool as announced: the four places. */
+export const CONTEST_POOL = CONTEST.prizes.reduce((a, b) => a + b, 0);
+
+/** Everything paid out: the four places, plus the honourable mentions once the results are in. */
+export const CONTEST_TOTAL =
+  CONTEST_POOL + (CONTEST_RESULTS ? CONTEST_RESULTS.honourable.reduce((a, h) => a + h.usd, 0) : 0);
 
 const MONTHS = [
   "January",

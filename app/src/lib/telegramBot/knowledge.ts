@@ -25,7 +25,16 @@ import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET } from "@/l
 import { BNB, BNB_LIVE_SINCE } from "@/lib/bnb";
 import { VAULT_SWAP_V2_ROUTER, swapV3Live } from "@/lib/vaultSwap";
 import { voteFacts } from "@/lib/vote/glim";
-import { CONTEST, CONTEST_TOTAL, contestDay, contestTime, placeLabel } from "@/lib/contest";
+import {
+  CONTEST,
+  CONTEST_POOL,
+  CONTEST_RESULTS,
+  CONTEST_TOTAL,
+  contestDay,
+  contestTime,
+  placeLabel,
+  type ContestPlace,
+} from "@/lib/contest";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
 import { huntEnabled } from "@/lib/hunt";
@@ -77,7 +86,9 @@ export const OFFICIAL_LINKS = [
   "gloam.trade/docs (docs; the testnet guide is gloam.trade/docs/testnet)",
   "gloam.trade/verify (check a proof, no wallet needed)",
   "gloam.trade/testers (apply to be a tester)",
-  "gloam.trade/contest (the Gloam Video Contest: prizes, rules and the entry form)",
+  CONTEST_RESULTS
+    ? "gloam.trade/contest (the Gloam Video Contest: the winners, their films and how we judged)"
+    : "gloam.trade/contest (the Gloam Video Contest: prizes, rules and the entry form)",
   "gloam.trade/transparency (what anyone can see about the vault)",
   "gloam.trade/blog/live-on-mainnet (the mainnet launch post)",
   "gloam.trade/blog/private-agent-payments (Raeto and Agent Wormhole: agents funded privately, checked before they pay)",
@@ -585,9 +596,24 @@ function mainnetLiveFacts(): string {
 function contestFacts(): string {
   const prizes = CONTEST.prizes.map((usd, i) => `${placeLabel(i)} $${usd}`).join(", ");
   const closes = `${contestDay(CONTEST.closesAt)} at ${contestTime(CONTEST.closesAt)}`;
+  const r = CONTEST_RESULTS;
+  if (r) {
+    const who = (p: ContestPlace) => `${p.name} (@${p.handle})`;
+    const places = r.winners.map((w, i) => `${placeLabel(i)} ${who(w)} $${w.usd}`).join(", ");
+    const hms = r.honourable.map(who).join(", ");
+    return [
+      "VIDEO CONTEST (ended)",
+      `- The ${CONTEST.name} is over. Entries ran ${contestDay(CONTEST.opensAt, false)} to ${closes}: videos about Gloam, ${CONTEST.minMinutes} to ${CONTEST.maxMinutes} minutes long, posted on X. ${r.entries} entries came in.`,
+      `- Winners, announced ${contestDay(r.announcedAt)} on @${CONTEST.account} and at gloam.trade/contest: ${places}. Honourable mentions, $${r.honourable[0]?.usd ?? 0} each: ${hms}. $${CONTEST_TOTAL} in total; the entries were so good the team added the honourable mentions to the $${CONTEST_POOL} pool.`,
+      `- Every prize is paid privately with a Gloam claim link, sent by DM from @${CONTEST.account}, in USDG on Robinhood Chain or USDC on Base.`,
+      `- How it was judged: a team of ${r.judges} judged. Entries were shuffled into ${r.judges} batches of about 25 with a stratified random split, so each batch had the same mix of networks. Each judge scored their batch on clarity (40%), creativity (30%), production quality (20%) and a real flow in the app on mainnet (10%), plus a rules check. In a second round the picks were regrouped so nobody judged their own batch, then the team decided the winners and honourable mentions together. Likes and views did not count, and the decision is final.`,
+      `- Entries are closed. Prizes come only from @${CONTEST.account}; Gloam never asks for a seed phrase, private key or payment to release a prize, and the team is not responsible for deals made in DMs.`,
+      "- Name only the winners and honourable mentions above. Never say how any other entry scored or placed, and never promise anyone a prize.",
+    ].join("\n");
+  }
   return [
     "VIDEO CONTEST",
-    `- The ${CONTEST.name}: $${CONTEST_TOTAL} for videos about Gloam, ${CONTEST.minMinutes} to ${CONTEST.maxMinutes} minutes long, in any style: explainers, tutorials, short films, animations, skits, memes. No AI-generated videos: footage, avatars, voices or animation made by an AI generator are not accepted and such entries are removed; animation and motion graphics the creator made themselves (After Effects, Blender, Figma, Rive and the like) are fine, and so are normal editing tools. Prizes: ${prizes}. Winners are paid privately with a Gloam claim link, in USDG on Robinhood Chain or USDC on Base, their choice.`,
+    `- The ${CONTEST.name}: $${CONTEST_POOL} for videos about Gloam, ${CONTEST.minMinutes} to ${CONTEST.maxMinutes} minutes long, in any style: explainers, tutorials, short films, animations, skits, memes. No AI-generated videos: footage, avatars, voices or animation made by an AI generator are not accepted and such entries are removed; animation and motion graphics the creator made themselves (After Effects, Blender, Figma, Rive and the like) are fine, and so are normal editing tools. Prizes: ${prizes}. Winners are paid privately with a Gloam claim link, in USDG on Robinhood Chain or USDC on Base, their choice.`,
     `- Entries open ${contestDay(CONTEST.opensAt)} and close ${closes}. Winners are announced by ${contestDay(CONTEST.winnersBy)} on @${CONTEST.account}.`,
     `- To enter: upload the video to a post on X (entries come from X only; a YouTube or other link does not count), quote the contest announcement (${CONTEST.announcementUrl ?? "on X @gloamtrade"}) and tag @${CONTEST.account} (no hashtag needed), then send the post link with the form at gloam.trade/contest. Both the post and the form are needed. The form also asks the entrant to agree that Gloam may repost, clip and use the video in its marketing, with credit to them. One entry per X account; sending the form again with the same handle replaces it.`,
     `- Creators can ask questions and share drafts in the Creators topic of this group: ${CONTEST.telegramUrl}.`,
