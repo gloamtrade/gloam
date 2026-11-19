@@ -216,32 +216,62 @@ export async function loadLiveMarkets() {
   });
 }
 
-/** ETH USD for portfolio dollar conversion */
-/** HYPE in USD (CoinGecko "hyperliquid"): Elysium's gas coin. Null when unknown, never ETH's price. */
+/**
+ * A gas coin's price in USD: CoinGecko first, then Binance's public market-data
+ * API (USDT pair, which tracks the dollar to well under a percent), then the last
+ * price this instance saw in the past hour. CoinGecko's free tier answers 429
+ * when the markets read, its sparks and these three land together, and a null
+ * here left ETH, HYPE or BNB out of every dollar total ("no dollar price").
+ * Null only when all three have nothing. Never another coin's price.
+ */
+const BINANCE_PAIR: Record<string, string> = { ethereum: "ETHUSDT", hyperliquid: "HYPEUSDT", binancecoin: "BNBUSDT" };
+const LAST_GOOD_MS = 60 * 60_000;
+const lastGood = new Map<string, { mark: number; at: number }>();
+
+async function coinUsd(id: string): Promise<number | null> {
+  try {
+    const mark = (await fetchCoinGeckoSimple([id])).get(id)?.mark;
+    if (mark && mark > 0) {
+      lastGood.set(id, { mark, at: Date.now() });
+      return mark;
+    }
+  } catch {
+    // fall through to the next source
+  }
+  const pair = BINANCE_PAIR[id];
+  if (pair) {
+    try {
+      const res = await fetch(`https://data-api.binance.vision/api/v3/ticker/price?symbol=${pair}`, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(4_000),
+      });
+      if (res.ok) {
+        const mark = Number(((await res.json()) as { price?: string }).price);
+        if (Number.isFinite(mark) && mark > 0) {
+          lastGood.set(id, { mark, at: Date.now() });
+          return mark;
+        }
+      }
+    } catch {
+      // fall through to the last price seen
+    }
+  }
+  const last = lastGood.get(id);
+  return last && Date.now() - last.at < LAST_GOOD_MS ? last.mark : null;
+}
+
+/** HYPE in USD: Elysium's gas coin. Null when unknown, never ETH's price. */
 export async function loadHypeUsd(): Promise<number | null> {
-  try {
-    const map = await fetchCoinGeckoSimple(["hyperliquid"]);
-    return map.get("hyperliquid")?.mark ?? null;
-  } catch {
-    return null;
-  }
+  return coinUsd("hyperliquid");
 }
 
-/** BNB in USD (CoinGecko "binancecoin"): BNB Chain's gas coin. Null when unknown, never ETH's price. */
+/** BNB in USD: BNB Chain's gas coin. Null when unknown, never ETH's price. */
 export async function loadBnbUsd(): Promise<number | null> {
-  try {
-    const map = await fetchCoinGeckoSimple(["binancecoin"]);
-    return map.get("binancecoin")?.mark ?? null;
-  } catch {
-    return null;
-  }
+  return coinUsd("binancecoin");
 }
 
+/** ETH in USD, for the portfolio's dollar figures. */
 export async function loadEthUsd(): Promise<number | null> {
-  try {
-    const map = await fetchCoinGeckoSimple(["ethereum"]);
-    return map.get("ethereum")?.mark ?? null;
-  } catch {
-    return null;
-  }
+  return coinUsd("ethereum");
 }

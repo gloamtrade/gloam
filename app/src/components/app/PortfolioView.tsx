@@ -635,9 +635,23 @@ export function PortfolioView() {
             ) : amountsHidden && balancesVisible ? (
               <SealDots n={7} dot={14} label="Private balance hidden" className="h-[1em]" />
             ) : (
-              privateDisplay
+              <HeroFigure text={privateDisplay} />
             )}
           </p>
+          {balancesVisible && hasShield && !amountsHidden && !(restoring && !hasShield) && (
+            <VaultChips
+              rows={shieldRows.map((r) => {
+                const native = isNativeAsset(r.asset);
+                const tok = native ? null : knownHere.find((t) => t.address.toLowerCase() === r.asset.toLowerCase());
+                return {
+                  key: r.asset,
+                  id: native ? nativeId : (tok?.id ?? null),
+                  symbol: r.label,
+                  amount: tidyAmount(Number(formatUnits(r.amount, native ? 18 : assetDecimals(r.asset)))),
+                };
+              })}
+            />
+          )}
           <p className="mt-4 max-w-[64ch] text-[15px] leading-relaxed text-mute">
             {amountsHidden && balancesVisible && hasShield ? "Amounts hidden on this screen. Tap the eye to show them." : privateSub}
           </p>
@@ -1031,5 +1045,54 @@ export function PortfolioView() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The hero number, typeset like a bank balance: "$2.29" as a big "$2" with the
+ * cents quieter, and a lone token amount ("0.00387 BNB") with its symbol small
+ * beside it. Anything else ("$100 + 1,000 GLOAM", "3 assets") shows as is.
+ */
+function HeroFigure({ text }: { text: string }) {
+  const usd = /^(\$[\d,]+)(\.\d+)$/.exec(text);
+  if (usd) {
+    return (
+      <>
+        {usd[1]}
+        <span className="text-foreground/35">{usd[2]}</span>
+      </>
+    );
+  }
+  const amount = /^([<\d.,]+)\s+([A-Za-z.$][\w.$]*)$/.exec(text);
+  if (amount) {
+    return (
+      <>
+        {amount[1]}
+        <span className="ml-3 align-baseline text-[0.42em] font-normal tracking-normal text-mute">{amount[2]}</span>
+      </>
+    );
+  }
+  return <>{text}</>;
+}
+
+/** What the private balance holds, one quiet chip per asset with its own mark; three at most, then "+2". */
+function VaultChips({ rows }: { rows: { key: string; id: string | null; symbol: string; amount: string }[] }) {
+  if (rows.length === 0) return null;
+  const shown = rows.slice(0, 3);
+  const more = rows.length - shown.length;
+  return (
+    <ul className="mt-5 flex flex-wrap items-center gap-2" aria-label="In your private balance">
+      {shown.map((r) => (
+        <li
+          key={r.key}
+          className="tnum inline-flex h-9 items-center gap-2 rounded-full border border-line bg-panel/60 pl-1.5 pr-3.5 text-[13.5px] text-soft"
+        >
+          <TokenLogo id={r.id ?? r.symbol.toLowerCase()} symbol={r.symbol} size={24} />
+          <span className="text-foreground">{r.amount}</span>
+          <span className="text-mute">{r.symbol}</span>
+        </li>
+      ))}
+      {more > 0 && <li className="h-9 px-2 text-[13.5px] leading-9 text-mute">+{more}</li>}
+    </ul>
   );
 }

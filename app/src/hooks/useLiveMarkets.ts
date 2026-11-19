@@ -17,11 +17,35 @@ type ApiResponse = {
   };
 };
 
+/**
+ * The last gas-coin prices this page saw, so one empty read (the price source
+ * was busy) does not flip a dollar figure back to "no dollar price" for 30
+ * seconds. Kept 15 minutes; after that an empty read shows as unknown again.
+ */
+const KEEP_PRICE_MS = 15 * 60_000;
+const lastPrice: Partial<Record<"ethUsd" | "hypeUsd" | "bnbUsd", { usd: number; at: number }>> = {};
+
+function steady(key: "ethUsd" | "hypeUsd" | "bnbUsd", v: number | null | undefined): number | null {
+  const now = Date.now();
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+    lastPrice[key] = { usd: v, at: now };
+    return v;
+  }
+  const last = lastPrice[key];
+  return last && now - last.at < KEEP_PRICE_MS ? last.usd : null;
+}
+
 async function fetchMarkets(): Promise<ApiResponse> {
   // no cache-buster: the CDN keeps it for 20 s (api/markets), which is fresher than the 30 s poll
   const res = await fetch("/api/markets", { cache: "no-store" });
   if (!res.ok) throw new Error("markets_failed");
-  return res.json() as Promise<ApiResponse>;
+  const body = (await res.json()) as ApiResponse;
+  return {
+    ...body,
+    ethUsd: steady("ethUsd", body.ethUsd),
+    hypeUsd: steady("hypeUsd", body.hypeUsd),
+    bnbUsd: steady("bnbUsd", body.bnbUsd),
+  };
 }
 
 export function useLiveMarkets() {
