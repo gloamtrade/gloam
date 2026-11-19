@@ -3,9 +3,10 @@
  * /api/status). No imports, so the page's client parts can use it too.
  *
  * A check answers operational, degraded (it answered, but slow, stale or in
- * part) or down. The history keeps, per part and per UTC day, how many checks
- * landed in each (lib/status/history). A day with no checks is "No data",
- * never green: nothing is shown that was not measured.
+ * part) or down. The history keeps, per part and per UTC day and hour, how
+ * many checks landed in each (lib/status/history). The bars start at a part's
+ * first check, and a period with no checks after it is "No data", never
+ * green: nothing is shown that was not measured.
  */
 
 export type Health = "operational" | "degraded" | "down";
@@ -167,6 +168,23 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 export function formatDay(day: string): string {
   const [y, m, d] = day.split("-").map(Number);
   return `${d} ${MONTHS[(m ?? 1) - 1]} ${y}`;
+}
+
+/**
+ * A bar's period: "19 Nov 2026" for a day (YYYY-MM-DD), "19 Nov, 01:00 to
+ * 02:00 UTC" for an hour (YYYY-MM-DDTHH).
+ */
+export function formatPeriod(key: string): string {
+  if (key.length !== 13) return formatDay(key);
+  const h = Number(key.slice(11, 13));
+  const pad = (n: number) => String(n % 24).padStart(2, "0");
+  return `${formatDay(key.slice(0, 10)).replace(/ \d{4}$/, "")}, ${pad(h)}:00 to ${pad(h + 1)}:00 UTC`;
+}
+
+/** Where counting starts: "Since 18 Nov" for a day, "Since 19 Nov, 01:00" for an hour. */
+export function sinceText(key: string): string {
+  const day = formatDay(key.slice(0, 10)).replace(/ \d{4}$/, "");
+  return key.length === 13 ? `Since ${day}, ${key.slice(11, 13)}:00` : `Since ${day}`;
 }
 
 /** "19 Nov 2026, 00:51 UTC". */

@@ -10,8 +10,11 @@
  *    check made per network failing on some or all; Glim's webhook; Turnkey
  *  - the parts: the networks people can see only (no hidden testnet), every
  *    group filled
- *  - the history: a run counted into today, 90 days read back, a day with no
- *    run all zeros, the cron refused without its secret
+ *  - the history: hours from the first check while young, days once it spans
+ *    3 days, nothing before a part's first check, a period with no run after
+ *    it all zeros; the cron refused without its secret
+ *  - what is shown: the cron's latest run while under 7 minutes old, else one
+ *    check here, kept as the latest and shared
  *  - nothing leaks: with a keyed private RPC and a bot token set and every
  *    request failing with its URL in the error, no URL, key or token is in
  *    the result, every part is down, and the checks end inside their cap
@@ -51,6 +54,8 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
 const model = await import("../src/lib/status/model");
 const checks = await import("../src/lib/status/checks");
 const history = await import("../src/lib/status/history");
+const current = await import("../src/lib/status/current");
+const kvStore = await import("../src/lib/partnersKv");
 const incidents = await import("../src/lib/status/incidents");
 const cron = await import("../src/app/api/status/cron/route");
 
@@ -240,22 +245,73 @@ const run = (status: "operational" | "degraded" | "down", at: number) => ({
   parts: parts.map((p) => ({ ...p, status, latencyMs: 10, reason: null, detail: null })),
   packages: [],
 });
-await history.recordRun(run("degraded", now - 86_400_000));
+const ids2 = [...ids, "never-checked"];
+
+// young: hours since the first check, nothing before it
+kvStore.resetMemoryKv();
+await history.recordRun(run("degraded", now - 2 * 3_600_000));
 await history.recordRun(run("operational", now));
 await history.recordRun(run("operational", now + 300_000));
 await history.recordRun(run("down", now + 600_000));
-const h = await history.readHistory(ids, now + 700_000);
+const h = await history.readHistory(ids2, now + 660_000);
 assert.ok(h);
-assert.equal(h.days.length, 90);
-assert.equal(h.days[89], "2026-11-19");
-const vault = h.byPart.get("relay:4663")!;
-assert.deepEqual(vault[89], { day: "2026-11-19", ok: 2, degraded: 0, down: 1 });
-assert.deepEqual(vault[88], { day: "2026-11-18", ok: 0, degraded: 1, down: 0 });
-assert.deepEqual(vault[10], { day: vault[10]!.day, ok: 0, degraded: 0, down: 0 }, "a day with no run is all zeros");
-assert.equal(model.dayTone(vault[10]!), "none", "and shows as no data");
+assert.equal(h.unit, "hour");
+assert.equal(h.since, "2026-11-19T10");
+const relay = h.byPart.get("relay:4663")!;
+assert.deepEqual(relay, [
+  { day: "2026-11-19T10", ok: 0, degraded: 1, down: 0 },
+  { day: "2026-11-19T11", ok: 0, degraded: 0, down: 0 },
+  { day: "2026-11-19T12", ok: 2, degraded: 0, down: 1 },
+], "from the first check to now, an hour with no run in between is all zeros");
+assert.equal(model.dayTone(relay[1]!), "none", "and shows as no data");
+assert.deepEqual(h.byPart.get("never-checked"), [], "a part never checked has no bars at all");
 assert.equal(h.lastRun, now + 600_000);
-assert.ok(h.byPart.get("unknown") === undefined);
-ok("history: counted per day, read back over 90 days");
+ok("history: hours from the first check while young");
+
+// older: days, from the first day on record
+kvStore.resetMemoryKv();
+await history.recordRun(run("operational", now - 10 * 86_400_000));
+await history.recordRun(run("down", now));
+const d = await history.readHistory(ids, now + 60_000);
+assert.ok(d);
+assert.equal(d.unit, "day");
+assert.equal(d.since, "2026-11-09");
+const days10 = d.byPart.get("relay:4663")!;
+assert.equal(days10.length, 11);
+assert.deepEqual(days10[0], { day: "2026-11-09", ok: 1, degraded: 0, down: 0 });
+assert.deepEqual(days10[10], { day: "2026-11-19", ok: 0, degraded: 0, down: 1 });
+ok("history: days from the first day once it spans 3 days or more");
+
+// days recorded before hours were kept: days until an hour is on record
+kvStore.resetMemoryKv();
+await kvStore.kv([["HINCRBY", history.dayKey("2026-11-18"), "relay:4663|ok", 5]]);
+const old = await history.readHistory(ids, now);
+assert.equal(old!.unit, "day");
+assert.deepEqual(old!.byPart.get("relay:4663")!.map((t) => t.day), ["2026-11-18", "2026-11-19"]);
+ok("history: days when no hour is on record yet");
+
+assert.equal(model.sinceText("2026-11-18"), "Since 18 Nov");
+assert.equal(model.sinceText("2026-11-19T01"), "Since 19 Nov, 01:00");
+assert.equal(model.formatPeriod("2026-11-19"), "19 Nov 2026");
+assert.equal(model.formatPeriod("2026-11-19T23"), "19 Nov, 23:00 to 00:00 UTC");
+ok("since and period labels");
+
+// the page and the JSON show the cron's latest run, or check once themselves when it is too old
+kvStore.resetMemoryKv();
+current.resetStatusMemo();
+await history.recordRun(run("operational", now));
+const fresh = await current.currentSnapshot(now + 4 * 60_000);
+assert.equal(fresh.checkedAt, now, "a run under 7 minutes old is shown as is");
+assert.equal(fresh.overall, "operational");
+current.resetStatusMemo();
+const stale = await current.currentSnapshot(now + 8 * 60_000);
+assert.notEqual(stale.checkedAt, now, "an older run is not shown: the checks run here");
+assert.equal(stale.overall, "down", "(every request fails in this test)");
+const kept = await history.readLatest();
+assert.equal(kept!.checkedAt, stale.checkedAt, "and that run is kept as the latest");
+const again = await current.currentSnapshot(now + 8 * 60_000 + 5_000);
+assert.equal(again.checkedAt, stale.checkedAt);
+ok("current: the cron's run while fresh, one shared check when stale");
 
 const refused = await cron.GET(new Request("http://localhost/api/status/cron"));
 assert.equal(refused.status, 401);
