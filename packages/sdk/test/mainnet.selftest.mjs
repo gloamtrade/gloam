@@ -272,8 +272,8 @@ for (const [family, chainId, key, assets, native, memo] of [
     assert(a.depositLimit.perDeposit === whole(per) && a.depositLimit.total === whole(total), `${symbol}: ${per} per deposit, ${total} total`);
   }
   assert(BASE_MAINNET_ASSETS.map((a) => a.address).join() === [BASE_USDC, BASE_EURC, BASE_USDT, NATIVE_ASSET, BASE_BDX].join(), "Base mainnet lists USDC, EURC, USDT, ETH and BDX");
-  // BDX (Beldex, LayerZero OFT): the same address on Base and Ethereum, 9 decimals,
-  // no limit once its timelocked change lands (0 on chain until then).
+  // The LayerZero OFT named BDX (not Beldex's; Beldex's BDX is on BNB Chain): the same
+  // address on Base and Ethereum, 9 decimals, closed (0, 0) in both vaults on 20 Nov 2026.
   assert(BASE_BDX === "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181" && ETHEREUM_BDX === BASE_BDX, "BDX: one address on Base and Ethereum");
   const bdx = BASE_MAINNET_ASSETS.find((a) => a.symbol === "BDX");
   assert(bdx.decimals === 9 && bdx.depositLimit.perDeposit === (1n << 128n) - 1n && bdx.depositLimit.total === (1n << 128n) - 1n, "BDX: no limit once it lands");

@@ -85,18 +85,18 @@ check("the mainnet stocks carry a uiMultiplier; the testnet stocks, WETH and sta
   assert.equal(hasUiMultiplier(RH, testnetStock), false);
 });
 
-// BDX on Base and Ethereum is listed ahead of its deposit limit, which goes
-// through the vault's 3-day timelock: Add offers it only once the live limit
-// reads open, while the wallet card, names and balances know it all along.
+// The LayerZero OFT named BDX is not Beldex's (Beldex's BDX is only on BNB Chain):
+// closed in the Base and Ethereum vaults on 20 Nov 2026 and no longer listed there.
+// The gating below is checked with a stand-in token that opens with its limit.
 const BDX = "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181";
 const bdxLower = BDX.toLowerCase();
+const GATED_STANDIN = { id: "bdx", symbol: "BDX", name: "Beldex", address: BDX, decimals: 9, yahoo: "", kind: "token", coingecko: "beldex", opensWithLimit: true } as const;
 
-check("BDX is listed on Base and Ethereum, gated by its live limit, and nowhere else", () => {
+check("no BDX on Base or Ethereum, and no limit-gated token there", () => {
   for (const id of [8453, 1]) {
-    const gated = limitGatedTokensFor(id);
-    assert.deepEqual(gated.map((t) => [t.symbol, t.address, t.decimals, t.kind, t.coingecko]), [["BDX", BDX, 9, "token", "beldex"]]);
-    assert.ok(shieldTokensFor(id).some((t) => t.id === "bdx"), "known to the chain's list");
-    assert.ok(walletDisplayTokensFor(id).some((t) => t.id === "bdx"), "the wallet card reads it");
+    assert.deepEqual(limitGatedTokensFor(id), []);
+    assert.ok(!shieldTokensFor(id).some((t) => t.id === "bdx"), "not in the chain's list");
+    assert.ok(!walletDisplayTokensFor(id).some((t) => t.id === "bdx"), "not on the wallet card");
   }
   for (const id of [4217, 84532, 11155111, 46630, 42431]) assert.deepEqual(limitGatedTokensFor(id), []);
 });
@@ -145,24 +145,16 @@ check("ETH needs no live read where it was listed from the start, and Tempo neve
   for (const id of [4217, 42431]) assert.equal(isNativeAddable(id, new Set([ZERO])), false, `${id}`);
 });
 
-check("Add leaves BDX out until its limit is read open", () => {
+check("Add never offers BDX on Base or Ethereum, even if a read came back open", () => {
   for (const id of [8453, 1]) {
-    const bdx = shieldTokensFor(id).find((t) => t.id === "bdx")!;
     assert.ok(!addableTokensFor(id).some((t) => t.id === "bdx"), "no reads: not offered");
-    assert.ok(!addableTokensFor(id, new Set()).some((t) => t.id === "bdx"), "read closed: not offered");
-    assert.equal(isAddableToken(id, bdx), false);
-    assert.equal(isAddableToken(id, bdx, new Set([bdxLower])), true);
-    assert.ok(addableTokensFor(id, new Set([bdxLower])).some((t) => t.id === "bdx"), "read open: offered");
-    // the rest of the list is untouched either way
-    assert.deepEqual(
-      addableTokensFor(id).map((t) => t.id),
-      shieldTokensFor(id).filter((t) => t.id !== "bdx").map((t) => t.id)
-    );
+    assert.ok(!addableTokensFor(id, new Set([bdxLower])).some((t) => t.id === "bdx"), "not listed: never offered");
+    assert.deepEqual(addableTokensFor(id).map((t) => t.id), shieldTokensFor(id).map((t) => t.id));
   }
 });
 
 check("the live reads open BDX only with a limit above 0, and never while unread", () => {
-  const gated = limitGatedTokensFor(8453);
+  const gated = [GATED_STANDIN] as unknown as ReturnType<typeof limitGatedTokensFor>;
   const per = 100_000n * 10n ** 9n;
   const total = 2_000_000n * 10n ** 9n;
   assert.equal(openGatedFromReads(gated, undefined, [[per, total]]).size, 0, "depositLimitsOn unread");

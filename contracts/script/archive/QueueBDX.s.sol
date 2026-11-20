@@ -21,7 +21,7 @@ interface IERC20Meta {
 }
 
 /**
- * Opens the Ethereum and Base mainnet vaults to Beldex's BDX, through each
+ * Opens the Ethereum and Base mainnet vaults to the LayerZero OFT named BDX, through each
  * vault's 3-day public timelock. Until the limit lands BDX has a zero limit
  * and the vault refuses it as a deposit (shieldBound checks the limit before
  * it pulls a token). Private sends and cash-outs never look at the limit.
@@ -53,7 +53,8 @@ interface IERC20Meta {
  * Forge simulates the whole run on a fork first and sends nothing if any call
  * would revert. --ledger works in place of --interactives 1.
  *
- * The token: BDX is Beldex's LayerZero OFT, the same verified contract
+ * The token: the LayerZero OFT named BDX (not Beldex's, as Beldex said on 20 Nov 2026;
+ * closed to 0 / 0 in both vaults that day), the same verified contract
  * (Sourcify exact match, contracts/MyOFT.sol:BELDEX) at the same address on
  * both chains, 9 decimals. Plain OpenZeppelin v5.4.0 ERC-20: no transfer fee,
  * no rebasing, transfer and transferFrom return true (the vault's own
@@ -76,7 +77,7 @@ contract QueueBDX is Script {
     uint256 constant ETHEREUM = 1;
     uint256 constant BASE = 8453;
 
-    /// @notice Beldex's BDX (LayerZero OFT), the same address on Ethereum and Base.
+    /// @notice The LayerZero OFT named BDX (not Beldex's), the same address on Ethereum and Base.
     address constant BDX = 0x6ad12E761b438beA3EA09F6C6266556Bb24C2181;
     uint8 constant BDX_DECIMALS = 9;
 

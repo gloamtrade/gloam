@@ -229,7 +229,7 @@ export function PortfolioView() {
         : ethUsd;
   const nativeId = isElysium ? "hype" : isBnb ? "bnb" : "eth";
   const nativeName = isElysium ? "Hyperliquid" : isBnb ? "BNB" : "Ether";
-  // $GLOAM and the swap tokens on Robinhood Chain mainnet, and BDX on Base and Ethereum, priced like Transparency does.
+  // $GLOAM and the swap tokens on Robinhood Chain mainnet, and BDX on BNB Chain, priced like Transparency does.
   const { marks: geckoMarks, pending: geckoPending } = useCoingeckoMarks(hasCoingeckoMarks(network.chainId));
   // BDX, or ETH on Robinhood Chain, is offered to Add only once the vault's live limit for it is open.
   const openGated = useOpenGatedTokens();

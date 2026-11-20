@@ -25,11 +25,12 @@ for (const s of ["EURC", "USDC", "USDG", "WETH", "NVDA"]) assert.ok(!symbols.inc
 // Stocks are priced by the markets feed; the server's price is only the swap and transparency pages' fallback.
 assert.ok(STOCK_FALLBACK_MARKED.some((t) => t.symbol === "NVDA"), "a stock has a fallback price");
 assert.ok(STOCK_FALLBACK_MARKED.every((t) => t.kind === "stock"), "only stocks are on the fallback list");
-assert.ok(hasCoingeckoMarks(4663) && hasCoingeckoMarks(8453) && hasCoingeckoMarks(1) && !hasCoingeckoMarks(4217));
+// Base and Ethereum list no token priced here since the BDX OFT (not Beldex's) was closed on 20 Nov 2026.
+assert.ok(hasCoingeckoMarks(4663) && !hasCoingeckoMarks(8453) && !hasCoingeckoMarks(1) && !hasCoingeckoMarks(4217));
 assert.ok(
-  MARKED_BY_CHAIN.find((c) => c.chainId === 8453)!.tokens.some((t) => t.symbol === "BDX") &&
-    MARKED_BY_CHAIN.find((c) => c.chainId === 1)!.tokens.some((t) => t.symbol === "BDX"),
-  "BDX can be looked up on either chain, though it is listed once"
+  !MARKED_BY_CHAIN.find((c) => c.chainId === 8453)!.tokens.some((t) => t.symbol === "BDX") &&
+    !MARKED_BY_CHAIN.find((c) => c.chainId === 1)!.tokens.some((t) => t.symbol === "BDX"),
+  "no BDX on Base or Ethereum"
 );
 
 // ---- DEX Screener: only a pool that has the token as its base prices it.

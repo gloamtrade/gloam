@@ -115,8 +115,8 @@ type Prices = {
   /**
    * The server's USD by token address (/api/token-marks): $GLOAM, the tokens a
    * private swap lands in on Robinhood Chain (cbBTC and the rest; a stock falls
-   * back to it when its live mark or multiplier is missing), and BDX on Base and
-   * Ethereum (stablecoins there are $1, and EURC stays unpriced).
+   * back to it when its live mark or multiplier is missing), and BDX on BNB Chain
+   * (dollar stablecoins are $1, and EURC stays unpriced).
    */
   tokenMarks: Map<string, number>;
 };

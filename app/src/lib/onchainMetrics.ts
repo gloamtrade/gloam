@@ -575,8 +575,7 @@ async function loadSwapTokenMarks(marketsRead: Promise<LiveMarkets>): Promise<Ma
 
 /**
  * Listed tokens only CoinGecko prices that loadSwapTokenMarks does not reach: BDX
- * on Base and Ethereum (one address on both, so listed once), and GRIFT, AI and
- * ORBIO on Robinhood Chain. $GLOAM is priced from DEX Screener, dollar stablecoins
+ * on BNB Chain, and GRIFT, AI and ORBIO on Robinhood Chain. $GLOAM is priced from DEX Screener, dollar stablecoins
  * are $1 and EURC is left unpriced, as before.
  */
 const SWAP_MARKED = new Set((SWAP_LANDABLE[4663] ?? []).map((t) => t.address.toLowerCase()));

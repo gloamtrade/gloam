@@ -204,9 +204,9 @@ check_asset USDT "$USDT" "${BNB_STABLE_LIMITS:-max}"
 check_asset USDC "$USDC" "${BNB_STABLE_LIMITS:-max}"
 check_asset BNB "$ZERO" "${BNB_NATIVE_LIMITS:-max}"
 check_asset BDX "$BDX" "${BNB_BDX_LIMITS:-100000/2000000}"
-# BDX is Beldex's LayerZero OFT: the token is its own OFT (token() is itself).
+# The BDX listed at deploy is the LayerZero OFT (token() is itself). Not Beldex's: see DEPLOY-BNB.md.
 same "$(call "$BDX" 'token()(address)')" "$BDX" || fail "BDX is not the LayerZero OFT (token() is not itself)."
-ok "BDX is the canonical OFT"
+ok "BDX is the LayerZero OFT listed at deploy"
 
 # The code, the same as on the other chains.
 [ "$(codehash "$POSEIDON")" = "$POSEIDON_T3_CODE" ] || fail "PoseidonT3's code is not circomlibjs's."

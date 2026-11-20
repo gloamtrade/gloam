@@ -32,12 +32,14 @@ const symbols = (chainId: number) => publicSendTokens(chainId).map((t) => t.symb
 test("every listed token goes out on every chain", () => {
   assert.deepEqual(symbols(4663), ["USDG", "GLOAM", "GRIFT", "PONS", "CASHCAT", "AI", "ORBIO"]);
   assert.deepEqual(symbols(4217), ["USDC.e", "pathUSD", "USDT0", "OUSD"]);
-  assert.deepEqual(symbols(8453), ["USDC", "EURC", "USDT", "BDX"]);
-  assert.deepEqual(symbols(1), ["USDC", "USDT", "USDG", "PYUSD", "EURC", "BDX"]);
+  assert.deepEqual(symbols(8453), ["USDC", "EURC", "USDT"]);
+  assert.deepEqual(symbols(1), ["USDC", "USDT", "USDG", "PYUSD", "EURC"]);
 });
 
 test("a token the vault does not take yet still goes out: no limit applies to a public send", () => {
-  for (const chainId of [4663, 8453, 1]) {
+  // Base and Ethereum have none since the BDX OFT (not Beldex's) was dropped on 20 Nov 2026.
+  for (const chainId of [8453, 1]) assert.deepEqual(limitGatedTokensFor(chainId), [], `${chainId} has no gated token`);
+  for (const chainId of [4663]) {
     const gated = limitGatedTokensFor(chainId);
     assert.ok(gated.length > 0, `${chainId} has a gated token`);
     for (const t of gated) assert.ok(publicSendTokens(chainId).some((x) => x.id === t.id), `${t.symbol} on ${chainId}`);

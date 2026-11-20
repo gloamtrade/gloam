@@ -117,7 +117,8 @@ contract NoDepositLimits is Script {
     /// @notice "No limit": the largest limit the vault can hold.
     uint128 constant MAX = type(uint128).max;
 
-    /// @notice Beldex's BDX (LayerZero OFT), the same address on Ethereum and Base.
+    /// @notice The LayerZero OFT named BDX, the same address on Ethereum and Base. Not Beldex's
+    ///         (Beldex's BDX is only on BNB Chain); closed to 0 / 0 in both vaults on 20 Nov 2026.
     address constant BDX = 0x6ad12E761b438beA3EA09F6C6266556Bb24C2181;
 
     /// @notice BDX stays capped: 100,000 per deposit, 2,000,000 in total (9 decimals),
