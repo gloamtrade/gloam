@@ -36,6 +36,7 @@ import {
   type ContestPlace,
 } from "@/lib/contest";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+import { BUYBACKS, buybackBurnedUnits } from "@/lib/buybacks";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
 import { huntEnabled } from "@/lib/hunt";
 
@@ -58,6 +59,33 @@ function claimLinkHow(): string {
 }
 
 /** The $GLOAM token, as gloam.trade/token shows it. The only contract address the helper may share. */
+
+const BUYBACK_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/**
+ * Glim's buyback facts, built from the same list as gloam.trade/token#buybacks
+ * (lib/buybacks), so a new round reaches Glim the moment it is logged instead of
+ * waiting for someone to rewrite this file.
+ */
+function buybackLines(): string[] {
+  const amount = (a: string) => Number(a).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const day = (d: string) => {
+    const [y, m, dd] = d.split("-").map(Number);
+    return `${dd} ${BUYBACK_MONTHS[m - 1]} ${y}`;
+  };
+  const total = amount((Number(buybackBurnedUnits()) / 1e18).toString());
+  const rounds = BUYBACKS.map((b, i) => {
+    const fees = Number(b.fromFees) > 0 ? ` plus ${amount(b.fromFees)} GLOAM the treasury already held from fees` : "";
+    const kept = Number(b.toTreasury) > 0 ? `, kept ${amount(b.toTreasury)} in the treasury` : "";
+    return `- Round ${i + 1} (${day(b.date)}): bought ${amount(b.gloamBought)} GLOAM${fees}; burned ${amount(b.burned)}${kept}. Burn transaction: https://robin.etherscan.io/tx/${b.txHash}. ${b.note ?? ""}`.trim();
+  });
+  return [
+    `- Buybacks so far: ${BUYBACKS.length} rounds, ${total} GLOAM burned in total, all sent to the burn address 0x000000000000000000000000000000000000dEaD. Every round and transaction is on gloam.trade/token#buybacks.`,
+    ...rounds,
+    "- The burn address also holds a little GLOAM sent there by outside wallets, so its balance is slightly above the buyback total. Circulating supply is the 500,000 total minus what sits at the burn address.",
+  ];
+}
+
 export const GLOAM_TOKEN = {
   address: "0xDcD885F5c60b3aD49F6D58718696417314e8724d",
   page: "gloam.trade/token",
@@ -573,7 +601,7 @@ function mainnetLiveFacts(): string {
       : "- The swap routers have no owner, no admin and no upgrade, and the vault itself did not change. They were reviewed internally, not externally audited. Their addresses are on gloam.trade/docs/private-swaps; point there instead of writing them out. Full guide: gloam.trade/docs/private-swaps.",
     "",
     "BUYBACKS (the current state; overrides any line below)",
-    "- The first buyback is done (31 October 2026): 183.01 GLOAM, bought with collected fees plus a $200 team top-up, all sent to the burn address 0x000000000000000000000000000000000000dEaD. Burn transaction: https://robin.etherscan.io/tx/0x4ed0e963486d72b4444236428a74732db37d6977145834a8ccf924c26af1dd6b. That round was all burned instead of half burned and half to the treasury. A second round on 6 November 2026 bought 417.41 GLOAM and burned 418.03 GLOAM (the extra was GLOAM the treasury already held from fees), again all of it: https://robin.etherscan.io/tx/0x59831426fa7d82fa4e46ddf4fee3125404e844f400f9a94fcd7c24a128622d5c. A third round on 13 November 2026 put all of that week's fees on Robinhood Chain and Base plus a $100 founder top-up into GLOAM (508.65 bought) and burned 543.87 GLOAM, again all of it: https://robin.etherscan.io/tx/0xde41b1a590bb601a55fd5432ca4f07395d02fa0ff82b0ce5a0ff1000d4c265ea. The burn address now holds about 1,146 GLOAM. Every round with its buy and burn transactions, the live burned total, the treasury address and the cash-out fee read from each vault are on gloam.trade/token (#buybacks, #fees). The contract's total supply still reads 500,000 because $GLOAM has no burn function: burned tokens sit at the dead address and can never move, so circulating supply goes down. Cash-out fees go to their own treasury wallet since 24 October, so every buyback can be followed on-chain, and the team posts each one's transaction. The first three rounds were burned in full because the team topped them up. From the next round, half of what is bought is burned and half goes to the Gloam treasury; Gloam currently puts half of its protocol fees toward buying $GLOAM, a treasury decision that can change or stop. Never give a future buyback's date, amount or size, and never say buybacks are live.",
+    ...buybackLines(),
     "",
     "CLAIM LINKS ON MAINNET",
     "- To claim: open the link, connect a wallet on the chain it names (Robinhood Chain for most), and tap Claim and secure. Or open Vault > Pay > Receive and paste it under Claim a payment: the box takes the whole link, the code alone, or a message with the link in it.",
