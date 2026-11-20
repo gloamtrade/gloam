@@ -228,8 +228,8 @@ function WritingEntries() {
         minWidth={1200}
       />
       <Note>
-        One entry per X handle; sending again replaces it. Check each post quotes the announcement, tags @gloamtrade and meets the length rule before
-        judging. Store: {data.backend}.
+        One entry per X handle; sending again replaces it. Before judging, check each entry tags @gloamtrade and meets the length rule, and that threads
+        quote the announcement (X Articles can&rsquo;t). Store: {data.backend}.
       </Note>
     </Panel>
   );

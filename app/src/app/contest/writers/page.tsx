@@ -54,6 +54,7 @@ const IDEAS = [
 const RULES = [
   `Threads have at least ${C.minThreadPosts} posts. Articles have at least ${C.minArticleWords} words.`,
   "Entries are posted on X: a thread, or an article published as an X Article.",
+  `Threads quote the announcement and tag @${C.account}. X Articles tag @${C.account}.`,
   "Original writing only. No AI-written entries.",
   "Write about the product, not the token price. No price predictions or investment advice.",
   "Get the facts right. Entries with false claims about Gloam are removed.",
@@ -72,6 +73,10 @@ const FAQ: [string, string][] = [
   [
     "Can I post my article on Medium or Substack too?",
     "Yes, share it anywhere you like. The entry itself has to be an X Article, and engagement is read on X.",
+  ],
+  [
+    "Does my X Article need to quote the announcement?",
+    `No. X Articles can’t quote a post. Tag @${C.account} in your article, then send us its link with the form.`,
   ],
   [
     "Can I use AI?",
@@ -181,15 +186,14 @@ export default function WritingContestPage() {
               share the article on other platforms too, but the entry is the one on X.
             </Step>
             <Step n={2} title="Post it on X">
-              Quote{" "}
+              For a thread, the first post quotes{" "}
               <a href={announcement} target="_blank" rel="noreferrer" className={TEXT_LINK}>
                 the contest announcement
               </a>{" "}
-              and tag @{C.account}. For a thread, that is the first post. For an X Article, share it in a post that quotes the
-              announcement.
+              and tags @{C.account}. An X Article can&rsquo;t quote a post, so just tag @{C.account} in it.
             </Step>
             <Step n={3} title="Send us the link">
-              Put the link to that post in{" "}
+              Put the link to your thread or X Article in{" "}
               <a href="#enter" className={TEXT_LINK}>
                 the form on this page
               </a>
@@ -236,7 +240,7 @@ export default function WritingContestPage() {
               <p className="mt-6 max-w-[40ch] text-[16px] leading-relaxed text-soft sm:text-[17px]">
                 {closed
                   ? `Thanks to everyone who entered. Winners are announced by ${winners} on @${C.account}.`
-                  : `Post your thread or article on X first, quoting the announcement and tagging @${C.account}. Then add the link here.`}
+                  : `Post your thread on X quoting the announcement, or publish your X Article, and tag @${C.account}. Then add the link here.`}
               </p>
               <p className="mt-6 max-w-[40ch] text-[13.5px] leading-relaxed text-mute">
                 Questions or a draft to share? Ask in{" "}
