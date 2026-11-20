@@ -7,7 +7,7 @@ import { MarkKey, TickRow } from "../charts";
 import { useAdminResource } from "../data";
 import { agoMs, lastDays, n } from "../format";
 import { countPoints, markDays } from "../series";
-import { CsvLink, DataTable, Note, Notice, Panel, PanelSkeleton, StatStrip } from "../ui";
+import { CsvLink, DataTable, Note, Notice, Panel, PanelSkeleton, SectionHead, StatStrip } from "../ui";
 
 export type ContestRow = {
   name: string;
@@ -38,8 +38,20 @@ export function contestFlags(entries: ContestRow[]) {
 
 const link = "underline decoration-line-strong underline-offset-4 hover:decoration-foreground";
 
-/** Video contest entries (gloam.trade/contest), latest change first, and the CSV. Read only. */
+/** Both contests, the open writing contest first. Read only. */
 export function ContestTab() {
+  return (
+    <>
+      <SectionHead title="Writing contest" sub="gloam.trade/contest/writers" />
+      <WritingEntries />
+      <SectionHead title="Video contest" sub="gloam.trade/contest" />
+      <VideoEntries />
+    </>
+  );
+}
+
+/** Video contest entries (gloam.trade/contest), latest change first, and the CSV. Read only. */
+function VideoEntries() {
   const res = useAdminResource<ContestData>("/api/contest/entries", "Contest entries");
   if (res.err && !res.data) return <Notice tone="danger">{res.err}</Notice>;
   const data = res.data;
@@ -107,7 +119,7 @@ export function ContestTab() {
           );
         })}
       </StreamCard>
-      <Panel title="Contest entries" sub="Latest change first" action={<CsvLink href="/api/contest/entries?format=csv">Download CSV</CsvLink>}>
+      <Panel title="Video contest entries" sub="Latest change first" action={<CsvLink href="/api/contest/entries?format=csv">Download CSV</CsvLink>}>
         <DataTable
           headers={["Name", "X handle", "Post on X", "Flag", "Network", "What it shows", "Email", "Marketing consent", "Submitted", "Updated"]}
           rows={entries.map((e) => [
@@ -149,7 +161,6 @@ export function ContestTab() {
           posts an entry replaced. Store: {data.backend}.
         </Note>
       </Panel>
-      <WritingEntries />
     </>
   );
 }
