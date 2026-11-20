@@ -45,6 +45,8 @@ const IDEAS = [
   "A private payment on Gloam, start to finish",
   "Private payroll for a remote team",
   "How AI agents can pay without exposing their owners",
+  "Private payments in a few lines of code with the Gloam SDK",
+  "Adding a Send privately button to any wallet or app with the SDK",
   "Private, but provable: showing one payment and nothing else",
   "What public-by-default money costs ordinary people",
 ];
