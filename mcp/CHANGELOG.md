@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.1 (20 November 2026)
+
+- Built with `@gloamtrade/sdk` 0.8.1: on BNB Chain, BDX is Beldex's BEP-20 `0x9d10a1ec41Fe7878429BB457e31F9b050D38c633`, not the LayerZero OFT that BDX uses on Base and Ethereum. A limit or payment naming BDX on `bnb-mainnet` now counts in that contract. No other change.
+
 ## 0.10.0 (19 November 2026)
 
 - **BNB Chain mainnet:** `GLOAM_NETWORK=bnb-mainnet` (chain `56`, gas in BNB), live since 19 November 2026. It takes USDT and USDC (18 decimals each), BNB and BDX. Its public RPCs keep about a day of logs, so set `GLOAM_RPC_URL_56` to an RPC that keeps them all. A read that hits pruned history fails loudly instead of reporting no payments. No private swaps there yet.

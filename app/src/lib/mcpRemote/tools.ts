@@ -922,7 +922,7 @@ function mppHowToMainnet(role: "pay" | "charge" | "both", network: NetworkKey): 
             ? named("RH_MAINNET_USDG", "      currency: RH_MAINNET_USDG, decimals: 6,             // or GLOAM_TOKEN, RH_MAINNET_PONS, RH_MAINNET_CASHCAT with decimals: 18", "USDG")
             : nativeStableLine(n);
   const getter = n.testnet ? "testnetNetwork" : "mainnetNetwork";
-  const sdkVersion = "0.8.0";
+  const sdkVersion = "0.8.1";
   const netLines = `const net = ${getter}("${family}");                   // null until the pool is published
 if (!net) throw new Error("${where} pool not published yet");`;
   const charge = {
