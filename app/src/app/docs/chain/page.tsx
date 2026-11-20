@@ -1016,8 +1016,8 @@ export default function DocsNetworksPage() {
             </li>
             <li>
               <strong>Assets</strong>, USDT and USDC ({BNB.usdt.decimals} decimals each, not 6),
-              BNB, the gas coin, and BDX ({BNB.bdx.decimals} decimals), Beldex&apos;s token as its
-              canonical LayerZero contract, the same address as on Base and Ethereum.
+              BNB, the gas coin, and BDX ({BNB.bdx.decimals} decimals), Beldex&apos;s own BEP-20 on
+              BNB Chain, <code>{BNB.bdx.address}</code>, not the LayerZero contract BDX uses on Base and Ethereum.
             </li>
             <li>
               <strong>Deposit limits</strong>, none on USDT, USDC and BNB, and 100,000 BDX per

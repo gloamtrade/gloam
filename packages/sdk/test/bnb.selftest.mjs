@@ -81,7 +81,7 @@ function throws(fn, re, msg) {
 const NO_LIMIT = (1n << 128n) - 1n;
 const USDT = "0x55d398326f99059fF775485246999027B3197955";
 const USDC = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
-const BDX = "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181";
+const BDX = "0x9d10a1ec41Fe7878429BB457e31F9b050D38c633";
 const ZERO = "0x0000000000000000000000000000000000000000";
 
 // ── the values, pool or not ────────────────────────────────────────────────────────
@@ -89,8 +89,8 @@ const ZERO = "0x0000000000000000000000000000000000000000";
   assert(sdk.BNB_MAINNET_CHAIN_ID === 56 && bnb.BNB_MAINNET.chainId === 56, "chain id 56");
   assert(bnb.BNB_MAINNET.usdt.address === USDT && bnb.BNB_MAINNET.usdt.decimals === 18, "USDT, 18 decimals (checked on chain)");
   assert(bnb.BNB_MAINNET.usdc.address === USDC && bnb.BNB_MAINNET.usdc.decimals === 18, "USDC, 18 decimals (checked on chain)");
-  assert(bnb.BNB_MAINNET.bdx.address === BDX && bnb.BNB_MAINNET.bdx.decimals === 9, "BDX OFT, 9 decimals, the same address as on Base and Ethereum");
-  assert(sdk.BASE_BDX === BDX, "one BDX address on Base and BNB Chain");
+  assert(bnb.BNB_MAINNET.bdx.address === BDX && bnb.BNB_MAINNET.bdx.decimals === 9, "BDX is Beldex's own BEP-20 on BNB Chain, 9 decimals");
+  assert(sdk.BASE_BDX.toLowerCase() !== BDX.toLowerCase(), "BNB Chain's BDX is not the OFT that Base and Ethereum use");
   assert(bnb.BNB_MAINNET.rpcUrls[0] === "https://bsc-rpc.publicnode.com", "first RPC answers eth_getLogs (recent blocks)");
   assert(bnb.BNB_NO_LOG_RPCS.includes("https://bsc-dataseed.bnbchain.org"), "the dataseed refuses log reads");
   assert(sdk.BNB_MAINNET_CHAIN.id === 56 && sdk.BNB_MAINNET_CHAIN.nativeCurrency.symbol === "BNB", "viem chain: 56, gas in BNB");

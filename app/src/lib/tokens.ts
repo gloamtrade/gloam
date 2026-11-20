@@ -328,7 +328,8 @@ export function nativeTokenFor(chainId: number): OnchainToken {
  * have 18 decimals there (not 6), read on chain on 18 Nov 2026 and kept in
  * packages/sdk/src/bnb.ts. Both are listed with no deposit limit, like the
  * stablecoins on Base; BNB, the gas coin, is the vault's native asset
- * (supportsNativeShield), with no limit either; BDX (Beldex's OFT, 9 decimals)
+ * (supportsNativeShield), with no limit either; BDX (Beldex's own BEP-20 on BNB
+ * Chain, 0x9d10…c633, not the OFT used on Base and Ethereum; 9 decimals)
  * is capped at 100,000 per deposit and 2,000,000 in total, all set in the deploy
  * itself (DEPLOY-BNB.md). Add reads each live limit as everywhere else.
  */

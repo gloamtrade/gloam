@@ -59,6 +59,16 @@ cannot be reproduced on BNB Chain (that deployer's key is retired).
 | BNB | native, `address(0)` | 18 | no limit | no limit |
 | BDX | `0x6ad12E761b438beA3EA09F6C6266556Bb24C2181` | 9 | 100,000 | 2,000,000 |
 
+> **Correction, 20 November 2026.** Beldex confirmed that BDX on BNB Chain is its own BEP-20
+> `0x9d10a1ec41Fe7878429BB457e31F9b050D38c633` (9 decimals, an EIP-1967 proxy), not the
+> LayerZero OFT above, which is Beldex's BDX on Base and Ethereum only. The vault launched with
+> the OFT listed (100,000 / 2,000,000). The Safe fixes it in one batch to the guard
+> `0x633B24cf4C48CF68cB815BC87C110c47E218B4af`: `lowerDepositLimit(0x6ad1…2181, 0, 0)` (at once)
+> and `queueChange(setDepositLimit(0x9d10…c633, 100,000e9, 2,000,000e9))`, then
+> `executeChange` with the same call once the 3-day timelock has passed. The SDK, app and MCP
+> name `0x9d10…c633` from SDK 0.8.1 / MCP 0.10.1; the deploy record and scripts below keep the
+> OFT because that is what the deploy set.
+
 This mirrors what is live on Base today (read on chain 18 Nov 2026: USDC, EURC, USDT and ETH
 at `type(uint128).max`, BDX at 100,000 / 2,000,000). "No limit" is `type(uint128).max`; the
 app, SDK and MCP read it as no limit. BDX is Beldex's LayerZero OFT, the same contract and
