@@ -147,9 +147,11 @@ export const BASE_EURC: Address =
 export const BASE_USDT: Address =
   "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2";
 /**
- * Beldex's BDX on Base mainnet: a LayerZero OFT, 9 decimals, the same contract
- * and address as on Ethereum (ETHEREUM_BDX). A plain ERC-20 (no transfer fee, no
- * rebasing); Beldex's owner can mint and pause mint and burn, never transfers.
+ * The LayerZero OFT named BELDEX/BDX on Base mainnet, 9 decimals, the same
+ * contract and address as on Ethereum (ETHEREUM_BDX), owner 0x5be3…9D30. Beldex
+ * says it is not theirs: Beldex's BDX exists only on BNB Chain (src/bnb.ts). Its
+ * deposit limit was closed to (0, 0) in the Base and Ethereum vaults on
+ * 20 November 2026, with nothing deposited, so the vault refuses it.
  */
 export const BASE_BDX: Address =
   "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181";
@@ -179,7 +181,7 @@ export const ETHEREUM_PYUSD: Address =
 /** Circle's EURC on Ethereum, 6 decimals. A euro stablecoin, never a dollar. */
 export const ETHEREUM_EURC: Address =
   "0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c";
-/** Beldex's BDX on Ethereum: the same LayerZero OFT and address as on Base (BASE_BDX), 9 decimals. */
+/** The LayerZero OFT named BDX on Ethereum, the same contract as BASE_BDX: not Beldex's, closed in the vault on 20 November 2026. */
 export const ETHEREUM_BDX: Address = BASE_BDX;
 /** Circle's test USDC on Ethereum Sepolia, 6 decimals (faucet.circle.com). */
 export const ETHEREUM_SEPOLIA_USDC: Address =
@@ -433,11 +435,10 @@ const baseEthLimit: DepositLimit = { perDeposit: units(20n, 18), total: units(1_
 const sepoliaEthLimit: DepositLimit = { perDeposit: 2n * 10n ** 17n, total: units(10n, 18) };
 
 /**
- * BDX on Base and Ethereum: no limit once its timelocked change lands (queued
- * 2026-10-30 through contracts/script/NoDepositLimits.s.sol, ready from
- * 2026-11-02). It reads 0 on chain until then, so the vault refuses BDX
- * deposits before it runs: assertDepositWithinLiveLimit reads the live value
- * and says so.
+ * The BDX OFT on Base and Ethereum. Not Beldex's token: its live limit was closed
+ * to (0, 0) on 20 November 2026, so the vault refuses it and
+ * assertDepositWithinLiveLimit, which reads the live value, says so. The value
+ * here is what it was opened with; the live one governs.
  */
 const bdxLimit: DepositLimit = NO_LIMIT;
 
@@ -522,7 +523,7 @@ export const BNB_MAINNET_CHAIN: Chain = defineChain({
 /**
  * BDX on BNB Chain stays capped while the stablecoins and BNB take any amount:
  * 100,000 per deposit and 2,000,000 in total, in BDX's own decimals (9), the
- * cap BDX has on Base and Ethereum (contracts/script/NoDepositLimits.s.sol).
+ * cap first set in contracts/script/NoDepositLimits.s.sol.
  */
 export function bdxCapFor(decimals: number): DepositLimit {
   return { perDeposit: units(100_000n, decimals), total: units(2_000_000n, decimals) };

@@ -667,7 +667,7 @@ export default function DocsNetworksPage() {
         <li>
           <strong>Mainnet assets</strong>,{" "}
           {BASE_MAINNET_TOKENS.filter((t) => t.kind === "stablecoin").map((t) => t.symbol).join(", ")}{" "}
-          (6 decimals each), ETH, and Beldex&apos;s BDX (9 decimals). USDC and EURC are Circle&apos;s; USDT is Tether bridged from
+          (6 decimals each) and ETH. USDC and EURC are Circle&apos;s; USDT is Tether bridged from
           Ethereum over Base&apos;s standard bridge.
         </li>
         <li>
@@ -702,10 +702,6 @@ export default function DocsNetworksPage() {
         <li>
           <strong>Deposit limits on Base Sepolia</strong>, each stablecoin 500 per
           deposit and 25,000 in total; ETH 0.2 per deposit and 10 in total
-        </li>
-        <li>
-          <strong>BDX on Base mainnet</strong>, 100,000 per deposit and 2,000,000 in total, set through
-          the vault&apos;s 3-day timelock. Add offers BDX once that limit is live on chain.
         </li>
       </ul>
 
@@ -768,16 +764,12 @@ export default function DocsNetworksPage() {
         </li>
         <li>
           <strong>Assets</strong>, {ETHEREUM_MAINNET_TOKENS.filter((t) => t.kind === "stablecoin").map((t) => t.symbol).join(", ")} (6
-          decimals each), ETH, and Beldex&apos;s BDX (9 decimals). USDC and EURC are Circle&apos;s, USDT is
+          decimals each) and ETH. USDC and EURC are Circle&apos;s, USDT is
           Tether&apos;s, USDG and PYUSD are issued by Paxos.
         </li>
         <li>
           <strong>Deposit limits</strong>, each stablecoin 50,000 per deposit and
           2,500,000 in total; ETH 20 per deposit and 1,000 in total
-        </li>
-        <li>
-          <strong>BDX</strong>, 100,000 per deposit and 2,000,000 in total, set through the
-          vault&apos;s 3-day timelock. Add offers BDX once that limit is live on chain.
         </li>
       </ul>
 
@@ -1017,7 +1009,7 @@ export default function DocsNetworksPage() {
             <li>
               <strong>Assets</strong>, USDT and USDC ({BNB.usdt.decimals} decimals each, not 6),
               BNB, the gas coin, and BDX ({BNB.bdx.decimals} decimals), Beldex&apos;s own BEP-20 on
-              BNB Chain, <code>{BNB.bdx.address}</code>, not the LayerZero contract BDX uses on Base and Ethereum.
+              BNB Chain, <code>{BNB.bdx.address}</code>. Beldex&apos;s BDX exists only on BNB Chain.
             </li>
             <li>
               <strong>Deposit limits</strong>, none on USDT, USDC and BNB, and 100,000 BDX per

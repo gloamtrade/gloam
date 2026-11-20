@@ -20,7 +20,8 @@ interface IERC20Decimals {
  * (bnb-mainnet-env.sh sets them, each limit from the token's own decimals()):
  *   USDT 0x55d398326f99059fF775485246999027B3197955  18 decimals
  *   USDC 0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d  18 decimals
- *   BDX  0x6ad12E761b438beA3EA09F6C6266556Bb24C2181   9 decimals (Beldex's LayerZero OFT)
+ *   BDX  0x6ad12E761b438beA3EA09F6C6266556Bb24C2181   9 decimals (the LayerZero OFT named BDX; not
+ *        Beldex's, which is 0x9d10a1ec41Fe7878429BB457e31F9b050D38c633, see DEPLOY-BNB.md)
  *   BNB  address(0), the native coin, 18 decimals
  * The stablecoins here have 18 decimals, not 6: a raw limit copied from Base
  * (50000000000 for 50,000 USDC) would cap USDT at 0.00000005. So this script

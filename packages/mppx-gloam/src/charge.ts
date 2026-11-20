@@ -195,7 +195,7 @@ export function assetDecimals(currency: Address, chainId?: number): number | und
     }
   }
   if (c === lc(NATIVE_ASSET) || c === lc(GLOAM_TOKEN)) return 18;
-  // BNB Chain's USDT and USDC (18 decimals) and BDX (9, the same address on Base and Ethereum).
+  // BNB Chain's USDT and USDC (18 decimals) and BDX (9, Beldex's own BEP-20).
   const bnb = bnbMainnetAssets().find((a) => lc(a.address) === c);
   if (bnb) return bnb.decimals;
   const sixes = [
@@ -274,7 +274,7 @@ export function assetSymbol(chainId: number, currency: Address): string {
   if (c === lc(BASE_USDT) || c === lc(ETHEREUM_USDT)) return "USDT";
   if (c === lc(ETHEREUM_USDG) || c === lc(ETHEREUM_SEPOLIA_USDG)) return "USDG";
   if (c === lc(ETHEREUM_PYUSD) || c === lc(ETHEREUM_SEPOLIA_PYUSD)) return "PYUSD";
-  // Anything else a network lists (BDX on Base and Ethereum, say), by that network's own symbol.
+  // Anything else a network lists, by that network's own symbol.
   const listed = networkForChainId(chainId)?.assets.find((a) => lc(a.address) === c);
   if (listed) return listed.symbol;
   return "TOKEN";

@@ -2,7 +2,7 @@
 
 ## 0.10.1 (20 November 2026)
 
-- Built with `@gloamtrade/sdk` 0.8.1: on BNB Chain, BDX is Beldex's BEP-20 `0x9d10a1ec41Fe7878429BB457e31F9b050D38c633`, not the LayerZero OFT that BDX uses on Base and Ethereum. A limit or payment naming BDX on `bnb-mainnet` now counts in that contract. No other change.
+- Built with `@gloamtrade/sdk` 0.8.1: on BNB Chain, BDX is Beldex's BEP-20 `0x9d10a1ec41Fe7878429BB457e31F9b050D38c633`, not the LayerZero OFT named BDX, which is not Beldex's (closed in every vault on 20 November 2026). A limit or payment naming BDX on `bnb-mainnet` now counts in that contract. No other change.
 
 ## 0.10.0 (19 November 2026)
 

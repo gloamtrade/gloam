@@ -92,7 +92,6 @@ const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 const USDT = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const USDG = "0xe343167631d89B6Ffc58B88d6b7fB0228795491D";
 const PYUSD = "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8";
-const BDX = "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181";
 const EURC = "0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c";
 
 // ---------------------------------------------------------------- both runs
@@ -135,7 +134,6 @@ check("Ethereum assets as checked on chain, EURC never a dollar, USDT approvals 
       ["USDG", USDG, 6],
       ["PYUSD", PYUSD, 6],
       ["EURC", EURC, 6],
-      ["BDX", BDX, 9],
     ]
   );
   assert.equal(tokens.supportsNativeShield(1), true);
@@ -256,7 +254,7 @@ if (CONFIGURED) {
     const assets = requestAssetsFor("ethereum-mainnet");
     assert.deepEqual(
       assets.map((a) => a.symbol),
-      ["USDC", "USDT", "USDG", "PYUSD", "EURC", "ETH", "BDX"]
+      ["USDC", "USDT", "USDG", "PYUSD", "EURC", "ETH"]
     );
     assert.ok(assets.find((a) => a.symbol === "ETH")!.native);
     // A Base mainnet USDC code opened on Ethereum (same vault address) is refused.

@@ -136,7 +136,6 @@ check("Base assets as checked on chain, with EURC never counted as a dollar", ()
       ["USDC", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 6],
       ["EURC", "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42", 6],
       ["USDT", "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", 6],
-      ["BDX", "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181", 9],
     ]
   );
   assert.equal(tokens.supportsNativeShield(84532), true);

@@ -32,8 +32,11 @@ assert.equal(SDK_NOTE_MAX, REQUEST_NOTE_MAX, "the same note cap");
 const amounts = ["25", "12.5", "0.000001", undefined];
 const notes = ["agent-42", "Invoice 042 · October", "a".repeat(80), undefined];
 // Only the networks this build runs on: Elysium joins once NEXT_PUBLIC_ELYSIUM_ENABLED is on (lib/elysium.ts).
+// The SDK still lists the LayerZero OFT named BDX on Base and Ethereum (closed to 0 / 0 in both
+// vaults on 20 Nov 2026; not Beldex's, whose BDX is only on BNB Chain). The app no longer offers it there.
+const DROPPED_FROM_APP = new Set(["0x6ad12e761b438bea3ea09f6c6266556bb24c2181"]);
 for (const net of gloamNetworks().filter((x) => isNetworkKey(x.key))) {
-  for (const asset of net.assets) {
+  for (const asset of net.assets.filter((a) => !(net.chainId !== 56 && DROPPED_FROM_APP.has(a.address.toLowerCase())))) {
     for (let i = 0; i < amounts.length; i++) {
       const amount = asset.decimals < 6 && amounts[i]?.includes(".") ? "7" : amounts[i];
       const note = notes[i];

@@ -25,9 +25,11 @@
  * starts approving mainnet assets by itself. Mainnet-only symbols (USDC.e,
  * USDT0, GLOAM, USDT, BDX, PONS, CASHCAT, AI, ORBIO) and mainnet-only addresses
  * (USDG on Robinhood Chain mainnet, USDC on Base, every Ethereum token) name the
- * mainnet asset directly. A symbol on two mainnets (USDT and BDX on Base and Ethereum) names
- * the first listed, Base; name "ethereum-mainnet" for Ethereum's. BDX sits at
- * the same address on both, so its address alone names Base's too.
+ * mainnet asset directly. A symbol on two mainnets (USDT on Base and Ethereum) names
+ * the first listed, Base; name "ethereum-mainnet" for Ethereum's. BDX on Base and
+ * Ethereum is a LayerZero OFT that is not Beldex's, closed in both vaults on
+ * 20 November 2026, so a limit naming it there never spends; Beldex's BDX is on
+ * BNB Chain.
  */
 import { formatUnits, isAddress, parseUnits, type Address } from "viem";
 import { z } from "zod";

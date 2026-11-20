@@ -15,9 +15,10 @@
  *         0xc67da833af386d2b124378fabd166a2eac0d271b), owner
  *         0x20F4c72FA65CEd48fc3f4eeD77898D24b162Bb8C. Confirmed by Beldex on
  *         20 November 2026. The LayerZero OFT at 0x6ad12E761b438beA3EA09F6C6266556Bb24C2181
- *         (Beldex's BDX on Base and Ethereum) also exists on BNB Chain but is not
- *         Beldex's contract there; the vault launched with the OFT listed and its
- *         limit is lowered to 0 while this one is queued through the guard's timelock.
+ *         (named BELDEX/BDX, the same address on Base and Ethereum) is not Beldex's;
+ *         Beldex's BDX exists only on BNB Chain. The vault launched with the OFT
+ *         listed; on 20 November 2026 its limit was lowered to 0 on every chain and
+ *         this one was queued through the guard's timelock.
  *   Multicall3 at its usual address
  *
  * The stablecoins on BNB Chain have 18 decimals, not 6 like everywhere else
@@ -65,7 +66,7 @@ export interface BnbMainnetInput {
   usdt: BnbToken;
   /** USDC on BNB Chain (Binance-Peg), 18 decimals. */
   usdc: BnbToken;
-  /** Beldex's BDX on BNB Chain, its own BEP-20 (not the OFT used on Base and Ethereum), 9 decimals. */
+  /** Beldex's BDX on BNB Chain, its own BEP-20 (not the LayerZero OFT named BDX), 9 decimals. */
   bdx: BnbToken;
   /** ShieldPoolPayments on BNB Chain, from the deploy. */
   pool: Address | null;

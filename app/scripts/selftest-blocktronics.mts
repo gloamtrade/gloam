@@ -462,8 +462,9 @@ await test("the route: only Gloam's own checkable tokens, on the three chains; b
   }
   assert.equal((await get(`chain=base&token=${PONS}`)).status, 404, "PONS is a Robinhood Chain token");
   assert.equal(outbound.length, 0, "nothing was asked about any of them");
-  assert.equal((await get(`chain=base&token=${BDX}`)).status, 200);
-  assert.equal((await get(`chain=ethereum&token=${BDX}`)).status, 200);
+  // the BDX OFT is not Beldex's and was closed on Base and Ethereum on 20 Nov 2026: no longer offered
+  assert.equal((await get(`chain=base&token=${BDX}`)).status, 404);
+  assert.equal((await get(`chain=ethereum&token=${BDX}`)).status, 404);
 });
 
 await test("the route holds each IP to 30 a minute", async () => {
@@ -689,7 +690,9 @@ await test("which tokens get a check: Gloam's own tokens on Robinhood Chain, Bas
   for (const t of [GLOAM, PONS, CASHCAT, ORBIO, AI, VIRTUAL, GRIFT]) assert.ok(ti.checkableToken(4663, t), t);
   assert.ok(ti.checkableToken(4663, GLOAM.toUpperCase().replace("0X", "0x")), "any case");
   for (const t of [USDG_RH, WETH_RH, NVDA_RH, "0x0000000000000000000000000000000000000000", OUTSIDER, null, undefined]) assert.equal(ti.checkableToken(4663, t), null, String(t));
-  assert.ok(ti.checkableToken(8453, BDX) && ti.checkableToken(1, BDX));
+  // the BDX OFT on Base and Ethereum is not Beldex's and is no longer listed there
+  assert.equal(ti.checkableToken(8453, BDX), null);
+  assert.equal(ti.checkableToken(1, BDX), null);
   for (const id of [4217, 46630, 84532, 11155111, 99901]) assert.equal(ti.checkableToken(id, GLOAM), null, `chain ${id}`);
   assert.equal(ti.blocktronicsTokenUrl("base", BDX.toUpperCase().replace("0X", "0x")), `https://blocktronics.xyz/t/base/${BDX}`);
 });
@@ -752,7 +755,8 @@ await test("Glim: what counts as a token check", () => {
   assert.deepEqual(ask("is PONS safe"), { address: null, symbol: "PONS", chain: null }, "a ticker in capitals");
   assert.deepEqual(ask("is the cashcat token legit?"), { address: null, symbol: "CASHCAT", chain: null });
   assert.deepEqual(ask("token check orbio"), { address: null, symbol: "ORBIO", chain: null });
-  assert.deepEqual(ask("is $BDX on base safe to buy?"), { address: null, symbol: "BDX", chain: "base" });
+  // BDX on Base is no longer one of Gloam's tokens (the OFT there is not Beldex's)
+  assert.equal(ask("is $BDX on base safe to buy?"), null);
   for (const no of [
     "is gloam safe?", // the app, most likely
     "is ai safe?",

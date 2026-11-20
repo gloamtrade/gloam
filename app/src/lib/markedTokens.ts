@@ -2,8 +2,8 @@ import { BASE_MAINNET_TOKENS, BNB_MAINNET_TOKENS, ELYSIUM_MAINNET_TOKENS, ETHERE
 
 /**
  * Tokens the markets feed does not price: on Robinhood Chain mainnet $GLOAM,
- * PONS, CASHCAT, AI, ORBIO and the swap tokens such as cbBTC, and on Base and
- * Ethereum BDX. The list is fixed, never the viewer's holdings, so asking for
+ * PONS, CASHCAT, AI, ORBIO and the swap tokens such as cbBTC, and BDX on BNB
+ * Chain. The list is fixed, never the viewer's holdings, so asking for
  * it says nothing about what a wallet holds. Stocks come from the markets feed,
  * WETH from ETH's price and dollar stablecoins are $1. EURC is a stablecoin
  * here, so it stays off the list and unpriced: a euro is never $1.
@@ -13,7 +13,7 @@ const LISTED: readonly (readonly [chainId: number, tokens: readonly OnchainToken
   [8453, BASE_MAINNET_TOKENS],
   [1, ETHEREUM_MAINNET_TOKENS],
   [99901, ELYSIUM_MAINNET_TOKENS],
-  // BNB Chain, only while it is on (lib/bnb): BDX is priced here, like on Base and Ethereum.
+  // BNB Chain, only while it is on (lib/bnb): BDX, Beldex's BEP-20, is priced here.
   ...(BNB_MAINNET_TOKENS.length ? ([[56, BNB_MAINNET_TOKENS]] as const) : []),
 ];
 
@@ -31,7 +31,7 @@ function uniqueByAddress(tokens: readonly OnchainToken[]): OnchainToken[] {
 
 export const COINGECKO_MARKED: OnchainToken[] = uniqueByAddress(LISTED.flatMap(([, tokens]) => tokens.filter(marked)));
 
-/** The same tokens by chain, for a lookup by address: BDX has one address on both Base and Ethereum, and is under each. */
+/** The same tokens by chain, for a lookup by address. */
 export const MARKED_BY_CHAIN: { chainId: number; tokens: OnchainToken[] }[] = LISTED.map(([chainId, tokens]) => ({
   chainId,
   tokens: uniqueByAddress(tokens.filter(marked)),
@@ -46,13 +46,7 @@ export const STOCK_FALLBACK_MARKED: OnchainToken[] = uniqueByAddress(
   RH_MAINNET_SWAP_TOKENS.filter((t) => Boolean(t.coingecko) && t.kind === "stock")
 );
 
-/** Chains whose listed tokens include one priced here: Robinhood Chain, Base and Ethereum mainnet. */
+/** Chains whose listed tokens include one priced here (Robinhood Chain mainnet, and BNB Chain for BDX). */
 export function hasCoingeckoMarks(chainId: number): boolean {
-  return (
-    chainId === 4663 ||
-    chainId === 8453 ||
-    chainId === 1 ||
-    (chainId === 99901 && ELYSIUM_MAINNET_TOKENS.length > 0) ||
-    (chainId === 56 && BNB_MAINNET_TOKENS.length > 0)
-  );
+  return MARKED_BY_CHAIN.some((c) => c.chainId === chainId && c.tokens.length > 0);
 }

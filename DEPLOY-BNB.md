@@ -61,7 +61,9 @@ cannot be reproduced on BNB Chain (that deployer's key is retired).
 
 > **Correction, 20 November 2026.** Beldex confirmed that BDX on BNB Chain is its own BEP-20
 > `0x9d10a1ec41Fe7878429BB457e31F9b050D38c633` (9 decimals, an EIP-1967 proxy), not the
-> LayerZero OFT above, which is Beldex's BDX on Base and Ethereum only. The vault launched with
+> LayerZero OFT above. Beldex's BDX exists only on BNB Chain; the OFT (the same address on Base
+> and Ethereum) is not Beldex's, and the Safe closed it to 0 / 0 on Base and Ethereum the same
+> day, with nothing deposited. The vault launched with
 > the OFT listed (100,000 / 2,000,000). The Safe fixes it in one batch to the guard
 > `0x633B24cf4C48CF68cB815BC87C110c47E218B4af`: `lowerDepositLimit(0x6ad1…2181, 0, 0)` (at once)
 > and `queueChange(setDepositLimit(0x9d10…c633, 100,000e9, 2,000,000e9))`, then
@@ -71,8 +73,9 @@ cannot be reproduced on BNB Chain (that deployer's key is retired).
 
 This mirrors what is live on Base today (read on chain 18 Nov 2026: USDC, EURC, USDT and ETH
 at `type(uint128).max`, BDX at 100,000 / 2,000,000). "No limit" is `type(uint128).max`; the
-app, SDK and MCP read it as no limit. BDX is Beldex's LayerZero OFT, the same contract and
-owner as on Base and Ethereum (`token()` is itself). Lowering any limit later is instant
+app, SDK and MCP read it as no limit. The BDX listed at deploy was the LayerZero OFT, the same
+contract and owner as on Base and Ethereum (`token()` is itself), which Beldex says is not theirs
+(see the correction above). Lowering any limit later is instant
 (the Safe calls `lowerDepositLimit` through the guard, down to 0 / 0 to close an asset);
 raising one takes the 3-day timelock.
 
