@@ -86,6 +86,21 @@ export const BUYBACKS: BuybackEntry[] = [
     toTreasury: "0",
     note: "This round was 100% burned: all of the week's fees on Robinhood Chain and Base, plus a founder top-up.",
   },
+  {
+    date: "2026-11-20",
+    chainId: 4663,
+    txHash: "0xf0c8d99c8703e2ab9afe767dc4c2796b1b39ca77a8ee71fcf6264875746e0001",
+    buyTxs: [
+      "0xc209bc27989d6ab8e3e7a19b28330dfa0acddaba00bd61633176727b5c69688e",
+      "0x146317fa2bb774d459e4602a999a4859ee055f5b6fd09de3f01490818bd61e8f",
+      "0x6835668d2cd5af6583cde8b82112988a1c5abc43eddc45e2b84fe5e0eeca72d0",
+    ],
+    gloamBought: "341.747029369516057441",
+    fromFees: "0",
+    burned: "341.747029369516057441",
+    toTreasury: "0",
+    note: "This round was 100% burned: all of the week's fees on Robinhood Chain and Base, plus a founder top-up.",
+  },
 ];
 
 /** A decimal token amount as base units (18 decimals). */
