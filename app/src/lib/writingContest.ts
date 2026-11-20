@@ -41,13 +41,17 @@ export function writingClosed(now = Date.now()): boolean {
   return now > Date.parse(WRITING_CONTEST.closesAt);
 }
 
-/** How an entry is judged: name, what it means, weight in percent. Quality is 60, engagement 40. */
+/** How an entry is judged: name, what it means, weight in percent. Quality (with the app flow) is 65, engagement 35. */
 export const WRITING_JUDGING: [string, string, number][] = [
-  ["Accuracy", "Gets Gloam right. No invented features, no price talk.", 25],
-  ["Clarity", "A reader who has never heard of Gloam understands what it does and why privacy matters.", 20],
-  ["Originality", "Your own angle and your own words, not a rewrite of our docs.", 15],
-  ["Engagement", "Replies, reposts and quotes from real accounts, read when entries close. Bought engagement removes the entry.", 40],
+  ["A real flow in the app", "Your own screenshots or screen recording of Gloam on mainnet: a private payment, a cash out, a payroll run or a claim link. Testnet doesn’t count.", 25],
+  ["Accuracy", "Gets Gloam right. No invented features, no price talk.", 15],
+  ["Clarity", "A reader who has never heard of Gloam understands what it does and why privacy matters.", 15],
+  ["Originality", "Your own angle and your own words, not a rewrite of our docs.", 10],
+  ["Engagement", "Replies, reposts and quotes from real accounts, read when entries close. Bought engagement removes the entry.", 35],
 ];
+
+/** The share of the score that is engagement; the rest is quality. */
+export const WRITING_ENGAGEMENT_WEIGHT = WRITING_JUDGING.find(([name]) => name === "Engagement")?.[2] ?? 0;
 
 export const WRITING_KINDS = ["thread", "article"] as const;
 export type WritingKind = (typeof WRITING_KINDS)[number];

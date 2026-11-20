@@ -3,7 +3,14 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { FlowField } from "@/components/ui/FlowField";
 import { contestDay, contestTime, placeLabel } from "@/lib/contest";
-import { WRITING_CONTEST, WRITING_EQUAL_PRIZES, WRITING_JUDGING, WRITING_POOL, writingClosed } from "@/lib/writingContest";
+import {
+  WRITING_CONTEST,
+  WRITING_ENGAGEMENT_WEIGHT,
+  WRITING_EQUAL_PRIZES,
+  WRITING_JUDGING,
+  WRITING_POOL,
+  writingClosed,
+} from "@/lib/writingContest";
 import { BulletList, CriteriaList, DateCard, Faq, SECTION, SectionHead, Step, TEXT_LINK } from "../parts";
 import { WritingForm } from "./WritingForm";
 
@@ -48,6 +55,7 @@ const RULES = [
   "Original writing only. No AI-written entries.",
   "Write about the product, not the token price. No price predictions or investment advice.",
   "Get the facts right. Entries with false claims about Gloam are removed.",
+  "Screenshots from the app are your own, from mainnet. Never show a seed phrase, private key, backup or an unclaimed claim link.",
   "One entry per X account.",
   "The post stays public until winners are paid.",
   "No bought likes, reposts, views or followers.",
@@ -69,7 +77,11 @@ const FAQ: [string, string][] = [
   ],
   [
     "Do I need to use the app?",
-    "No. It helps, though: writing that walks through a real private payment on mainnet usually explains Gloam better.",
+    "It isn’t required, but it scores much higher. A real flow in the app is the biggest single quality score: show a private payment, a cash out, a payroll run or a claim link on mainnet with your own screenshots or a screen recording. Testnet doesn’t count.",
+  ],
+  [
+    "What should I hide in my screenshots?",
+    "Anything that gives access to your money: seed phrases, private keys, backups and claim links that haven’t been claimed yet. Amounts and addresses are your call.",
   ],
   [
     "Where do I check my facts?",
@@ -140,6 +152,8 @@ export default function WritingContestPage() {
           <SectionHead id="write" label="What to write" title="A thread or an article about Gloam.">
             Explain it, teach it or make the case for it. A thread of at least {C.minThreadPosts} posts or an article of at
             least {C.minArticleWords} words. It has to get Gloam right and give the reader something worth their time.
+            Writing that shows a real flow in the app, with your own screenshots or a screen recording from mainnet,
+            scores much higher.
           </SectionHead>
           <div className="mt-12 max-w-[720px]">
             <p className="text-[14px] text-mute">Some ideas</p>
@@ -195,9 +209,10 @@ export default function WritingContestPage() {
         {/* judging */}
         <section id="judging" aria-labelledby="judging-title" className={SECTION}>
           <SectionHead id="judging" label="Judging" title="Quality first, then reach.">
-            Quality counts for 60% and engagement for 40%. Engagement means real replies, reposts and quotes, read when
-            entries close. Bought engagement, engagement pods and raid groups remove the entry. The Gloam team picks the
-            winners, and the decision is final.
+            Quality counts for {100 - WRITING_ENGAGEMENT_WEIGHT}% and engagement for {WRITING_ENGAGEMENT_WEIGHT}%. Showing
+            a real flow in the app is the biggest single quality score. Engagement means real replies, reposts and quotes,
+            read when entries close. Bought engagement, engagement pods and raid groups remove the entry. The Gloam team
+            picks the winners, and the decision is final.
           </SectionHead>
           <CriteriaList items={WRITING_JUDGING} />
         </section>
