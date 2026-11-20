@@ -14,7 +14,7 @@ export const WRITING_CONTEST = {
   name: "Gloam Writing Contest",
   path: "/contest/writers",
   /** Prizes in US dollars, by place. The total is their sum. */
-  prizes: [100, 100, 100, 100],
+  prizes: [150, 100, 100, 100],
   /** Entries open (UTC). */
   opensAt: "2026-11-20T00:00:00Z",
   /** The last moment an entry is taken (UTC). After it the form is closed. */
