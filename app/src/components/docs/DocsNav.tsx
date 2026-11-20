@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { IntentLink } from "@/components/IntentLink";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
+import { FRESH_WALLET_ENABLED } from "@/lib/freshWalletFlag";
 
 /**
  * The docs map: sidebar groups, top tabs, and the helpers that decide what is
@@ -48,7 +49,7 @@ export const DOCS_NAV: DocNavGroup[] = [
       { href: "/docs/private-pay", label: "Private pay" },
       { href: "/docs/private-swaps", label: "Private swaps" },
       { href: "/docs/bridge", label: "Deposit from another chain" },
-      { href: "/docs/fresh-wallet", label: "Fund a fresh wallet for Borro" },
+      ...(FRESH_WALLET_ENABLED ? [{ href: "/docs/fresh-wallet", label: "Fund a fresh wallet for Borro" }] : []),
       { href: "/docs/encryption", label: "How shield works" },
       { href: "/docs/privacy-model", label: "What stays private" },
       { href: "/docs/threat-model", label: "Threat model" },
@@ -85,7 +86,7 @@ export const DOCS_TABS: DocsTab[] = [
     match: ["/docs", "/docs/testnet", "/docs/product", "/docs/production"],
   },
   { label: "Payroll", href: "/docs/payroll", match: ["/docs/payroll"] },
-  { label: "Payments", href: "/docs/private-pay", match: ["/docs/private-pay", "/docs/private-swaps", "/docs/bridge", "/docs/fresh-wallet"] },
+  { label: "Payments", href: "/docs/private-pay", match: ["/docs/private-pay", "/docs/private-swaps", "/docs/bridge", ...(FRESH_WALLET_ENABLED ? ["/docs/fresh-wallet"] : [])] },
   {
     label: "Privacy",
     href: "/docs/privacy-model",

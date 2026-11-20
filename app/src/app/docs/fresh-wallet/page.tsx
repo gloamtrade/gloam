@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { FRESH_WALLET_PATH } from "@/lib/gasStation";
+import { FRESH_WALLET_ENABLED } from "@/lib/freshWalletFlag";
 
 export const metadata: Metadata = {
   title: "Fund a fresh wallet for Borro",
@@ -11,6 +13,8 @@ export const metadata: Metadata = {
 };
 
 export default function DocsFreshWalletPage() {
+  // Off for now (lib/freshWalletFlag): the guide answers 404 until the flag is "1".
+  if (!FRESH_WALLET_ENABLED) notFound();
   return (
     <DocsLayout
       title="Fund a fresh wallet for Borro"
