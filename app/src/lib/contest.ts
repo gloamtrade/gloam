@@ -152,7 +152,7 @@ export class ContestInputError extends Error {
 }
 
 /** Trimmed single-line text without control characters. */
-function clean(v: unknown): string {
+export function clean(v: unknown): string {
   if (typeof v !== "string") return "";
   return v
     .replace(/[\u0000-\u001f\u007f]+/g, " ")
@@ -160,7 +160,7 @@ function clean(v: unknown): string {
     .trim();
 }
 
-const HANDLE_RE = /^[A-Za-z0-9_]{1,15}$/;
+export const HANDLE_RE = /^[A-Za-z0-9_]{1,15}$/;
 const X_HOSTS = new Set(["x.com", "www.x.com", "mobile.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"]);
 const STATUS_PATH = /^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,20})(?:\/[A-Za-z0-9_/]*)?$/;
 

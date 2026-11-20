@@ -289,6 +289,16 @@ export default function PrivacyPage() {
         <a href="mailto:hello@gloam.trade">hello@gloam.trade</a> to have yours
         deleted sooner.
       </p>
+      <p>
+        If you enter the writing contest at gloam.trade/contest/writers, we keep
+        what you send: your name, X handle, the link to your post, whether it
+        is a thread or an article, its title if you give one and, if you give
+        it, your email. We also note when you entered, when you last changed
+        your entry, and when you agreed that Gloam may share and quote your
+        writing with credit to you. We use it the same way as video contest
+        entries, keep it for the same time, and delete it sooner if you ask at{" "}
+        <a href="mailto:hello@gloam.trade">hello@gloam.trade</a>.
+      </p>
       <h2>10. Glim, our Telegram helper</h2>
       <p>
         Glim is a bot in the Gloam Telegram group (t.me/gloamhq). It reads the

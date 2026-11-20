@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import type { ReactNode } from "react";
+import Link from "next/link";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { FlowField } from "@/components/ui/FlowField";
@@ -14,7 +14,9 @@ import {
   placeLabel,
   type ContestPlace,
 } from "@/lib/contest";
+import { WRITING_CONTEST } from "@/lib/writingContest";
 import { ContestForm } from "./ContestForm";
+import { BulletList, CriteriaList, DateCard, Faq, SECTION, SectionHead, Step, TEXT_LINK } from "./parts";
 
 /**
  * /contest: the Gloam Video Contest. One idea per section: the prize, what to
@@ -116,19 +118,6 @@ const RESULTS_FAQ: [string, string][] = [
   ],
 ];
 
-function SectionHead({ id, label, title, children }: { id: string; label: string; title: string; children?: ReactNode }) {
-  return (
-    <div className="max-w-[720px]">
-      <p className="t-label">{label}</p>
-      <h2 id={`${id}-title`} className="t-display-l mt-4">
-        {title}
-      </h2>
-      {children && <div className="mt-5 max-w-[56ch] text-[17px] leading-[1.6] text-mute sm:text-[19px]">{children}</div>}
-    </div>
-  );
-}
-
-const SECTION = "mx-auto max-w-[1240px] scroll-mt-24 px-5 pt-24 sm:px-7 sm:pt-36";
 
 export default function ContestPage() {
   const closed = contestClosed();
@@ -136,7 +125,6 @@ export default function ContestPage() {
   const closes = `${contestDay(CONTEST.closesAt)} at ${contestTime(CONTEST.closesAt)}`;
   const winners = contestDay(CONTEST.winnersBy);
   const announcement = CONTEST.announcementUrl ?? `https://x.com/${CONTEST.account}`;
-  const xLink = "text-foreground underline decoration-line-strong underline-offset-4 hover:decoration-foreground";
 
   return (
     <div className="relative min-h-screen bg-panel text-foreground">
@@ -162,6 +150,9 @@ export default function ContestPage() {
                   <a href="#judged" className="gl-arrowlink">
                     How we judged <span aria-hidden>→</span>
                   </a>
+                  <Link href={WRITING_CONTEST.path} className="gl-arrowlink">
+                    Now open: the writing contest <span aria-hidden>→</span>
+                  </Link>
                 </div>
                 <p className="tnum mt-8 text-[13.5px] text-mute">
                   {RESULTS.entries} entries, {contestDay(CONTEST.opensAt, false)} to {contestDay(CONTEST.closesAt)}. Announced{" "}
@@ -279,7 +270,7 @@ export default function ContestPage() {
                 </Step>
               </ol>
               <h3 className="mt-16 text-[22px] font-light tracking-[-0.015em] sm:mt-20 sm:text-[26px]">The criteria</h3>
-              <CriteriaList />
+              <CriteriaList items={JUDGING} />
             </section>
           </>
         )}
@@ -339,14 +330,14 @@ export default function ContestPage() {
             </Step>
             <Step n={2} title="Post it on X">
               Upload the video to the post itself. Quote{" "}
-              <a href={announcement} target="_blank" rel="noreferrer" className={xLink}>
+              <a href={announcement} target="_blank" rel="noreferrer" className={TEXT_LINK}>
                 the contest announcement
               </a>
               , and tag @{CONTEST.account}. Links to YouTube or other sites don&rsquo;t count.
             </Step>
             <Step n={3} title="Send us the link">
               Put the link to your post in{" "}
-              <a href="#enter" className={xLink}>
+              <a href="#enter" className={TEXT_LINK}>
                 the form on this page
               </a>
               .
@@ -376,21 +367,14 @@ export default function ContestPage() {
               Likes and views are not counted, so bought engagement doesn&rsquo;t help. The Gloam team picks the winners,
               and the decision is final.
             </SectionHead>
-            <CriteriaList />
+            <CriteriaList items={JUDGING} />
           </section>
         )}
 
         {/* rules */}
         <section id="rules" aria-labelledby="rules-title" className={SECTION}>
           <SectionHead id="rules" label="Rules" title="Keep it fair." />
-          <ul className="mt-12 grid max-w-[880px] gap-x-12 sm:grid-cols-2">
-            {RULES.map((r) => (
-              <li key={r} className="flex items-start gap-3 border-b border-line py-4 text-[16px] leading-relaxed text-soft">
-                <span aria-hidden className="mt-[10px] h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/40" />
-                {r}
-              </li>
-            ))}
-          </ul>
+          <BulletList items={RULES} />
         </section>
 
         {/* the form */}
@@ -409,7 +393,7 @@ export default function ContestPage() {
               </p>
               <p className="mt-6 max-w-[40ch] text-[13.5px] leading-relaxed text-mute">
                 Questions or a draft to share? Ask in{" "}
-                <a href={CONTEST.telegramUrl} target="_blank" rel="noreferrer" className={xLink}>
+                <a href={CONTEST.telegramUrl} target="_blank" rel="noreferrer" className={TEXT_LINK}>
                   the Creators topic on Telegram
                 </a>
                 .
@@ -429,26 +413,14 @@ export default function ContestPage() {
         {/* faq */}
         <section id="faq" aria-labelledby="faq-title" className={SECTION}>
           <SectionHead id="faq" label="FAQ" title="Questions." />
-          <div className="mt-12 max-w-[820px] divide-y divide-line border-y border-line">
-            {(RESULTS ? RESULTS_FAQ : FAQ).map(([q, a]) => (
-              <details key={q} className="group py-1">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-6 py-5 text-[17px] text-foreground sm:text-[19px] [&::-webkit-details-marker]:hidden">
-                  {q}
-                  <span aria-hidden className="text-[20px] leading-none text-mute transition-transform group-open:rotate-45">
-                    +
-                  </span>
-                </summary>
-                <p className="max-w-[60ch] pb-6 text-[15.5px] leading-relaxed text-soft">{a}</p>
-              </details>
-            ))}
-          </div>
+          <Faq items={RESULTS ? RESULTS_FAQ : FAQ} />
           <p className="mt-8 text-[14px] text-mute">
             Anything else? Ask{" "}
-            <a href={`https://x.com/${CONTEST.account}`} target="_blank" rel="noreferrer" className={xLink}>
+            <a href={`https://x.com/${CONTEST.account}`} target="_blank" rel="noreferrer" className={TEXT_LINK}>
               @{CONTEST.account}
             </a>{" "}
             on X or email{" "}
-            <a href="mailto:hello@gloam.trade" className={xLink}>
+            <a href="mailto:hello@gloam.trade" className={TEXT_LINK}>
               hello@gloam.trade
             </a>
             .
@@ -488,42 +460,5 @@ function WinnerCard({ place, entry }: { place: string; entry: ContestPlace }) {
         </a>
       </div>
     </li>
-  );
-}
-
-function CriteriaList() {
-  return (
-    <ul className="mt-12 divide-y divide-line border-y border-line">
-      {JUDGING.map(([name, line, weight]) => (
-        <li key={name} className="grid grid-cols-[1fr_auto] items-baseline gap-x-6 gap-y-1 py-6 sm:grid-cols-[1fr_1.4fr_auto] sm:py-7">
-          <p className="text-[19px] tracking-[-0.01em] sm:text-[22px]">{name}</p>
-          <p className="col-span-2 row-start-2 text-[15px] leading-relaxed text-mute sm:col-span-1 sm:row-start-1 sm:col-start-2">
-            {line}
-          </p>
-          <p className="tnum col-start-2 row-start-1 text-[19px] text-soft sm:col-start-3 sm:text-[22px]">{weight}%</p>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
-  return (
-    <li className="grid gap-3 py-8 sm:py-10 lg:grid-cols-[1fr_1.3fr] lg:gap-16">
-      <p className="flex items-baseline gap-4 text-[22px] leading-snug tracking-[-0.01em] sm:text-[26px]">
-        <span className="tnum text-[15px] text-faint">0{n}</span>
-        {title}
-      </p>
-      <p className="max-w-[52ch] text-[16px] leading-relaxed text-soft sm:text-[17px]">{children}</p>
-    </li>
-  );
-}
-
-function DateCard({ term, value }: { term: string; value: string }) {
-  return (
-    <div className="gl-card flex flex-col gap-6 p-5 sm:p-6">
-      <dt className="text-[14px] text-mute">{term}</dt>
-      <dd className="text-[19px] leading-snug tracking-[-0.01em] sm:text-[21px]">{value}</dd>
-    </div>
   );
 }
