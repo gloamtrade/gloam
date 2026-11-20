@@ -271,10 +271,10 @@ export function ContestForm({ closed }: { closed: boolean }) {
 }
 
 /** A small chevron for the select, drawn in the muted text colour. */
-const CHEVRON =
+export const CHEVRON =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")";
 
-function Row({
+export function Row({
   label,
   htmlFor,
   optional,
@@ -309,7 +309,7 @@ function Row({
   );
 }
 
-function Tick() {
+export function Tick() {
   return (
     <span aria-hidden className="grid h-11 w-11 place-items-center rounded-full bg-sealed-soft text-sealed">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none">

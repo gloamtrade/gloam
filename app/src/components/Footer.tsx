@@ -22,6 +22,7 @@ const groups: {
       ...(SHOW_TESTNETS ? [{ href: "/docs/testnet", label: "Testnet guide" }] : []),
       { href: "/testers", label: "Become a tester" },
       { href: "/contest", label: "Video contest" },
+      { href: "/contest/writers", label: "Writing contest" },
     ],
   },
   {

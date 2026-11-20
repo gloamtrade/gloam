@@ -35,6 +35,7 @@ import {
   placeLabel,
   type ContestPlace,
 } from "@/lib/contest";
+import { WRITING_CONTEST, WRITING_JUDGING, WRITING_POOL, writingClosed } from "@/lib/writingContest";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { BUYBACKS, buybackBurnedUnits } from "@/lib/buybacks";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
@@ -117,6 +118,7 @@ export const OFFICIAL_LINKS = [
   CONTEST_RESULTS
     ? "gloam.trade/contest (the Gloam Video Contest: the winners, their films and how we judged)"
     : "gloam.trade/contest (the Gloam Video Contest: prizes, rules and the entry form)",
+  "gloam.trade/contest/writers (the Gloam Writing Contest: prizes, rules and the entry form)",
   "gloam.trade/transparency (what anyone can see about the vault)",
   "gloam.trade/blog/live-on-mainnet (the mainnet launch post)",
   "gloam.trade/blog/private-agent-payments (Raeto and Agent Wormhole: agents funded privately, checked before they pay)",
@@ -652,6 +654,23 @@ function contestFacts(): string {
   ].join("\n");
 }
 
+/** The writing contest, from WRITING_CONTEST (lib/writingContest), so the dates and prizes match the page. */
+function writingFacts(): string {
+  const C = WRITING_CONTEST;
+  const prizes = C.prizes.map((usd, i) => `${placeLabel(i)} $${usd}`).join(", ");
+  const closes = `${contestDay(C.closesAt)} at ${contestTime(C.closesAt)}`;
+  const judging = WRITING_JUDGING.map(([name, , w]) => `${name.toLowerCase()} (${w}%)`).join(", ");
+  return [
+    writingClosed() ? "WRITING CONTEST (entries closed)" : "WRITING CONTEST",
+    `- The ${C.name}: $${WRITING_POOL} for threads and articles about Gloam, private money on public chains. A thread needs at least ${C.minThreadPosts} posts, an article at least ${C.minArticleWords} words. Prizes: ${prizes}, paid privately with a Gloam claim link in USDG on Robinhood Chain or USDC on Base.`,
+    `- Entries open ${contestDay(C.opensAt)} and close ${closes}. Winners are announced by ${contestDay(C.winnersBy)} on @${C.account}.`,
+    `- To enter: post the thread on X, or publish the article (as an X Article, or on a blog, Medium, Mirror, Paragraph or Substack) and share it in a post on X. That post quotes the contest announcement (${C.announcementUrl ?? "on X @gloamtrade"}) and tags @${C.account}. Then send the post link with the form at gloam.trade/contest/writers. One entry per X account; sending again with the same handle replaces it.`,
+    `- Judged by the Gloam team: ${judging}. Engagement means real replies, reposts and quotes, read when entries close; bought engagement, engagement pods and raid groups remove the entry. The decision is final.`,
+    "- Rules: original writing only, no AI-written entries (spelling, grammar and translation help are fine). Write about the product, not the token price; no price predictions or investment advice. False claims about Gloam remove the entry. English only.",
+    `- Entering never needs a private key, seed phrase or wallet connection. Winners are contacted only from @${C.account}. Never say who is winning, who entered or how many entries there are, and never promise anyone a prize.`,
+  ].join("\n");
+}
+
 /** The last hunt's result. Update it when a hunt is claimed. */
 const LAST_HUNT =
   "The last one, Hunt #2, has ended: its 100 USDC prize was claimed, and the full breakdown of how it was solved is on X at @gloamtrade.";
@@ -695,6 +714,7 @@ export function knowledgeBlock(): string {
     START.trim(),
     REWARDS.trim(),
     contestFacts(),
+    writingFacts(),
     huntFacts(),
     CODES.trim(),
     ISSUES.trim(),

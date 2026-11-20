@@ -90,7 +90,7 @@ function tabLine(t: Tab, isMain: boolean): string {
     case "testers":
       return "Tester applications, paid spots and volunteers.";
     case "contest":
-      return "Video contest entries, with the flags to check before judging.";
+      return "Video and writing contest entries, with the flags to check before judging.";
     case "updates":
       return "People who asked for Gloam updates by email, and where they joined.";
     case "bugs":

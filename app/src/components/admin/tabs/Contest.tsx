@@ -1,6 +1,7 @@
 "use client";
 
 import { CONTEST_NETWORK_LABEL, type ContestNetwork } from "@/lib/contest";
+import { WRITING_KIND_LABEL, type WritingKind } from "@/lib/writingContest";
 import { StreamCard, StreamIcon } from "../cards";
 import { MarkKey, TickRow } from "../charts";
 import { useAdminResource } from "../data";
@@ -148,6 +149,88 @@ export function ContestTab() {
           posts an entry replaced. Store: {data.backend}.
         </Note>
       </Panel>
+      <WritingEntries />
     </>
+  );
+}
+
+type WritingRow = {
+  name: string;
+  handle: string;
+  postUrl: string;
+  postUser: string;
+  postId: string;
+  kind: WritingKind;
+  title: string | null;
+  email: string | null;
+  marketingConsentAt?: number;
+  submittedAt: number;
+  updatedAt: number;
+  revisions?: number;
+  previousPosts?: string[];
+};
+
+/** Writing contest entries (gloam.trade/contest/writers), latest change first, and the CSV. Read only. */
+function WritingEntries() {
+  const res = useAdminResource<{ backend: string; entries: WritingRow[] }>("/api/contest/writers/entries", "Writing contest entries");
+  if (res.err && !res.data) return <Notice tone="danger">{res.err}</Notice>;
+  const data = res.data;
+  if (!data) return <PanelSkeleton label="Loading writing contest entries" />;
+  const entries = data.entries;
+  const postCount = new Map<string, number>();
+  for (const e of entries) postCount.set(e.postId, (postCount.get(e.postId) ?? 0) + 1);
+  const flag = (e: WritingRow) =>
+    [
+      e.postUser.toLowerCase() !== e.handle.toLowerCase() ? "Post is not by this handle" : null,
+      (postCount.get(e.postId) ?? 0) > 1 ? "Same post as another entry" : null,
+    ]
+      .filter(Boolean)
+      .join(". ");
+  return (
+    <Panel
+      title="Writing contest entries"
+      sub={`${n(entries.length)} entries, ${n(entries.filter((e) => e.kind === "thread").length)} threads, ${n(entries.filter((e) => e.kind === "article").length)} articles`}
+      action={<CsvLink href="/api/contest/writers/entries?format=csv">Download CSV</CsvLink>}
+    >
+      <DataTable
+        headers={["Name", "X handle", "Kind", "Title", "Post on X", "Flag", "Email", "Submitted", "Updated"]}
+        rows={entries.map((e) => [
+          e.name,
+          <a key="h" href={`https://x.com/${e.handle}`} target="_blank" rel="noreferrer" className={link}>
+            @{e.handle}
+          </a>,
+          WRITING_KIND_LABEL[e.kind] ?? e.kind,
+          <span key="t" title={e.title ?? undefined} className="block max-w-[260px] truncate">
+            {e.title ?? "None"}
+          </span>,
+          <a
+            key="p"
+            href={e.postUrl}
+            target="_blank"
+            rel="noreferrer"
+            title={(e.previousPosts ?? []).length ? `Earlier: ${(e.previousPosts ?? []).join(" ")}` : e.postUrl}
+            className={link}
+          >
+            @{e.postUser}/{e.postId.slice(-6)}
+          </a>,
+          flag(e) ? (
+            <span key="f" className="text-danger">
+              {flag(e)}
+            </span>
+          ) : (
+            "None"
+          ),
+          e.email ?? "None",
+          new Date(e.submittedAt).toLocaleString(),
+          (e.revisions ?? 0) > 0 ? `${new Date(e.updatedAt).toLocaleString()} (${e.revisions}x)` : "Not updated",
+        ])}
+        empty={data.backend === "none" ? "Contest storage is not configured (set Upstash Redis)." : "No entries yet"}
+        minWidth={1200}
+      />
+      <Note>
+        One entry per X handle; sending again replaces it. Check each post quotes the announcement, tags @gloamtrade and meets the length rule before
+        judging. Store: {data.backend}.
+      </Note>
+    </Panel>
   );
 }
