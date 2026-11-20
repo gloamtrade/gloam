@@ -4,7 +4,7 @@
     "gloam": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@gloamtrade/mcp@0.10.0"]
+      "args": ["-y", "@gloamtrade/mcp@0.10.1"]
     }
   }
 }

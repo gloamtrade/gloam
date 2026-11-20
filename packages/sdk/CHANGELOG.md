@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1 (20 November 2026)
+
+- **BNB Chain: BDX is Beldex's BEP-20 `0x9d10a1ec41Fe7878429BB457e31F9b050D38c633`** (9 decimals), confirmed by Beldex on 20 November 2026. 0.8.0 listed the LayerZero OFT `0x6ad12E761b438beA3EA09F6C6266556Bb24C2181`, which is BDX on Base and Ethereum only. `BNB_MAINNET.bdx`, `bnbMainnetAssets()` and every BNB Chain reader now name the Beldex contract.
+- BDX on BNB Chain opens once its deposit limit (100,000 per deposit, 2,000,000 in total) is live on chain. It was queued through the vault's 3-day timelock on 20 November 2026. The OFT's BNB Chain limit is set to 0.
+- Base and Ethereum are unchanged: BDX there is still the OFT.
+
 ## 0.8.0 (19 November 2026)
 
 **BNB Chain mainnet**, live since 19 November 2026.
