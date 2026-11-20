@@ -7,20 +7,20 @@
  * Change prizes and dates in WRITING_CONTEST only. The page, the form, the API
  * route, the link preview and Glim all read them from here.
  */
-import { CONTEST_LIMITS, HANDLE_RE, bareXHandle, clean, normalizeXPost } from "./contest";
+import { CONTEST_LIMITS, HANDLE_RE, bareXHandle, clean, normalizeXArticle, normalizeXPost } from "./contest";
 import { normalizeEmail } from "./updatesEmail";
 
 export const WRITING_CONTEST = {
   name: "Gloam Writing Contest",
   path: "/contest/writers",
   /** Prizes in US dollars, by place. The total is their sum. */
-  prizes: [150, 100, 75, 75, 50, 50],
+  prizes: [150, 150, 100, 100],
   /** Entries open (UTC). */
   opensAt: "2026-11-20T00:00:00Z",
   /** The last moment an entry is taken (UTC). After it the form is closed. */
-  closesAt: "2026-11-29T23:00:00Z",
+  closesAt: "2026-11-27T23:00:00Z",
   /** Winners are announced on @gloamtrade by this day (UTC). */
-  winnersBy: "2026-12-03T00:00:00Z",
+  winnersBy: "2026-11-29T00:00:00Z",
   /** The shortest thread, in posts, and the shortest article, in words. */
   minThreadPosts: 5,
   minArticleWords: 600,
@@ -34,24 +34,31 @@ export const WRITING_CONTEST = {
 /** The prize pool: every place added up. */
 export const WRITING_POOL = WRITING_CONTEST.prizes.reduce((a, b) => a + b, 0);
 
+/** Every winner gets the same prize, so places are not ranked by amount. */
+export const WRITING_EQUAL_PRIZES = WRITING_CONTEST.prizes.every((usd) => usd === WRITING_CONTEST.prizes[0]);
+
 export function writingClosed(now = Date.now()): boolean {
   return now > Date.parse(WRITING_CONTEST.closesAt);
 }
 
-/** How an entry is judged: name, what it means, weight in percent. Quality is 60, engagement 40. */
+/** How an entry is judged: name, what it means, weight in percent. Quality (with the app flow) is 65, engagement 35. */
 export const WRITING_JUDGING: [string, string, number][] = [
-  ["Accuracy", "Gets Gloam right. No invented features, no price talk.", 25],
-  ["Clarity", "A reader who has never heard of Gloam understands what it does and why privacy matters.", 20],
-  ["Originality", "Your own angle and your own words, not a rewrite of our docs.", 15],
-  ["Engagement", "Replies, reposts and quotes from real accounts, read when entries close. Bought engagement removes the entry.", 40],
+  ["A real flow in the app", "Your own screenshots or screen recording of Gloam on mainnet: a private payment, a cash out, a payroll run or a claim link. Testnet doesn’t count.", 25],
+  ["Accuracy", "Gets Gloam right. No invented features, no price talk.", 15],
+  ["Clarity", "A reader who has never heard of Gloam understands what it does and why privacy matters.", 15],
+  ["Originality", "Your own angle and your own words, not a rewrite of our docs.", 10],
+  ["Engagement", "Replies, reposts and quotes from real accounts, read when entries close. Bought engagement removes the entry.", 35],
 ];
+
+/** The share of the score that is engagement; the rest is quality. */
+export const WRITING_ENGAGEMENT_WEIGHT = WRITING_JUDGING.find(([name]) => name === "Engagement")?.[2] ?? 0;
 
 export const WRITING_KINDS = ["thread", "article"] as const;
 export type WritingKind = (typeof WRITING_KINDS)[number];
 
 export const WRITING_KIND_LABEL: Record<WritingKind, string> = {
   thread: "Thread on X",
-  article: "Article",
+  article: "X Article",
 };
 
 export const WRITING_LIMITS = { name: CONTEST_LIMITS.name, title: 140, email: CONTEST_LIMITS.email, post: CONTEST_LIMITS.post } as const;
@@ -65,7 +72,7 @@ export type WritingInput = {
   name: string;
   /** Lowercased, without the @. */
   handle: string;
-  /** Always https://x.com/<user>/status/<id>. */
+  /** https://x.com/<user>/status/<id>, or https://x.com/<user>/article/<id> for an X Article. */
   postUrl: string;
   /** The account in the post link, lowercased. It can differ from the handle; admin flags it. */
   postUser: string;
@@ -100,10 +107,10 @@ export function parseWritingInput(raw: unknown): WritingInput {
     throw new WritingInputError("handle", "That X handle doesn't look right. Use the part after x.com/, up to 15 letters, digits or _.");
   }
 
-  if (!clean(b.post)) throw new WritingInputError("post", "Add the link to your post on X.");
-  const post = normalizeXPost(b.post);
+  if (!clean(b.post)) throw new WritingInputError("post", "Add the link to your post or X Article.");
+  const post = normalizeXPost(b.post) ?? normalizeXArticle(b.post);
   if (!post) {
-    throw new WritingInputError("post", "Use the link to your post on X, like x.com/yourname/status/123.");
+    throw new WritingInputError("post", "Use the link to your post or X Article on X, like x.com/yourname/status/123.");
   }
 
   if (!WRITING_KINDS.includes(b.kind as WritingKind)) {

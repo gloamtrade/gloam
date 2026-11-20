@@ -179,6 +179,17 @@ export function bareXHandle(v: unknown): string {
  * query, hash or /video/1 tail. Anything else, http:// included, is null.
  */
 export function normalizeXPost(raw: unknown): { url: string; user: string; id: string } | null {
+  return normalizeX(raw, STATUS_PATH, "status");
+}
+
+/** A link to an X Article, as https://x.com/<user>/article/<id>, read the same way as a post link. */
+export function normalizeXArticle(raw: unknown): { url: string; user: string; id: string } | null {
+  return normalizeX(raw, ARTICLE_PATH, "article");
+}
+
+const ARTICLE_PATH = /^\/([A-Za-z0-9_]{1,15})\/article\/(\d{1,20})$/;
+
+function normalizeX(raw: unknown, path: RegExp, kind: "status" | "article"): { url: string; user: string; id: string } | null {
   let s = clean(raw);
   if (!s || s.length > CONTEST_LIMITS.post) return null;
   if (!/^[a-z][a-z0-9+.-]*:/i.test(s)) s = `https://${s}`;
@@ -190,10 +201,10 @@ export function normalizeXPost(raw: unknown): { url: string; user: string; id: s
   }
   if (u.protocol !== "https:" || u.username || u.password || u.port) return null;
   if (!X_HOSTS.has(u.hostname.toLowerCase())) return null;
-  const m = STATUS_PATH.exec(u.pathname.replace(/\/+$/, ""));
+  const m = path.exec(u.pathname.replace(/\/+$/, ""));
   if (!m) return null;
   const [, user, id] = m;
-  return { url: `https://x.com/${user}/status/${id}`, user: user!.toLowerCase(), id: id! };
+  return { url: `https://x.com/${user}/${kind}/${id}`, user: user!.toLowerCase(), id: id! };
 }
 
 /** Checks an entry. The same rules run in the form and on the server. */

@@ -136,7 +136,7 @@ export function WritingForm({ closed }: { closed: boolean }) {
       <Row
         label="Link to your post on X"
         htmlFor="w-post"
-        hint={`The first post of your thread, or the post that shares your article. It quotes the announcement and tags @${WRITING_CONTEST.account}.`}
+        hint={`The first post of your thread, or your X Article (or the post that shares it). Quote the announcement and tag @${WRITING_CONTEST.account}.`}
         error={fieldError("post")}
       >
         <input
