@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { useNetwork } from "./NetworkProvider";
 import { useAppAccount } from "@/lib/demo";
 import { FRESH_WALLET_PATH, GAS_STATION_CHAIN_ID } from "@/lib/gasStation";
+import { FRESH_WALLET_ENABLED } from "@/lib/freshWalletFlag";
 import { swapOpenTo, vaultSwapRouter } from "@/lib/vaultSwap";
 import { vaultActionFromParams, vaultActionsFor, type VaultActionId } from "@/lib/vaultNav";
 
@@ -68,7 +69,8 @@ function VaultNavList({
   });
   const rows: { id: VaultActionId | "fresh-wallet"; label: string; href: string }[] = [...actions];
   // Same wait for the network, so Fresh wallet never flashes in and out either.
-  if (settled && network.chainId === GAS_STATION_CHAIN_ID) {
+  // Only while the flow is on (lib/freshWalletFlag).
+  if (FRESH_WALLET_ENABLED && settled && network.chainId === GAS_STATION_CHAIN_ID) {
     rows.splice(rows.findIndex((a) => a.id === "topups") + 1, 0, { id: "fresh-wallet", label: "Fresh wallet", href: FRESH_WALLET_PATH });
   }
   const inVault = pathname === "/app/vault";

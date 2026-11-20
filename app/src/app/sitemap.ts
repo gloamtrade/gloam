@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
+import { FRESH_WALLET_ENABLED } from "@/lib/freshWalletFlag";
 
 const SITE = "https://www.gloam.trade";
 
@@ -45,7 +46,8 @@ const PAGES: { path: string; priority: number }[] = [
   { path: "/docs/virtuals", priority: 0.6 },
   { path: "/docs/integrate", priority: 0.6 },
   { path: "/docs/bridge", priority: 0.6 },
-  { path: "/docs/fresh-wallet", priority: 0.6 },
+  // the fresh-wallet guide only while the flow is on (lib/freshWalletFlag)
+  ...(FRESH_WALLET_ENABLED ? [{ path: "/docs/fresh-wallet", priority: 0.6 }] : []),
   { path: "/docs/chain", priority: 0.6 },
   // the testnet guide only while people see the testnets (lib/showTestnets)
   ...(SHOW_TESTNETS ? [{ path: "/docs/testnet", priority: 0.6 }] : []),
