@@ -26,7 +26,7 @@ export const WRITING_CONTEST = {
   minArticleWords: 600,
   account: "gloamtrade",
   /** The contest post on X that entries quote. Until it is set, the page points at @gloamtrade. */
-  announcementUrl: null as string | null,
+  announcementUrl: "https://x.com/gloamtrade/status/2123787797555249268" as string | null,
   /** The Creators topic in the Telegram community, for questions and drafts. */
   telegramUrl: "https://t.me/gloamhq/28002",
 } as const;
