@@ -289,6 +289,11 @@ export interface PrivateSendIntentParams {
   poolAddress?: Address;
   chainId?: number;
   agentAddress?: Address | null;
+  /**
+   * Optional 16-byte seed (hex) to derive the payee note's secret from
+   * (seedToSecret), so the payment fits a compact short claim link.
+   */
+  paySeed?: `0x${string}`;
 }
 
 export interface PrivateSendIntent extends GloamIntent<"private_send"> {
@@ -311,6 +316,7 @@ export async function buildPrivateSendIntent(
     amountPay: params.amountPayWei,
     asset,
     path: params.path,
+    ...(params.paySeed ? { paySeed: params.paySeed } : {}),
   });
   if (w.blocker) throw new Error(w.blocker);
   const { proofBytes } = await params.prove(w.circomInput);

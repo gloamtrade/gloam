@@ -124,6 +124,13 @@ assert(sTest.wasm === "/circuits/shield.wasm" && sTest.zkey === "/circuits/shiel
 assert(circuitArtifactUrls("shield", BASE_SEPOLIA_CHAIN_ID).zkey === "https://www.gloam.trade/circuits/final/shield_final.zkey", "Base Sepolia proves with the final zkey");
 const fFinal = circuitArtifactFiles("unshield", "production");
 assert(fFinal.sha256.zkey === CIRCUIT_SHA256.zkey.production.unshield && fFinal.sha256.zkey !== CIRCUIT_SHA256.zkey.dev.unshield, "final and dev zkeys differ");
+const pMain = circuitArtifactUrls("payroll_total", TEMPO_MAINNET_CHAIN_ID);
+assert(pMain.wasm === "https://www.gloam.trade/circuits/payroll_total.wasm", "payroll_total mainnet wasm url");
+assert(pMain.zkey === "https://www.gloam.trade/circuits/final/payroll_total_final.zkey", "payroll_total mainnet zkey is the final key");
+const pDev = circuitArtifactFiles("payroll_total", "dev");
+assert(pDev.sha256.zkey === CIRCUIT_SHA256.zkey.dev.payroll_total && pDev.sha256.zkey !== CIRCUIT_SHA256.zkey.production.payroll_total, "payroll_total final and dev zkeys differ");
+const fundsMain = circuitArtifactUrls("funds", TEMPO_MAINNET_CHAIN_ID);
+assert(fundsMain.wasm === "https://www.gloam.trade/circuits/funds.wasm" && fundsMain.zkey === "https://www.gloam.trade/circuits/final/funds_final.zkey", "funds mainnet artifact urls");
 for (const set of [CIRCUIT_SHA256.wasm, CIRCUIT_SHA256.zkey.dev, CIRCUIT_SHA256.zkey.production]) {
   for (const h of Object.values(set)) assert(/^[0-9a-f]{64}$/.test(h), "sha256 is 64 hex chars");
 }

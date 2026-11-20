@@ -17,6 +17,10 @@ import {
   fieldToHex,
   NATIVE_ASSET,
   SEALED_VAULT,
+  randomNoteSeed,
+  seedMakesSecret,
+  encodeShortClaim,
+  decodeShortClaim,
 } from "../dist/index.js";
 
 let checks = 0;
@@ -72,6 +76,24 @@ assert(s.exec.args[0] === STUB_PROOF, "transfer arg0 = proof");
 assert(isBytes32(s.exec.args[1]) && isBytes32(s.exec.args[2]), "transfer root+nullifier");
 assert(Array.isArray(s.exec.args[3]) && s.exec.args[3].length === 2 && s.exec.args[3].every(isBytes32), "transfer [c0,c1]");
 assert(s.paymentNote && s.changeNote, "send returns payment+change notes");
+
+// paySeed forwards through buildPrivateSendIntent -> compact short claim link
+const { seed: paySeed } = randomNoteSeed();
+const seeded = await buildPrivateSendIntent({
+  secretHex,
+  amountInWei: AMOUNT,
+  amountPayWei: 400000000000000n,
+  asset: NATIVE_ASSET,
+  path,
+  prove,
+  paySeed,
+});
+assert(seeded.paymentNote.seed === paySeed, "send forwards paySeed onto paymentNote");
+assert(seedMakesSecret(paySeed, seeded.paymentNote.secret), "paySeed derives paymentNote.secret");
+const shortBody = encodeShortClaim({ ...seeded.paymentNote, pool: SEALED_VAULT, chainId: seeded.chainId });
+assert(shortBody !== null, "seeded paymentNote encodes as short claim");
+const decodedShort = await decodeShortClaim(shortBody);
+assert(decodedShort.commitment === seeded.paymentNote.commitment && decodedShort.seed === paySeed, "short claim decodes back to same commitment and seed");
 
 // sealedSwap(proof, root, nullifier, cOut, cChange, assetIn, assetOut, amountOutMin, rateIn, rateOut)
 const t = await buildPrivateTradeIntent({
