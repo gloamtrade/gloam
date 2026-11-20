@@ -10,9 +10,14 @@
  *
  *   USDT  0x55d398326f99059fF775485246999027B3197955  symbol USDT, 18 decimals
  *   USDC  0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d  symbol USDC, 18 decimals
- *   BDX   0x6ad12E761b438beA3EA09F6C6266556Bb24C2181  symbol BDX, 9 decimals, Beldex's
- *         LayerZero OFT (token() is itself, endpoint 0x1a44…728c), the same contract
- *         and owner as on Base and Ethereum
+ *   BDX   0x9d10a1ec41Fe7878429BB457e31F9b050D38c633  symbol BDX ("BELDEX"), 9 decimals,
+ *         Beldex's own BEP-20 on BNB Chain: an EIP-1967 proxy (implementation
+ *         0xc67da833af386d2b124378fabd166a2eac0d271b), owner
+ *         0x20F4c72FA65CEd48fc3f4eeD77898D24b162Bb8C. Confirmed by Beldex on
+ *         20 November 2026. The LayerZero OFT at 0x6ad12E761b438beA3EA09F6C6266556Bb24C2181
+ *         (Beldex's BDX on Base and Ethereum) also exists on BNB Chain but is not
+ *         Beldex's contract there; the vault launched with the OFT listed and its
+ *         limit is lowered to 0 while this one is queued through the guard's timelock.
  *   Multicall3 at its usual address
  *
  * The stablecoins on BNB Chain have 18 decimals, not 6 like everywhere else
@@ -60,7 +65,7 @@ export interface BnbMainnetInput {
   usdt: BnbToken;
   /** USDC on BNB Chain (Binance-Peg), 18 decimals. */
   usdc: BnbToken;
-  /** Beldex's BDX, the LayerZero OFT, 9 decimals. */
+  /** Beldex's BDX on BNB Chain, its own BEP-20 (not the OFT used on Base and Ethereum), 9 decimals. */
   bdx: BnbToken;
   /** ShieldPoolPayments on BNB Chain, from the deploy. */
   pool: Address | null;
@@ -78,7 +83,7 @@ export const BNB_MAINNET: BnbMainnetInput = {
   explorerUrl: "https://bscscan.com",
   usdt: { address: "0x55d398326f99059fF775485246999027B3197955", decimals: 18 },
   usdc: { address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", decimals: 18 },
-  bdx: { address: "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181", decimals: 9 },
+  bdx: { address: "0x9d10a1ec41Fe7878429BB457e31F9b050D38c633", decimals: 9 },
   pool: "0x89d3042390204f57b8b4F8949D3c2203E4002164",
   deployBlock: 134431196n,
   payMemo: "0xb692c86B13f65a123f45cF9A21580b2dDC7B8a79",

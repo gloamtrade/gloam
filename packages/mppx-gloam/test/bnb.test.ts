@@ -21,7 +21,8 @@ const FILLED = process.env.GLOAM_TEST_BNB === "filled";
 const POOL: Address = "0x89d3042390204f57b8b4F8949D3c2203E4002164";
 const USDT: Address = "0x55d398326f99059fF775485246999027B3197955";
 const USDC: Address = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
-const BDX: Address = "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181";
+const BDX: Address = "0x9d10a1ec41Fe7878429BB457e31F9b050D38c633";
+const BASE_BDX: Address = "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181";
 const NATIVE: Address = "0x0000000000000000000000000000000000000000";
 const LIVE = bnbMainnetConfig();
 if (FILLED && !LIVE) Object.assign(BNB_MAINNET, { pool: POOL, deployBlock: 134_300_000n });
@@ -67,7 +68,7 @@ test("a decimals value that disagrees with a listed asset is refused", () => {
   if (base) {
     const usdc = base.assets.find((a) => a.symbol === "USDC")!;
     assert.throws(() => chargeDecimals(usdc.address, 8453, 18), /USDC on Base has 6 decimals, not 18/);
-    assert.equal(assetSymbol(8453, BDX), "BDX", "BDX on Base reads as BDX, by the network's own list");
+    assert.equal(assetSymbol(8453, BASE_BDX), "BDX", "BDX on Base reads as BDX, by the network's own list");
   }
 });
 

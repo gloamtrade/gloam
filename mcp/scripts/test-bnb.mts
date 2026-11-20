@@ -17,7 +17,7 @@ const FILLED = process.env.GLOAM_TEST_BNB === "filled";
 const POOL = "0x89d3042390204f57b8b4F8949D3c2203E4002164";
 const USDT = "0x55d398326f99059fF775485246999027B3197955";
 const USDC = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
-const BDX = "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181";
+const BDX = "0x9d10a1ec41Fe7878429BB457e31F9b050D38c633";
 
 // The SDK's config module on its own, before the SDK's networks are built from it.
 // In this workspace @gloamtrade/sdk is its src/ (package.json), so this is the same module.

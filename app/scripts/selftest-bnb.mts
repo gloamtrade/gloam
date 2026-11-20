@@ -39,7 +39,7 @@ const SDK_POOL_IN = /^\s*pool:\s*"0x[0-9a-fA-F]{40}",\s*$/m.test(SDK_BNB_SRC);
 const SDK_DEPLOY_BLOCK = SDK_POOL_IN ? BigInt(/^\s*deployBlock:\s*(\d+)n,\s*$/m.exec(SDK_BNB_SRC)?.[1] ?? "0") : null;
 const USDT = "0x55d398326f99059fF775485246999027B3197955";
 const USDC = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
-const BDX = "0x6ad12E761b438beA3EA09F6C6266556Bb24C2181";
+const BDX = "0x9d10a1ec41Fe7878429BB457e31F9b050D38c633";
 
 for (const k of Object.keys(process.env)) if (k.startsWith("NEXT_PUBLIC_BNB_")) delete process.env[k];
 delete process.env.GLOAM_RPC_URL_56;
