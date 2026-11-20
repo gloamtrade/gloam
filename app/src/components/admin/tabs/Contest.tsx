@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { CONTEST_NETWORK_LABEL, type ContestNetwork } from "@/lib/contest";
 import { WRITING_KIND_LABEL, type WritingKind } from "@/lib/writingContest";
 import { StreamCard, StreamIcon } from "../cards";
@@ -7,7 +8,7 @@ import { MarkKey, TickRow } from "../charts";
 import { useAdminResource } from "../data";
 import { agoMs, lastDays, n } from "../format";
 import { countPoints, markDays } from "../series";
-import { CsvLink, DataTable, Note, Notice, Panel, PanelSkeleton, SectionHead, StatStrip } from "../ui";
+import { CsvLink, DataTable, Note, Notice, Panel, PanelSkeleton, StatStrip } from "../ui";
 
 export type ContestRow = {
   name: string;
@@ -38,14 +39,48 @@ export function contestFlags(entries: ContestRow[]) {
 
 const link = "underline decoration-line-strong underline-offset-4 hover:decoration-foreground";
 
-/** Both contests, the open writing contest first. Read only. */
+type ContestView = "writing" | "video";
+
+const VIEWS: [ContestView, string][] = [
+  ["writing", "Writing"],
+  ["video", "Video"],
+];
+
+/** Which contest is shown, kept in the address as ?contest=video. Writing is the default. */
+function readView(): ContestView {
+  if (typeof window === "undefined") return "writing";
+  return new URLSearchParams(window.location.search).get("contest") === "video" ? "video" : "writing";
+}
+
+/** One contest at a time, switched at the top. Read only. */
 export function ContestTab() {
+  const [view, setViewState] = useState<ContestView>(readView);
+  const setView = (next: ContestView) => {
+    setViewState(next);
+    const url = new URL(window.location.href);
+    if (next === "video") url.searchParams.set("contest", "video");
+    else url.searchParams.delete("contest");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  };
   return (
     <>
-      <SectionHead title="Writing contest" sub="gloam.trade/contest/writers" />
-      <WritingEntries />
-      <SectionHead title="Video contest" sub="gloam.trade/contest" />
-      <VideoEntries />
+      <div role="radiogroup" aria-label="Contest" className="flex w-fit rounded-full bg-surface-2 p-1 text-[13px]">
+        {VIEWS.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={view === id}
+            onClick={() => setView(id)}
+            className={`inline-flex h-9 items-center justify-center whitespace-nowrap rounded-full px-5 transition-colors ${
+              view === id ? "bg-panel font-medium text-foreground shadow-card" : "text-mute hover:text-foreground"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === "writing" ? <WritingEntries /> : <VideoEntries />}
     </>
   );
 }
