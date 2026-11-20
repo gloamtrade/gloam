@@ -7,7 +7,7 @@
  * Change prizes and dates in WRITING_CONTEST only. The page, the form, the API
  * route, the link preview and Glim all read them from here.
  */
-import { CONTEST_LIMITS, HANDLE_RE, bareXHandle, clean, normalizeXPost } from "./contest";
+import { CONTEST_LIMITS, HANDLE_RE, bareXHandle, clean, normalizeXArticle, normalizeXPost } from "./contest";
 import { normalizeEmail } from "./updatesEmail";
 
 export const WRITING_CONTEST = {
@@ -54,7 +54,7 @@ export type WritingKind = (typeof WRITING_KINDS)[number];
 
 export const WRITING_KIND_LABEL: Record<WritingKind, string> = {
   thread: "Thread on X",
-  article: "Article",
+  article: "X Article",
 };
 
 export const WRITING_LIMITS = { name: CONTEST_LIMITS.name, title: 140, email: CONTEST_LIMITS.email, post: CONTEST_LIMITS.post } as const;
@@ -68,7 +68,7 @@ export type WritingInput = {
   name: string;
   /** Lowercased, without the @. */
   handle: string;
-  /** Always https://x.com/<user>/status/<id>. */
+  /** https://x.com/<user>/status/<id>, or https://x.com/<user>/article/<id> for an X Article. */
   postUrl: string;
   /** The account in the post link, lowercased. It can differ from the handle; admin flags it. */
   postUser: string;
@@ -103,10 +103,10 @@ export function parseWritingInput(raw: unknown): WritingInput {
     throw new WritingInputError("handle", "That X handle doesn't look right. Use the part after x.com/, up to 15 letters, digits or _.");
   }
 
-  if (!clean(b.post)) throw new WritingInputError("post", "Add the link to your post on X.");
-  const post = normalizeXPost(b.post);
+  if (!clean(b.post)) throw new WritingInputError("post", "Add the link to your post or X Article.");
+  const post = normalizeXPost(b.post) ?? normalizeXArticle(b.post);
   if (!post) {
-    throw new WritingInputError("post", "Use the link to your post on X, like x.com/yourname/status/123.");
+    throw new WritingInputError("post", "Use the link to your post or X Article on X, like x.com/yourname/status/123.");
   }
 
   if (!WRITING_KINDS.includes(b.kind as WritingKind)) {

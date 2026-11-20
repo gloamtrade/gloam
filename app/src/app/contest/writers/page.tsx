@@ -44,7 +44,7 @@ const IDEAS = [
 
 const RULES = [
   `Threads have at least ${C.minThreadPosts} posts. Articles have at least ${C.minArticleWords} words.`,
-  "Entries come from X: a thread, an X Article, or a post that shares your article.",
+  "Entries are posted on X: a thread, or an article published as an X Article.",
   "Original writing only. No AI-written entries.",
   "Write about the product, not the token price. No price predictions or investment advice.",
   "Get the facts right. Entries with false claims about Gloam are removed.",
@@ -60,8 +60,8 @@ const RULES = [
 const FAQ: [string, string][] = [
   ["Thread or article, which is better?", "Either. Pick the format that suits what you want to say. Both are judged the same way."],
   [
-    "Can I publish on Medium, Mirror, Paragraph or Substack?",
-    `Yes. Share it in a post on X that quotes the announcement and tags @${C.account}, then send us the link to that post. Engagement is read on the post on X.`,
+    "Can I post my article on Medium or Substack too?",
+    "Yes, share it anywhere you like. The entry itself has to be an X Article, and engagement is read on X.",
   ],
   [
     "Can I use AI?",
@@ -161,15 +161,16 @@ export default function WritingContestPage() {
           </SectionHead>
           <ol className="mt-12 divide-y divide-line border-y border-line">
             <Step n={1} title="Write it">
-              A thread of {C.minThreadPosts} posts or more, or an article of {C.minArticleWords} words or more. Publish the
-              article as an X Article, or on your own blog, Medium, Mirror, Paragraph or Substack.
+              A thread of {C.minThreadPosts} posts or more, or an X Article of {C.minArticleWords} words or more. You can
+              share the article on other platforms too, but the entry is the one on X.
             </Step>
             <Step n={2} title="Post it on X">
               Quote{" "}
               <a href={announcement} target="_blank" rel="noreferrer" className={TEXT_LINK}>
                 the contest announcement
               </a>{" "}
-              and tag @{C.account}. For a thread, that is the first post. For an article, it is the post that shares it.
+              and tag @{C.account}. For a thread, that is the first post. For an X Article, share it in a post that quotes the
+              announcement.
             </Step>
             <Step n={3} title="Send us the link">
               Put the link to that post in{" "}
