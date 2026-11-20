@@ -183,7 +183,7 @@ export default function WritingContestPage() {
 
         {/* dates */}
         <section id="dates" aria-labelledby="dates-title" className={SECTION}>
-          <SectionHead id="dates" label="Dates" title="Ten days to enter." />
+          <SectionHead id="dates" label="Dates" title="One week to enter." />
           <dl className="tnum mt-12 grid gap-3 sm:grid-cols-3 sm:gap-4">
             <DateCard term="Entries open" value={contestDay(C.opensAt)} />
             <DateCard term="Entries close" value={closes} />

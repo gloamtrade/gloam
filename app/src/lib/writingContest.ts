@@ -18,9 +18,9 @@ export const WRITING_CONTEST = {
   /** Entries open (UTC). */
   opensAt: "2026-11-20T00:00:00Z",
   /** The last moment an entry is taken (UTC). After it the form is closed. */
-  closesAt: "2026-11-29T23:00:00Z",
+  closesAt: "2026-11-27T23:00:00Z",
   /** Winners are announced on @gloamtrade by this day (UTC). */
-  winnersBy: "2026-12-03T00:00:00Z",
+  winnersBy: "2026-11-29T00:00:00Z",
   /** The shortest thread, in posts, and the shortest article, in words. */
   minThreadPosts: 5,
   minArticleWords: 600,
