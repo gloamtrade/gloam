@@ -3,7 +3,7 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { FlowField } from "@/components/ui/FlowField";
 import { contestDay, contestTime, placeLabel } from "@/lib/contest";
-import { WRITING_CONTEST, WRITING_JUDGING, WRITING_POOL, writingClosed } from "@/lib/writingContest";
+import { WRITING_CONTEST, WRITING_EQUAL_PRIZES, WRITING_JUDGING, WRITING_POOL, writingClosed } from "@/lib/writingContest";
 import { BulletList, CriteriaList, DateCard, Faq, SECTION, SectionHead, Step, TEXT_LINK } from "../parts";
 import { WritingForm } from "./WritingForm";
 
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
   twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION, site: "@gloamtrade" },
 };
 
-/** "Six", for the prizes heading. */
+/** "Four", for the prizes heading. */
 const WINNERS_IN_WORDS = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight"][C.prizes.length - 1] ?? String(C.prizes.length);
 
 const IDEAS = [
@@ -119,13 +119,13 @@ export default function WritingContestPage() {
 
         {/* prizes */}
         <section id="prizes" aria-labelledby="prizes-title" className={SECTION}>
-          <SectionHead id="prizes" label="Prizes" title={`${WINNERS_IN_WORDS} winners, paid privately.`}>
+          <SectionHead id="prizes" label="Prizes" title={WRITING_EQUAL_PRIZES ? `${WINNERS_IN_WORDS} winners, $${C.prizes[0]} each.` : `${WINNERS_IN_WORDS} winners, paid privately.`}>
             Each winner gets a Gloam claim link. Take it in USDG on Robinhood Chain or USDC on Base, your choice.
           </SectionHead>
           <ol className={`mt-12 grid grid-cols-2 gap-3 sm:gap-4 ${C.prizes.length % 3 === 0 ? "lg:grid-cols-3" : "lg:grid-cols-4"}`}>
             {C.prizes.map((usd, i) => (
               <li key={i} className="gl-card flex flex-col justify-between gap-10 p-5 sm:p-6">
-                <span className="text-[14px] text-mute">{placeLabel(i)} place</span>
+                <span className="text-[14px] text-mute">{WRITING_EQUAL_PRIZES ? "Winner" : `${placeLabel(i)} place`}</span>
                 <span className="tnum text-[36px] font-light leading-none tracking-[-0.03em] sm:text-[44px]">${usd}</span>
               </li>
             ))}

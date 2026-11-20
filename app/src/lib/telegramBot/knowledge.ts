@@ -35,7 +35,7 @@ import {
   placeLabel,
   type ContestPlace,
 } from "@/lib/contest";
-import { WRITING_CONTEST, WRITING_JUDGING, WRITING_POOL, writingClosed } from "@/lib/writingContest";
+import { WRITING_CONTEST, WRITING_EQUAL_PRIZES, WRITING_JUDGING, WRITING_POOL, writingClosed } from "@/lib/writingContest";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { BUYBACKS, buybackBurnedUnits } from "@/lib/buybacks";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
@@ -657,7 +657,9 @@ function contestFacts(): string {
 /** The writing contest, from WRITING_CONTEST (lib/writingContest), so the dates and prizes match the page. */
 function writingFacts(): string {
   const C = WRITING_CONTEST;
-  const prizes = C.prizes.map((usd, i) => `${placeLabel(i)} $${usd}`).join(", ");
+  const prizes = WRITING_EQUAL_PRIZES
+    ? `${C.prizes.length} winners, $${C.prizes[0]} each`
+    : C.prizes.map((usd, i) => `${placeLabel(i)} $${usd}`).join(", ");
   const closes = `${contestDay(C.closesAt)} at ${contestTime(C.closesAt)}`;
   const judging = WRITING_JUDGING.map(([name, , w]) => `${name.toLowerCase()} (${w}%)`).join(", ");
   return [

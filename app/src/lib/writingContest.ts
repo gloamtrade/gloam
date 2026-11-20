@@ -14,7 +14,7 @@ export const WRITING_CONTEST = {
   name: "Gloam Writing Contest",
   path: "/contest/writers",
   /** Prizes in US dollars, by place. The total is their sum. */
-  prizes: [150, 100, 75, 75, 50, 50],
+  prizes: [100, 100, 100, 100],
   /** Entries open (UTC). */
   opensAt: "2026-11-20T00:00:00Z",
   /** The last moment an entry is taken (UTC). After it the form is closed. */
@@ -33,6 +33,9 @@ export const WRITING_CONTEST = {
 
 /** The prize pool: every place added up. */
 export const WRITING_POOL = WRITING_CONTEST.prizes.reduce((a, b) => a + b, 0);
+
+/** Every winner gets the same prize, so places are not ranked by amount. */
+export const WRITING_EQUAL_PRIZES = WRITING_CONTEST.prizes.every((usd) => usd === WRITING_CONTEST.prizes[0]);
 
 export function writingClosed(now = Date.now()): boolean {
   return now > Date.parse(WRITING_CONTEST.closesAt);
