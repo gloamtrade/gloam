@@ -94,7 +94,6 @@ import {
 import { PAYMENT_NOTE_MAX, cleanPaymentNote } from "@/lib/paymentNote";
 import { NoteGlyph, PaymentNoteLine } from "./PaymentNote";
 import { SuccessModal } from "./SuccessModal";
-import { PrivatePayShare } from "./PrivatePayShare";
 import {
   markPrivatePaid,
   readFirstPaySuggestion,
@@ -398,8 +397,6 @@ export function MoveView() {
   const [relayStatus, setRelayStatus] = useState<RelayNetworkStatus | null>(null);
   const gasHigh = Boolean(relayStatus?.gasHigh);
   const [relayHash, setRelayHash] = useState<Hex | undefined>(undefined);
-  /** The last confirmed action was a private payment, so success offers the share post. */
-  const [paidPrivately, setPaidPrivately] = useState(false);
 
   // Drop the nudge's suggestion from the URL once read (it is already in the
   // form), so a refresh or a tab switch does not fill it in again.
@@ -696,7 +693,6 @@ export function MoveView() {
         // The payment itself has landed (a heads-up, if any, is a second
         // step). Retires the first-payment nudge on this device.
         markPrivatePaid(network.chainId);
-        setPaidPrivately(true);
         // claim-link counts: a link made, or a claimer's first own payment (lib/funnel)
         if (pendingClaimLink.current) countLinkCreated();
         pendingClaimLink.current = false;
@@ -1273,7 +1269,6 @@ export function MoveView() {
     }
 
     setBusy(true);
-    setPaidPrivately(false);
     // the last payment's claim code (kept under Sent links) is not this cash out's success
     setShareBlob(null);
     setMemoPosted(false);
@@ -1540,7 +1535,6 @@ export function MoveView() {
 
     const note = selected;
     setBusy(true);
-    setPaidPrivately(false);
     setShareBlob(null);
     setMemoPosted(false);
     reset();
@@ -1697,7 +1691,6 @@ export function MoveView() {
     }
     setShareBlob(null);
     setBusy(true);
-    setPaidPrivately(false);
     reset();
     setRelayHash(undefined);
     handledHash.current = null;
@@ -3924,9 +3917,7 @@ export function MoveView() {
         primaryLabel="View on explorer"
         secondaryLabel="Done"
         footer={
-          paidPrivately ? (
-            <PrivatePayShare chainId={network.chainId} networkLabel={network.label} testnet={network.testnet} />
-          ) : successTitle === "Cashed out" && xSent ? (
+          successTitle === "Cashed out" && xSent ? (
             <CrossChainCashOutStatus quote={xSent} fromChain={network.label} fromChainId={network.chainId} />
           ) : successTitle === "Cashed out" && cashedOut ? (
             <AddTokenToWallet chainId={network.chainId} asset={cashedOut.asset} to={cashedOut.to} />
