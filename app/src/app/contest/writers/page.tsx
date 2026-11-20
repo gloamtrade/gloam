@@ -30,6 +30,9 @@ export const metadata: Metadata = {
   twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION, site: "@gloamtrade" },
 };
 
+/** "Six", for the prizes heading. */
+const WINNERS_IN_WORDS = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight"][C.prizes.length - 1] ?? String(C.prizes.length);
+
 const IDEAS = [
   "Why your salary shouldn’t be public onchain",
   "A private payment on Gloam, start to finish",
@@ -116,10 +119,10 @@ export default function WritingContestPage() {
 
         {/* prizes */}
         <section id="prizes" aria-labelledby="prizes-title" className={SECTION}>
-          <SectionHead id="prizes" label="Prizes" title="Four winners, paid privately.">
+          <SectionHead id="prizes" label="Prizes" title={`${WINNERS_IN_WORDS} winners, paid privately.`}>
             Each winner gets a Gloam claim link. Take it in USDG on Robinhood Chain or USDC on Base, your choice.
           </SectionHead>
-          <ol className="mt-12 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+          <ol className={`mt-12 grid grid-cols-2 gap-3 sm:gap-4 ${C.prizes.length % 3 === 0 ? "lg:grid-cols-3" : "lg:grid-cols-4"}`}>
             {C.prizes.map((usd, i) => (
               <li key={i} className="gl-card flex flex-col justify-between gap-10 p-5 sm:p-6">
                 <span className="text-[14px] text-mute">{placeLabel(i)} place</span>
