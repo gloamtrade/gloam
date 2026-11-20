@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { CONTEST_NETWORK_LABEL, type ContestNetwork } from "@/lib/contest";
 import { WRITING_KIND_LABEL, type WritingKind } from "@/lib/writingContest";
 import { StreamCard, StreamIcon } from "../cards";
@@ -38,8 +39,54 @@ export function contestFlags(entries: ContestRow[]) {
 
 const link = "underline decoration-line-strong underline-offset-4 hover:decoration-foreground";
 
-/** Video contest entries (gloam.trade/contest), latest change first, and the CSV. Read only. */
+type ContestView = "writing" | "video";
+
+const VIEWS: [ContestView, string][] = [
+  ["writing", "Writing"],
+  ["video", "Video"],
+];
+
+/** Which contest is shown, kept in the address as ?contest=video. Writing is the default. */
+function readView(): ContestView {
+  if (typeof window === "undefined") return "writing";
+  return new URLSearchParams(window.location.search).get("contest") === "video" ? "video" : "writing";
+}
+
+/** One contest at a time, switched at the top. Read only. */
 export function ContestTab() {
+  const [view, setViewState] = useState<ContestView>(readView);
+  const setView = (next: ContestView) => {
+    setViewState(next);
+    const url = new URL(window.location.href);
+    if (next === "video") url.searchParams.set("contest", "video");
+    else url.searchParams.delete("contest");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  };
+  return (
+    <>
+      <div role="radiogroup" aria-label="Contest" className="flex w-fit rounded-full bg-surface-2 p-1 text-[13px]">
+        {VIEWS.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={view === id}
+            onClick={() => setView(id)}
+            className={`inline-flex h-9 items-center justify-center whitespace-nowrap rounded-full px-5 transition-colors ${
+              view === id ? "bg-panel font-medium text-foreground shadow-card" : "text-mute hover:text-foreground"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === "writing" ? <WritingEntries /> : <VideoEntries />}
+    </>
+  );
+}
+
+/** Video contest entries (gloam.trade/contest), latest change first, and the CSV. Read only. */
+function VideoEntries() {
   const res = useAdminResource<ContestData>("/api/contest/entries", "Contest entries");
   if (res.err && !res.data) return <Notice tone="danger">{res.err}</Notice>;
   const data = res.data;
@@ -107,7 +154,7 @@ export function ContestTab() {
           );
         })}
       </StreamCard>
-      <Panel title="Contest entries" sub="Latest change first" action={<CsvLink href="/api/contest/entries?format=csv">Download CSV</CsvLink>}>
+      <Panel title="Video contest entries" sub="Latest change first" action={<CsvLink href="/api/contest/entries?format=csv">Download CSV</CsvLink>}>
         <DataTable
           headers={["Name", "X handle", "Post on X", "Flag", "Network", "What it shows", "Email", "Marketing consent", "Submitted", "Updated"]}
           rows={entries.map((e) => [
@@ -149,7 +196,6 @@ export function ContestTab() {
           posts an entry replaced. Store: {data.backend}.
         </Note>
       </Panel>
-      <WritingEntries />
     </>
   );
 }
