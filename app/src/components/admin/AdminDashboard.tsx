@@ -20,6 +20,7 @@ import { BugsTab } from "./tabs/Bugs";
 import { ContestTab } from "./tabs/Contest";
 import { EventsTab } from "./tabs/Events";
 import { HuntTab } from "./tabs/Hunt";
+import { NamesTab } from "./tabs/Names";
 import { OverviewTab } from "./tabs/Overview";
 import { PartnersTab } from "./tabs/Partners";
 import { RelayTab } from "./tabs/Relay";
@@ -42,7 +43,7 @@ function readEnv(): Env {
   }
 }
 
-const TABS: Tab[] = ["overview", "revenue", "relay", "users", "events", "partners", "testers", "contest", "updates", "bugs", "votes", "hunt"];
+const TABS: Tab[] = ["overview", "revenue", "relay", "users", "events", "partners", "testers", "contest", "updates", "bugs", "votes", "hunt", "names"];
 
 /** The section to open: ?tab= in the address, else the overview. */
 function readTab(): Tab {
@@ -68,6 +69,7 @@ function tabTitle(t: Tab, isMain: boolean): string {
     bugs: "Bug reports",
     votes: "Votes",
     hunt: "Hunt",
+    names: "Names",
   }[t];
 }
 
@@ -99,6 +101,8 @@ function tabLine(t: Tab, isMain: boolean): string {
       return "Every vote's tallies and ballots, the holders who connected, and private feedback.";
     case "hunt":
       return "The treasure hunt: how far people got, and whether the prize is claimed.";
+    case "names":
+      return "Every Gloam name claimed, who holds it and what it paid the treasury.";
   }
 }
 
@@ -325,7 +329,7 @@ export function AdminDashboard() {
   const sided = SIDED.includes(shown);
   const groups: { title: string; tabs: Tab[] }[] = [
     { title: "Traction", tabs: ["overview", "revenue", ...(isMain ? (["relay"] as Tab[]) : []), "users", "events"] },
-    { title: "Operations", tabs: ["partners", "testers", "contest", "updates", "bugs", "votes", "hunt"] },
+    { title: "Operations", tabs: ["partners", "testers", "contest", "updates", "bugs", "votes", "hunt", "names"] },
   ];
   const backend = data?.product?.backend;
   const oc = side.oc;
@@ -465,6 +469,7 @@ export function AdminDashboard() {
           {shown === "bugs" && <BugsTab />}
           {shown === "votes" && <VotesPanel />}
           {shown === "hunt" && <HuntTab />}
+          {shown === "names" && <NamesTab />}
 
           <p className="tnum border-t border-line pt-5 text-[12px] text-mute">
             Generated {data?.generatedAt ?? "not yet"} ·{" "}

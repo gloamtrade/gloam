@@ -54,7 +54,8 @@ export type Tab =
   | "updates"
   | "bugs"
   | "votes"
-  | "hunt";
+  | "hunt"
+  | "names";
 
 /** The two views: mainnet or the testnets. Never mixed. */
 export type Env = "mainnet" | "testnet";

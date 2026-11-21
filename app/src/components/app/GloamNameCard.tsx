@@ -26,6 +26,7 @@ import { walletErrorForPeople } from "@/lib/walletErrors";
 import { lookupGloamName, readGloamName } from "@/hooks/useGloamName";
 import { BusyLabel } from "@/components/ui/Spinner";
 import { SuccessModal } from "./SuccessModal";
+import { Select } from "@/components/ui/Select";
 import {
   GLOAM_NAMES_ADDRESS,
   GLOAM_NAMES_CHAIN_ID,
@@ -456,7 +457,8 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
           Get a name
         </label>
         <p className="mt-0.5 text-[12.5px] leading-relaxed text-mute">People can pay @name instead of this address.</p>
-        <div className="gl-inputcard mt-3 flex items-center gap-1 rounded-[14px] px-3.5">
+        {/* one box: the name, and how long, in a dropdown at its end */}
+        <div className="gl-inputcard mt-3 flex items-center gap-1 rounded-[14px] py-1.5 pl-3.5 pr-1.5">
           <span className="text-[15px] text-mute">@</span>
           <input
             id="gloam-name"
@@ -468,7 +470,17 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
             spellCheck={false}
             maxLength={21}
             placeholder="yourname"
-            className="h-11 min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none! placeholder:text-faint"
+            className="h-10 min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none! placeholder:text-faint"
+          />
+          <Select
+            variant="pill"
+            align="end"
+            className="shrink-0"
+            label="How long"
+            value={years}
+            disabled={Boolean(busy)}
+            onChange={(v) => setYears(v)}
+            options={NAME_YEARS.map((y) => ({ value: y, label: y === 1 ? "1 year" : `${y} years` }))}
           />
         </div>
         {problem ? (
@@ -487,22 +499,6 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
 
         {isValidName(name) && !isBlockedName(name) && current?.status !== "taken" && (
           <>
-            <div role="radiogroup" aria-label="How long" className="mt-3 flex w-fit rounded-full bg-surface-2 p-1 text-[13px]">
-              {NAME_YEARS.map((y) => (
-                <button
-                  key={y}
-                  type="button"
-                  role="radio"
-                  aria-checked={years === y}
-                  onClick={() => setYears(y)}
-                  className={`inline-flex h-8 items-center rounded-full px-4 transition-colors ${
-                    years === y ? "bg-panel font-medium text-foreground shadow-card" : "text-mute hover:text-foreground"
-                  }`}
-                >
-                  {y === 1 ? "1 year" : `${y} years`}
-                </button>
-              ))}
-            </div>
             {walletStep ?? (
               <button
                 type="button"
