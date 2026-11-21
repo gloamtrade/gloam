@@ -1,7 +1,7 @@
 "use client";
 
 import { IntentLink } from "@/components/IntentLink";
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useSignMessage } from "wagmi";
 import { useAppAccount } from "@/lib/demo";
 import { WALLET_BROWSER_NOTE, inWalletBrowser, passkeySupport } from "@/lib/passkey";
@@ -15,6 +15,7 @@ import {
   passkeySecret,
   recoveryServerState,
   recoveryState,
+  recoveryTurnedOffHere,
   restoreOlderBackup,
   restoreWithWallet,
   startRecoverySync,
@@ -30,6 +31,7 @@ import { isTempoWallet } from "@/lib/tempoWallet";
 import { EMBEDDED_CONNECTOR_ID } from "@/lib/embeddedWallet";
 import { TURNKEY_CAN_OPEN_TEXT } from "@/lib/embeddedRecovery";
 import { useAutoRestore } from "@/hooks/useAutoRestore";
+import { backupRoute, backupSkippedAt, backupStepNeeded, skipBackupStep, type BackupRoute } from "@/lib/backupGate";
 import { useWalletState } from "@/hooks/useWalletState";
 
 type Busy = "on-wallet" | "on-passkey" | "restore-wallet" | "restore-passkey" | "restore-older" | "save" | "off" | "update" | "older" | null;
@@ -448,6 +450,10 @@ export function RecoverySettingsCard() {
 
 const NUDGE_KEY = "gloam.recovery.nudge.v1";
 const NUDGE_SNOOZE_MS = 7 * 86_400_000;
+/** When the nudge may show again, set by a snooze (newer than NUDGE_KEY, which held when it was snoozed). */
+const NUDGE_UNTIL_KEY = "gloam.recovery.nudge.until.v1";
+/** A browser holding a private balance with recovery off is reminded sooner: two days, not a week. */
+const HOLDING_SNOOZE_MS = 2 * 86_400_000;
 
 const nudgeListeners = new Set<() => void>();
 
@@ -461,6 +467,8 @@ function subscribeNudge(fn: () => void): () => void {
 /** "hidden" while snoozed (or before the browser can say), else "shown". */
 function nudgeSnapshot(): "hidden" | "shown" {
   try {
+    const until = Number(localStorage.getItem(NUDGE_UNTIL_KEY) ?? 0);
+    if (until > 0) return Date.now() < until ? "hidden" : "shown";
     return Date.now() - Number(localStorage.getItem(NUDGE_KEY) ?? 0) < NUDGE_SNOOZE_MS ? "hidden" : "shown";
   } catch {
     return "shown";
@@ -469,9 +477,11 @@ function nudgeSnapshot(): "hidden" | "shown" {
 
 const nudgeServerSnapshot = () => "hidden" as const;
 
-function snoozeNudge() {
+function snoozeNudge(ms: number = NUDGE_SNOOZE_MS) {
   try {
-    localStorage.setItem(NUDGE_KEY, String(Date.now()));
+    const now = Date.now();
+    localStorage.setItem(NUDGE_KEY, String(now));
+    localStorage.setItem(NUDGE_UNTIL_KEY, String(now + ms));
   } catch {
     /* private mode */
   }
@@ -516,7 +526,7 @@ export function RecoveryNudge({ hasBalance, hasDeposits }: { hasBalance: boolean
         walletLabel={auto.kind === "embedded" || failed ? "Try again" : "Restore with your wallet"}
         // Before November 2026 a wallet's backup used the older key, which takes one more signature to find.
         offerOlder={auto.status.kind === "none" && r.walletOk && auto.kind === "browser"}
-        onSnooze={stayUp ? null : snoozeNudge}
+        onSnooze={stayUp ? null : () => snoozeNudge()}
       />
     );
   }
@@ -534,6 +544,8 @@ export function RecoveryNudge({ hasBalance, hasDeposits }: { hasBalance: boolean
         : null;
   const busy = Boolean(r.busy);
   const label = noBackup ? "Try now" : source === "wallet" ? "Turn on with your wallet" : "Turn on with a passkey";
+  // Holding a private balance with no backup: hidden for two days at most, never a week.
+  const snooze = () => snoozeNudge(hasBalance && !r.state.on ? HOLDING_SNOOZE_MS : NUDGE_SNOOZE_MS);
 
   return (
     <section aria-labelledby="recovery-nudge-title" className="gl-card flex gap-4 max-sm:items-start max-sm:p-5 sm:items-center sm:py-4 sm:pl-6 sm:pr-4">
@@ -604,7 +616,7 @@ export function RecoveryNudge({ hasBalance, hasDeposits }: { hasBalance: boolean
       {!stayUp && (
         <button
           type="button"
-          onClick={snoozeNudge}
+          onClick={snooze}
           aria-label="Hide for a week"
           title="Hide for a week"
           className="-mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground max-sm:-mt-1.5"
@@ -690,6 +702,84 @@ function RestoreFallback({
           </svg>
         </button>
       )}
+    </section>
+  );
+}
+
+/**
+ * Whether a deposit or a claim should ask for a backup first (lib/backupGate).
+ * `needed` reads the saved settings and the clock, so call it in the click
+ * handler, never while rendering.
+ */
+export function useBackupGate() {
+  const r = useRecovery();
+  const { address, demo } = useAppAccount();
+  const route = backupRoute({ walletOk: r.walletOk, passkeyOk: r.passkeyOk });
+  return {
+    route,
+    needed: () => {
+      const s = recoveryState();
+      return backupStepNeeded({
+        demo: Boolean(demo),
+        active: r.active,
+        ready: s.ready,
+        on: s.on,
+        turnedOff: recoveryTurnedOffHere(),
+        embedded: r.embedded,
+        route,
+        skippedAt: address ? backupSkippedAt(address) : null,
+        now: Date.now(),
+      });
+    },
+    skip: () => {
+      if (address) skipBackupStep(address, Date.now());
+    },
+  };
+}
+
+/**
+ * The backup step itself: one button that turns recovery on, then hands back to
+ * the flow (`onDone`), and "Skip for now" (`onSkip`). Nothing is saved or sent
+ * before it, so leaving it loses nothing.
+ */
+export function BackupStep({ route, onDone, onSkip }: { route: BackupRoute; onDone: () => void; onSkip: () => void }) {
+  const r = useRecovery();
+  // the flow's latest handler, so the deposit or claim goes on with what the form holds now
+  const done = useRef(onDone);
+  useEffect(() => {
+    done.current = onDone;
+  });
+  const busy = r.busy === "on-wallet" || r.busy === "on-passkey";
+
+  async function backUp() {
+    await r.turnOn(route);
+    if (recoveryState().on) done.current();
+  }
+
+  return (
+    <section aria-labelledby="backup-step-title" className="rounded-[16px] bg-surface p-4 sm:p-5">
+      <h3 id="backup-step-title" className="text-[15px] text-foreground">
+        Back up your private balance
+      </h3>
+      <p className="mt-1 max-w-[56ch] text-[13.5px] leading-relaxed text-mute">
+        It lives in this browser. Back it up once and it comes back on any device{route === "wallet" ? " you sign in on with this wallet" : " with this passkey"}.
+      </p>
+      <p className="mt-1 text-[12.5px] leading-relaxed text-faint">
+        {route === "wallet" ? "Your wallet asks you to sign twice. It's free and sends nothing." : "Your device asks for a passkey. It's free and sends nothing."}
+      </p>
+      {r.message?.tone === "error" && (
+        <p role="alert" className="mt-2 text-[13px] leading-relaxed text-danger">
+          {r.message.text}
+        </p>
+      )}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => void backUp()} disabled={busy} className="btn btn-ink btn-lg min-w-0 flex-1">
+          {busy ? (route === "wallet" ? "Check your wallet…" : "Check your passkey…") : route === "wallet" ? "Back up with your wallet" : "Back up with a passkey"}
+        </button>
+        <button type="button" onClick={onSkip} disabled={busy} className="btn btn-ghost btn-lg">
+          Skip for now
+        </button>
+      </div>
     </section>
   );
 }

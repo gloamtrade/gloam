@@ -178,6 +178,7 @@ import { useEnsAddress } from "@/hooks/useEnsAddress";
 import { lookupGloamName, useGloamName } from "@/hooks/useGloamName";
 import { GloamNameCard } from "./GloamNameCard";
 import { GLOAM_NAMES_ADDRESS } from "@/lib/gloamNames";
+import { BackupStep, useBackupGate } from "./RecoveryPanel";
 
 /** How securing a claim ended (lib/claimSweep), or "error" when it threw. */
 type SweepStatus = SweepResult["status"] | "error";
@@ -372,6 +373,9 @@ export function MoveView() {
   const [cashOutChecking, setCashOutChecking] = useState(false);
   /** Opening a claim code (PBKDF2, spent check, tree sync) before it is saved: one at a time. */
   const claimGate = useRef(false);
+  /** Before a claim first lands in this browser: the backup step shows in place of the button (lib/backupGate). */
+  const backupGate = useBackupGate();
+  const [claimBackupAsk, setClaimBackupAsk] = useState(false);
   const [claimOpening, setClaimOpening] = useState(false);
   /** The newest inbox scan: Check now waits for it, and an older one never ends its spinner. */
   const scanRun = useRef(0);
@@ -2326,8 +2330,15 @@ export function MoveView() {
     return { label, note: pack.note, local, isNew: !known, already: false, demo };
   }
 
-  async function onImportNote() {
+  /** `afterBackup`: the backup step just finished or was skipped, so it isn't asked again. */
+  async function onImportNote(afterBackup = false) {
     if (claimGate.current) return;
+    // Nothing is opened or saved yet: a browser with no backup is asked for one first.
+    if (!afterBackup && backupGate.needed()) {
+      setError(null);
+      setClaimBackupAsk(true);
+      return;
+    }
     claimGate.current = true;
     setClaimOpening(true);
     setError(null);
@@ -3848,6 +3859,19 @@ export function MoveView() {
                   />
                   {!isConnected ? (
                     connectPrompt("claim it")
+                  ) : claimBackupAsk && backupGate.route ? (
+                    <BackupStep
+                      route={backupGate.route}
+                      onDone={() => {
+                        setClaimBackupAsk(false);
+                        void onImportNote(true);
+                      }}
+                      onSkip={() => {
+                        backupGate.skip();
+                        setClaimBackupAsk(false);
+                        void onImportNote(true);
+                      }}
+                    />
                   ) : (
                     <button
                       id="claim-submit"

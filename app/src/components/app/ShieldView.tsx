@@ -54,6 +54,7 @@ import { countPerson } from "@/lib/people";
 import { pickAddAsset } from "@/lib/vaultHub";
 import { faucetFor } from "@/lib/faucet";
 import { TempoFaucetButton } from "./TempoFaucetButton";
+import { BackupStep, useBackupGate } from "./RecoveryPanel";
 
 type TxKind = "shield" | "approve" | "pull" | null;
 type AssetChoice = "eth" | string; // eth | token id
@@ -321,6 +322,9 @@ export function ShieldView() {
   // again right before signing.
   const [blockedAddr, setBlockedAddr] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  /** Before money first lands in this browser: the backup step shows in place of the button (lib/backupGate). */
+  const backupGate = useBackupGate();
+  const [backupAsk, setBackupAsk] = useState(false);
   const screenBlocked = Boolean(address) && blockedAddr === address;
   useEffect(() => {
     if (!address || demo) return;
@@ -752,8 +756,9 @@ export function ShieldView() {
     } as Parameters<typeof writeContract>[0]);
   }
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  /** `afterBackup`: the backup step just finished or was skipped, so it isn't asked again. */
+  async function onSubmit(e?: React.FormEvent, afterBackup = false) {
+    e?.preventDefault();
     const err = validate();
     if (err) {
       setFormError(err);
@@ -762,6 +767,12 @@ export function ShieldView() {
     if (!network.pool || !address) return;
     if (vault.locked) {
       setFormError("Unlock your private balance with your passkey first.");
+      return;
+    }
+    // Nothing is saved or sent yet: a browser with no backup is asked for one first.
+    if (!afterBackup && backupGate.needed()) {
+      setFormError(null);
+      setBackupAsk(true);
       return;
     }
 
@@ -1254,6 +1265,19 @@ export function ShieldView() {
               <p role="status" className="rounded-[16px] bg-surface px-4 py-3.5 text-center text-[14px] text-mute">
                 {SCREEN_BLOCKED_MESSAGE}
               </p>
+            ) : backupAsk && backupGate.route ? (
+              <BackupStep
+                route={backupGate.route}
+                onDone={() => {
+                  setBackupAsk(false);
+                  void onSubmit(undefined, true);
+                }}
+                onSkip={() => {
+                  backupGate.skip();
+                  setBackupAsk(false);
+                  void onSubmit(undefined, true);
+                }}
+              />
             ) : (
               <button
                 type="submit"
