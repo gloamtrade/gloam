@@ -73,7 +73,9 @@ const ethShort = (wei: bigint) => Number(formatEther(wei)).toLocaleString("en-US
 
 export function GloamNameCard({ tag }: { tag: string }) {
   const demo = useDemo();
-  if (!GLOAM_NAMES_ADDRESS || demo) return null;
+  const { isConnected } = useAppAccount();
+  // signed out, the browser's names stay out of sight (the next person here isn't you)
+  if (!GLOAM_NAMES_ADDRESS || demo || !isConnected) return null;
   return <NameCard tag={tag} registry={GLOAM_NAMES_ADDRESS} />;
 }
 
