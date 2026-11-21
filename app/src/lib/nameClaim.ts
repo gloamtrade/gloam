@@ -16,10 +16,10 @@ import { SWAP_ESCROW_INIT_CODE, refundAmountFor, vaultFeeOf } from "./vaultSwap"
 import { GLOAM_TOKEN } from "./buybacks";
 
 /**
- * The registrar on Robinhood Chain mainnet. null until it is deployed
- * (contracts/script/DeployGloamNamesRegistrar.s.sol), and private claims stay off.
+ * The registrar on Robinhood Chain mainnet (deployed 21 Nov 2026, block 119888677,
+ * Sourcify exact_match). Set to null to switch private claims off.
  */
-export const NAMES_REGISTRAR_ADDRESS: Address | null = null;
+export const NAMES_REGISTRAR_ADDRESS: Address | null = "0x2B28b693EA3A880085fe582E55B7f0EEC86d3EDB";
 
 /** The chain names live on, where the registrar spends notes. */
 export const NAME_CLAIM_CHAIN_ID = 4663;
