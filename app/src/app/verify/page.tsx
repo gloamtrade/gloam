@@ -28,6 +28,7 @@ import { ContractsSection } from "@/components/verify/ContractsSection";
 import { OwnershipStatement } from "@/components/verify/OwnershipStatement";
 import { CheckMark } from "@/components/verify/VerifyBits";
 import { GLOAM_OWNER } from "@/lib/contractDirectory";
+import { ELYSIUM_ENABLED } from "@/lib/elysium";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 type Result =
@@ -94,8 +95,8 @@ const FACTS: Fact[] = [
     body: "The vault is not a proxy and has no upgrade function, so its code is fixed. Only the settings above can change, and only in public.",
   },
   {
-    title: "One owner wallet, then the owner guard",
-    body: `${short(GLOAM_OWNER)} owned every mainnet vault at launch. Each vault moves to the owner guard, a contract that forwards only deposit limit and fee changes and the sweep of coin sent by mistake, so it can then never get a new proof checker or a new owner. The checks above show which holds each vault. A handover takes two steps on chain: the new owner has to accept it, and a pending one shows above.`,
+    title: "An owner guard, run by a 2 of 3 Safe",
+    body: `${short(GLOAM_OWNER)} owned the first mainnet vaults at launch. Since 12 November 2026 each is held by the owner guard, a contract that forwards only deposit limit and fee changes and the sweep of coin sent by mistake, so it can never get a new proof checker or a new owner. The guard is run by the Gloam Owner Safe, which needs 2 of 3 signatures${ELYSIUM_ENABLED ? " (on Elysium, by the owner wallet until Safe runs there)" : ""}. The checks above show which holds each vault.`,
   },
   {
     title: "Keys from a public ceremony",
