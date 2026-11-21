@@ -27,6 +27,7 @@ export default function DocsPayrollPage() {
         { href: "/app/payroll", label: "Open payroll" },
         { href: "#csv", label: "List format" },
         { href: "#relay", label: "The Gloam relay" },
+        { href: "#headless", label: "Run from a script" },
       ]}
     >
       <h2>Why payroll needs privacy</h2>
@@ -235,6 +236,18 @@ const hash = await relayIntent(payment.intent); // your wallet stays off the rec
       <p>
         The MCP server settles agent payments through the relay with{" "}
         <code>GLOAM_USE_RELAY=1</code>. See <Link href="/docs/agents">Agents</Link>.
+      </p>
+
+      <h3 id="headless">Run payroll from a script</h3>
+      <p>
+        <a href="https://github.com/Olalolo22/gloam-payroll-cli">gloam-payroll-cli</a>,
+        a community tool by Olu, runs the same payroll without a browser, from a
+        server or a CI job. It reads the same list format, pays each row through
+        the Gloam relay, picks a run back up if it stopped halfway without paying
+        anyone twice, and makes a payroll total proof you can check at{" "}
+        <Link href="/verify">/verify</Link>. It is built on{" "}
+        <code>@gloamtrade/sdk</code> and maintained by its author, not by Gloam,
+        so read it before you run it with real money.
       </p>
 
       <h2>No middlemen</h2>
