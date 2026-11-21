@@ -1721,7 +1721,9 @@ export function MoveView() {
       if (payStyle === "direct" && !isValidReceiveTag(payTag)) {
         throw new Error(
           payRecipient.kind === "name"
-            ? `No one has @${payRecipient.name} yet. Check the spelling, or paste their Gloam address.`
+            ? nameLookup.status === "blocked"
+              ? `@${payRecipient.name} can't be paid on Gloam. Paste their Gloam address instead.`
+              : `No one has @${payRecipient.name} yet. Check the spelling, or paste their Gloam address.`
             : "That Gloam address is incomplete or mistyped. Copy it again from their Receive page."
         );
       }
@@ -2877,7 +2879,11 @@ export function MoveView() {
                         That Gloam address looks incomplete or mistyped. Copy it again from their Receive page.
                       </p>
                     ) : payRecipient.kind === "name" && nameLookup.status !== "off" && nameLookup.status !== "idle" ? (
-                      nameLookup.status === "none" ? (
+                      nameLookup.status === "blocked" ? (
+                        <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
+                          @{payRecipient.name} can&apos;t be paid on Gloam. Paste their Gloam address instead.
+                        </p>
+                      ) : nameLookup.status === "none" ? (
                         <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
                           No one has @{payRecipient.name} yet. Check the spelling.
                         </p>

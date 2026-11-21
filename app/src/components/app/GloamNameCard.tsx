@@ -36,6 +36,7 @@ import {
   nameDate,
   nameExpired,
   nameFromClaimInput,
+  isBlockedName,
   nameProblem,
   rememberMyName,
   type NameRecord,
@@ -105,7 +106,7 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
 
   // Whether the typed name is free, and what it costs for the years picked.
   useEffect(() => {
-    if (!isValidName(name)) return;
+    if (!isValidName(name) || isBlockedName(name)) return;
     let stale = false;
     const key = checkKey;
     const timer = window.setTimeout(() => {
@@ -368,7 +369,7 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
         </p>
       ) : null}
 
-      {isValidName(name) && current?.status !== "taken" && (
+      {isValidName(name) && !isBlockedName(name) && current?.status !== "taken" && (
         <>
           <div role="radiogroup" aria-label="How long" className="mt-3 flex w-fit rounded-full bg-surface-2 p-1 text-[13px]">
             {NAME_YEARS.map((y) => (

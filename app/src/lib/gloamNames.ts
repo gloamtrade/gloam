@@ -115,12 +115,61 @@ export function nameFromClaimInput(input: string): string {
   return input.trim().replace(/^@/, "").toLowerCase();
 }
 
-/** Why a name someone is typing cannot be registered, or null when the shape is fine. */
+/**
+ * Names the app never registers and never pays: Gloam's own, staff and
+ * support words, and names people could use to pass as a chain, wallet or
+ * stablecoin. Anyone can still write one into the registry directly, but no
+ * Gloam screen reads it, so "pay @support" can never reach a stranger.
+ */
+const BLOCKED_NAMES = new Set([
+  "glim", "glimbot",
+  "support", "help", "helpdesk", "team", "admin", "administrator", "official", "security",
+  "mod", "mods", "moderator", "staff", "dev", "devs", "developer", "developers",
+  "founder", "cofounder", "ceo", "cto", "treasury", "owner", "root", "system",
+  "airdrop", "airdrops", "claim", "claims", "reward", "rewards", "refund", "refunds", "giveaway",
+  "verify", "verified", "verification", "wallet", "recovery", "service",
+  "customercare", "customerservice", "info", "contact",
+  "robinhood", "tempo", "base", "ethereum", "eth", "bnb", "binance", "coinbase",
+  "metamask", "okx", "relay", "safe", "elysium", "kinetiq",
+  "usdg", "usdc", "usdt", "tether", "circle",
+]);
+
+/** Blocked at the start or end of a name too: "support_team", "official_okx", "adminbob". */
+const BLOCKED_EDGES = [
+  "support", "admin", "official", "moderator", "helpdesk", "security",
+  "airdrop", "refund", "giveaway", "verify", "recovery", "treasury",
+];
+
+/** Digits that pass for letters: "supp0rt", "h3lp", "4dmin". */
+const LOOKALIKE: Record<string, string> = { "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b", "9": "g" };
+
+/**
+ * True for a name the app refuses: anything with "gloam" in it, the names
+ * above, and the same with underscores, trailing digits or lookalike digits.
+ */
+export function isBlockedName(name: string): boolean {
+  const plain = name.toLowerCase().replace(/_/g, "");
+  const forms = [
+    plain,
+    plain.replace(/\d+$/, ""),
+    plain.replace(/\d/g, (d) => LOOKALIKE[d] ?? d),
+    plain.replace(/\d/g, (d) => (d === "1" ? "i" : (LOOKALIKE[d] ?? d))),
+  ];
+  return forms.some(
+    (f) =>
+      f.includes("gloam") ||
+      BLOCKED_NAMES.has(f) ||
+      BLOCKED_EDGES.some((w) => f.startsWith(w) || f.endsWith(w))
+  );
+}
+
+/** Why a name someone is typing cannot be registered, or null when it can be. */
 export function nameProblem(name: string): string | null {
   if (!name) return null;
   if (name.length < 3) return "Names are at least 3 characters.";
   if (name.length > 20) return "Names are at most 20 characters.";
   if (!isValidName(name)) return "Use only letters, numbers and underscores.";
+  if (isBlockedName(name)) return `@${name} isn't available.`;
   return null;
 }
 
@@ -137,11 +186,11 @@ export type NameReader = (name: string) => Promise<readonly [Address, Hex, Hex, 
 
 /**
  * The record for `name`, or null when nobody holds it (never taken, or past
- * its grace period), the read fails, or the key does not make a whole Gloam
- * address. Never throws.
+ * its grace period), the name is blocked, the read fails, or the key does not
+ * make a whole Gloam address. Never throws.
  */
 export async function readNameRecord(name: string, read: NameReader): Promise<NameRecord | null> {
-  if (!isValidName(name)) return null;
+  if (!isValidName(name) || isBlockedName(name)) return null;
   try {
     const [holder, x, y, expires] = await read(name);
     if (!isAddress(holder) || holder === zeroAddress) return null;

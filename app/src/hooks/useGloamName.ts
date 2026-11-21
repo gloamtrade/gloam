@@ -3,13 +3,15 @@
 import { useEffect, useState } from "react";
 import { getNetwork } from "@/lib/networks";
 import { publicClientFor } from "@/lib/rhClient";
-import { GLOAM_NAMES_ADDRESS, gloamNamesAbi, readNameRecord, type NameRecord } from "@/lib/gloamNames";
+import { GLOAM_NAMES_ADDRESS, gloamNamesAbi, isBlockedName, readNameRecord, type NameRecord } from "@/lib/gloamNames";
 
 export type NameLookup =
   | { status: "idle" }
   /** Names are not live yet (no registry address). */
   | { status: "off" }
   | { status: "loading" }
+  /** A name the app never pays (Gloam's own, staff words, brands). Not looked up. */
+  | { status: "blocked"; name: string }
   | { status: "found"; record: NameRecord }
   | { status: "none"; name: string };
 
@@ -40,7 +42,7 @@ export function useGloamName(name: string | null, refresh = 0): NameLookup {
   const key = name ? `${name}:${refresh}` : "";
 
   useEffect(() => {
-    if (!name || !GLOAM_NAMES_ADDRESS) return;
+    if (!name || !GLOAM_NAMES_ADDRESS || isBlockedName(name)) return;
     let stale = false;
     const timer = window.setTimeout(() => {
       void readGloamName(name).then((record) => {
@@ -56,6 +58,7 @@ export function useGloamName(name: string | null, refresh = 0): NameLookup {
 
   if (!name) return { status: "idle" };
   if (!GLOAM_NAMES_ADDRESS) return { status: "off" };
+  if (isBlockedName(name)) return { status: "blocked", name };
   if (!state || state.key !== key) return { status: "loading" };
   return state.result;
 }

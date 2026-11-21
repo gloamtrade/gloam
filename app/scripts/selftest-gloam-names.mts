@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { zeroAddress, type Address, type Hex } from "viem";
 import {
+  isBlockedName,
   isValidName,
   nameExpired,
   nameFromClaimInput,
@@ -123,6 +124,29 @@ await test("expiry is judged against the time given", () => {
   assert.equal(nameExpired({ expires: 100 }, 99), false);
   assert.equal(nameExpired({ expires: 100 }, 100), false);
   assert.equal(nameExpired({ expires: 100 }, 101), true);
+});
+
+await test("team, staff and brand names are blocked, with their disguises", async () => {
+  for (const n of [
+    "gloam", "gloamtrade", "gloam_support", "xgloamx", "gl0am", "glim",
+    "support", "supp0rt", "support1", "s_u_p_p_o_r_t", "support_team", "help", "h3lp",
+    "official", "0ff1c1al", "official_okx", "adminbob", "4dmin", "airdrop2026", "refunds",
+    "okx", "robinhood", "usdg", "treasury",
+  ]) {
+    assert.equal(isBlockedName(n), true, n);
+    assert.match(nameProblem(n) ?? "", /isn't available/, n);
+  }
+  for (const n of ["duke", "alice", "badminton", "glimmer", "teamrocket", "helper", "basel", "ama_99", "sam"]) {
+    assert.equal(isBlockedName(n), false, n);
+    assert.equal(nameProblem(n), null, n);
+  }
+  let asked = false;
+  const record = await readNameRecord("support", async () => {
+    asked = true;
+    return ["0x00000000000000000000000000000000000000aa" as Address, "0x01" as Hex, "0x02" as Hex, 1n];
+  });
+  assert.equal(record, null, "a blocked name never resolves, even if someone registered it on chain");
+  assert.equal(asked, false, "a blocked name is never looked up");
 });
 
 console.log(`\n${passed} passed`);
