@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.2 (21 November 2026)
+
+- **Circuit hashes for `funds` and `payroll_total`.** `GloamCircuit` and `CIRCUIT_SHA256` now cover both (wasm, dev zkey and ceremony-final zkey), so a headless prover for proofs of holdings or a payroll run's total can fetch them with `circuitArtifactUrls` / `circuitArtifactFiles` and check them before proving.
+- **`paySeed` on `buildPrivateSendIntent`.** Pass `randomNoteSeed().seed` and the payment note's secret is made from it, so the payment fits a short claim link (`encodeShortClaim`). Left out, the secret is random as before.
+- **`buildShieldBoundIntent` takes `prove`**, the name every other builder uses. `prover` still works.
+
 ## 0.8.1 (20 November 2026)
 
 - **BNB Chain: BDX is Beldex's BEP-20 `0x9d10a1ec41Fe7878429BB457e31F9b050D38c633`** (9 decimals), confirmed by Beldex on 20 November 2026. 0.8.0 listed the LayerZero OFT `0x6ad12E761b438beA3EA09F6C6266556Bb24C2181`, the LayerZero OFT named BDX, which is not Beldex's (Beldex's BDX exists only on BNB Chain); it was also closed (0, 0) in the Base and Ethereum vaults on 20 November 2026. `BNB_MAINNET.bdx`, `bnbMainnetAssets()` and every BNB Chain reader now name the Beldex contract.
