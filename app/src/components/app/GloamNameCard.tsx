@@ -14,8 +14,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
-import { erc20Abi, zeroAddress, type Hex } from "viem";
-import { useWriteContract } from "wagmi";
+import { erc20Abi, formatEther, parseEther, zeroAddress, type Hex } from "viem";
+import { useSendTransaction, useWriteContract } from "wagmi";
+import { buildEthToGloamSwap, ethWithBuffer, quoteCall } from "@/lib/ethForGloam";
 import { useAppAccount, useDemo } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
 import { getNetwork } from "@/lib/networks";
@@ -53,12 +54,22 @@ import {
 type Check =
   | { status: "idle" }
   /** `balance` is the connected wallet's $GLOAM on Robinhood Chain, null with no wallet. */
-  | { status: "free"; key: string; price: bigint; balance: bigint | null }
+  /**
+   * `balance` is the connected wallet's $GLOAM on Robinhood Chain, null with no wallet.
+   * When it falls short, `ethQuote` is what the pool asks in ETH for the rest and
+   * `ethBalance` the wallet's ETH, for paying with ETH; both null otherwise.
+   */
+  | { status: "free"; key: string; price: bigint; balance: bigint | null; ethQuote: bigint | null; ethBalance: bigint | null }
   | { status: "yours"; key: string; record: NameRecord }
   | { status: "taken"; key: string }
   | { status: "error"; key: string };
 
 const rh = () => publicClientFor(getNetwork("robinhood-mainnet"));
+
+/** ETH kept back for the swap, approval and registration gas when paying with ETH. */
+const GAS_RESERVE = parseEther("0.0002");
+/** ETH as a short figure: 0.002958 -> 0.003. */
+const ethShort = (wei: bigint) => Number(formatEther(wei)).toLocaleString("en-US", { maximumSignificantDigits: 2 });
 
 export function GloamNameCard({ tag }: { tag: string }) {
   const demo = useDemo();
@@ -70,6 +81,7 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
   const { address, isConnected } = useAppAccount();
   const { network, setNetworkKey } = useNetwork();
   const { writeContractAsync } = useWriteContract();
+  const { sendTransactionAsync } = useSendTransaction();
   const onRh = network.chainId === GLOAM_NAMES_CHAIN_ID;
 
   const [mine, setMine] = useState<NameRecord | null>(null);
@@ -215,7 +227,24 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
               : Promise.resolve(null),
           ]);
           if (stale) return;
-          setCheck(free ? { status: "free", key, price, balance } : { status: "taken", key });
+          if (!free) {
+            setCheck({ status: "taken", key });
+            return;
+          }
+          // short of $GLOAM: what the rest would cost in ETH, and whether the wallet has it
+          let ethQuote: bigint | null = null;
+          let ethBalance: bigint | null = null;
+          if (address && balance !== null && balance < price) {
+            [ethQuote, ethBalance] = await Promise.all([
+              client
+                .simulateContract({ ...quoteCall(price - balance), account: address })
+                .then((r) => r.result[0])
+                .catch(() => null),
+              client.getBalance({ address }).catch(() => null),
+            ]);
+            if (stale) return;
+          }
+          setCheck({ status: "free", key, price, balance, ethQuote, ethBalance });
         } catch {
           if (!stale) setCheck({ status: "error", key });
         }
@@ -283,7 +312,11 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
     try {
       await work();
     } catch (e) {
-      setError(e instanceof Error && e.message.includes("$GLOAM") ? e.message : walletErrorForPeople(e, `${label} didn't go through. Try again.`));
+      setError(
+        e instanceof Error && /\$GLOAM|ETH on Robinhood Chain/.test(e.message)
+          ? e.message
+          : walletErrorForPeople(e, `${label} didn't go through. Try again.`)
+      );
     } finally {
       working.current = false;
       setBusy(null);
@@ -293,7 +326,11 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
     }
   }
 
-  function getName(price: bigint) {
+  /**
+   * Get the name. With `withEth`, first buy the $GLOAM the wallet is short of with
+   * ETH (lib/ethForGloam), then approve and register as usual.
+   */
+  function getName(price: bigint, withEth = false) {
     const point = receiveTagPoint(tag);
     if (!address || !point || busy || working.current) return;
     const payer = address;
@@ -310,12 +347,37 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
         args: [wanted, BigInt(span)],
       });
       if (now !== price) throw new Error(`The price of @${wanted} just changed to ${gloamAmount(now)} $GLOAM. Check it and try again.`);
-      const approving = await needsApproval(price);
-      const of = approving ? 2 : 1;
+      const client = rh();
+      const [held, allowance] = await Promise.all([
+        client.readContract({ address: GLOAM_TOKEN, abi: erc20Abi, functionName: "balanceOf", args: [payer] }),
+        client.readContract({ address: GLOAM_TOKEN, abi: erc20Abi, functionName: "allowance", args: [payer, registry] }),
+      ]);
+      const need = withEth && held < price ? price - held : 0n;
+      const approving = allowance < price;
+      const of = (need > 0n ? 1 : 0) + (approving ? 1 : 0) + 1;
+      let step = 0;
+      if (need > 0n) {
+        // a fresh quote, the buffer on top, and enough ETH left for gas
+        const quote = (await client.simulateContract({ ...quoteCall(need), account: payer })).result[0];
+        const ethIn = ethWithBuffer(quote);
+        const eth = await client.getBalance({ address: payer });
+        if (eth < ethIn + GAS_RESERVE) {
+          throw new Error(`This takes about ${ethShort(ethIn + GAS_RESERVE)} ETH on Robinhood Chain, and this wallet has ${ethShort(eth)}.`);
+        }
+        setProgress({ step: ++step, of, text: `Swap ${ethShort(ethIn)} ETH for ${gloamAmount(need)} $GLOAM` });
+        const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200);
+        const swap = buildEthToGloamSwap(ethIn, need, deadline);
+        await waitFor(
+          await sendTransactionAsync({ account: payer, to: swap.to, data: swap.data, value: swap.value, chainId: GLOAM_NAMES_CHAIN_ID })
+        );
+      }
       if (approving) {
-        setProgress({ step: 1, of, text: `Approve ${gloamAmount(price)} $GLOAM in your wallet` });
+        // throws before any prompt if the wallet still holds too little
+        await needsApproval(price);
+        setProgress({ step: ++step, of, text: `Approve ${gloamAmount(price)} $GLOAM in your wallet` });
         await approve(price);
       }
+      if (!approving) await needsApproval(price);
       setProgress({ step: of, of, text: `Confirm @${wanted} in your wallet` });
       const hash = await writeContractAsync({
         account: payer,
@@ -519,6 +581,14 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
     current?.status === "free" &&
     feeBps !== null &&
     pickClaimNote(privateGloam, noteForPrice(current.price, feeBps)) !== null;
+  /** Short of $GLOAM, no private note to use, but the wallet holds enough ETH to buy the rest and pay the gas. */
+  const ethOk =
+    !privateOk &&
+    short &&
+    current?.status === "free" &&
+    current.ethQuote !== null &&
+    current.ethBalance !== null &&
+    current.ethBalance >= ethWithBuffer(current.ethQuote) + GAS_RESERVE;
 
   return (
     <>
@@ -602,7 +672,7 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
                   </BusyLabel>
                 </button>
               ))}
-            {short && !privateOk && current?.status === "free" && !busy && (
+            {short && !privateOk && current?.status === "free" && !busy && !ethOk && (
               <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
                 This takes {gloamAmount(current.price)} $GLOAM on Robinhood Chain, and this wallet has{" "}
                 {gloamAmount(current.balance ?? 0n)}.{" "}
@@ -611,11 +681,21 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
                 </Link>
               </p>
             )}
+            {ethOk && current?.status === "free" && current.ethQuote !== null && !busy && !walletStep && (
+              <>
+                <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
+                  This wallet has {gloamAmount(current.balance ?? 0n)} $GLOAM. You can pay with ETH instead.
+                </p>
+                <button type="button" onClick={() => getName(current.price, true)} className="btn btn-ghost mt-2">
+                  Pay with ETH · about {ethShort(ethWithBuffer(current.ethQuote))} ETH
+                </button>
+              </>
+            )}
             {progress && (
               <div aria-live="polite" className="mt-3 flex items-center gap-2.5 text-[12.5px] text-mute">
                 {progress.of > 1 && (
                   <span className="flex gap-1" aria-hidden>
-                    {[1, 2].map((s) => (
+                    {Array.from({ length: progress.of }, (_, i) => i + 1).map((s) => (
                       <span
                         key={s}
                         className={`h-1 w-5 rounded-full transition-colors duration-300 ${

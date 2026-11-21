@@ -76,7 +76,7 @@ const vaultAbi = parseAbi([
 
 // ── the registrar, as forge built it ──────────────────────────────────────────
 const artifact = JSON.parse(readFileSync("../contracts/out/GloamNamesRegistrar.sol/GloamNamesRegistrar.json", "utf8"));
-const initCode = (artifact.bytecode.object as Hex) + encodeAbiParameters([{ type: "address" }, { type: "address" }, { type: "address" }], [VAULT, NAMES, TREASURY]).slice(2);
+const initCode = ((artifact.bytecode.object as Hex) + encodeAbiParameters([{ type: "address" }, { type: "address" }, { type: "address" }], [VAULT, NAMES, TREASURY]).slice(2)) as Hex;
 const REGISTRAR = getContractAddress({ from: DEPLOYER, nonce: 0n });
 
 const [dCode, dNonce, rCode] = await Promise.all([
