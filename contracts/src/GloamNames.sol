@@ -10,17 +10,17 @@ pragma solidity ^0.8.24;
  *    key, exactly as pasting the full address does. The key is checked to be
  *    on the curve here, so a name can never point at a key nobody can open.
  *  - Names are paid for per year in $GLOAM. Every token paid goes straight
- *    from the payer to the burn address in the same transaction. This contract
- *    never holds tokens and has no function that moves them anywhere else.
+ *    from the payer to the Gloam treasury in the same transaction. This
+ *    contract never holds tokens.
  *  - Names are lowercase a to z, 0 to 9 and underscore, 3 to 20 characters, so
  *    look-alike letters from other alphabets cannot copy a name.
  *  - After a name expires its holder has GRACE_PERIOD to renew it. Until then
  *    it still resolves to the same key and nobody else can take it.
  *  - Anyone can renew any name, so a friend or a team can keep one alive.
  *
- * Owner powers (the Safe): set the yearly prices, and set a name that nobody
- * holds aside for one address (so "gloam" or "support" cannot be taken to
- * impersonate the team). The owner cannot change, take, cancel or re-point a
+ * Owner powers (the Safe): set the yearly prices, change where payments go
+ * (the treasury), and set a name that nobody holds aside for one address (so
+ * "gloam" or "support" cannot be taken to impersonate the team). The owner cannot change, take, cancel or re-point a
  * name someone holds. Only the holder can change its key or hand it on.
  *
  * Privacy: the wallet that holds a name is public, and so is the key the name
@@ -29,9 +29,6 @@ pragma solidity ^0.8.24;
  * Gloam address a payment was for.
  */
 contract GloamNames {
-    /// @notice Where every $GLOAM paid for a name goes. Nothing can move tokens out of it.
-    address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
-
     uint256 public constant YEAR = 365 days;
     uint256 public constant GRACE_PERIOD = 30 days;
     uint256 public constant MIN_LENGTH = 3;
@@ -48,13 +45,16 @@ contract GloamNames {
     address public owner;
     address public pendingOwner;
 
+    /// @notice Where every $GLOAM paid for a name goes: the Gloam treasury.
+    address public treasury;
+
     /// @notice Yearly price in $GLOAM base units for a 3, 4, and 5-or-more character name.
     uint256 public price3;
     uint256 public price4;
     uint256 public price5;
 
-    /// @notice Every $GLOAM this contract has sent to the burn address.
-    uint256 public totalBurned;
+    /// @notice Every $GLOAM paid for names so far.
+    uint256 public totalCollected;
 
     struct Record {
         address holder;
@@ -69,13 +69,14 @@ contract GloamNames {
     mapping(bytes32 => address) public reservedFor;
 
     event NameRegistered(
-        bytes32 indexed node, string name, address indexed holder, bytes32 keyX, bytes32 keyY, uint64 expires, uint256 burned
+        bytes32 indexed node, string name, address indexed holder, bytes32 keyX, bytes32 keyY, uint64 expires, uint256 paid
     );
-    event NameRenewed(bytes32 indexed node, uint64 expires, uint256 burned);
+    event NameRenewed(bytes32 indexed node, uint64 expires, uint256 paid);
     event KeyChanged(bytes32 indexed node, bytes32 keyX, bytes32 keyY);
     event NameTransferred(bytes32 indexed node, address indexed from, address indexed to);
     event NameReserved(bytes32 indexed node, string name, address indexed reservedFor);
     event PricesSet(uint256 price3, uint256 price4, uint256 price5);
+    event TreasurySet(address indexed treasury);
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
@@ -97,12 +98,20 @@ contract GloamNames {
         _;
     }
 
-    constructor(address token_, address owner_, uint256 price3_, uint256 price4_, uint256 price5_) {
+    constructor(
+        address token_,
+        address owner_,
+        address treasury_,
+        uint256 price3_,
+        uint256 price4_,
+        uint256 price5_
+    ) {
         if (token_ == address(0) || owner_ == address(0)) revert ZeroAddress();
         if (token_.code.length == 0) revert ZeroAddress();
         token = token_;
         owner = owner_;
         emit OwnershipTransferred(address(0), owner_);
+        _setTreasury(treasury_);
         _setPrices(price3_, price4_, price5_);
     }
 
@@ -168,7 +177,7 @@ contract GloamNames {
     /**
      * @notice Register `name` for `years_` years, pointing at the Gloam address
      *         key (keyX, keyY), held by `holder`. The caller pays the price in
-     *         $GLOAM (approve this contract first) and it is burned.
+     *         $GLOAM (approve this contract first), sent to the treasury.
      * @param holder The wallet that may change the key or hand the name on.
      *        It can be any wallet; it never sees payments made to the name.
      */
@@ -198,10 +207,10 @@ contract GloamNames {
         uint256 cost = priceOf(name, years_);
         if (previous != address(0)) emit NameTransferred(node, previous, holder);
         emit NameRegistered(node, name, holder, keyX, keyY, expires, cost);
-        _burnFrom(msg.sender, cost);
+        _collect(msg.sender, cost);
     }
 
-    /// @notice Add `years_` years to a name. Anyone can pay; the caller's $GLOAM is burned.
+    /// @notice Add `years_` years to a name. Anyone can pay; the caller's $GLOAM goes to the treasury.
     ///         Works until the grace period ends, then the name is open to anyone.
     function renew(string calldata name, uint256 years_) external returns (uint64 expires) {
         if (years_ == 0 || years_ > MAX_YEARS) revert BadYears();
@@ -217,7 +226,7 @@ contract GloamNames {
 
         uint256 cost = priceOf(name, years_);
         emit NameRenewed(node, expires, cost);
-        _burnFrom(msg.sender, cost);
+        _collect(msg.sender, cost);
     }
 
     /// @notice Point the name at a new Gloam address key. Holder only, while the name is live.
@@ -244,6 +253,11 @@ contract GloamNames {
     /// @notice Set the yearly prices in $GLOAM base units. Names already paid for keep their expiry.
     function setPrices(uint256 price3_, uint256 price4_, uint256 price5_) external onlyOwner {
         _setPrices(price3_, price4_, price5_);
+    }
+
+    /// @notice Change where name payments go. Payments already made stay where they went.
+    function setTreasury(address treasury_) external onlyOwner {
+        _setTreasury(treasury_);
     }
 
     /**
@@ -285,6 +299,12 @@ contract GloamNames {
         if (block.timestamp > r.expires) revert Expired();
     }
 
+    function _setTreasury(address treasury_) private {
+        if (treasury_ == address(0)) revert ZeroAddress();
+        treasury = treasury_;
+        emit TreasurySet(treasury_);
+    }
+
     function _setPrices(uint256 price3_, uint256 price4_, uint256 price5_) private {
         price3 = price3_;
         price4 = price4_;
@@ -292,13 +312,13 @@ contract GloamNames {
         emit PricesSet(price3_, price4_, price5_);
     }
 
-    /// @dev Move `amount` $GLOAM from `from` straight to the burn address. Accepts
+    /// @dev Move `amount` $GLOAM from `from` straight to the treasury. Accepts
     ///      tokens that return true or nothing; anything else reverts.
-    function _burnFrom(address from, uint256 amount) private {
+    function _collect(address from, uint256 amount) private {
         if (amount == 0) return;
-        totalBurned += amount;
+        totalCollected += amount;
         (bool ok, bytes memory ret) =
-            token.call(abi.encodeWithSelector(0x23b872dd, from, BURN_ADDRESS, amount));
+            token.call(abi.encodeWithSelector(0x23b872dd, from, treasury, amount));
         if (!ok || (ret.length != 0 && !abi.decode(ret, (bool)))) revert PaymentFailed();
     }
 }

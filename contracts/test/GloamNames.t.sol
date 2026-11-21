@@ -14,7 +14,7 @@ contract GloamNamesTest is Test {
     address bob = makeAddr("bob");
     address carol = makeAddr("carol");
 
-    address constant DEAD = 0x000000000000000000000000000000000000dEaD;
+    address treasury = makeAddr("treasury");
 
     // P-256 generator G and 2G: real points on the curve, as in a Gloam address.
     bytes32 constant GX = 0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296;
@@ -22,13 +22,13 @@ contract GloamNamesTest is Test {
     bytes32 constant G2X = 0x7cf27b188d034f7e8a52380304b51ac3c08969e277f21b35a60b48fc47669978;
     bytes32 constant G2Y = 0x07775510db8ed040293d9ac69f7430dbba7dade63ce982299e04b79d227873d1;
 
-    uint256 constant P3 = 400 ether;
-    uint256 constant P4 = 100 ether;
-    uint256 constant P5 = 25 ether;
+    uint256 constant P3 = 50 ether;
+    uint256 constant P4 = 15 ether;
+    uint256 constant P5 = 5 ether;
 
     function setUp() public {
         gloam = new MockERC20();
-        names = new GloamNames(address(gloam), safe, P3, P4, P5);
+        names = new GloamNames(address(gloam), safe, treasury, P3, P4, P5);
         for (uint256 i; i < 3; ++i) {
             address who = [alice, bob, carol][i];
             gloam.mint(who, 10_000 ether);
@@ -44,12 +44,12 @@ contract GloamNamesTest is Test {
 
     // ------------------------------------------------------------ register
 
-    function test_register_burns_and_resolves() public {
+    function test_register_pays_treasury_and_resolves() public {
         uint64 exp = _register(alice, "duke", 2);
         assertEq(exp, uint64(block.timestamp + 2 * 365 days));
-        assertEq(gloam.balanceOf(DEAD), 2 * P4);
+        assertEq(gloam.balanceOf(treasury), 2 * P4);
         assertEq(gloam.balanceOf(address(names)), 0);
-        assertEq(names.totalBurned(), 2 * P4);
+        assertEq(names.totalCollected(), 2 * P4);
 
         (address holder, bytes32 x, bytes32 y, uint64 expires) = names.resolve("duke");
         assertEq(holder, alice);
@@ -115,7 +115,8 @@ contract GloamNamesTest is Test {
         names.register("duke", GX, GY, broke, 1);
         (address holder,,,) = names.resolve("duke");
         assertEq(holder, address(0));
-        assertEq(names.totalBurned(), 0);
+        assertEq(names.totalCollected(), 0);
+        assertEq(gloam.balanceOf(treasury), 0);
     }
 
     function test_free_names_when_price_is_zero() public {
@@ -277,6 +278,31 @@ contract GloamNamesTest is Test {
         assertEq(names.priceOf("abcde", 1), 3 ether);
     }
 
+    function test_renewals_pay_treasury() public {
+        _register(alice, "duke", 1);
+        vm.prank(bob);
+        names.renew("duke", 3);
+        assertEq(gloam.balanceOf(treasury), 4 * P4);
+        assertEq(names.totalCollected(), 4 * P4);
+    }
+
+    function test_only_owner_moves_the_treasury() public {
+        address next = makeAddr("next");
+        vm.prank(alice);
+        vm.expectRevert(GloamNames.NotOwner.selector);
+        names.setTreasury(alice);
+        vm.prank(safe);
+        vm.expectRevert(GloamNames.ZeroAddress.selector);
+        names.setTreasury(address(0));
+
+        _register(alice, "duke", 1);
+        vm.prank(safe);
+        names.setTreasury(next);
+        _register(bob, "bobby", 1);
+        assertEq(gloam.balanceOf(treasury), P4);
+        assertEq(gloam.balanceOf(next), P5);
+    }
+
     function test_price_change_keeps_paid_expiry() public {
         uint64 exp = _register(alice, "duke", 1);
         vm.prank(safe);
@@ -300,11 +326,13 @@ contract GloamNamesTest is Test {
 
     function test_constructor_rejects_missing_token() public {
         vm.expectRevert(GloamNames.ZeroAddress.selector);
-        new GloamNames(address(0), safe, 1, 1, 1);
+        new GloamNames(address(0), safe, treasury, 1, 1, 1);
         vm.expectRevert(GloamNames.ZeroAddress.selector);
-        new GloamNames(makeAddr("eoa"), safe, 1, 1, 1);
+        new GloamNames(makeAddr("eoa"), safe, treasury, 1, 1, 1);
         vm.expectRevert(GloamNames.ZeroAddress.selector);
-        new GloamNames(address(gloam), address(0), 1, 1, 1);
+        new GloamNames(address(gloam), address(0), treasury, 1, 1, 1);
+        vm.expectRevert(GloamNames.ZeroAddress.selector);
+        new GloamNames(address(gloam), safe, address(0), 1, 1, 1);
     }
 
     // ------------------------------------------------------------ fuzz
