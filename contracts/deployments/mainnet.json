@@ -21,6 +21,10 @@
       "ShieldIVerifier": "0x69Fa6d2De0A66dA718DF022cEe98485AfDb03465",
       "GloamPayMemo": "0x01B3172d9900Cb26d57E986429b9b23854c74598",
       "GloamPayMemoDeployBlock": 95494392,
+      "GloamNames": "0x62c435CE6886fa91e3b0e91500c6dC9219723457",
+      "GloamNamesDeployBlock": 119798738,
+      "GloamNamesDeployTx": "0xfb36dd019d816de8d55c2881ad2266bb9804e9af6ef69b9bbdf18e88f5227918",
+      "GloamNamesNote": "Deployed 2026-11-21 by 0xec9993765e249e8e9DC677B7BCB61F78b31c6b60. Owner the Safe 0x8E74b2b85b40f36771f92392b42BBaeacDC75507, payments to the treasury, 50 / 15 / 5 GLOAM a year for 3 / 4 / 5+ characters. Sourcify exact_match.",
       "GloamVaultSwapV4": "0x34AB06208586A737Bf1607fa996Bc9162271c52d",
       "GloamVaultSwapV4b": "0xfCa1887e77f738ef9C5751974b3f3873d029F2DC",
       "assets": {

@@ -10,8 +10,8 @@
 import { formatUnits, getAddress, isAddress, zeroAddress, type Address, type Hex } from "viem";
 import { receiveTagFromPoint } from "./receiveTag";
 
-/** The registry on Robinhood Chain mainnet. null until it is deployed, and names stay off. */
-export const GLOAM_NAMES_ADDRESS: Address | null = null;
+/** The registry on Robinhood Chain mainnet (deployed 21 Nov 2026, block 119798738). Set to null to switch names off. */
+export const GLOAM_NAMES_ADDRESS: Address | null = "0x62c435CE6886fa91e3b0e91500c6dC9219723457";
 
 /** Robinhood Chain mainnet, where the registry and $GLOAM live. */
 export const GLOAM_NAMES_CHAIN_ID = 4663;
