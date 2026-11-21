@@ -1,0 +1,26 @@
+{
+  "name": "gloam-solana-rings-spike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Spike: Gloam private balances on Solana via Helius Solana Privacy Rings (localnet/devnet only). Not part of the app build or the pnpm workspace.",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "spike": "tsx src/spike.ts",
+    "account-layer": "tsx src/account-layer.ts"
+  },
+  "dependencies": {
+    "@heliuslabs/spr": "0.9.0-alpha",
+    "@solana/kit": "^8.3.0",
+    "@solana-program/system": "0.14.1",
+    "@solana-program/token": "0.16.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
