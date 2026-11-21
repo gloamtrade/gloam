@@ -332,7 +332,11 @@ function NetworkCard({ entry, state, onRetry }: { entry: DirectoryEntry; state: 
 
 /* ---------------------------------------------------------------- the section */
 
-type CsvState = { status: "idle" } | { status: "preparing" } | { status: "done"; missing: string[] } | { status: "failed" };
+type CsvState =
+  | { status: "idle" }
+  | { status: "preparing"; how: "download" | "copy" }
+  | { status: "done"; how: "download" | "copy"; missing: string[] }
+  | { status: "failed"; how: "download" | "copy" };
 
 export function ContractsSection() {
   const [shown, setShown] = useState<NetworkKey>(() => firstOn(ENTRIES.some((e) => e.kind === "mainnet" && e.live) ? "mainnet" : "testnet").key);
@@ -370,19 +374,37 @@ export function ContractsSection() {
     return () => window.clearTimeout(t);
   }, [inView, entry, load]);
 
-  async function downloadCsv() {
-    setCsv({ status: "preparing" });
+  /** Every address as CSV, with what each vault reads now; `missing` names the networks that did not answer. */
+  async function buildCsv(): Promise<{ text: string; missing: string[] }> {
+    const liveEntries = ENTRIES.filter((e) => e.live);
+    const got = await Promise.all(liveEntries.map((e) => load(e)));
+    const read: Partial<Record<NetworkKey, VaultRead>> = {};
+    const missing: string[] = [];
+    liveEntries.forEach((e, i) => {
+      const r = got[i];
+      if (r) read[e.key] = r;
+      else missing.push(e.name);
+    });
+    return { text: directoryCsv(ENTRIES, read), missing };
+  }
+
+  /** The same CSV on the clipboard, for whoever labels these addresses. */
+  async function copyCsv() {
+    setCsv({ status: "preparing", how: "copy" });
     try {
-      const liveEntries = ENTRIES.filter((e) => e.live);
-      const got = await Promise.all(liveEntries.map((e) => load(e)));
-      const read: Partial<Record<NetworkKey, VaultRead>> = {};
-      const missing: string[] = [];
-      liveEntries.forEach((e, i) => {
-        const r = got[i];
-        if (r) read[e.key] = r;
-        else missing.push(e.name);
-      });
-      const blob = new Blob([directoryCsv(ENTRIES, read)], { type: "text/csv;charset=utf-8" });
+      const { text, missing } = await buildCsv();
+      await navigator.clipboard.writeText(text);
+      setCsv({ status: "done", how: "copy", missing });
+    } catch {
+      setCsv({ status: "failed", how: "copy" });
+    }
+  }
+
+  async function downloadCsv() {
+    setCsv({ status: "preparing", how: "download" });
+    try {
+      const { text, missing } = await buildCsv();
+      const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -391,9 +413,9 @@ export function ContractsSection() {
       a.click();
       a.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
-      setCsv({ status: "done", missing });
+      setCsv({ status: "done", how: "download", missing });
     } catch {
-      setCsv({ status: "failed" });
+      setCsv({ status: "failed", how: "download" });
     }
   }
 
@@ -417,7 +439,15 @@ export function ContractsSection() {
                 disabled={csv.status === "preparing"}
                 className="btn btn-ghost"
               >
-                {csv.status === "preparing" ? "Reading the vaults…" : "Download CSV"}
+                {csv.status === "preparing" && csv.how === "download" ? "Reading the vaults…" : "Download CSV"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void copyCsv()}
+                disabled={csv.status === "preparing"}
+                className="btn btn-ghost"
+              >
+                {csv.status === "preparing" && csv.how === "copy" ? "Reading the vaults…" : "Copy all as CSV"}
               </button>
               <a href={`${GITHUB}/tree/main/contracts`} target="_blank" rel="noreferrer" className="btn btn-quiet">
                 Read the source <ArrowUpRight />
@@ -427,9 +457,12 @@ export function ContractsSection() {
           <p aria-live="polite" className="mt-3 min-h-[1.25rem] text-[12.5px] text-mute lg:text-right">
             {csv.status === "done" &&
               (csv.missing.length
-                ? `Downloaded. ${csv.missing.join(", ")} did not answer, so the file has their listed addresses but not what their vaults read. Try again for those.`
-                : "Downloaded: every address on every network, with what each vault read just now.")}
-            {csv.status === "failed" && "Could not make the file just now. Try again."}
+                ? `${csv.how === "copy" ? "Copied" : "Downloaded"}. ${csv.missing.join(", ")} did not answer, so the ${csv.how === "copy" ? "list" : "file"} has their listed addresses but not what their vaults read. Try again for those.`
+                : csv.how === "copy"
+                  ? "Copied: every address on every network, with what each vault read just now."
+                  : "Downloaded: every address on every network, with what each vault read just now.")}
+            {csv.status === "failed" &&
+              (csv.how === "copy" ? "Could not copy just now. Use Download CSV instead." : "Could not make the file just now. Try again.")}
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

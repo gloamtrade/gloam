@@ -6,7 +6,7 @@ import { BASE_MAINNET_TOKENS, BASE_SEPOLIA_TOKENS, BNB_MAINNET_TOKENS, ELYSIUM_M
 import { DEFAULT_MAX_GAS_GWEI } from "@/lib/relay/gasCeiling";
 import { getNetwork } from "@/lib/networks";
 import { VAULT_SWAP_ROUTERS, swapMainnets, swapV3Live } from "@/lib/vaultSwap";
-import { GLOAM_OWNER, GLOAM_RELAYERS, GLOAM_TREASURY, MAINNET_POSEIDON_T3 } from "@/lib/contractDirectory";
+import { GLOAM_OWNER, GLOAM_OWNER_SAFE, GLOAM_RELAYERS, GLOAM_TREASURY, MAINNET_POSEIDON_T3 } from "@/lib/contractDirectory";
 import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_LIVE_SINCE, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET, ELYSIUM_TESTNET_FLAG } from "@/lib/elysium";
 import { BNB, BNB_LIVE_SINCE } from "@/lib/bnb";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
@@ -449,12 +449,16 @@ export default function DocsNetworksPage() {
           <strong>PoseidonT3</strong> (every mainnet), <code>{MAINNET_POSEIDON_T3}</code>
         </li>
         <li>
-          <strong>Owner</strong>, <code>{GLOAM_OWNER}</code>. One wallet at
-          launch; a multisig is planned. It cannot withdraw pooled funds: there
-          is no admin withdraw. Each vault&apos;s ownership moves to the owner
-          guard, which forwards only limit and fee changes and the sweep of
-          coin sent by mistake; read{" "}
-          <code>owner()</code> on a vault to see which holds it.
+          <strong>Owner</strong>: the owner guard, which forwards only limit and
+          fee changes and the sweep of coin sent by mistake, so a vault it holds
+          can never get a new proof checker or a new owner. Since 12 November
+          2026 it holds the vault on Robinhood Chain, Tempo, Base and Ethereum,
+          run by the Gloam Owner Safe (2 of 3, <code>{GLOAM_OWNER_SAFE}</code>).
+          {BNB || ELYSIUM ? ` ${[BNB ? "BNB Chain" : null, ELYSIUM ? "Elysium" : null].filter(Boolean).join(" and ")} ${BNB && ELYSIUM ? "were" : "was"} born with ${BNB && ELYSIUM ? "their" : "its"} own guard${BNB && ELYSIUM ? "s" : ""}.` : ""}{" "}
+          Nobody can withdraw pooled funds: there is no admin withdraw. The launch owner
+          was the wallet <code>{GLOAM_OWNER}</code>, now one of the Safe&apos;s
+          three signers. Read <code>owner()</code> on a vault to see which holds
+          it.
         </li>
         <li>
           <strong>Treasury</strong>, <code>{GLOAM_TREASURY}</code>. Cash-out

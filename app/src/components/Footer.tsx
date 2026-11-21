@@ -55,6 +55,7 @@ const legal = [
   { href: "/privacy", label: "Privacy" },
   { href: "/cookies", label: "Cookies" },
   { href: "/disclosures", label: "Risk disclosures" },
+  { href: "/compliance", label: "Compliance" },
 ];
 
 function XIcon() {

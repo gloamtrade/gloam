@@ -182,8 +182,8 @@ check("owner, treasury and deployer on the mainnet-pool vaults only; the relayer
   for (const e of entries.filter((x) => x.live)) {
     const roles = e.rows.map((r) => r.role);
     const payments = e.network.paymentsPool;
-    // Elysium's vault was born guarded: its owner is the VaultOwnerGuard from the live read, never the owner wallet row
-    assert.equal(roles.includes("owner"), payments && e.network.family !== "elysium", `${e.key} owner`);
+    // Every mainnet-pool vault lists who owns it: the owner guard and the guard's controller.
+    assert.equal(roles.includes("owner"), payments, `${e.key} owner`);
     assert.equal(roles.includes("fee_recipient"), payments, `${e.key} treasury`);
     assert.equal(roles.includes("deployer"), payments, `${e.key} deployer`);
     assert.ok(roles.includes("relayer"), `${e.key} relayer`);
