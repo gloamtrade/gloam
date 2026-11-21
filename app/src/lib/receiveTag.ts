@@ -273,6 +273,36 @@ export function isValidReceiveTag(input: string): boolean {
   return bytes.length === 91 && P256_SPKI_HEAD.every((b, i) => bytes[i] === b) && onP256(bytes.subarray(P256_SPKI_HEAD.length));
 }
 
+const toHex32 = (bytes: Uint8Array): `0x${string}` =>
+  `0x${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+
+/**
+ * The point (x, y) inside a whole Gloam address, as two 32-byte hex words: what
+ * the GloamNames registry stores for a name. null when the address is not whole.
+ */
+export function receiveTagPoint(tag: string): { x: `0x${string}`; y: `0x${string}` } | null {
+  if (!isValidReceiveTag(tag)) return null;
+  const xy = b64urlDecode(tag.trim().slice(RECEIVE_TAG_PREFIX.length)).subarray(P256_SPKI_HEAD.length);
+  return { x: toHex32(xy.subarray(0, 32)), y: toHex32(xy.subarray(32)) };
+}
+
+/**
+ * The Gloam address for a P-256 point (x, y) read from the GloamNames registry.
+ * null unless the point is on the curve, so a bad record never becomes an address.
+ */
+export function receiveTagFromPoint(x: string, y: string): string | null {
+  const word = /^0x[0-9a-fA-F]{64}$/;
+  if (!word.test(x) || !word.test(y)) return null;
+  const bytes = new Uint8Array(P256_SPKI_HEAD.length + 64);
+  bytes.set(P256_SPKI_HEAD);
+  for (let i = 0; i < 32; i++) {
+    bytes[P256_SPKI_HEAD.length + i] = parseInt(x.slice(2 + i * 2, 4 + i * 2), 16);
+    bytes[P256_SPKI_HEAD.length + 32 + i] = parseInt(y.slice(2 + i * 2, 4 + i * 2), 16);
+  }
+  const tag = RECEIVE_TAG_PREFIX + b64urlEncode(bytes);
+  return isValidReceiveTag(tag) ? tag : null;
+}
+
 export function isPayToTagPackage(input: string): boolean {
   return input.trim().startsWith(PAY_TO_TAG_PREFIX);
 }

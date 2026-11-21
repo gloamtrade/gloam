@@ -52,6 +52,7 @@ import {
   isValidReceiveTag,
   encryptTicketForTag,
   rotateReceiveIdentity,
+  shortTag,
   type ReceiveIdentity,
 } from "@/lib/receiveTag";
 import {
@@ -173,6 +174,9 @@ import { embeddedAvailability, onEmbeddedAvailability } from "@/lib/turnkeyBridg
 import { moveModeFromParam, searchWithMoveMode } from "@/lib/vaultNav";
 import { cashOutHandoff, classifyPayRecipient, isWalletRecipient } from "@/lib/payRecipient";
 import { useEnsAddress } from "@/hooks/useEnsAddress";
+import { useGloamName } from "@/hooks/useGloamName";
+import { GloamNameCard } from "./GloamNameCard";
+import { GLOAM_NAMES_ADDRESS } from "@/lib/gloamNames";
 
 /** How securing a claim ended (lib/claimSweep), or "error" when it threw. */
 type SweepStatus = SweepResult["status"] | "error";
@@ -358,6 +362,11 @@ export function MoveView() {
           ? ensLookup.address
           : null;
   const payToWallet = payStyle === "direct" && (isWalletRecipient(payRecipient) || payRecipient.kind === "badAddress");
+  // "@duke" pays the Gloam address the name points at, read from the registry on Robinhood Chain (lib/gloamNames).
+  const nameLookup = useGloamName(payStyle === "direct" && payRecipient.kind === "name" ? payRecipient.name : null);
+  /** The Gloam address a direct payment is sealed to: the one typed, or the one the name points at. */
+  const payTag =
+    payRecipient.kind === "name" ? (nameLookup.status === "found" ? nameLookup.record.tag : "") : recipientTag.trim();
   const [myIdentity, setMyIdentity] = useState<ReceiveIdentity | null>(null);
   const [tagCopied, setTagCopied] = useState(false);
   const [shareLocked, setShareLocked] = useState(false);
@@ -1709,8 +1718,12 @@ export function MoveView() {
         throw new Error("That is more than this balance holds.");
       }
       // a mistyped Gloam address is caught before anything is proven or sent
-      if (payStyle === "direct" && !isValidReceiveTag(recipientTag)) {
-        throw new Error("That Gloam address is incomplete or mistyped. Copy it again from their Receive page.");
+      if (payStyle === "direct" && !isValidReceiveTag(payTag)) {
+        throw new Error(
+          payRecipient.kind === "name"
+            ? `No one has @${payRecipient.name} yet. Check the spelling, or paste their Gloam address.`
+            : "That Gloam address is incomplete or mistyped. Copy it again from their Receive page."
+        );
       }
 
       const path = await notePath(selected);
@@ -1785,7 +1798,7 @@ export function MoveView() {
       let share: string;
       let locked = false;
       if (payStyle === "direct") {
-        const tag = recipientTag.trim();
+        const tag = payTag;
         if (!isValidReceiveTag(tag)) {
           throw new Error(
             "Paste their Gloam address (it starts with gloamr1) to pay them privately."
@@ -2788,7 +2801,7 @@ export function MoveView() {
                     ) : (
                     <>
                     <label htmlFor="recv-tag" className="sr-only">
-                      Their Gloam address, 0x address or ENS name
+                      {GLOAM_NAMES_ADDRESS ? "Their Gloam name, Gloam address, 0x address or ENS name" : "Their Gloam address, 0x address or ENS name"}
                     </label>
                     <input
                       id="recv-tag"
@@ -2798,10 +2811,10 @@ export function MoveView() {
                       onChange={(e) => {
                         const v = e.target.value.trim();
                         setRecipientTag(v);
-                        if (v.startsWith("gloamr1.")) setPayStyle("direct");
+                        if (v.startsWith("gloamr1.") || v.startsWith("@")) setPayStyle("direct");
                         else if (v === "") setPayStyle("direct");
                       }}
-                      placeholder="Gloam address, 0x address or ENS name"
+                      placeholder={GLOAM_NAMES_ADDRESS ? "@name, Gloam address, 0x address or ENS name" : "Gloam address, 0x address or ENS name"}
                       className="gl-input tnum mt-3"
                     />
                     {payToWallet ? (
@@ -2863,6 +2876,18 @@ export function MoveView() {
                       <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
                         That Gloam address looks incomplete or mistyped. Copy it again from their Receive page.
                       </p>
+                    ) : payRecipient.kind === "name" && nameLookup.status !== "off" && nameLookup.status !== "idle" ? (
+                      nameLookup.status === "none" ? (
+                        <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
+                          No one has @{payRecipient.name} yet. Check the spelling.
+                        </p>
+                      ) : (
+                        <p aria-live="polite" className="tnum mt-2 text-[12.5px] leading-relaxed text-mute">
+                          {nameLookup.status === "found"
+                            ? `@${nameLookup.record.name} · ${shortTag(nameLookup.record.tag)}`
+                            : "Looking up name…"}
+                        </p>
+                      )
                     ) : null}
                     {(contacts.length > 0 || recipientTag.trim().startsWith("gloamr1.")) && (
                       <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -2980,7 +3005,8 @@ export function MoveView() {
                         !relayChecked ||
                         working ||
                         payToWallet ||
-                        (payStyle !== "bearer" && !recipientTag.trim())
+                        (payStyle !== "bearer" && !recipientTag.trim()) ||
+                        (payStyle === "direct" && payRecipient.kind === "name" && nameLookup.status !== "found")
                       }
                       onClick={() => {
                         if (recipientTag.trim()) setPayStyle("direct");
@@ -3640,6 +3666,7 @@ export function MoveView() {
                         </button>
                       </div>
                     </div>
+                    <GloamNameCard tag={myIdentity.tag} />
                     <div className="mt-3">
                       <PaymentTicketShare
                         code={myIdentity.tag}

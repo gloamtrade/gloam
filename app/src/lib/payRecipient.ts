@@ -11,6 +11,7 @@
 import { getAddress, isAddress, type Address } from "viem";
 import { normalize, toCoinType } from "viem/ens";
 import { RECEIVE_TAG_PREFIX } from "./receiveTag";
+import { nameFromPayInput } from "./gloamNames";
 
 export type PayRecipient =
   | { kind: "empty" }
@@ -22,6 +23,8 @@ export type PayRecipient =
   | { kind: "badAddress" }
   /** Looks like an ENS name; `name` is its normalized form, to resolve. */
   | { kind: "ens"; name: string }
+  /** A Gloam name ("@duke"), lowercased, to look up for the Gloam address it pays (lib/gloamNames). */
+  | { kind: "name"; name: string }
   | { kind: "other" };
 
 const HEX_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -50,6 +53,8 @@ export function classifyPayRecipient(input: string): PayRecipient {
   const text = input.trim();
   if (!text) return { kind: "empty" };
   if (text.startsWith(RECEIVE_TAG_PREFIX)) return { kind: "gloam" };
+  const gloamName = nameFromPayInput(text);
+  if (gloamName) return { kind: "name", name: gloamName };
   if (isAddress(text)) return { kind: "address", address: text as Address };
   if (HEX_ADDRESS.test(text)) return { kind: "badAddress" };
   const name = ensCandidate(text);

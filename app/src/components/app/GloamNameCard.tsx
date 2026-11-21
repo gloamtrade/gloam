@@ -1,0 +1,423 @@
+"use client";
+
+/**
+ * "Your name" on Receive: get a short name (@duke) that pays this Gloam address,
+ * or see the one this browser already has (lib/gloamNames, contracts/src/GloamNames.sol).
+ *
+ * Names live in one registry on Robinhood Chain mainnet and are paid per year in
+ * $GLOAM, which goes to the treasury. Getting one is two wallet steps on
+ * Robinhood Chain: approve the exact price, then register. The name points at
+ * the key inside this Gloam address; the wallet that pays becomes its holder,
+ * the only one who can re-point it. Hidden until the registry is deployed, and
+ * in the recording demo.
+ */
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { erc20Abi, zeroAddress, type Hex } from "viem";
+import { useWriteContract } from "wagmi";
+import { useAppAccount, useDemo } from "@/lib/demo";
+import { useNetwork } from "./NetworkProvider";
+import { getNetwork } from "@/lib/networks";
+import { publicClientFor } from "@/lib/rhClient";
+import { GLOAM_TOKEN } from "@/lib/buybacks";
+import { receiveTagPoint } from "@/lib/receiveTag";
+import { walletErrorForPeople } from "@/lib/walletErrors";
+import { readGloamName } from "@/hooks/useGloamName";
+import {
+  GLOAM_NAMES_ADDRESS,
+  GLOAM_NAMES_CHAIN_ID,
+  NAME_GRACE_SECONDS,
+  NAME_YEARS,
+  forgetMyName,
+  gloamAmount,
+  gloamNamesAbi,
+  isValidName,
+  loadMyNames,
+  nameDate,
+  nameExpired,
+  nameFromClaimInput,
+  nameProblem,
+  rememberMyName,
+  type NameRecord,
+} from "@/lib/gloamNames";
+
+type Check =
+  | { status: "idle" }
+  | { status: "free"; key: string; price: bigint }
+  | { status: "yours"; key: string; record: NameRecord }
+  | { status: "taken"; key: string }
+  | { status: "error"; key: string };
+
+const rh = () => publicClientFor(getNetwork("robinhood-mainnet"));
+
+export function GloamNameCard({ tag }: { tag: string }) {
+  const demo = useDemo();
+  if (!GLOAM_NAMES_ADDRESS || demo) return null;
+  return <NameCard tag={tag} registry={GLOAM_NAMES_ADDRESS} />;
+}
+
+function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
+  const { address, isConnected } = useAppAccount();
+  const { network, setNetworkKey } = useNetwork();
+  const { writeContractAsync } = useWriteContract();
+  const onRh = network.chainId === GLOAM_NAMES_CHAIN_ID;
+
+  const [mine, setMine] = useState<NameRecord | null>(null);
+  /** When `mine` was read, unix seconds: expiry is judged against it, not the clock at render. */
+  const [readAt, setReadAt] = useState(0);
+  const [mineLoaded, setMineLoaded] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [years, setYears] = useState<number>(1);
+  const [check, setCheck] = useState<Check>({ status: "idle" });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+
+  const name = nameFromClaimInput(draft);
+  const problem = nameProblem(name);
+  const checkKey = `${name}:${years}:${address ?? ""}:${refresh}`;
+
+  // The name this browser has: the newest one that still exists on chain.
+  useEffect(() => {
+    let stale = false;
+    void (async () => {
+      for (const n of loadMyNames()) {
+        const record = await readGloamName(n);
+        if (stale) return;
+        if (record) {
+          setMine(record);
+          setReadAt(Date.now() / 1000);
+          setMineLoaded(true);
+          return;
+        }
+        forgetMyName(n);
+      }
+      if (!stale) {
+        setMine(null);
+        setMineLoaded(true);
+      }
+    })();
+    return () => {
+      stale = true;
+    };
+  }, [refresh]);
+
+  // Whether the typed name is free, and what it costs for the years picked.
+  useEffect(() => {
+    if (!isValidName(name)) return;
+    let stale = false;
+    const key = checkKey;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const record = await readGloamName(name);
+          if (stale) return;
+          if (record) {
+            if (record.tag === tag) {
+              // A name typed here that already points at this address is simply this browser's.
+              rememberMyName(record.name);
+              setMine(record);
+              setReadAt(Date.now() / 1000);
+              setDraft("");
+              setCheck({ status: "yours", key, record });
+            } else {
+              setCheck({ status: "taken", key });
+            }
+            return;
+          }
+          const client = rh();
+          const [free, price] = await Promise.all([
+            client.readContract({
+              address: registry,
+              abi: gloamNamesAbi,
+              functionName: "available",
+              args: [name, address ?? zeroAddress],
+            }),
+            client.readContract({
+              address: registry,
+              abi: gloamNamesAbi,
+              functionName: "priceOf",
+              args: [name, BigInt(years)],
+            }),
+          ]);
+          if (stale) return;
+          setCheck(free ? { status: "free", key, price } : { status: "taken", key });
+        } catch {
+          if (!stale) setCheck({ status: "error", key });
+        }
+      })();
+    }, 350);
+    return () => {
+      stale = true;
+      window.clearTimeout(timer);
+    };
+  }, [name, years, address, registry, tag, checkKey]);
+
+  /** The check for exactly what is typed now; null while it is still being read. */
+  const current = check.status !== "idle" && check.key === checkKey ? check : null;
+
+  async function waitFor(hash: Hex) {
+    const receipt = await rh().waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success") throw new Error("The transaction did not go through. Nothing was paid.");
+  }
+
+  /** Approve exactly `amount` $GLOAM for the registry when the allowance is short. */
+  async function approveIfNeeded(amount: bigint) {
+    if (!address || amount === 0n) return;
+    const client = rh();
+    const [balance, allowance] = await Promise.all([
+      client.readContract({ address: GLOAM_TOKEN, abi: erc20Abi, functionName: "balanceOf", args: [address] }),
+      client.readContract({ address: GLOAM_TOKEN, abi: erc20Abi, functionName: "allowance", args: [address, registry] }),
+    ]);
+    if (balance < amount) {
+      throw new Error(
+        `This takes ${gloamAmount(amount)} $GLOAM on Robinhood Chain, and this wallet has ${gloamAmount(balance)}.`
+      );
+    }
+    if (allowance >= amount) return;
+    setBusy("Approving $GLOAM…");
+    await waitFor(
+      await writeContractAsync({
+        address: GLOAM_TOKEN,
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [registry, amount],
+        chainId: GLOAM_NAMES_CHAIN_ID,
+      })
+    );
+  }
+
+  async function run(label: string, work: () => Promise<void>) {
+    setError(null);
+    try {
+      await work();
+      setRefresh((n) => n + 1);
+    } catch (e) {
+      setError(e instanceof Error && e.message.includes("$GLOAM") ? e.message : walletErrorForPeople(e, `${label} didn't go through. Try again.`));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function getName(price: bigint) {
+    const point = receiveTagPoint(tag);
+    if (!address || !point) return;
+    void run("Getting the name", async () => {
+      await approveIfNeeded(price);
+      setBusy(`Getting @${name}…`);
+      await waitFor(
+        await writeContractAsync({
+          address: registry,
+          abi: gloamNamesAbi,
+          functionName: "register",
+          args: [name, point.x, point.y, address, BigInt(years)],
+          chainId: GLOAM_NAMES_CHAIN_ID,
+        })
+      );
+      rememberMyName(name);
+      setDraft("");
+    });
+  }
+
+  function renew(record: NameRecord) {
+    void run("Renewing", async () => {
+      const price = await rh().readContract({
+        address: registry,
+        abi: gloamNamesAbi,
+        functionName: "priceOf",
+        args: [record.name, 1n],
+      });
+      await approveIfNeeded(price);
+      setBusy(`Renewing @${record.name}…`);
+      await waitFor(
+        await writeContractAsync({
+          address: registry,
+          abi: gloamNamesAbi,
+          functionName: "renew",
+          args: [record.name, 1n],
+          chainId: GLOAM_NAMES_CHAIN_ID,
+        })
+      );
+    });
+  }
+
+  function pointHere(record: NameRecord) {
+    const point = receiveTagPoint(tag);
+    if (!point) return;
+    void run("Updating the name", async () => {
+      setBusy(`Pointing @${record.name} at this address…`);
+      await waitFor(
+        await writeContractAsync({
+          address: registry,
+          abi: gloamNamesAbi,
+          functionName: "setKey",
+          args: [record.name, point.x, point.y],
+          chainId: GLOAM_NAMES_CHAIN_ID,
+        })
+      );
+    });
+  }
+
+  const walletStep = !isConnected ? (
+    <p className="mt-2 text-[12.5px] leading-relaxed text-mute">Connect a wallet to continue.</p>
+  ) : !onRh ? (
+    <button type="button" onClick={() => setNetworkKey("robinhood-mainnet")} className="btn btn-ghost mt-3">
+      Switch to Robinhood Chain
+    </button>
+  ) : null;
+
+  if (!mineLoaded) return null;
+
+  if (mine) {
+    const expired = nameExpired(mine, readAt);
+    const soon = !expired && mine.expires - readAt < NAME_GRACE_SECONDS;
+    const elsewhere = mine.tag !== tag;
+    const holder = address?.toLowerCase() === mine.holder.toLowerCase();
+    return (
+      <div className="mt-3 rounded-[16px] border border-line p-[16px]">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[20px] font-light leading-tight tracking-[-0.01em] text-foreground">@{mine.name}</p>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(`@${mine.name}`);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              } catch {
+                setError("Could not copy your name.");
+              }
+            }}
+            aria-live="polite"
+            className="btn btn-ghost btn-sm"
+          >
+            {copied ? "Copied" : "Copy name"}
+          </button>
+        </div>
+        <p className="mt-1 text-[12.5px] leading-relaxed text-mute">
+          {expired
+            ? `Expired ${nameDate(mine.expires)}. Renew by ${nameDate(mine.expires + NAME_GRACE_SECONDS)} to keep it.`
+            : `Yours until ${nameDate(mine.expires)}.`}
+        </p>
+        {elsewhere && (
+          <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
+            It pays your earlier address, which still opens here.
+          </p>
+        )}
+        {(expired || soon || elsewhere) &&
+          (walletStep ?? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(expired || soon) && (
+                <button type="button" disabled={Boolean(busy)} onClick={() => renew(mine)} className="btn btn-ink">
+                  Renew for a year
+                </button>
+              )}
+              {elsewhere && holder && (
+                <button type="button" disabled={Boolean(busy)} onClick={() => pointHere(mine)} className="btn btn-ghost">
+                  Point it at this address
+                </button>
+              )}
+            </div>
+          ))}
+        {busy && (
+          <p aria-live="polite" className="mt-2 text-[12.5px] text-mute">
+            {busy}
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
+            {error}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-[16px] border border-line p-[16px]">
+      <label htmlFor="gloam-name" className="text-[14px] text-foreground">
+        Get a name
+      </label>
+      <p className="mt-0.5 text-[12.5px] leading-relaxed text-mute">People can pay @name instead of this address.</p>
+      <div className="gl-inputcard mt-3 flex items-center gap-1 rounded-[14px] px-3.5">
+        <span className="text-[15px] text-mute">@</span>
+        <input
+          id="gloam-name"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          autoComplete="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          maxLength={21}
+          placeholder="yourname"
+          className="h-11 min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none! placeholder:text-faint"
+        />
+      </div>
+      {problem ? (
+        <p role="alert" className="mt-2 text-[12.5px] text-danger">
+          {problem}
+        </p>
+      ) : current?.status === "taken" ? (
+        <p role="alert" className="mt-2 text-[12.5px] text-danger">
+          @{name} is taken.
+        </p>
+      ) : current?.status === "error" ? (
+        <p role="alert" className="mt-2 text-[12.5px] text-danger">
+          Could not check that name. Try again in a moment.
+        </p>
+      ) : null}
+
+      {isValidName(name) && current?.status !== "taken" && (
+        <>
+          <div role="radiogroup" aria-label="How long" className="mt-3 flex w-fit rounded-full bg-surface-2 p-1 text-[13px]">
+            {NAME_YEARS.map((y) => (
+              <button
+                key={y}
+                type="button"
+                role="radio"
+                aria-checked={years === y}
+                onClick={() => setYears(y)}
+                className={`inline-flex h-8 items-center rounded-full px-4 transition-colors ${
+                  years === y ? "bg-panel font-medium text-foreground shadow-card" : "text-mute hover:text-foreground"
+                }`}
+              >
+                {y === 1 ? "1 year" : `${y} years`}
+              </button>
+            ))}
+          </div>
+          {walletStep ?? (
+            <button
+              type="button"
+              disabled={current?.status !== "free" || Boolean(busy)}
+              onClick={() => current?.status === "free" && getName(current.price)}
+              className="btn btn-ink mt-3"
+            >
+              {current?.status === "free"
+                ? `Get @${name} · ${gloamAmount(current.price)} $GLOAM`
+                : "Checking…"}
+            </button>
+          )}
+          {busy && (
+            <p aria-live="polite" className="mt-2 text-[12.5px] text-mute">
+              {busy}
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
+              {error}{" "}
+              {error.includes("$GLOAM on Robinhood Chain") && (
+                <Link href="/token" className="underline underline-offset-2">
+                  Get $GLOAM
+                </Link>
+              )}
+            </p>
+          )}
+          <p className="mt-3 text-[12px] leading-relaxed text-mute">
+            Payments to your name stay private. The wallet that pays for it is public.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}

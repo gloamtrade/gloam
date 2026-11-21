@@ -21,6 +21,7 @@ import {DeployerBroadcast} from "./DeployerBroadcast.sol";
  *   export NAMES_PRICE_3=...   # 3-character names, $GLOAM per year
  *   export NAMES_PRICE_4=...   # 4-character names
  *   export NAMES_PRICE_5=...   # 5 or more characters
+ *   (agreed 21 Nov 2026: 50 / 15 / 5)
  *   forge script script/DeployGloamNames.s.sol:DeployGloamNames \
  *     --rpc-url https://rpc.mainnet.chain.robinhood.com --broadcast
  */
