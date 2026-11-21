@@ -61,6 +61,7 @@ import {
   MAX_IMAGE_BYTES,
   SHORT_CAPTION_WORDS,
   TOPIC,
+  asksHowToBuy,
   asksTokenAddress,
   chainFix,
   chainMismatch,
@@ -105,6 +106,7 @@ import {
   spaceOut,
   tagsSomeone,
   teamMemoryText,
+  buyGuide,
   tokenCard,
   tokenPointer,
   topicName,
@@ -925,11 +927,11 @@ const TOKEN_COMMANDS = new Set(["ca", "contract", "token"]);
  * in the same topic within a few minutes, a short pointer instead, so the
  * group is not the same card over and over.
  */
-async function sendTokenCard(msg: TgMessage, c: BotConfig, topic: number, name: string): Promise<void> {
+async function sendTokenCard(msg: TgMessage, c: BotConfig, topic: number, name: string, buy = false): Promise<void> {
   const chatId = msg.chat.id;
   const threadId = msg.is_topic_message ? msg.message_thread_id : undefined;
   const lately = await tokenCardLately(chatId, topic).catch(() => false);
-  const reply = lately ? tokenPointer(name) : tokenCard();
+  const reply = lately ? tokenPointer(name) : buy ? buyGuide() : tokenCard();
   if (!(await sendMessage(chatId, reply, { threadId, replyTo: msg.message_id }))) return;
   if (!lately) await markTokenCard(chatId, topic).catch(() => {});
   await markReplied(msg.message_id).catch(() => {});
@@ -1376,7 +1378,7 @@ async function onGroupMessage(msg: TgMessage, c: BotConfig, edited = false): Pro
   if (!edited && asksTokenAddress(text)) {
     const kept = memoryText(text);
     if (kept) await logQuestion(kept).catch(() => {});
-    if (await withinLimits(from.id)) await sendTokenCard(msg, c, topic, name);
+    if (await withinLimits(from.id)) await sendTokenCard(msg, c, topic, name, asksHowToBuy(text));
     return;
   }
   // "token check 0x...", "is $PONS safe?": Blocktronics' read of that token, never a verdict
