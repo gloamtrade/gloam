@@ -13,6 +13,7 @@
  */
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { motion, useReducedMotion } from "framer-motion";
 import { erc20Abi, zeroAddress, type Hex } from "viem";
 import { useWriteContract } from "wagmi";
 import { useAppAccount, useDemo } from "@/lib/demo";
@@ -23,6 +24,8 @@ import { GLOAM_TOKEN } from "@/lib/buybacks";
 import { receiveTagPoint } from "@/lib/receiveTag";
 import { walletErrorForPeople } from "@/lib/walletErrors";
 import { readGloamName } from "@/hooks/useGloamName";
+import { BusyLabel } from "@/components/ui/Spinner";
+import { SuccessModal } from "./SuccessModal";
 import {
   GLOAM_NAMES_ADDRESS,
   GLOAM_NAMES_CHAIN_ID,
@@ -44,7 +47,8 @@ import {
 
 type Check =
   | { status: "idle" }
-  | { status: "free"; key: string; price: bigint }
+  /** `balance` is the connected wallet's $GLOAM on Robinhood Chain, null with no wallet. */
+  | { status: "free"; key: string; price: bigint; balance: bigint | null }
   | { status: "yours"; key: string; record: NameRecord }
   | { status: "taken"; key: string }
   | { status: "error"; key: string };
@@ -71,7 +75,12 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
   const [years, setYears] = useState<number>(1);
   const [check, setCheck] = useState<Check>({ status: "idle" });
   const [busy, setBusy] = useState<string | null>(null);
+  /** Where getting a name is: step 1 approve, step 2 register (1 of 1 when no approval is needed). */
+  const [progress, setProgress] = useState<{ step: number; of: number; text: string } | null>(null);
+  /** The name just bought, shown in the success dialog. */
+  const [won, setWon] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const still = Boolean(useReducedMotion());
   const [copied, setCopied] = useState(false);
   const [refresh, setRefresh] = useState(0);
 
@@ -128,7 +137,7 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
             return;
           }
           const client = rh();
-          const [free, price] = await Promise.all([
+          const [free, price, balance] = await Promise.all([
             client.readContract({
               address: registry,
               abi: gloamNamesAbi,
@@ -141,9 +150,12 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
               functionName: "priceOf",
               args: [name, BigInt(years)],
             }),
+            address
+              ? client.readContract({ address: GLOAM_TOKEN, abi: erc20Abi, functionName: "balanceOf", args: [address] })
+              : Promise.resolve(null),
           ]);
           if (stale) return;
-          setCheck(free ? { status: "free", key, price } : { status: "taken", key });
+          setCheck(free ? { status: "free", key, price, balance } : { status: "taken", key });
         } catch {
           if (!stale) setCheck({ status: "error", key });
         }
@@ -163,9 +175,12 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
     if (receipt.status !== "success") throw new Error("The transaction did not go through. Nothing was paid.");
   }
 
-  /** Approve exactly `amount` $GLOAM for the registry when the allowance is short. */
-  async function approveIfNeeded(amount: bigint) {
-    if (!address || amount === 0n) return;
+  /**
+   * Whether the registry needs an approval for `amount` $GLOAM first. Throws
+   * when the wallet holds too little, before any wallet prompt.
+   */
+  async function needsApproval(amount: bigint): Promise<boolean> {
+    if (!address || amount === 0n) return false;
     const client = rh();
     const [balance, allowance] = await Promise.all([
       client.readContract({ address: GLOAM_TOKEN, abi: erc20Abi, functionName: "balanceOf", args: [address] }),
@@ -176,8 +191,11 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
         `This takes ${gloamAmount(amount)} $GLOAM on Robinhood Chain, and this wallet has ${gloamAmount(balance)}.`
       );
     }
-    if (allowance >= amount) return;
-    setBusy("Approving $GLOAM…");
+    return allowance < amount;
+  }
+
+  /** Approve exactly `amount` $GLOAM for the registry and wait for it. */
+  async function approve(amount: bigint) {
     await waitFor(
       await writeContractAsync({
         address: GLOAM_TOKEN,
@@ -189,6 +207,13 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
     );
   }
 
+  /** Approve exactly `amount` $GLOAM for the registry when the allowance is short. */
+  async function approveIfNeeded(amount: bigint) {
+    if (!(await needsApproval(amount))) return;
+    setBusy("Approving $GLOAM…");
+    await approve(amount);
+  }
+
   async function run(label: string, work: () => Promise<void>) {
     setError(null);
     try {
@@ -198,28 +223,77 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
       setError(e instanceof Error && e.message.includes("$GLOAM") ? e.message : walletErrorForPeople(e, `${label} didn't go through. Try again.`));
     } finally {
       setBusy(null);
+      setProgress(null);
     }
   }
 
   function getName(price: bigint) {
     const point = receiveTagPoint(tag);
-    if (!address || !point) return;
+    if (!address || !point || busy) return;
+    // what was on screen when the button was pressed, whatever happens to the input after
+    const wanted = name;
+    const span = years;
+    setBusy(`Getting @${wanted}…`);
     void run("Getting the name", async () => {
-      await approveIfNeeded(price);
-      setBusy(`Getting @${name}…`);
-      await waitFor(
-        await writeContractAsync({
-          address: registry,
-          abi: gloamNamesAbi,
-          functionName: "register",
-          args: [name, point.x, point.y, address, BigInt(years)],
-          chainId: GLOAM_NAMES_CHAIN_ID,
-        })
-      );
-      rememberMyName(name);
+      const approving = await needsApproval(price);
+      const of = approving ? 2 : 1;
+      if (approving) {
+        setProgress({ step: 1, of, text: `Approve ${gloamAmount(price)} $GLOAM in your wallet` });
+        await approve(price);
+      }
+      setProgress({ step: of, of, text: `Confirm @${wanted} in your wallet` });
+      const hash = await writeContractAsync({
+        address: registry,
+        abi: gloamNamesAbi,
+        functionName: "register",
+        args: [wanted, point.x, point.y, address, BigInt(span)],
+        chainId: GLOAM_NAMES_CHAIN_ID,
+      });
+      setProgress({ step: of, of, text: `Saving @${wanted} on Robinhood Chain…` });
+      await waitFor(hash);
+      rememberMyName(wanted);
       setDraft("");
+      setCopied(false);
+      setWon(wanted);
     });
   }
+
+  async function copyName(n: string) {
+    try {
+      await navigator.clipboard.writeText(`@${n}`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError("Could not copy your name.");
+    }
+  }
+
+  // One dialog for both views, so it stays put while the card turns into the new name under it.
+  const successDialog = (
+    <SuccessModal
+      open={Boolean(won)}
+      title="Your name is live"
+      amount={won ? <NameReveal name={won} still={still} /> : null}
+      body={
+        <>
+          People can now pay <span className="text-foreground">@{won}</span> privately on Gloam.
+          {mine?.name === won && <span className="mt-1 block">Yours until {nameDate(mine.expires)}.</span>}
+        </>
+      }
+      primaryLabel={copied ? "Copied" : `Copy @${won ?? ""}`}
+      onPrimary={() => won && void copyName(won)}
+      onClose={() => setWon(null)}
+    />
+  );
+
+  /** A soft rise when the card changes between getting a name and showing it. */
+  const enter = still
+    ? {}
+    : {
+        initial: { opacity: 0, y: 6 },
+        animate: { opacity: 1, y: 0 },
+        transition: { duration: 0.32, ease: [0.22, 1, 0.36, 1] as const },
+      };
 
   function renew(record: NameRecord) {
     void run("Renewing", async () => {
@@ -276,129 +350,45 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
     const elsewhere = mine.tag !== tag;
     const holder = address?.toLowerCase() === mine.holder.toLowerCase();
     return (
-      <div className="mt-3 rounded-[16px] border border-line p-[16px]">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[20px] font-light leading-tight tracking-[-0.01em] text-foreground">@{mine.name}</p>
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(`@${mine.name}`);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              } catch {
-                setError("Could not copy your name.");
-              }
-            }}
-            aria-live="polite"
-            className="btn btn-ghost btn-sm"
-          >
-            {copied ? "Copied" : "Copy name"}
-          </button>
-        </div>
-        <p className="mt-1 text-[12.5px] leading-relaxed text-mute">
-          {expired
-            ? `Expired ${nameDate(mine.expires)}. Renew by ${nameDate(mine.expires + NAME_GRACE_SECONDS)} to keep it.`
-            : `Yours until ${nameDate(mine.expires)}.`}
-        </p>
-        {elsewhere && (
-          <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
-            It pays your earlier address, which still opens here.
-          </p>
-        )}
-        {(expired || soon || elsewhere) &&
-          (walletStep ?? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {(expired || soon) && (
-                <button type="button" disabled={Boolean(busy)} onClick={() => renew(mine)} className="btn btn-ink">
-                  Renew for a year
-                </button>
-              )}
-              {elsewhere && holder && (
-                <button type="button" disabled={Boolean(busy)} onClick={() => pointHere(mine)} className="btn btn-ghost">
-                  Point it at this address
-                </button>
-              )}
-            </div>
-          ))}
-        {busy && (
-          <p aria-live="polite" className="mt-2 text-[12.5px] text-mute">
-            {busy}
-          </p>
-        )}
-        {error && (
-          <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
-            {error}
-          </p>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-3 rounded-[16px] border border-line p-[16px]">
-      <label htmlFor="gloam-name" className="text-[14px] text-foreground">
-        Get a name
-      </label>
-      <p className="mt-0.5 text-[12.5px] leading-relaxed text-mute">People can pay @name instead of this address.</p>
-      <div className="gl-inputcard mt-3 flex items-center gap-1 rounded-[14px] px-3.5">
-        <span className="text-[15px] text-mute">@</span>
-        <input
-          id="gloam-name"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          autoComplete="off"
-          autoCapitalize="none"
-          spellCheck={false}
-          maxLength={21}
-          placeholder="yourname"
-          className="h-11 min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none! placeholder:text-faint"
-        />
-      </div>
-      {problem ? (
-        <p role="alert" className="mt-2 text-[12.5px] text-danger">
-          {problem}
-        </p>
-      ) : current?.status === "taken" ? (
-        <p role="alert" className="mt-2 text-[12.5px] text-danger">
-          @{name} is taken.
-        </p>
-      ) : current?.status === "error" ? (
-        <p role="alert" className="mt-2 text-[12.5px] text-danger">
-          Could not check that name. Try again in a moment.
-        </p>
-      ) : null}
-
-      {isValidName(name) && !isBlockedName(name) && current?.status !== "taken" && (
-        <>
-          <div role="radiogroup" aria-label="How long" className="mt-3 flex w-fit rounded-full bg-surface-2 p-1 text-[13px]">
-            {NAME_YEARS.map((y) => (
-              <button
-                key={y}
-                type="button"
-                role="radio"
-                aria-checked={years === y}
-                onClick={() => setYears(y)}
-                className={`inline-flex h-8 items-center rounded-full px-4 transition-colors ${
-                  years === y ? "bg-panel font-medium text-foreground shadow-card" : "text-mute hover:text-foreground"
-                }`}
-              >
-                {y === 1 ? "1 year" : `${y} years`}
-              </button>
-            ))}
-          </div>
-          {walletStep ?? (
+      <>
+        {successDialog}
+        <motion.div key={`mine:${mine.name}`} {...enter} className="mt-3 rounded-[16px] border border-line p-[16px]">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[20px] font-light leading-tight tracking-[-0.01em] text-foreground">@{mine.name}</p>
             <button
               type="button"
-              disabled={current?.status !== "free" || Boolean(busy)}
-              onClick={() => current?.status === "free" && getName(current.price)}
-              className="btn btn-ink mt-3"
+              onClick={() => void copyName(mine.name)}
+              aria-live="polite"
+              className="btn btn-ghost btn-sm"
             >
-              {current?.status === "free"
-                ? `Get @${name} · ${gloamAmount(current.price)} $GLOAM`
-                : "Checking…"}
+              {copied && !won ? "Copied" : "Copy name"}
             </button>
+          </div>
+          <p className="mt-1 text-[12.5px] leading-relaxed text-mute">
+            {expired
+              ? `Expired ${nameDate(mine.expires)}. Renew by ${nameDate(mine.expires + NAME_GRACE_SECONDS)} to keep it.`
+              : `Yours until ${nameDate(mine.expires)}.`}
+          </p>
+          {elsewhere && (
+            <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
+              It pays your earlier address, which still opens here.
+            </p>
           )}
+          {(expired || soon || elsewhere) &&
+            (walletStep ?? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(expired || soon) && (
+                  <button type="button" disabled={Boolean(busy)} onClick={() => renew(mine)} className="btn btn-ink">
+                    Renew for a year
+                  </button>
+                )}
+                {elsewhere && holder && (
+                  <button type="button" disabled={Boolean(busy)} onClick={() => pointHere(mine)} className="btn btn-ghost">
+                    Point it at this address
+                  </button>
+                )}
+              </div>
+            ))}
           {busy && (
             <p aria-live="polite" className="mt-2 text-[12.5px] text-mute">
               {busy}
@@ -406,19 +396,154 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
           )}
           {error && (
             <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
-              {error}{" "}
-              {error.includes("$GLOAM on Robinhood Chain") && (
+              {error}
+            </p>
+          )}
+        </motion.div>
+      </>
+    );
+  }
+
+  const short = current?.status === "free" && current.balance !== null && current.balance < current.price;
+
+  return (
+    <>
+      {successDialog}
+      <motion.div key="get" {...enter} className="mt-3 rounded-[16px] border border-line p-[16px]">
+        <label htmlFor="gloam-name" className="text-[14px] text-foreground">
+          Get a name
+        </label>
+        <p className="mt-0.5 text-[12.5px] leading-relaxed text-mute">People can pay @name instead of this address.</p>
+        <div className="gl-inputcard mt-3 flex items-center gap-1 rounded-[14px] px-3.5">
+          <span className="text-[15px] text-mute">@</span>
+          <input
+            id="gloam-name"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={Boolean(busy)}
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            maxLength={21}
+            placeholder="yourname"
+            className="h-11 min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none! placeholder:text-faint"
+          />
+        </div>
+        {problem ? (
+          <p role="alert" className="mt-2 text-[12.5px] text-danger">
+            {problem}
+          </p>
+        ) : current?.status === "taken" ? (
+          <p role="alert" className="mt-2 text-[12.5px] text-danger">
+            @{name} is taken.
+          </p>
+        ) : current?.status === "error" ? (
+          <p role="alert" className="mt-2 text-[12.5px] text-danger">
+            Could not check that name. Try again in a moment.
+          </p>
+        ) : null}
+
+        {isValidName(name) && !isBlockedName(name) && current?.status !== "taken" && (
+          <>
+            <div role="radiogroup" aria-label="How long" className="mt-3 flex w-fit rounded-full bg-surface-2 p-1 text-[13px]">
+              {NAME_YEARS.map((y) => (
+                <button
+                  key={y}
+                  type="button"
+                  role="radio"
+                  aria-checked={years === y}
+                  onClick={() => setYears(y)}
+                  className={`inline-flex h-8 items-center rounded-full px-4 transition-colors ${
+                    years === y ? "bg-panel font-medium text-foreground shadow-card" : "text-mute hover:text-foreground"
+                  }`}
+                >
+                  {y === 1 ? "1 year" : `${y} years`}
+                </button>
+              ))}
+            </div>
+            {walletStep ?? (
+              <button
+                type="button"
+                disabled={current?.status !== "free" || short || Boolean(busy)}
+                aria-busy={Boolean(busy)}
+                onClick={() => current?.status === "free" && getName(current.price)}
+                className="btn btn-ink mt-3"
+              >
+                <BusyLabel busy={Boolean(busy)} busyText={busy ? "Getting your name" : undefined}>
+                  {current?.status === "free" ? `Get @${name} · ${gloamAmount(current.price)} $GLOAM` : "Checking…"}
+                </BusyLabel>
+              </button>
+            )}
+            {short && current?.status === "free" && !busy && (
+              <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
+                This takes {gloamAmount(current.price)} $GLOAM on Robinhood Chain, and this wallet has{" "}
+                {gloamAmount(current.balance ?? 0n)}.{" "}
                 <Link href="/token" className="underline underline-offset-2">
                   Get $GLOAM
                 </Link>
-              )}
+              </p>
+            )}
+            {progress && (
+              <div aria-live="polite" className="mt-3 flex items-center gap-2.5 text-[12.5px] text-mute">
+                {progress.of > 1 && (
+                  <span className="flex gap-1" aria-hidden>
+                    {[1, 2].map((s) => (
+                      <span
+                        key={s}
+                        className={`h-1 w-5 rounded-full transition-colors duration-300 ${
+                          s <= progress.step ? "bg-sealed" : "bg-line"
+                        }`}
+                      />
+                    ))}
+                  </span>
+                )}
+                <span>
+                  {progress.of > 1 && (
+                    <span className="sr-only">
+                      Step {progress.step} of {progress.of}.{" "}
+                    </span>
+                  )}
+                  {progress.text}
+                </span>
+              </div>
+            )}
+            {error && (
+              <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
+                {error}{" "}
+                {error.includes("$GLOAM on Robinhood Chain") && (
+                  <Link href="/token" className="underline underline-offset-2">
+                    Get $GLOAM
+                  </Link>
+                )}
+              </p>
+            )}
+            <p className="mt-3 text-[12px] leading-relaxed text-mute">
+              Payments to your name stay private. The wallet that pays for it is public.
             </p>
-          )}
-          <p className="mt-3 text-[12px] leading-relaxed text-mute">
-            Payments to your name stay private. The wallet that pays for it is public.
-          </p>
-        </>
-      )}
-    </div>
+          </>
+        )}
+      </motion.div>
+    </>
+  );
+}
+
+/** The new name, letter by letter: each rises out of a blur. Still under reduced motion. */
+function NameReveal({ name, still }: { name: string; still: boolean }) {
+  const chars = ["@", ...name];
+  return (
+    <span aria-label={`@${name}`} className="inline-flex" style={name.length > 12 ? { fontSize: "0.72em" } : undefined}>
+      {chars.map((c, i) => (
+        <motion.span
+          key={i}
+          aria-hidden
+          className="inline-block"
+          initial={still ? false : { opacity: 0, y: 14, filter: "blur(6px)" }}
+          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          transition={{ delay: 0.22 + i * 0.045, type: "spring", stiffness: 380, damping: 26 }}
+        >
+          {c}
+        </motion.span>
+      ))}
+    </span>
   );
 }

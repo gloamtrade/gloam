@@ -122,6 +122,7 @@ export function SuccessModal({
   body,
   primaryHref,
   primaryLabel,
+  onPrimary,
   secondaryLabel = "Done",
   footer,
   detail,
@@ -139,6 +140,8 @@ export function SuccessModal({
   amount?: React.ReactNode;
   primaryHref?: string;
   primaryLabel?: string;
+  /** Run this for the primary button instead of following primaryHref (e.g. copy something). */
+  onPrimary?: () => void;
   secondaryLabel?: string;
   /** Optional extra step under the actions (e.g. sharing a private payment). */
   footer?: React.ReactNode;
@@ -204,7 +207,13 @@ export function SuccessModal({
           <SuccessReceipt title={title} body={body} detail={detail} logo={logo} amount={amount} />
 
           <div className="mt-8 flex gap-2 max-sm:flex-col">
-            {primaryHref &&
+            {onPrimary && primaryLabel && (
+              <button type="button" onClick={onPrimary} aria-live="polite" className="btn btn-ink sm:flex-1">
+                {primaryLabel}
+              </button>
+            )}
+            {!onPrimary &&
+              primaryHref &&
               primaryLabel &&
               (external ? (
                 <a
