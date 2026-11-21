@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { UserRejectedRequestError, ContractFunctionExecutionError, ContractFunctionRevertedError, parseAbi } from "viem";
 
-const { walletErrorForPeople } = await import("../src/lib/walletErrors");
+const { walletErrorForPeople, lacksGasFunds, NO_GAS_FUNDS_TEXT } = await import("../src/lib/walletErrors");
 
 let n = 0;
 function check(name: string, fn: () => void) {
@@ -37,7 +37,42 @@ check("viem's long message is cut to its short first line", () => {
   const shown = walletErrorForPeople(e);
   assert.ok(!shown.includes("\n"), "one line");
   assert.ok(!/Contract Call|Request Arguments|Version: viem|0x39E28/i.test(shown), shown);
-  assert.match(shown, /deposit/);
+  assert.match(shown, /OverDepositLimit/, "the reason, not just the call's name");
+});
+
+check("a revert's reason, cut onto viem's second line, is shown (not the empty first line)", () => {
+  const abi = parseAbi(["function approve(address s, uint256 v)"]);
+  const e = new ContractFunctionExecutionError(
+    new ContractFunctionRevertedError({ abi, functionName: "approve", message: "Internal JSON-RPC error." }),
+    { abi, functionName: "approve", args: ["0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194", 1n], contractAddress: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", sender: "0x0000000000000000000000000000000000000001" }
+  );
+  const shown = walletErrorForPeople(e);
+  assert.equal(shown, "It wouldn't go through: Internal JSON-RPC error.");
+  assert.ok(!lacksGasFunds(e));
+});
+
+check("no gas coin for the fee reads as that, however the wallet words it", () => {
+  const abi = parseAbi(["function approve(address s, uint256 v)"]);
+  for (const words of [
+    "insufficient funds for gas * price + value: balance 0, tx cost 2400000000000, overshot 2400000000000",
+    "gas required exceeds allowance (0)",
+    "Insufficient balance for transaction fee",
+  ]) {
+    const e = new ContractFunctionExecutionError(
+      new ContractFunctionRevertedError({ abi, functionName: "approve", message: words }),
+      { abi, functionName: "approve", args: ["0x39E28Cde55CAB798874746ac52cb4B5Cc99a0194", 1n], contractAddress: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", sender: "0x0000000000000000000000000000000000000001" }
+    );
+    assert.ok(lacksGasFunds(e), words);
+    assert.equal(walletErrorForPeople(e), NO_GAS_FUNDS_TEXT, words);
+  }
+  // a token's own "exceeds balance" is about the token, not the fee
+  assert.ok(!lacksGasFunds(new Error("ERC20: transfer amount exceeds balance")));
+});
+
+check("a revert with no reason keeps viem's one line", () => {
+  const abi = parseAbi(["function approve(address s, uint256 v)"]);
+  const e = new ContractFunctionRevertedError({ abi, functionName: "approve" });
+  assert.equal(walletErrorForPeople(e), 'The contract function "approve" reverted.');
 });
 
 check("a long single-line message is shortened", () => {

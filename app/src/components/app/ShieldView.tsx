@@ -32,7 +32,7 @@ import { formatUsd } from "@/lib/markets";
 import { addableTokensFor, approvalsBeforeDeposit, isDollarStable, isNativeAddable, nativeTokenFor } from "@/lib/tokens";
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
 import { hasCoingeckoMarks, useCoingeckoMarks } from "@/hooks/useCoingeckoMarks";
-import { surelyNotSent, walletErrorForPeople } from "@/lib/walletErrors";
+import { lacksGasFunds, surelyNotSent, walletErrorForPeople } from "@/lib/walletErrors";
 import { publicClientFor } from "@/lib/rhClient";
 
 import { isNoLimit } from "@gloamtrade/sdk";
@@ -629,6 +629,16 @@ export function ShieldView() {
       }
     }
     return null;
+  }
+
+  /**
+   * A token deposit's approve and deposit are paid in the chain's gas coin. A
+   * wallet with none refuses the approve before anything is sent, in words viem
+   * passes on as the call reverting. Said plainly here instead. Not blocked up
+   * front: some wallets pay the fee in a stablecoin for the person.
+   */
+  function noGasFundsText(): string {
+    return `You need a little ${network.primaryAsset.symbol} on ${network.label} for the network fee.`;
   }
 
   /**
@@ -1289,7 +1299,9 @@ export function ShieldView() {
               {formError ||
                 (writeError?.message.includes("OverDepositLimit")
                   ? "This deposit is over the vault's deposit limit. Try a smaller amount."
-                  : walletErrorForPeople(writeError))}
+                  : lacksGasFunds(writeError) && network.family !== "tempo"
+                    ? noGasFundsText()
+                    : walletErrorForPeople(writeError))}
             </p>
           )}
           {hash && !isSuccess && (
