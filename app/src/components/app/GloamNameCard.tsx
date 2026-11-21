@@ -11,7 +11,7 @@
  * the only one who can re-point it. Hidden until the registry is deployed, and
  * in the recording demo.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
 import { erc20Abi, formatEther, parseEther, zeroAddress, type Hex } from "viem";
@@ -28,6 +28,10 @@ import { lookupGloamName, readGloamName } from "@/hooks/useGloamName";
 import { BusyLabel } from "@/components/ui/Spinner";
 import { SuccessModal } from "./SuccessModal";
 import { Select } from "@/components/ui/Select";
+import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
+import { isUnsecuredClaim } from "@/lib/claimSweep";
+import { NAMES_REGISTRAR_ADDRESS, noteForPrice } from "@/lib/nameClaim";
+import { pickClaimNote, runPrivateNameClaim } from "@/lib/nameClaimRun";
 import {
   GLOAM_NAMES_ADDRESS,
   GLOAM_NAMES_CHAIN_ID,
@@ -96,6 +100,43 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
   const still = Boolean(useReducedMotion());
   const [copied, setCopied] = useState(false);
   const [refresh, setRefresh] = useState(0);
+
+  // A private claim (lib/nameClaim): $GLOAM from the private balance in the Robinhood Chain vault.
+  const rhNet = getNetwork("robinhood-mainnet");
+  const { open } = useLocalShieldNotes(address);
+  const privateGloam = useMemo(
+    () =>
+      open.filter(
+        (n) =>
+          n.chainId === rhNet.chainId &&
+          rhNet.pool != null &&
+          n.pool.toLowerCase() === rhNet.pool.toLowerCase() &&
+          n.asset.toLowerCase() === GLOAM_TOKEN.toLowerCase() &&
+          n.bound &&
+          (!n.scheme || n.scheme === "poseidon") &&
+          !isUnsecuredClaim(n)
+      ),
+    [open, rhNet.chainId, rhNet.pool]
+  );
+  // the vault's cash-out fee: a private claim spends a note sized for the price after it
+  const [feeBps, setFeeBps] = useState<number | null>(null);
+  useEffect(() => {
+    if (!NAMES_REGISTRAR_ADDRESS || !rhNet.pool) return;
+    let stale = false;
+    void rh()
+      .readContract({
+        address: rhNet.pool,
+        abi: [{ type: "function", name: "withdrawFeeBps", stateMutability: "view", inputs: [], outputs: [{ type: "uint16" }] }] as const,
+        functionName: "withdrawFeeBps",
+      })
+      .then((v) => {
+        if (!stale) setFeeBps(Number(v));
+      })
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [rhNet.pool]);
   /** Set the moment a wallet action starts, so a second click in the same tick does nothing. */
   const working = useRef(false);
 
@@ -361,6 +402,30 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
     });
   }
 
+  /** Get the name with $GLOAM from the private balance: no wallet pays, and none switches network. */
+  function getNamePrivately(price: bigint) {
+    const point = receiveTagPoint(tag);
+    if (!address || !point || busy || working.current || feeBps === null) return;
+    const wanted = name;
+    const span = years;
+    setBusy(`Getting @${wanted}…`);
+    void run("Getting the name", async () => {
+      const { refunded } = await runPrivateNameClaim({
+        notes: privateGloam,
+        claim: { name: wanted, keyX: point.x, keyY: point.y, holder: address, years: span },
+        price,
+        feeBps,
+        owner: address,
+        onStatus: (text) => setProgress({ step: 1, of: 1, text }),
+      });
+      if (refunded) throw new Error("The claim couldn't finish, so the money went back to your private balance, less the vault's fee.");
+      rememberMyName(wanted);
+      setDraft("");
+      setCopied(false);
+      setWon(wanted);
+    });
+  }
+
   async function copyName(n: string) {
     try {
       await navigator.clipboard.writeText(`@${n}`);
@@ -510,8 +575,15 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
   }
 
   const short = current?.status === "free" && current.balance !== null && current.balance < current.price;
-  /** Short of $GLOAM, but the wallet holds enough ETH to buy the rest and pay the gas. */
+  // a private claim needs one private note that covers the price after the vault's fee
+  const privateOk =
+    Boolean(NAMES_REGISTRAR_ADDRESS && address) &&
+    current?.status === "free" &&
+    feeBps !== null &&
+    pickClaimNote(privateGloam, noteForPrice(current.price, feeBps)) !== null;
+  /** Short of $GLOAM, no private note to use, but the wallet holds enough ETH to buy the rest and pay the gas. */
   const ethOk =
+    !privateOk &&
     short &&
     current?.status === "free" &&
     current.ethQuote !== null &&
@@ -568,20 +640,39 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
 
         {isValidName(name) && !isBlockedName(name) && current?.status !== "taken" && (
           <>
-            {walletStep ?? (
+            {privateOk && current?.status === "free" && (
               <button
                 type="button"
-                disabled={current?.status !== "free" || short || Boolean(busy)}
+                disabled={Boolean(busy)}
                 aria-busy={Boolean(busy)}
-                onClick={() => current?.status === "free" && getName(current.price)}
+                onClick={() => getNamePrivately(current.price)}
                 className="btn btn-ink mt-3"
               >
                 <BusyLabel busy={Boolean(busy)} busyText={busy ? "Getting your name" : undefined}>
-                  {current?.status === "free" ? `Get @${name} · ${gloamAmount(current.price)} $GLOAM` : "Checking…"}
+                  {`Get @${name} privately · ${gloamAmount(current.price)} $GLOAM`}
                 </BusyLabel>
               </button>
             )}
-            {short && current?.status === "free" && !busy && !ethOk && (
+            {/* from the wallet: the only way without a private balance, a quieter second one with it */}
+            {!(privateOk && short) &&
+              (walletStep ?? (
+                <button
+                  type="button"
+                  disabled={current?.status !== "free" || short || Boolean(busy)}
+                  aria-busy={Boolean(busy) && !privateOk}
+                  onClick={() => current?.status === "free" && getName(current.price)}
+                  className={`btn mt-3 ${privateOk ? "btn-ghost ml-2" : "btn-ink"}`}
+                >
+                  <BusyLabel busy={Boolean(busy) && !privateOk} busyText={busy ? "Getting your name" : undefined}>
+                    {current?.status === "free"
+                      ? privateOk
+                        ? "Pay from wallet"
+                        : `Get @${name} · ${gloamAmount(current.price)} $GLOAM`
+                      : "Checking…"}
+                  </BusyLabel>
+                </button>
+              ))}
+            {short && !privateOk && current?.status === "free" && !busy && !ethOk && (
               <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
                 This takes {gloamAmount(current.price)} $GLOAM on Robinhood Chain, and this wallet has{" "}
                 {gloamAmount(current.balance ?? 0n)}.{" "}
@@ -635,7 +726,9 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
               </p>
             )}
             <p className="mt-3 text-[12px] leading-relaxed text-mute">
-              Payments to your name stay private. The wallet that pays for it is public.
+              {privateOk
+                ? "Paid from your private balance, so no wallet shows up paying. Your connected wallet holds the name, and that is public."
+                : "Payments to your name stay private. The wallet that pays for it is public."}
             </p>
           </>
         )}
