@@ -95,6 +95,7 @@ import {
 import { PAYMENT_NOTE_MAX, cleanPaymentNote } from "@/lib/paymentNote";
 import { NoteGlyph, PaymentNoteLine } from "./PaymentNote";
 import { SuccessModal } from "./SuccessModal";
+import { Select } from "@/components/ui/Select";
 import {
   markPrivatePaid,
   readFirstPaySuggestion,
@@ -205,6 +206,37 @@ const RELAY_MAYBE_SENT = new Set(["maybe_sent", "rpc", "network", "error", "inte
 /** No payments listed: one constant, so the wallet-scoped list starts over on the same empty list. */
 const NO_INBOX: { memo: ScannedMemo; label: string; ticket: string; note?: string }[] = [];
 
+/** What the Pay box's To field holds. */
+type ToKind = "name" | "gloam" | "wallet";
+
+const TO_KINDS = [
+  { value: "name" as const, label: "Name" },
+  { value: "gloam" as const, label: "Gloam address" },
+  { value: "wallet" as const, label: "Wallet or ENS" },
+];
+
+const TO_PLACEHOLDER: Record<ToKind, string> = {
+  name: "theirname",
+  gloam: "gloamr1…",
+  wallet: "0x… or name.eth",
+};
+
+/** The kind the text itself says (a pasted address, an ENS name, "@name"), else the one picked. */
+function toKindOf(text: string, picked: ToKind): ToKind {
+  const t = text.trim();
+  if (t.startsWith("gloamr1.")) return "gloam";
+  if (t.startsWith("@")) return "name";
+  if (/^0x/i.test(t) || t.includes(".")) return "wallet";
+  return picked;
+}
+
+/** What to keep for typed text: a name gets its "@" back, anything that says what it is stays as typed. */
+function toValue(text: string, picked: ToKind): string {
+  const t = text.trim();
+  if (!t) return "";
+  return toKindOf(t, picked) === "name" && !t.startsWith("@") ? `@${t}` : t;
+}
+
 export function MoveView() {
   const shieldLive = isShieldDeployed();
   const poseidonMode = HASH_SCHEME === "poseidon";
@@ -309,6 +341,8 @@ export function MoveView() {
   const [noteOpen, setNoteOpen] = useState(() => Boolean(request?.note));
   /** The note the last payment carried, for the success message. */
   const [sentNote, setSentNote] = useState<string | null>(null);
+  /** What a direct private payment was and who it went to, for the success dialog ("25 USDG to @duke"). */
+  const [sentTo, setSentTo] = useState<{ amount: string; to: string } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [shareBlob, setShareBlob] = useState<string | null>(null);
@@ -349,6 +383,15 @@ export function MoveView() {
   // Cash out to that wallet instead (lib/payRecipient). The name is looked up on Ethereum mainnet,
   // for the address it sets for this network (useEnsAddress).
   const payRecipient = useMemo(() => classifyPayRecipient(recipientTag), [recipientTag]);
+  /**
+   * What the To box holds, picked in its dropdown: a Gloam name (typed without "@"),
+   * a Gloam address, or a wallet (0x or ENS). Pasting a gloamr1 or 0x address, or an
+   * ENS name, switches it by itself; plain text follows the pick. A name is kept as
+   * "@name" underneath, so everything downstream reads it the same way.
+   */
+  const [pickedToKind, setPickedToKind] = useState<ToKind>(GLOAM_NAMES_ADDRESS ? "name" : "gloam");
+  const toKind = toKindOf(recipientTag, pickedToKind);
+  const shownTo = toKind === "name" ? recipientTag.replace(/^@/, "") : recipientTag;
   const ensLookup = useEnsAddress(
     payStyle === "direct" && payRecipient.kind === "ens" ? payRecipient.name : null,
     network.chainId
@@ -1809,6 +1852,14 @@ export function MoveView() {
         seed: w.paymentNote.seed,
       });
       setSentNote(pack.note ?? null);
+      setSentTo(
+        payStyle === "direct"
+          ? {
+              amount: formatAssetLabel(w.paymentNote.amountWei, w.paymentNote.asset),
+              to: payRecipient.kind === "name" ? `@${payRecipient.name}` : shortTag(payTag, 8, 10),
+            }
+          : null
+      );
       payTrack.current = { chainId: network.chainId, request: Boolean(request), note: Boolean(pack.note) };
       let share: string;
       let locked = false;
@@ -2816,22 +2867,43 @@ export function MoveView() {
                     ) : (
                     <>
                     <label htmlFor="recv-tag" className="sr-only">
-                      {GLOAM_NAMES_ADDRESS ? "Their Gloam name, Gloam address, 0x address or ENS name" : "Their Gloam address, 0x address or ENS name"}
+                      {toKind === "name" ? "Their Gloam name" : toKind === "gloam" ? "Their Gloam address" : "Their wallet address or ENS name"}
                     </label>
-                    <input
-                      id="recv-tag"
-                      value={recipientTag}
-                      autoComplete="off"
-                      spellCheck={false}
-                      onChange={(e) => {
-                        const v = e.target.value.trim();
-                        setRecipientTag(v);
-                        if (v.startsWith("gloamr1.") || v.startsWith("@")) setPayStyle("direct");
-                        else if (v === "") setPayStyle("direct");
-                      }}
-                      placeholder={GLOAM_NAMES_ADDRESS ? "@name, Gloam address, 0x address or ENS name" : "Gloam address, 0x address or ENS name"}
-                      className="gl-input tnum mt-3"
-                    />
+                    {/* one box: what they're paid at, and what kind it is in a dropdown at its end */}
+                    <div className="gl-inputcard mt-3 flex items-center gap-1 rounded-[14px] py-1.5 pl-3.5 pr-1.5">
+                      {toKind === "name" && <span className="text-[15px] text-mute">@</span>}
+                      <input
+                        id="recv-tag"
+                        value={shownTo}
+                        autoComplete="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        onChange={(e) => {
+                          const v = toValue(e.target.value.trim(), pickedToKind);
+                          setRecipientTag(v);
+                          if (v.startsWith("gloamr1.") || v.startsWith("@")) setPayStyle("direct");
+                          else if (v === "") setPayStyle("direct");
+                        }}
+                        placeholder={TO_PLACEHOLDER[toKind]}
+                        className="tnum h-10 min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none! placeholder:text-faint"
+                      />
+                      {GLOAM_NAMES_ADDRESS && (
+                        <Select
+                          variant="pill"
+                          align="end"
+                          className="shrink-0"
+                          label="Pay to"
+                          value={toKind}
+                          onChange={(k) => {
+                            setPickedToKind(k);
+                            const v = toValue(recipientTag.replace(/^@/, ""), k);
+                            setRecipientTag(v);
+                            if (v.startsWith("@")) setPayStyle("direct");
+                          }}
+                          options={TO_KINDS}
+                        />
+                      )}
+                    </div>
                     {payToWallet ? (
                       <div
                         id="pay-wallet"
@@ -3951,6 +4023,11 @@ export function MoveView() {
                 <LockIcon size={11} />
                 Private payment
               </span>
+              {sentTo && memoPosted && (
+                <p className="tnum mt-3">
+                  <span className="text-foreground">{sentTo.amount}</span> to <span className="text-foreground">{sentTo.to}</span>
+                </p>
+              )}
               {!memoPosted && <p className="mt-3">This code is the money. Save or share it now.</p>}
               {sentNote && (
                 <p className="mt-3 break-words">
