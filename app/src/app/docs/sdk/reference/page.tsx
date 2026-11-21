@@ -412,7 +412,8 @@ cashOutFee(500_000_000n);                     // what the pool keeps on a 500 US
   agentAddress?: Address | null;
 }
 interface ShieldBoundIntentParams extends ShieldIntentParams {
-  prover: Prover;             // bound to the shield circuit artifacts
+  prove: Prover;              // bound to the shield circuit artifacts
+                              // (\`prover\` works too, the older name)
 }
 interface UnshieldIntentParams {
   secretHex: \`0x\${string}\`;  // the note's spend key
@@ -430,6 +431,7 @@ interface PrivateSendIntentParams {
   asset?: Address;
   path: PoseidonMerklePath;
   prove: Prover;
+  paySeed?: \`0x\${string}\`;     // randomNoteSeed().seed: the payment fits a short claim link
   poolAddress?: Address; chainId?: number; agentAddress?: Address | null;
 }`}</code>
       </pre>

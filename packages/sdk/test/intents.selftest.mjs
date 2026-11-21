@@ -13,6 +13,11 @@ import {
   buildUnshieldIntent,
   buildPrivateSendIntent,
   buildPrivateTradeIntent,
+  buildShieldBoundIntent,
+  randomNoteSeed,
+  seedMakesSecret,
+  encodeShortClaim,
+  decodeShortClaim,
   poseidon3,
   fieldToHex,
   NATIVE_ASSET,
@@ -72,6 +77,26 @@ assert(s.exec.args[0] === STUB_PROOF, "transfer arg0 = proof");
 assert(isBytes32(s.exec.args[1]) && isBytes32(s.exec.args[2]), "transfer root+nullifier");
 assert(Array.isArray(s.exec.args[3]) && s.exec.args[3].length === 2 && s.exec.args[3].every(isBytes32), "transfer [c0,c1]");
 assert(s.paymentNote && s.changeNote, "send returns payment+change notes");
+assert(!s.paymentNote.seed, "no paySeed: the payment secret is random");
+
+// paySeed: the payment note's secret comes from the seed, so the payment fits a short claim link
+const { seed: paySeed } = randomNoteSeed();
+const sSeeded = await buildPrivateSendIntent({ secretHex, amountInWei: AMOUNT, amountPayWei: 400000000000000n, asset: NATIVE_ASSET, path, prove, paySeed });
+assert(sSeeded.paymentNote.seed === paySeed, "paySeed is carried on the payment note");
+assert(seedMakesSecret(paySeed, sSeeded.paymentNote.secret), "the payment secret is made from paySeed");
+const shortBody = encodeShortClaim({ ...sSeeded.paymentNote, pool: SEALED_VAULT, chainId: sSeeded.chainId });
+assert(typeof shortBody === "string", "a seeded payment encodes as a short claim link");
+const opened = await decodeShortClaim(shortBody);
+assert(opened.commitment === sSeeded.paymentNote.commitment, "the short claim link opens to the same note");
+
+// buildShieldBoundIntent takes the prover as `prove`, like every other builder, or as `prover`
+for (const key of ["prove", "prover"]) {
+  let called = 0;
+  const sb = await buildShieldBoundIntent({ amountWei: AMOUNT, asset: NATIVE_ASSET, [key]: async (i) => { called++; return prove(i); } });
+  assert(sb.exec.fn === "shieldBound" && sb.exec.args[3] === STUB_PROOF && called === 1, `shieldBound proves with \`${key}\``);
+}
+const noProver = await buildShieldBoundIntent({ amountWei: AMOUNT, asset: NATIVE_ASSET }).then(() => null, (e) => e);
+assert(noProver && /prover/.test(noProver.message), "shieldBound without a prover says so");
 
 // sealedSwap(proof, root, nullifier, cOut, cChange, assetIn, assetOut, amountOutMin, rateIn, rateOut)
 const t = await buildPrivateTradeIntent({

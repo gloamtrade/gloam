@@ -122,6 +122,15 @@ assert(tMain.zkey === "https://www.gloam.trade/circuits/final/transfer_final.zke
 const sTest = circuitArtifactUrls("shield", RH_TESTNET_CHAIN_ID, "/circuits/");
 assert(sTest.wasm === "/circuits/shield.wasm" && sTest.zkey === "/circuits/shield_final.zkey", "testnet files, custom base");
 assert(circuitArtifactUrls("shield", BASE_SEPOLIA_CHAIN_ID).zkey === "https://www.gloam.trade/circuits/final/shield_final.zkey", "Base Sepolia proves with the final zkey");
+// the off-chain proof circuits are pinned too: funds (holdings) and payroll_total (a payroll run)
+for (const c of ["funds", "payroll_total"]) {
+  const u = circuitArtifactUrls(c, TEMPO_MAINNET_CHAIN_ID);
+  assert(u.wasm === `https://www.gloam.trade/circuits/${c}.wasm` && u.zkey === `https://www.gloam.trade/circuits/final/${c}_final.zkey`, `${c} mainnet urls`);
+  const dev = circuitArtifactFiles(c, "dev");
+  const prod = circuitArtifactFiles(c, "production");
+  assert(/^[0-9a-f]{64}$/.test(dev.sha256.wasm) && dev.sha256.wasm === prod.sha256.wasm, `${c} wasm hash pinned`);
+  assert(/^[0-9a-f]{64}$/.test(prod.sha256.zkey) && prod.sha256.zkey !== dev.sha256.zkey, `${c} final and dev zkeys pinned and different`);
+}
 const fFinal = circuitArtifactFiles("unshield", "production");
 assert(fFinal.sha256.zkey === CIRCUIT_SHA256.zkey.production.unshield && fFinal.sha256.zkey !== CIRCUIT_SHA256.zkey.dev.unshield, "final and dev zkeys differ");
 for (const set of [CIRCUIT_SHA256.wasm, CIRCUIT_SHA256.zkey.dev, CIRCUIT_SHA256.zkey.production]) {

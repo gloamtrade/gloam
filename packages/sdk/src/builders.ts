@@ -134,20 +134,29 @@ export async function buildShieldIntent(
   };
 }
 
-export interface ShieldBoundIntentParams extends ShieldIntentParams {
-  /**
-   * Injected shield prover bound to the shield circuit artifacts
-   * (artifactProver({ wasm, zkey })). Required because the hardened pool enforces
-   * a proof at deposit.
-   */
-  prover: Prover;
+export type ShieldBoundIntentParams = ShieldIntentParams & {
   /**
    * Reads the vault's live deposit limits (a viem PublicClient on this chain), so a
    * deposit over them is refused before any proof is made. Left out, or when
    * the read fails, the amount is not checked here and the vault enforces it.
    */
   client?: DepositLimitReader;
-}
+} & (
+    | {
+        /**
+         * Injected shield prover bound to the shield circuit artifacts
+         * (artifactProver({ wasm, zkey })). Required because the hardened pool
+         * enforces a proof at deposit.
+         */
+        prover: Prover;
+        prove?: Prover;
+      }
+    | {
+        /** The same prover, under the name every other builder uses. */
+        prove: Prover;
+        prover?: Prover;
+      }
+  );
 
 /**
  * Build a hardened shield intent for a pool whose shieldVerifier is set (audit
@@ -171,8 +180,10 @@ export async function buildShieldBoundIntent(
     ? await assertDepositWithinLiveLimit(params.client, chainId, asset, params.amountWei, poolAddress)
     : null;
   if (!live || !live.on) assertDepositAllowed(chainId, asset, params.amountWei);
+  const prove = params.prove ?? params.prover;
+  if (typeof prove !== "function") throw new Error("buildShieldBoundIntent needs a shield prover (prove)");
   const note = await makeBoundNotePoseidon(params.amountWei, asset);
-  const { proofBytes } = await params.prover({
+  const { proofBytes } = await prove({
     commitment: note.commitmentField.toString(),
     amount: params.amountWei.toString(),
     asset: toField(BigInt(asset)).toString(),
@@ -289,6 +300,12 @@ export interface PrivateSendIntentParams {
   poolAddress?: Address;
   chainId?: number;
   agentAddress?: Address | null;
+  /**
+   * A 16-byte seed (randomNoteSeed) to make the payment note's secret from, so
+   * the payment fits a short claim link (encodeShortClaim). Left out, the secret
+   * is random and the payment needs a full claim link.
+   */
+  paySeed?: `0x${string}`;
 }
 
 export interface PrivateSendIntent extends GloamIntent<"private_send"> {
@@ -311,6 +328,7 @@ export async function buildPrivateSendIntent(
     amountPay: params.amountPayWei,
     asset,
     path: params.path,
+    ...(params.paySeed ? { paySeed: params.paySeed } : {}),
   });
   if (w.blocker) throw new Error(w.blocker);
   const { proofBytes } = await params.prove(w.circomInput);
