@@ -12,6 +12,7 @@ import { zeroAddress, type Address, type Hex } from "viem";
 import {
   isBlockedName,
   isValidName,
+  lookupNameRecord,
   nameExpired,
   nameFromClaimInput,
   nameFromPayInput,
@@ -147,6 +148,36 @@ await test("team, staff and brand names are blocked, with their disguises", asyn
   });
   assert.equal(record, null, "a blocked name never resolves, even if someone registered it on chain");
   assert.equal(asked, false, "a blocked name is never looked up");
+});
+
+await test("blocklist catches lookalike letters, staff words anywhere and brand parts", () => {
+  for (const n of [
+    "gloarn", "glooam", "the_support_desk", "realsupport_bot", "x_admin_x", "okx_wallet", "binance_team",
+    "coinbase_help", "help_center", "suport", "securlty", "adrnin", "vvallet", "mod_jane",
+  ]) {
+    assert.equal(isBlockedName(n), true, n);
+  }
+  for (const n of ["bernard", "emily", "lily", "olivia", "cadmium", "dream_team", "base_god", "mood", "maryam", "vivian"]) {
+    assert.equal(isBlockedName(n), false, n);
+  }
+});
+
+await test("a failed read is told apart from an empty record", async () => {
+  const empty: NameReader = async () => [zeroAddress, "0x00" as Hex, "0x00" as Hex, 0n];
+  assert.equal(await lookupNameRecord("amara", empty), null);
+  assert.equal(
+    await lookupNameRecord("amara", async () => {
+      throw new Error("socket hang up");
+    }),
+    "failed",
+    "a dropped connection never reads as 'nobody has it'"
+  );
+  assert.equal(
+    await readNameRecord("amara", async () => {
+      throw new Error("socket hang up");
+    }),
+    null
+  );
 });
 
 console.log(`\n${passed} passed`);

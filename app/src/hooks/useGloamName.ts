@@ -3,7 +3,13 @@
 import { useEffect, useState } from "react";
 import { getNetwork } from "@/lib/networks";
 import { publicClientFor } from "@/lib/rhClient";
-import { GLOAM_NAMES_ADDRESS, gloamNamesAbi, isBlockedName, readNameRecord, type NameRecord } from "@/lib/gloamNames";
+import {
+  GLOAM_NAMES_ADDRESS,
+  gloamNamesAbi,
+  isBlockedName,
+  lookupNameRecord,
+  type NameRecord,
+} from "@/lib/gloamNames";
 
 export type NameLookup =
   | { status: "idle" }
@@ -13,21 +19,29 @@ export type NameLookup =
   /** A name the app never pays (Gloam's own, staff words, brands). Not looked up. */
   | { status: "blocked"; name: string }
   | { status: "found"; record: NameRecord }
-  | { status: "none"; name: string };
+  | { status: "none"; name: string }
+  /** The registry could not be read just now; says nothing about the name. */
+  | { status: "error"; name: string };
 
 /** How long the text must sit still before a name is looked up, ms. */
 export const NAME_DEBOUNCE_MS = 350;
 
-type Result = Extract<NameLookup, { status: "found" } | { status: "none" }>;
+type Result = Extract<NameLookup, { status: "found" } | { status: "none" } | { status: "error" }>;
 
-/** Read one name's record from the registry on Robinhood Chain mainnet. */
-export function readGloamName(name: string): Promise<NameRecord | null> {
+/** Read one name's record from the registry on Robinhood Chain mainnet: the record, null for nobody, or "failed". */
+export function lookupGloamName(name: string): Promise<NameRecord | null | "failed"> {
   const registry = GLOAM_NAMES_ADDRESS;
   if (!registry) return Promise.resolve(null);
   const client = publicClientFor(getNetwork("robinhood-mainnet"));
-  return readNameRecord(name, (n) =>
+  return lookupNameRecord(name, (n) =>
     client.readContract({ address: registry, abi: gloamNamesAbi, functionName: "resolve", args: [n] })
   );
+}
+
+/** lookupGloamName with a failed read treated as no record. */
+export async function readGloamName(name: string): Promise<NameRecord | null> {
+  const record = await lookupGloamName(name);
+  return record === "failed" ? null : record;
 }
 
 /**
@@ -45,9 +59,17 @@ export function useGloamName(name: string | null, refresh = 0): NameLookup {
     if (!name || !GLOAM_NAMES_ADDRESS || isBlockedName(name)) return;
     let stale = false;
     const timer = window.setTimeout(() => {
-      void readGloamName(name).then((record) => {
+      void lookupGloamName(name).then((record) => {
         if (stale) return;
-        setState({ key: `${name}:${refresh}`, result: record ? { status: "found", record } : { status: "none", name } });
+        setState({
+          key: `${name}:${refresh}`,
+          result:
+            record === "failed"
+              ? { status: "error", name }
+              : record
+                ? { status: "found", record }
+                : { status: "none", name },
+        });
       });
     }, NAME_DEBOUNCE_MS);
     return () => {

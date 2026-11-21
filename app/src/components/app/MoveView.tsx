@@ -174,7 +174,7 @@ import { embeddedAvailability, onEmbeddedAvailability } from "@/lib/turnkeyBridg
 import { moveModeFromParam, searchWithMoveMode } from "@/lib/vaultNav";
 import { cashOutHandoff, classifyPayRecipient, isWalletRecipient } from "@/lib/payRecipient";
 import { useEnsAddress } from "@/hooks/useEnsAddress";
-import { useGloamName } from "@/hooks/useGloamName";
+import { lookupGloamName, useGloamName } from "@/hooks/useGloamName";
 import { GloamNameCard } from "./GloamNameCard";
 import { GLOAM_NAMES_ADDRESS } from "@/lib/gloamNames";
 
@@ -363,7 +363,11 @@ export function MoveView() {
           : null;
   const payToWallet = payStyle === "direct" && (isWalletRecipient(payRecipient) || payRecipient.kind === "badAddress");
   // "@duke" pays the Gloam address the name points at, read from the registry on Robinhood Chain (lib/gloamNames).
-  const nameLookup = useGloamName(payStyle === "direct" && payRecipient.kind === "name" ? payRecipient.name : null);
+  const [nameRefresh, setNameRefresh] = useState(0);
+  const nameLookup = useGloamName(
+    payStyle === "direct" && payRecipient.kind === "name" ? payRecipient.name : null,
+    nameRefresh
+  );
   /** The Gloam address a direct payment is sealed to: the one typed, or the one the name points at. */
   const payTag =
     payRecipient.kind === "name" ? (nameLookup.status === "found" ? nameLookup.record.tag : "") : recipientTag.trim();
@@ -1727,6 +1731,15 @@ export function MoveView() {
             : "That Gloam address is incomplete or mistyped. Copy it again from their Receive page."
         );
       }
+      // a name is read again right before sealing: it pays whoever holds it now, not when it was typed
+      if (payStyle === "direct" && payRecipient.kind === "name") {
+        const fresh = await lookupGloamName(payRecipient.name);
+        if (fresh === "failed") throw new Error(`Could not check @${payRecipient.name} just now. Try again in a moment.`);
+        if (!fresh || fresh.tag !== payTag) {
+          setNameRefresh((n) => n + 1);
+          throw new Error(`@${payRecipient.name} just changed. Check who it pays, then try again.`);
+        }
+      }
 
       const path = await notePath(selected);
       if (!path) throw new Error("Could not read your private balance. Refresh and try again.");
@@ -2883,6 +2896,10 @@ export function MoveView() {
                         <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
                           @{payRecipient.name} can&apos;t be paid on Gloam. Paste their Gloam address instead.
                         </p>
+                      ) : nameLookup.status === "error" ? (
+                        <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
+                          Could not look up @{payRecipient.name} just now. Try again in a moment.
+                        </p>
                       ) : nameLookup.status === "none" ? (
                         <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
                           No one has @{payRecipient.name} yet. Check the spelling.
@@ -2890,7 +2907,7 @@ export function MoveView() {
                       ) : (
                         <p aria-live="polite" className="tnum mt-2 text-[12.5px] leading-relaxed text-mute">
                           {nameLookup.status === "found"
-                            ? `@${nameLookup.record.name} · ${shortTag(nameLookup.record.tag)}`
+                            ? `@${nameLookup.record.name} · ${shortTag(nameLookup.record.tag, 8, 14)}`
                             : "Looking up name…"}
                         </p>
                       )

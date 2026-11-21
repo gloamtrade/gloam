@@ -131,36 +131,62 @@ const BLOCKED_NAMES = new Set([
   "customercare", "customerservice", "info", "contact",
   "robinhood", "tempo", "base", "ethereum", "eth", "bnb", "binance", "coinbase",
   "metamask", "okx", "relay", "safe", "elysium", "kinetiq",
-  "usdg", "usdc", "usdt", "tether", "circle",
+  "usdg", "usdc", "usdt", "tether", "circle", "helpcenter", "helpcentre",
 ]);
 
-/** Blocked at the start or end of a name too: "support_team", "official_okx", "adminbob". */
-const BLOCKED_EDGES = [
-  "support", "admin", "official", "moderator", "helpdesk", "security",
-  "airdrop", "refund", "giveaway", "verify", "recovery", "treasury",
+/** Blocked anywhere in a name: "the_support_desk", "realsupport_bot". Long enough not to hide inside real words. */
+const BLOCKED_INSIDE = [
+  "support", "official", "moderator", "helpdesk", "airdrop", "refund", "giveaway",
+  "security", "recovery", "treasury", "verify", "verification", "customercare",
 ];
+
+/** Blocked at the start or end of a name: "adminbob", "okx_wallet", "binance_team", "coinbase_help". */
+const BLOCKED_EDGES = ["admin", "robinhood", "binance", "coinbase", "metamask", "okx", "kinetiq", "elysium", "tether"];
+
+/** Blocked as any underscore-separated part: "x_admin_x", "help_center", "mod_jane". */
+const BLOCKED_PARTS = new Set([
+  ...BLOCKED_EDGES, "support", "help", "helpdesk", "official", "mod", "mods", "moderator", "staff",
+  "security", "verify", "verified", "refund", "airdrop", "recovery", "treasury",
+]);
+
+/** "suport" for "support": doubled letters collapsed, checked against words of 5 letters or more. */
+const collapse = (s: string) => s.replace(/(.)\1+/g, "$1");
+const BLOCKED_COLLAPSED = new Set([...BLOCKED_NAMES].filter((w) => w.length >= 5).map(collapse));
+const BLOCKED_INSIDE_COLLAPSED = BLOCKED_INSIDE.map(collapse);
 
 /** Digits that pass for letters: "supp0rt", "h3lp", "4dmin". */
 const LOOKALIKE: Record<string, string> = { "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b", "9": "g" };
 
 /**
  * True for a name the app refuses: anything with "gloam" in it, the names
- * above, and the same with underscores, trailing digits or lookalike digits.
+ * above, and the same with underscores, trailing digits, lookalike digits,
+ * letters that pass for others ("rn" for "m", "vv" for "w", "l" for "i") or
+ * a doubled letter dropped.
  */
 export function isBlockedName(name: string): boolean {
+  const parts = name.toLowerCase().split("_").filter(Boolean);
+  if (parts.length > 1 && parts.some((p) => BLOCKED_PARTS.has(p.replace(/\d/g, (d) => LOOKALIKE[d] ?? d)))) return true;
   const plain = name.toLowerCase().replace(/_/g, "");
-  const forms = [
+  const digits = [
     plain,
     plain.replace(/\d+$/, ""),
     plain.replace(/\d/g, (d) => LOOKALIKE[d] ?? d),
     plain.replace(/\d/g, (d) => (d === "1" ? "i" : (LOOKALIKE[d] ?? d))),
   ];
-  return forms.some(
-    (f) =>
-      f.includes("gloam") ||
+  const forms = digits.flatMap((f) => {
+    const letters = f.replace(/rn/g, "m").replace(/vv/g, "w");
+    return [f, letters, letters.replace(/l/g, "i")];
+  });
+  return forms.some((f) => {
+    const c = collapse(f);
+    return (
+      c.includes("gloam") ||
       BLOCKED_NAMES.has(f) ||
+      BLOCKED_COLLAPSED.has(c) ||
+      BLOCKED_INSIDE_COLLAPSED.some((w) => c.includes(w)) ||
       BLOCKED_EDGES.some((w) => f.startsWith(w) || f.endsWith(w))
-  );
+    );
+  });
 }
 
 /** Why a name someone is typing cannot be registered, or null when it can be. */
@@ -185,21 +211,30 @@ export type NameRecord = {
 export type NameReader = (name: string) => Promise<readonly [Address, Hex, Hex, bigint]>;
 
 /**
- * The record for `name`, or null when nobody holds it (never taken, or past
- * its grace period), the name is blocked, the read fails, or the key does not
- * make a whole Gloam address. Never throws.
+ * The record for `name`; null when nobody holds it (never taken, or past its
+ * grace period), the name is blocked, or the key does not make a whole Gloam
+ * address; "failed" when the chain could not be read, which says nothing
+ * about the name. Never throws.
  */
-export async function readNameRecord(name: string, read: NameReader): Promise<NameRecord | null> {
+export async function lookupNameRecord(name: string, read: NameReader): Promise<NameRecord | null | "failed"> {
   if (!isValidName(name) || isBlockedName(name)) return null;
+  let raw: Awaited<ReturnType<NameReader>>;
   try {
-    const [holder, x, y, expires] = await read(name);
-    if (!isAddress(holder) || holder === zeroAddress) return null;
-    const tag = receiveTagFromPoint(x, y);
-    if (!tag) return null;
-    return { name, tag, holder: getAddress(holder), expires: Number(expires) };
+    raw = await read(name);
   } catch {
-    return null;
+    return "failed";
   }
+  const [holder, x, y, expires] = raw;
+  if (!isAddress(holder) || holder === zeroAddress) return null;
+  const tag = receiveTagFromPoint(x, y);
+  if (!tag) return null;
+  return { name, tag, holder: getAddress(holder), expires: Number(expires) };
+}
+
+/** lookupNameRecord with a failed read treated as no record. Never throws. */
+export async function readNameRecord(name: string, read: NameReader): Promise<NameRecord | null> {
+  const record = await lookupNameRecord(name, read);
+  return record === "failed" ? null : record;
 }
 
 /** True once the paid time is over (the name still pays its holder during the grace period). */

@@ -11,7 +11,7 @@
  * the only one who can re-point it. Hidden until the registry is deployed, and
  * in the recording demo.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
 import { erc20Abi, zeroAddress, type Hex } from "viem";
@@ -23,7 +23,7 @@ import { publicClientFor } from "@/lib/rhClient";
 import { GLOAM_TOKEN } from "@/lib/buybacks";
 import { receiveTagPoint } from "@/lib/receiveTag";
 import { walletErrorForPeople } from "@/lib/walletErrors";
-import { readGloamName } from "@/hooks/useGloamName";
+import { lookupGloamName, readGloamName } from "@/hooks/useGloamName";
 import { BusyLabel } from "@/components/ui/Spinner";
 import { SuccessModal } from "./SuccessModal";
 import {
@@ -83,35 +83,52 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
   const still = Boolean(useReducedMotion());
   const [copied, setCopied] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  /** Set the moment a wallet action starts, so a second click in the same tick does nothing. */
+  const working = useRef(false);
 
   const name = nameFromClaimInput(draft);
   const problem = nameProblem(name);
   const checkKey = `${name}:${years}:${address ?? ""}:${refresh}`;
 
-  // The name this browser has: the newest one that still exists on chain.
+  // The name this browser has: the newest saved one that still pays this address, or
+  // is held by the connected wallet. A saved name now held by someone else is dropped;
+  // one that could not be read is kept and read again shortly, never dropped.
   useEffect(() => {
     let stale = false;
+    let retry = 0;
     void (async () => {
+      let failed = false;
       for (const n of loadMyNames()) {
-        const record = await readGloamName(n);
+        const record = await lookupGloamName(n);
         if (stale) return;
-        if (record) {
+        if (record === "failed") {
+          failed = true;
+          continue;
+        }
+        const held = Boolean(record && address && record.holder.toLowerCase() === address.toLowerCase());
+        if (record && (record.tag === tag || held)) {
           setMine(record);
           setReadAt(Date.now() / 1000);
           setMineLoaded(true);
           return;
         }
+        // without a wallet there is no telling whose it is now: keep it
+        if (record && !address) continue;
         forgetMyName(n);
       }
-      if (!stale) {
-        setMine(null);
-        setMineLoaded(true);
+      if (stale) return;
+      if (failed) {
+        retry = window.setTimeout(() => setRefresh((x) => x + 1), 3000);
+        return;
       }
+      setMine(null);
+      setMineLoaded(true);
     })();
     return () => {
       stale = true;
+      window.clearTimeout(retry);
     };
-  }, [refresh]);
+  }, [refresh, tag, address]);
 
   // Whether the typed name is free, and what it costs for the years picked.
   useEffect(() => {
@@ -121,11 +138,12 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const record = await readGloamName(name);
+          const record = await lookupGloamName(name);
           if (stale) return;
+          if (record === "failed") throw new Error("read failed");
           if (record) {
-            if (record.tag === tag) {
-              // A name typed here that already points at this address is simply this browser's.
+            if (record.tag === tag && address && record.holder.toLowerCase() === address.toLowerCase()) {
+              // A name typed here that pays this address and is held by this wallet is simply this browser's.
               rememberMyName(record.name);
               setMine(record);
               setReadAt(Date.now() / 1000);
@@ -202,6 +220,7 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
         abi: erc20Abi,
         functionName: "approve",
         args: [registry, amount],
+        account: address,
         chainId: GLOAM_NAMES_CHAIN_ID,
       })
     );
@@ -215,26 +234,40 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
   }
 
   async function run(label: string, work: () => Promise<void>) {
+    if (working.current) return;
+    working.current = true;
     setError(null);
+    setBusy((b) => b ?? `${label}…`);
     try {
       await work();
-      setRefresh((n) => n + 1);
     } catch (e) {
       setError(e instanceof Error && e.message.includes("$GLOAM") ? e.message : walletErrorForPeople(e, `${label} didn't go through. Try again.`));
     } finally {
+      working.current = false;
       setBusy(null);
       setProgress(null);
+      // read everything again: the name, the price, the balance
+      setRefresh((n) => n + 1);
     }
   }
 
   function getName(price: bigint) {
     const point = receiveTagPoint(tag);
-    if (!address || !point || busy) return;
+    if (!address || !point || busy || working.current) return;
+    const payer = address;
     // what was on screen when the button was pressed, whatever happens to the input after
     const wanted = name;
     const span = years;
     setBusy(`Getting @${wanted}…`);
     void run("Getting the name", async () => {
+      // the price the button showed is the price paid: stop if it moved since
+      const now = await rh().readContract({
+        address: registry,
+        abi: gloamNamesAbi,
+        functionName: "priceOf",
+        args: [wanted, BigInt(span)],
+      });
+      if (now !== price) throw new Error(`The price of @${wanted} just changed to ${gloamAmount(now)} $GLOAM. Check it and try again.`);
       const approving = await needsApproval(price);
       const of = approving ? 2 : 1;
       if (approving) {
@@ -243,14 +276,21 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
       }
       setProgress({ step: of, of, text: `Confirm @${wanted} in your wallet` });
       const hash = await writeContractAsync({
+        account: payer,
         address: registry,
         abi: gloamNamesAbi,
         functionName: "register",
-        args: [wanted, point.x, point.y, address, BigInt(span)],
+        args: [wanted, point.x, point.y, payer, BigInt(span)],
         chainId: GLOAM_NAMES_CHAIN_ID,
       });
       setProgress({ step: of, of, text: `Saving @${wanted} on Robinhood Chain…` });
-      await waitFor(hash);
+      try {
+        await waitFor(hash);
+      } catch (e) {
+        // the wait can fail after the name is already saved: believe the chain, not the wait
+        const record = await readGloamName(wanted);
+        if (!(record && record.tag === tag)) throw e;
+      }
       rememberMyName(wanted);
       setDraft("");
       setCopied(false);
@@ -311,6 +351,7 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
           abi: gloamNamesAbi,
           functionName: "renew",
           args: [record.name, 1n],
+          account: address,
           chainId: GLOAM_NAMES_CHAIN_ID,
         })
       );
@@ -328,6 +369,7 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
           abi: gloamNamesAbi,
           functionName: "setKey",
           args: [record.name, point.x, point.y],
+          account: address,
           chainId: GLOAM_NAMES_CHAIN_ID,
         })
       );
@@ -382,7 +424,7 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
                     Renew for a year
                   </button>
                 )}
-                {elsewhere && holder && (
+                {elsewhere && holder && !expired && (
                   <button type="button" disabled={Boolean(busy)} onClick={() => pointHere(mine)} className="btn btn-ghost">
                     Point it at this address
                   </button>
