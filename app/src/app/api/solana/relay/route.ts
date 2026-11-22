@@ -89,7 +89,9 @@ export async function POST(req: Request) {
       return refuse(502, "upstream_unavailable", "Solana is slow to answer. Try again.");
     }
   }
-  if (!(await ringsRelayRate(req, paysRent ? "rent" : "transact"))) return refuse(429, "rate_limited", "Too many requests. Try again in a little while.");
+  const rate = await ringsRelayRate(req, paysRent ? "rent" : "transact");
+  if (rate === "unavailable") return refuse(503, "relay_unavailable", "Gloam's Solana relay is paused for a moment. Try again shortly.");
+  if (rate === "limited") return refuse(429, "rate_limited", "Too many requests. Try again in a little while.");
   if (!(await screenOtherChainAddresses(verdict.accounts))) return refuse(403, "screened", "This transaction can't go through Gloam.");
 
   let signedBase64: string;
