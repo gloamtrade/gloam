@@ -66,11 +66,11 @@ const transferData = (to: string, amount: bigint) => `0xa9059cbb${padAddr(to)}${
 
 // ------------------------------------------------------------- what can go where
 
-await test("Robinhood Chain USDG can land on Base, Ethereum, Arbitrum, Solana and BNB Chain", () => {
+await test("Robinhood Chain USDG can land on Base, Ethereum, Arbitrum, Solana, BNB Chain and X Layer", () => {
   const ids = crossChainDestinations(4663, USDG_RH).map((d) => d.id);
-  assert.deepEqual(ids, ["base-usdc", "ethereum-usdc", "arbitrum-usdc", "solana-usdc", "bnb-usdt", "bnb-usdc"]);
+  assert.deepEqual(ids, ["base-usdc", "ethereum-usdc", "arbitrum-usdc", "solana-usdc", "bnb-usdt", "bnb-usdc", "xlayer-usdc", "xlayer-usdg"]);
   // any case of the address
-  assert.equal(crossChainDestinations(4663, USDG_RH.toUpperCase().replace("0X", "0x")).length, 6);
+  assert.equal(crossChainDestinations(4663, USDG_RH.toUpperCase().replace("0X", "0x")).length, 8);
 });
 
 await test("Base and Ethereum stablecoins can land as USDT or USDC on BNB Chain", () => {
@@ -101,12 +101,13 @@ await test("Tempo, testnets, ETH and unknown assets get no cross-chain option", 
   assert.equal(crossChainSource(4663, USDG_RH)?.symbol, "USDG");
 });
 
-await test("every destination is USDC or USDT with an id the API can look up, 6 decimals or 18 on BNB Chain", () => {
+await test("every destination is USDC, USDT or USDG with an id the API can look up, 6 decimals or 18 on BNB Chain", () => {
   const ids = new Set<string>();
+  const prefix: Record<string, string> = { "BNB Chain": "bnb", "X Layer": "xlayer" };
   for (const d of CROSS_CHAIN_DESTINATIONS) {
-    assert.ok(d.token.symbol === "USDC" || d.token.symbol === "USDT", d.id);
+    assert.ok(d.token.symbol === "USDC" || d.token.symbol === "USDT" || d.token.symbol === "USDG", d.id);
     assert.equal(d.token.decimals, d.chainId === 56 ? 18 : 6, `${d.id} decimals`);
-    assert.equal(d.id, `${d.chain === "BNB Chain" ? "bnb" : d.chain.toLowerCase()}-${d.token.symbol.toLowerCase()}`);
+    assert.equal(d.id, `${prefix[d.chain] ?? d.chain.toLowerCase()}-${d.token.symbol.toLowerCase()}`);
     assert.equal(crossChainDestination(d.id), d);
     ids.add(d.id);
   }
@@ -118,6 +119,13 @@ await test("every destination is USDC or USDT with an id the API can look up, 6 
   assert.equal(usdt.token.logo, "/brand/tokens/usdt.png");
   assert.equal(usdt.explorerTx("0xabc"), "https://bscscan.com/tx/0xabc");
   assert.equal(usdc.explorerTx("0xabc"), "https://bscscan.com/tx/0xabc");
+  const xUsdc = crossChainDestination("xlayer-usdc")!;
+  const xUsdg = crossChainDestination("xlayer-usdg")!;
+  assert.equal(xUsdc.chainId, 196);
+  assert.equal(xUsdc.token.address, "0xb6ceceab302e2e4948951ee7843fc24e92933061");
+  assert.equal(xUsdg.token.address, "0x4ae46a509f6b1d9056937ba4500cb143933d2dc8");
+  assert.equal(xUsdg.token.logo, "/brand/tokens/usdg.png");
+  assert.equal(xUsdg.explorerTx("0xabc"), "https://www.oklink.com/x-layer/evm/tx/0xabc");
   assert.equal(crossChainDestination("tempo-usdc"), null);
   assert.equal(crossChainDestination(undefined), null);
 });
@@ -372,6 +380,8 @@ if (process.env.XCHAIN_LIVE === "1") {
     ["bnb-usdt", 4663, USDG_RH],
     ["bnb-usdc", 8453, USDC_BASE],
     ["bnb-usdt", 1, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"],
+    ["xlayer-usdg", 4663, USDG_RH],
+    ["xlayer-usdc", 8453, USDC_BASE],
   ] as const) {
     await test(`live: a strict quote ${chainId} to ${id} reads clean`, async () => {
       const destination = crossChainDestination(id)!;

@@ -79,12 +79,16 @@ export type CrossChainDestination = {
  */
 const usdc = (address: string, decimals: number): CrossChainToken => ({ symbol: "USDC", address, decimals, logo: "/brand/tokens/usdc.png" });
 const usdt = (address: string, decimals: number): CrossChainToken => ({ symbol: "USDT", address, decimals, logo: "/brand/tokens/usdt.png" });
+const usdg = (address: string, decimals: number): CrossChainToken => ({ symbol: "USDG", address, decimals, logo: "/brand/tokens/usdg.png" });
 
 const bscscanTx = (h: string) => `https://bscscan.com/tx/${h}`;
+const xlayerTx = (h: string) => `https://www.oklink.com/x-layer/evm/tx/${h}`;
 
 /**
  * Where a cash out can land instead of its own chain. Checked with live strict
- * quotes on 2026-11-09, and on 2026-11-19 for BNB Chain. A BNB Chain
+ * quotes on 2026-11-09, on 2026-11-19 for BNB Chain, and on 2026-11-22 for X
+ * Layer (from Robinhood Chain USDG, Base USDC and USDT, Ethereum USDC and USDG,
+ * to both of its stablecoins). A BNB Chain
  * destination is only Relay delivering to a wallet there: it needs nothing
  * from Gloam's BNB Chain vault, so it is offered whether that vault is on or not.
  */
@@ -96,6 +100,9 @@ export const CROSS_CHAIN_DESTINATIONS: readonly CrossChainDestination[] = [
   // BNB Chain (56): USDT first, the stablecoin most held there. Both have 18 decimals.
   { id: "bnb-usdt", chainId: 56, chain: "BNB Chain", kind: "evm", token: usdt("0x55d398326f99059fF775485246999027B3197955", 18), explorerTx: bscscanTx },
   { id: "bnb-usdc", chainId: 56, chain: "BNB Chain", kind: "evm", token: usdc("0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", 18), explorerTx: bscscanTx },
+  // X Layer (196), OKX's chain: USDC and USDG, both 6 decimals. Relay delivers to a wallet there; Gloam has no vault on it.
+  { id: "xlayer-usdc", chainId: 196, chain: "X Layer", kind: "evm", token: usdc("0xb6ceceab302e2e4948951ee7843fc24e92933061", 6), explorerTx: xlayerTx },
+  { id: "xlayer-usdg", chainId: 196, chain: "X Layer", kind: "evm", token: usdg("0x4ae46a509f6b1d9056937ba4500cb143933d2dc8", 6), explorerTx: xlayerTx },
 ];
 
 /**
