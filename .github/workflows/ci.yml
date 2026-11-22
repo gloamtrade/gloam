@@ -58,10 +58,12 @@ jobs:
           NEXT_PUBLIC_BNB_ENABLED=1 NEXT_PUBLIC_BNB_POOL=0x89d3042390204f57b8b4F8949D3c2203E4002164 NEXT_PUBLIC_BNB_DEPLOY_BLOCK=134300000 NEXT_PUBLIC_BNB_LIVE_SINCE="21 November 2026" ../mcp/node_modules/.bin/tsx scripts/selftest-claim-csp.mts
 
       # Solana (off by default): account derivation, the proxy allowlist and the relay
-      # policy. No network.
+      # policy; payroll's list checks, pacing and resume against a fake chain. No network.
       - name: App Solana self-tests
         working-directory: app
-        run: ../mcp/node_modules/.bin/tsx scripts/selftest-solana-rings.mts
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-rings.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-payroll.mts
 
       # BNB Chain (off by default): off, no pool, on, and bad values; the pruned-logs check
       # end to end through the app's own transports. Fake RPCs only, nothing reaches a host.
