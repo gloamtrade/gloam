@@ -43,20 +43,22 @@ const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
  * The cipher a private account's runs are sealed with: AES-256-GCM, its key
  * HKDF-SHA256 over the account's 32-byte viewing secret (salt
  * "gloam/solana-payroll/v1", info the account's address), each seal under a
- * fresh nonce and bound to the address. The caller wipes `secret` after.
+ * fresh nonce and bound to the address. Another `domain` (a pending Pay or
+ * Cash out, lib/solanaRings/send) gets a key of its own. The caller wipes
+ * `secret` after.
  */
-export async function runCipher(secret: Uint8Array, owner: string): Promise<RunCipher> {
+export async function runCipher(secret: Uint8Array, owner: string, domain = DOMAIN): Promise<RunCipher> {
   if (secret.length !== 32) throw new Error("A viewing secret is 32 bytes.");
   const subtle = globalThis.crypto.subtle;
   const ikm = await subtle.importKey("raw", buf(secret), "HKDF", false, ["deriveKey"]);
   const key = await subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: buf(enc.encode(DOMAIN.trim())), info: buf(enc.encode(owner)) },
+    { name: "HKDF", hash: "SHA-256", salt: buf(enc.encode(domain.trim())), info: buf(enc.encode(owner)) },
     ikm,
     { name: "AES-GCM", length: 256 },
     false,
     ["encrypt", "decrypt"]
   );
-  const aad = buf(enc.encode(`${DOMAIN}${owner}`));
+  const aad = buf(enc.encode(`${domain}${owner}`));
   return {
     async seal(plain) {
       const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));

@@ -10,7 +10,13 @@
  *  - the relay policy (/api/solana/relay): only Privacy Rings registrations and
  *    transacts the private account signed, the relay as fee payer, the fee
  *    capped; never a deposit, a transfer of the relay's SOL, or another program;
- *  - the relay's key parsing and limits, and the Solana OFAC screen.
+ *  - the relay's key parsing and limits, and the Solana OFAC screen;
+ *  - Pay and Cash out through the relay (lib/solanaRings/send) against a fake
+ *    chain that keeps a ledger, with a person who tries again after an error:
+ *    a relay answer lost after the send, a confirmation that times out, a tab
+ *    closed mid-payment, a failure on chain. Nobody is paid twice, and a
+ *    payment's notes are freed only when nothing was sent or the chain shows
+ *    it never landed.
  *
  * No network. Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-solana-rings.mts
  */
@@ -412,6 +418,244 @@ ok((await server.ringsRelayRate(ipReq("198.51.100.3"), "transact", now)) === "ok
 ok(ofac.addresses.length >= 1 && ofac.addresses.every((a: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)), "the OFAC Solana list is Solana addresses");
 ok(!(await screening.screenOtherChainAddresses([cashOutTo, ofac.addresses[0]!])), "an OFAC-listed Solana address is refused");
 ok(await screening.screenOtherChainAddresses([cashOutTo, owner.address]), "other addresses pass");
+
+// ---------------------------------------------------------------- Pay and Cash out: never twice
+
+{
+  const send = await import("../src/lib/solanaRings/send");
+  const { INFLIGHT_POLL_MS } = await import("../src/lib/solanaRings/payroll");
+  type Pending = import("../src/lib/solanaRings/send").Pending;
+  type SendMode = "ok" | "429" | "422" | "503-empty" | "lost-landed" | "lost-not-sent" | "lost-landed-late" | "sent-fails-on-chain" | "hang-landed" | "hang-not-sent";
+  type Tx = { id: number; note: number; blockhash: string; sig: string; landed: boolean; failed: boolean; landsAfterChecks: number };
+  const nf = (note: number) => note.toString(16).padStart(64, "0");
+
+  /**
+   * One private account on a fake chain. Notes are spent by id; a landed
+   * payment spends its note and leaves change, as the pool does. A retry after
+   * the notes were freed picks the first unspent, unreserved note, so once the
+   * first payment landed and was read back it spends the change: a second
+   * payment, which is the bug this guards against.
+   */
+  function world() {
+    const notes = [{ id: 0, spent: false }];
+    const txs: Tx[] = [];
+    const paid: string[] = [];
+    const storage = new Map<string, string>();
+    return { notes, txs, paid, storage, sends: 0, releases: 0 };
+  }
+  type World = ReturnType<typeof world>;
+
+  /** One page (a tab): its own reservations and calls, the chain and storage shared. */
+  function page(w: World, modes: SendMode[], opts: { confirmTimesOut?: boolean; checks?: { n: number }; saveFails?: boolean } = {}) {
+    const reserved = new Set<number>();
+    const checksBefore = opts.checks ?? { n: 0 };
+    const land = (tx: Tx) => {
+      const note = w.notes.find((x) => x.id === tx.note)!;
+      if (note.spent || tx.landed || tx.failed) return; // a spent note can't be spent again
+      note.spent = true;
+      tx.landed = true;
+      w.paid.push(tx.sig);
+      w.notes.push({ id: w.notes.length, spent: false }); // its change
+    };
+    const deps: import("../src/lib/solanaRings/send").SendDeps = {
+      async build() {
+        const note = w.notes.find((x) => !x.spent && !reserved.has(x.id));
+        if (!note) throw new Error("Your private balance is too low for that.");
+        reserved.add(note.id);
+        const tx: Tx = { id: w.txs.length, note: note.id, blockhash: `bh${w.txs.length}`, sig: `sig${w.txs.length}`, landed: false, failed: false, landsAfterChecks: 0 };
+        w.txs.push(tx);
+        return { wire: Uint8Array.of(tx.id), nullifiers: [nf(note.id)], blockhash: tx.blockhash };
+      },
+      async send(wire) {
+        const tx = w.txs[wire[0]!]!;
+        const stored = await deps.pending.load();
+        assert.ok(stored && stored !== "unreadable" && stored.blockhash === tx.blockhash, "stored as pending before the send");
+        n++;
+        w.sends++;
+        const mode = modes.shift() ?? "ok";
+        const refuse = (status: number, code: string, maybeSent: boolean) => ({ status, code, message: `relay ${code}`, maybeSent });
+        switch (mode) {
+          case "ok":
+            land(tx);
+            return tx.sig;
+          case "429":
+            throw refuse(429, "rate_limited", false);
+          case "422":
+            throw refuse(422, "would_fail", false);
+          case "503-empty":
+            throw refuse(503, "relay_empty", false);
+          case "lost-landed":
+            land(tx);
+            throw refuse(502, "upstream_unavailable", true);
+          case "lost-landed-late":
+            tx.landsAfterChecks = 2;
+            throw refuse(504, "unknown", true);
+          case "lost-not-sent":
+            throw refuse(0, "network", true);
+          case "sent-fails-on-chain":
+            tx.failed = true;
+            return tx.sig;
+          case "hang-landed":
+            land(tx);
+            return new Promise<string>(() => {});
+          case "hang-not-sent":
+            return new Promise<string>(() => {});
+        }
+      },
+      async release() {
+        w.releases++;
+        reserved.clear();
+      },
+      async confirm(sig) {
+        const tx = w.txs.find((t) => t.sig === sig)!;
+        if (opts.confirmTimesOut || !tx.landed) throw new Error("CLIENT_RPC signature not confirmed");
+      },
+      async resolve(p: Pending) {
+        const tx = w.txs.find((t) => t.blockhash === p.blockhash)!;
+        if (p.signature && tx.failed) {
+          reserved.clear();
+          return { state: "failed", message: "failed" };
+        }
+        if (tx.landsAfterChecks > 0 && --tx.landsAfterChecks === 0) land(tx);
+        if (tx.landed) return { state: "landed", signature: tx.sig };
+        if (checksBefore.n > 0) {
+          checksBefore.n--;
+          return { state: "pending" };
+        }
+        if (tx.landsAfterChecks > 0) return { state: "pending" };
+        reserved.clear(); // dropped: its notes are freed
+        return { state: "dropped" };
+      },
+      pending: send.pendingStore({
+        key: "pending",
+        cipher: { seal: async (x) => `s:${x}`, open: async (x) => (x.startsWith("s:") ? x.slice(2) : Promise.reject(new Error("bad"))) },
+        storage: {
+          getItem: (k) => w.storage.get(k) ?? null,
+          setItem: (k, v) => {
+            if (opts.saveFails) throw new Error("QuotaExceededError");
+            w.storage.set(k, v);
+          },
+          removeItem: (k) => void w.storage.delete(k),
+        },
+      }),
+      sleep: async () => undefined,
+      now: () => 1,
+    };
+    return deps;
+  }
+
+  /** A person pays; on an error they try once more, as anyone would. Returns what each try said. */
+  async function payAndRetry(w: World, first: SendMode[], opts: Parameters<typeof page>[2] = {}, then: SendMode[] = ["ok"]) {
+    const said: string[] = [];
+    for (const modes of [first, then]) {
+      try {
+        said.push(`ok ${await send.sendGuarded(page(w, modes, modes === first ? opts : {}))}`);
+        break;
+      } catch (e) {
+        said.push((e as Error).message);
+      }
+    }
+    return said;
+  }
+
+  // the plain case
+  {
+    const w = world();
+    const said = await payAndRetry(w, ["ok"]);
+    ok(said[0] === "ok sig0" && w.paid.length === 1 && w.releases === 0 && !w.storage.size, "a payment lands once, nothing left pending");
+  }
+  // refusals from before the send: notes freed at once, the retry pays once
+  for (const mode of ["429", "422", "503-empty"] as const) {
+    const w = world();
+    const said = await payAndRetry(w, [mode]);
+    ok(said[0] === `relay ${mode === "429" ? "rate_limited" : mode === "422" ? "would_fail" : "relay_empty"}` && w.releases === 1, `${mode}: refused before the send, its notes freed at once`);
+    ok(w.paid.length === 1 && said[1] === "ok sig1", `${mode}: the retry pays once`);
+  }
+  // the bug: an answer lost after the relay sent it
+  {
+    const w = world();
+    const said = await payAndRetry(w, ["lost-landed"]);
+    ok(said.length === 1 && said[0] === "ok sig0", "an answer lost after the send: settled on chain, the payment shows as paid");
+    ok(w.paid.length === 1, "an answer lost after the send: paid once, never twice");
+    ok(w.releases === 0, "an answer lost after the send: its notes are never freed");
+  }
+  {
+    const w = world();
+    const checks = { n: 0 };
+    let waits = 0;
+    const deps = page(w, ["lost-landed-late"], { checks });
+    deps.onChecking = () => void waits++;
+    ok((await send.sendGuarded(deps)) === "sig0" && w.paid.length === 1, "an answer lost, the payment lands a little later: waits for it, paid once");
+    ok(waits >= 2 && INFLIGHT_POLL_MS > 0, "the person is told it is being checked while it waits");
+  }
+  {
+    const w = world();
+    const said = await payAndRetry(w, ["lost-not-sent"], { checks: { n: 3 } });
+    ok(said[0] === send.NOT_SENT, "an answer lost and it never went: says so once its blockhash expired");
+    ok(w.paid.length === 1 && said[1] === "ok sig1", "and the retry pays once");
+  }
+  // a confirmation that times out, though it landed
+  {
+    const w = world();
+    const said = await payAndRetry(w, ["ok"], { confirmTimesOut: true });
+    ok(said.length === 1 && said[0] === "ok sig0" && w.paid.length === 1, "a confirmation that timed out: settled on chain, paid once");
+  }
+  // it reached Solana and failed there
+  {
+    const w = world();
+    const said = await payAndRetry(w, ["sent-fails-on-chain"]);
+    ok(said[0] === send.FAILED_ON_CHAIN && w.paid.length === 1 && said[1] === "ok sig1", "failed on chain: says so, the retry pays once");
+  }
+  // the tab closes mid-payment, after the relay sent it: the next payment from this account is held once
+  {
+    const w = world();
+    void send.sendGuarded(page(w, ["hang-landed"]));
+    await new Promise((r) => setTimeout(r, 5));
+    ok(w.storage.size === 1, "a payment in flight stays stored as pending when the tab closes");
+    await assert.rejects(send.sendGuarded(page(w, ["ok"])), (e: Error) => e.message === send.LAST_PAYMENT_LANDED);
+    n++;
+    ok(w.paid.length === 1 && w.sends === 1 && w.storage.size === 0, "the same payment again in a new tab: told the last one went through, paid once, record cleared");
+    ok((await send.sendGuarded(page(w, ["ok"]))) === "sig1" && w.paid.length === 2, "a payment made after that goes through as asked");
+  }
+  // the tab closes before the relay got it: the next payment waits for it to expire, then goes
+  {
+    const w = world();
+    void send.sendGuarded(page(w, ["hang-not-sent"]));
+    await new Promise((r) => setTimeout(r, 5));
+    const said = await payAndRetry(w, ["ok"], { checks: { n: 2 } });
+    ok(said.length === 1 && said[0] === "ok sig1" && w.paid.length === 1, "a payment never sent: the next one waits for it to expire, then pays once");
+  }
+  // storage
+  {
+    const w = world();
+    const said = await payAndRetry(w, ["ok"], { saveFails: true });
+    ok(said[0] === send.NOT_SAVED && w.txs.length >= 1 && w.paid.length === 1 && w.sends === 1, "a payment that can't be stored first isn't sent; the retry pays once");
+  }
+  {
+    const w = world();
+    w.storage.set("pending", "garbage");
+    const said = await payAndRetry(w, ["ok"]);
+    ok(said[0] === send.NOT_SURE && w.paid.length === 1 && said[1] === "ok sig0", "an unreadable pending record: says check first, once, then pays");
+  }
+  {
+    const mem = new Map<string, string>();
+    const store = send.pendingStore({ key: "k", cipher: { seal: async (x) => `s:${x}`, open: async (x) => x.slice(2) }, storage: { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => void mem.set(k, v), removeItem: (k) => void mem.delete(k) } });
+    const p = { nullifiers: [nf(7)], blockhash: "bh", at: 3 };
+    await store.save(p);
+    ok(JSON.stringify(await store.load()) === JSON.stringify(p), "a pending record reads back");
+    mem.set("k", `s:${JSON.stringify({ ...p, nullifiers: ["zz"] })}`);
+    ok((await store.load()) === "unreadable", "a pending record with a bad nullifier is unreadable, not ignored");
+    await store.clear();
+    ok((await store.load()) === null, "cleared");
+    ok(send.pendingKey("devnet", "Abc") === "gloam:solana-rings:pending:v1:devnet:Abc", "one pending record per network and private account");
+    const liar = send.pendingStore({ key: "k", cipher: { seal: async (x) => x, open: async (x) => x }, storage: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined } });
+    await assert.rejects(liar.save(p), /didn't save/);
+    n++;
+  }
+  for (const m of [send.LAST_PAYMENT_LANDED, send.NOT_SENT, send.FAILED_ON_CHAIN, send.NOT_SURE, send.NOT_SAVED]) {
+    ok(!/[\u2014\u2013]/.test(m) && !/happy to/i.test(m) && m.length < 160, `plain words: ${m.slice(0, 30)}`);
+  }
+}
 
 a0.destroy();
 console.log(`selftest-solana-rings: ${n} checks passed`);

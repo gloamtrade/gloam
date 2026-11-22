@@ -20,6 +20,9 @@ type Tab = "balance" | "add" | "pay" | "payroll" | "cashout";
 
 const lib = () => import("@/lib/solanaRings/client");
 
+/** While a payment whose answer was lost is checked on Solana (up to about two minutes). */
+const CHECKING = "Checking on Solana whether it went through";
+
 function short(a: string) {
   return `${a.slice(0, 4)}...${a.slice(-4)}`;
 }
@@ -278,7 +281,7 @@ export function SolanaRingsView() {
               if (!(await l.isRegistered(session, to!))) {
                 throw new Error("That address has no Gloam private account. Use Cash out to pay any Solana address.");
               }
-              await l.payPrivately(session, to!, asset, amount);
+              await l.payPrivately(session, to!, asset, amount, { onChecking: () => setBusy(CHECKING) });
               setBalances(l.ringsBalances(session));
               return `Paid ${formatAmount(amount, asset.decimals)} ${asset.symbol} privately to ${short(to!)}.`;
             })
@@ -306,7 +309,7 @@ export function SolanaRingsView() {
           onSubmit={(asset, amount, to) =>
             run("Cashing out", async () => {
               const l = await lib();
-              await l.cashOut(session, to!, asset, amount);
+              await l.cashOut(session, to!, asset, amount, { onChecking: () => setBusy(CHECKING) });
               setBalances(l.ringsBalances(session));
               return `Sent ${formatAmount(amount, asset.decimals)} ${asset.symbol} to ${short(to!)}.`;
             })
