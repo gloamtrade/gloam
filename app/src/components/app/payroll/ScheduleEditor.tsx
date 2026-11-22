@@ -362,7 +362,7 @@ export function ScheduleEditor({
                   value={capInput}
                   onChange={(e) => setCapInput(e.target.value)}
                   inputMode="decimal"
-                  placeholder="25,000"
+                  placeholder="0"
                   aria-label={`Cap per run, in ${symbol}`}
                   className="gl-input tnum h-11 pr-20 text-[14px]"
                 />

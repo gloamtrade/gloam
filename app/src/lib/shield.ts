@@ -8,6 +8,7 @@ import { knownTokens } from "./tokens";
 import { getActiveNetwork, type GloamNetwork } from "./networks";
 import { makeBoundNote } from "./note";
 import { readAmountText } from "./amountText";
+import { shortAmount } from "./amountShort";
 import { dataKeyLocked, getAllNotes, noteOwnerProblem, setAllNotes, syncFromDisk, unlockNoteVault } from "./noteVault";
 import { accountScopeOn, boundAccount, SIGNED_OUT_MESSAGE } from "./accountSlot";
 import { readDemo } from "./demoFlag";
@@ -560,6 +561,33 @@ export function formatAssetAmountExact(raw: bigint | string, asset: string, minF
 /** "12.5 PathUSD" style label for a raw amount. */
 export function formatAssetLabel(raw: bigint | string, asset: string): string {
   return `${formatAssetAmount(raw, asset)} ${assetLabel(asset)}`;
+}
+
+/** A stablecoin on the active network (USDT and USDC have 18 decimals on BNB Chain, 6 elsewhere: decided by the token, not its decimals). */
+export function isStableAsset(asset: string): boolean {
+  if (isNativeAsset(asset)) return false;
+  return knownForActive().find((x) => x.address.toLowerCase() === asset.toLowerCase())?.kind === "stablecoin";
+}
+
+/**
+ * A balance at a glance (lib/amountShort): a stablecoin to cents, anything else
+ * to 4 places, cut down and never rounded up ("1,223.10", "0.0042"). For the
+ * balance pickers and success dialogs only; the amount field, Max, the fee and
+ * You get lines, receipts and CSV keep every unit.
+ */
+export function formatAssetShort(raw: bigint | string, asset: string): string {
+  let v: bigint;
+  try {
+    v = typeof raw === "bigint" ? raw : BigInt(raw || "0");
+  } catch {
+    return String(raw);
+  }
+  return shortAmount(v, assetDecimals(asset), isStableAsset(asset));
+}
+
+/** "1,223.10 USDC": formatAssetShort with the token's symbol. */
+export function formatAssetShortLabel(raw: bigint | string, asset: string): string {
+  return `${formatAssetShort(raw, asset)} ${assetLabel(asset)}`;
 }
 
 /**

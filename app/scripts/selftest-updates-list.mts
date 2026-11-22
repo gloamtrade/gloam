@@ -11,7 +11,8 @@
  *    list's prefix holds an address, an IP or a wallet id
  *  - bad emails, oversized bodies, the bot field, the hourly limit per IP
  *  - unsubscribe by link token only; an email alone is refused (anyone can type
- *    anyone's email); a used or made-up token does nothing
+ *    anyone's email); a used or made-up token does nothing; opening the page asks
+ *    first (the one-click route and the page's button are in selftest-updates-mail)
  *  - admin: the count and the CSV need an admin session; the CSV has email,
  *    day, source and the unsubscribe link only
  *  - the browser helper sends the email and source alone, without cookies
@@ -223,16 +224,18 @@ resetMemoryKv();
 // ------------------------------------------------------------ the unsubscribe page
 {
   const sub = (await list.listUpdatesSubscribers())[0]!;
-  let page: { default: (p: { searchParams: Promise<{ token?: string }> }) => Promise<unknown> } | null = null;
+  let page: { default: (p: { searchParams: Promise<{ token?: string; done?: string }> }) => Promise<unknown> } | null = null;
   try {
     page = await import("../src/app/unsubscribe/page");
   } catch {
     page = null; // the page's components need the Next bundler; the lib call above covers it
   }
   if (page) {
+    // opening the link only asks: mail scanners open links, so the button does it (api/updates/unsubscribe)
     await page.default({ searchParams: Promise.resolve({ token: sub.token }) });
-    assert.equal((await list.listUpdatesSubscribers()).some((s) => s.email === sub.email), false, "GET /unsubscribe?token= removes it");
+    assert.equal((await list.listUpdatesSubscribers()).some((s) => s.email === sub.email), true, "GET /unsubscribe?token= asks first and changes nothing");
     await page.default({ searchParams: Promise.resolve({}) });
+    await page.default({ searchParams: Promise.resolve({ done: "1" }) });
     n += 1;
   } else {
     console.log("  (unsubscribe page not importable under tsx; covered by unsubscribeToken)");
@@ -266,7 +269,7 @@ resetMemoryKv();
   for (const line of lines.slice(1)) {
     const cells = line.split('","');
     assert.equal(cells.length, 4);
-    assert.match(cells[3]!, /^https:\/\/gloam\.trade\/unsubscribe\?token=[A-Za-z0-9_-]{32}"$/);
+    assert.match(cells[3]!, /^https:\/\/www\.gloam\.trade\/unsubscribe\?token=[A-Za-z0-9_-]{32}"$/);
   }
   assert.ok(!/0x[0-9a-f]{40}/i.test(csv), "no address in the CSV");
   assert.equal(list.updatesCsv([{ email: "=cmd@example.com", day: "2026-11-05", source: "site", token: "t".repeat(32) }]).split("\r\n")[1]?.startsWith(`"'=cmd`), true, "a formula-looking cell is quoted as text");

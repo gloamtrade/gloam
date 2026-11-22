@@ -46,6 +46,7 @@ import { WalletMenu } from "./WalletMenu";
 import { TokenLogo } from "./TokenLogo";
 import { Select } from "@/components/ui/Select";
 import { SuccessModal } from "./SuccessModal";
+import { shortAmount } from "@/lib/amountShort";
 import { DevKeysBanner } from "./DevKeysBanner";
 import { BridgeInCard } from "./BridgeIn";
 import { RefreshIcon } from "./VaultHealth";
@@ -809,7 +810,8 @@ export function ShieldView() {
     setApproved(false);
     handledHash.current = null;
     txLog.clear();
-    setSentLabel(`${shortAmount(value, decimals)} ${symbol}`);
+    // the success dialog's amount: cents for a stablecoin, 4 places otherwise, never rounded up
+    setSentLabel(`${shortAmount(value, decimals, selectedToken?.kind === "stablecoin")} ${symbol}`);
     setSentMark(selectedToken ? { id: selectedToken.id, symbol: selectedToken.symbol } : { id: nativeToken.id, symbol: nativeToken.symbol });
     pendingShieldArgs.current = { value, commitment, note };
     // Proved while any approval is mined, so the deposit goes out as soon as it lands.
@@ -1398,17 +1400,6 @@ export function ShieldView() {
       />
     </>
   );
-}
-
-/**
- * An amount as the receipt shows it: floored to 6 decimals, trailing zeros cut,
- * so an 18-decimal coin reads 0.003868 rather than 0.003868049052992449.
- */
-function shortAmount(v: bigint, decimals: number): string {
-  const [whole, frac = ""] = formatUnits(v, decimals).split(".");
-  const f = frac.slice(0, 6).replace(/0+$/, "");
-  if (!f && whole === "0" && v > BigInt(0)) return "<0.000001";
-  return f ? `${whole}.${f}` : whole!;
 }
 
 function AssetMark({

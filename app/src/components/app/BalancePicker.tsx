@@ -11,8 +11,10 @@ export type BalanceOption = {
   id: string;
   mark: ReactNode;
   title: ReactNode;
+  /** The network the balance is on ("BNB Chain"), first on the line under the amount. */
+  network?: string;
   sub: string;
-  /** Draw the sub line as a warning (a claim not secured yet). */
+  /** Draw the sub part as a warning (a claim not secured yet). The network stays muted. */
   warn?: boolean;
   extra?: ReactNode;
 };
@@ -68,7 +70,11 @@ export function BalancePicker({
       {o.mark}
       <span className="min-w-0 flex-1">
         <span className="tnum block truncate text-[16px] text-foreground">{o.title}</span>
-        <span className={`block truncate text-[12px] ${o.warn ? "text-warn" : "text-mute"}`}>{o.sub}</span>
+        <span className="block truncate text-[12px] text-mute">
+          {o.network}
+          {o.network && o.sub ? " · " : null}
+          {o.sub && <span className={o.warn ? "text-warn" : undefined}>{o.sub}</span>}
+        </span>
         {o.extra}
       </span>
     </>

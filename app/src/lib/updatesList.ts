@@ -18,9 +18,14 @@
 import { createHash, randomBytes } from "crypto";
 import { jsonOf, kv } from "./partnersKv";
 import { normalizeEmail, type UpdatesSource } from "./updatesEmail";
+import { SITE } from "./updatesMailRender";
 
-const PREFIX = "gloam:updates:v1:";
-const IDS = `${PREFIX}ids`;
+/** Every key the list and its sends (lib/updatesMail) write starts with this. */
+export const UPDATES_PREFIX = "gloam:updates:v1:";
+const PREFIX = UPDATES_PREFIX;
+/** The set of everyone on the list, by id. */
+export const UPDATES_IDS = `${PREFIX}ids`;
+const IDS = UPDATES_IDS;
 /** A ceiling, so a flood of made-up addresses can't fill the store. */
 export const MAX_SUBSCRIBERS = 50_000;
 
@@ -28,7 +33,9 @@ export const MAX_SUBSCRIBERS = 50_000;
 function idFor(email: string): string {
   return createHash("sha256").update(`gloam-updates|${email}`).digest("hex").slice(0, 40);
 }
-const subKey = (id: string) => `${PREFIX}sub:${id}`;
+/** Where one subscriber is kept, by id. */
+export const subscriberKey = (id: string) => `${PREFIX}sub:${id}`;
+const subKey = subscriberKey;
 const tokenKey = (token: string) => `${PREFIX}tok:${token}`;
 
 export const UNSUBSCRIBE_TOKEN = /^[A-Za-z0-9_-]{32}$/;
@@ -142,8 +149,17 @@ export function updatesSummary(subs: UpdatesSubscriber[]): { count: number; bySo
   return { count: subs.length, bySource };
 }
 
-export function unsubscribeUrl(token: string, origin = "https://gloam.trade"): string {
+/** The unsubscribe page for one person: it asks before taking them off. */
+export function unsubscribeUrl(token: string, origin = SITE): string {
   return `${origin}/unsubscribe?token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * The List-Unsubscribe address in each update's headers (RFC 8058): a mail app's
+ * own Unsubscribe button POSTs to it and the person is off the list, no page.
+ */
+export function oneClickUnsubscribeUrl(token: string, origin = SITE): string {
+  return `${origin}/api/updates/unsubscribe?token=${encodeURIComponent(token)}`;
 }
 
 /**

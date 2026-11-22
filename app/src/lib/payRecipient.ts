@@ -67,6 +67,22 @@ export function isWalletRecipient(r: PayRecipient): boolean {
   return r.kind === "address" || r.kind === "ens";
 }
 
+/**
+ * Said under To when it is the payer's own Gloam address (their @name, or their
+ * gloamr1 address). Paying yourself stays allowed: it makes a fresh note that no
+ * longer links back to the deposit, which lib/proofs/prove.ts asks people to do
+ * before proving a balance that came straight from one.
+ */
+export const OWN_GLOAM_ADDRESS_NOTE =
+  "This is your own Gloam address. The money stays yours in a fresh note, which no longer links back to your deposit.";
+
+/** True when `payTag` (To as a Gloam address, or the one an @name points to) is the payer's own `ownTag`. */
+export function isOwnGloamAddress(payTag: string, ownTag: string | null | undefined): boolean {
+  const to = payTag.trim();
+  const own = (ownTag ?? "").trim();
+  return to !== "" && own !== "" && to === own;
+}
+
 /** The Cash out fields a Pay hand-off fills. Nothing else about Cash out changes. */
 export type CashOutHandoff = {
   dest: "other";

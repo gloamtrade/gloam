@@ -10,7 +10,7 @@ export const metadata: Metadata = { title: "Privacy Policy" };
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="November 12, 2026">
+    <LegalLayout title="Privacy Policy" updated="November 22, 2026">
       <p>
         This Privacy Policy describes what information Gloam (&ldquo;we,&rdquo;
         &ldquo;us&rdquo;) handles when you use gloam.trade, the Gloam app, the
@@ -437,9 +437,13 @@ export default function PrivacyPage() {
       <p>
         If you ask for Gloam updates by email, we keep only that email, the day
         you asked and where (sign-in, Settings or the site), and use it only to
-        send updates. It is stored on its own, apart from any wallet, and you
-        can unsubscribe with the link in any update or by writing to{" "}
-        <a href="mailto:hello@gloam.trade">hello@gloam.trade</a>.
+        send updates. It is stored on its own, apart from any wallet. We note
+        which updates went to it, so nobody gets the same one twice, and we
+        don&apos;t track whether you open an update or click its links. Resend
+        delivers the emails for us. You can unsubscribe with the link in any
+        update, with your mail app&apos;s Unsubscribe button, or by writing to{" "}
+        <a href="mailto:hello@gloam.trade">hello@gloam.trade</a>. The updates
+        themselves are public at <Link href="/updates">gloam.trade/updates</Link>.
       </p>
       <h2>14. How we use information</h2>
       <p>
@@ -456,8 +460,13 @@ export default function PrivacyPage() {
         <li>Vercel: hosting, request logs and Web Analytics.</li>
         <li>
           Upstash: our database, for tester applications, recovery backups,
-          partner accounts, Glim&apos;s records, usage counts and rate-limit
-          counts.
+          partner accounts, the email updates list, Glim&apos;s records, usage
+          counts and rate-limit counts.
+        </li>
+        <li>
+          Resend: sends the email updates. It receives your email address and
+          each update we send you, and keeps delivery records under its own
+          privacy policy.
         </li>
         <li>Anthropic: writing Glim&apos;s answers and daily summary.</li>
         <li>Raeto: choosing which model writes Glim&apos;s answers in the group.</li>

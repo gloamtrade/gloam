@@ -47,6 +47,7 @@ import { AmountProblem } from "./AmountProblem";
 import { BackupStep, useBackupGate } from "./RecoveryPanel";
 import { keepStorage } from "@/lib/backupGate";
 import { SuccessReceipt } from "./SuccessModal";
+import { stableTextDown } from "@/lib/amountShort";
 
 const noopSubscribe = () => () => {};
 const noop = () => {};
@@ -2026,7 +2027,7 @@ function PrivateLanded({ quote: q, onDone }: { quote: PrivateBridgeQuote; onDone
         logo={<TokenMark src={q.receive.logo} size={56} />}
         amount={
           <>
-            {fmtMoney(Number(q.receive.amount))}{" "}
+            {stableTextDown(q.receive.amount)}{" "}
             <span className="text-[16px] tracking-normal text-mute">{q.receive.symbol}</span>
           </>
         }

@@ -16,7 +16,7 @@ import { useWalletState } from "@/hooks/useWalletState";
 import { usePoolDeposited } from "@/hooks/usePoolDeposited";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient, publicClientFor } from "@/lib/rhClient";
-import { HASH_SCHEME, dropUnsentNote, gasFor, noteNetworkProblem, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, SIGNED_OUT_BALANCE_MESSAGE, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
+import { HASH_SCHEME, dropUnsentNote, gasFor, noteNetworkProblem, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatAssetShort, formatAssetShortLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, SIGNED_OUT_BALANCE_MESSAGE, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
 import {
   claimNoteId,
   isClaimedNote,
@@ -120,6 +120,7 @@ import {
   type CashOutWindow,
 } from "@/lib/cashOutLater";
 import { freshPath, networkOfNote, roundDownToWhole, spendPlanFor, spendWaitMessage, splitForCashOut } from "@/lib/cashOutSplit";
+import { CASH_OUT_EMPTY_HELP, readCashOutAmount } from "@/lib/cashOutAmount";
 import {
   findCashOutLink,
   linkMessage,
@@ -174,7 +175,7 @@ import { checkSweep, sweepVerdict, type SweepCheck, type SweepReader } from "@/l
 import { EMBEDDED_CONNECTOR_ID, EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
 import { embeddedAvailability, onEmbeddedAvailability } from "@/lib/turnkeyBridge";
 import { moveModeFromParam, searchWithMoveMode } from "@/lib/vaultNav";
-import { cashOutHandoff, classifyPayRecipient, isWalletRecipient } from "@/lib/payRecipient";
+import { OWN_GLOAM_ADDRESS_NOTE, cashOutHandoff, classifyPayRecipient, isOwnGloamAddress, isWalletRecipient } from "@/lib/payRecipient";
 import { useEnsAddress } from "@/hooks/useEnsAddress";
 import { lookupGloamName, useGloamName } from "@/hooks/useGloamName";
 import { GloamNameCard } from "./GloamNameCard";
@@ -306,8 +307,10 @@ export function MoveView() {
     request ? null : readFirstPaySuggestion(searchParams, network.chainId)
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Cash out: how much ("" is the whole balance), when, and to which wallet.
-  const [cashOutInput, setCashOutInput] = useState("");
+  // Cash out: how much, when, and to which wallet. The amount (lib/cashOutAmount): null until
+  // something is typed or picked, which writes the whole balance into the field; "" is no
+  // amount, never the whole balance.
+  const [cashOutInput, setCashOutInput] = useState<string | null>(null);
   const cashOutInputRef = useRef<HTMLInputElement>(null);
   const [cashOutWhen, setCashOutWhen] = useState<"now" | CashOutWindow>("now");
   const [cashOutDest, setCashOutDest] = useState<"mine" | "other">("mine");
@@ -429,6 +432,8 @@ export function MoveView() {
   // The signed-in account's own Gloam address: gone on sign out (Duke, 22 Nov 2026: Receive still
   // showed his address and QR after Sign out), and another sign-in reads its own.
   const [myIdentity, setMyIdentity] = useWalletState<ReceiveIdentity | null>(shownAccount, null);
+  /** To is the signed-in account's own Gloam address (typed, or behind an @name): still sent, with a note on why it helps. */
+  const payingSelf = payStyle === "direct" && !payToWallet && isValidReceiveTag(payTag) && isOwnGloamAddress(payTag, myIdentity?.tag);
   const [tagCopied, setTagCopied] = useState(false);
   const [shareLocked, setShareLocked] = useState(false);
   // Payments to this browser's Gloam address, with their amounts: read and listed
@@ -1049,14 +1054,17 @@ export function MoveView() {
   const { deposited: poolForCashOut } = usePoolDeposited(
     mode === "cashout" ? cashOutAsset : null
   );
-  // The whole balance unless a smaller amount is typed; a smaller one is set
-  // aside privately first (lib/cashOutSplit), then cashed out.
+  // The whole balance, written into the field, unless a smaller amount is typed; a smaller
+  // one is set aside privately first (lib/cashOutSplit), then cashed out. An empty field is
+  // no amount (lib/cashOutAmount).
   const noteWei = selected ? BigInt(selected.amountWei) : 0n;
-  const typedWei = cashOutInput.trim() && selected ? parseAssetAmount(cashOutInput.trim(), selected.asset) : null;
-  const cashOutAmountInvalid =
-    cashOutInput.trim() !== "" && (typedWei === null || typedWei <= 0n || typedWei > noteWei);
-  const cashOutAmount = typedWei !== null && !cashOutAmountInvalid ? typedWei : noteWei;
-  const cashOutPartial = !cashOutAmountInvalid && cashOutAmount < noteWei;
+  const cashOutRead = readCashOutAmount(cashOutInput, noteWei, selected ? assetDecimals(selected.asset) : 18);
+  /** The field's text: the whole balance, every unit, until something else is typed. */
+  const cashOutText = cashOutRead.text;
+  /** Nothing to cash out: the field is empty, or holds something that isn't an amount up to the balance. */
+  const cashOutAmountInvalid = cashOutRead.amount === null;
+  const cashOutAmount = cashOutRead.amount ?? 0n;
+  const cashOutPartial = cashOutRead.partial;
   // Where it goes: the connected wallet, or another address (a fresh one is best).
   const otherToClean = otherTo.trim();
   const cashOutTo: Address | null =
@@ -1444,7 +1452,7 @@ export function MoveView() {
         countPerson("cashout", address, network.testnet);
         if (fromLink) queuePartnerJobs(network.chainId, [job.id]);
         setScheduledNotice({ at: job.sendAfter, label: formatAssetLabel(target.amountWei, target.asset) });
-        setCashOutInput("");
+        setCashOutInput(null);
         refreshNotes();
         setBusy(false);
         setStatus(null);
@@ -1462,7 +1470,7 @@ export function MoveView() {
         else setCashedOut({ to, asset: target.asset as Address });
         setRelayHash(h);
         setSuccessTitle("Cashed out");
-        setCashOutInput("");
+        setCashOutInput(null);
         return;
       }
       // from the wallet: registered under the code now, before the wallet is asked, bound to this cash out's proof
@@ -1479,7 +1487,7 @@ export function MoveView() {
       if (xOrder) setXSent(xOrder);
       else setCashedOut({ to, asset: target.asset as Address });
       setSuccessTitle("Cashed out");
-      setCashOutInput("");
+      setCashOutInput(null);
       void import("@/lib/track").then(({ track }) => {
         track(xOrder ? "unshield_xchain" : "unshield_success");
       });
@@ -1645,7 +1653,7 @@ export function MoveView() {
         });
       }
       if (r.stoppedAt === null) {
-        setCashOutInput("");
+        setCashOutInput(null);
         setPieceTo([]);
         setPerPiece(false);
         setPlanSeed((v) => v + 7919);
@@ -1871,7 +1879,7 @@ export function MoveView() {
       setSentTo(
         payStyle === "direct"
           ? {
-              amount: formatAssetLabel(w.paymentNote.amountWei, w.paymentNote.asset),
+              amount: formatAssetShortLabel(w.paymentNote.amountWei, w.paymentNote.asset),
               to: payRecipient.kind === "name" ? `@${payRecipient.name}` : shortTag(payTag, 8, 10),
             }
           : null
@@ -1897,7 +1905,7 @@ export function MoveView() {
       }
       pendingShare.current = {
         blob: share,
-        amountLabel: formatAssetLabel(w.paymentNote.amountWei, w.paymentNote.asset),
+        amountLabel: formatAssetShortLabel(w.paymentNote.amountWei, w.paymentNote.asset),
       };
       // Sent links record. The nullifier is worked out now, the same way a claim
       // does, so its status can be checked later without the phrase.
@@ -2550,7 +2558,8 @@ export function MoveView() {
     const h = cashOutHandoff(to, sendAmount);
     setCashOutDest(h.dest);
     setOtherTo(h.to);
-    setCashOutInput(h.amount);
+    // none typed in Pay: the whole balance is written in, as when Cash out opens
+    setCashOutInput(h.amount === "" ? null : h.amount);
     selectMode("cashout");
   }
 
@@ -2576,7 +2585,7 @@ export function MoveView() {
       const h = cashOutHandoff(to, amount);
       setCashOutDest(h.dest);
       setOtherTo(h.to);
-      setCashOutInput(h.amount);
+      setCashOutInput(h.amount === "" ? null : h.amount);
       setMode("cashout");
       setError(null);
       setStatus(null);
@@ -2623,8 +2632,8 @@ export function MoveView() {
     if (id === "cashout" && claimed) {
       const pick = notes.find((n) => n.id === claimed || n.sweptFrom?.id === claimed);
       if (pick) setSelectedId(pick.id);
-      // a fresh cash out of it: no amount typed earlier carries over
-      setCashOutInput("");
+      // a fresh cash out of it: no amount typed earlier carries over, the whole balance is written in
+      setCashOutInput(null);
     }
     selectMode(id);
     window.setTimeout(() => {
@@ -2797,11 +2806,13 @@ export function MoveView() {
                     return {
                       id: n.id,
                       mark: <AssetMark id={logoIdFor(n.asset)} symbol={assetLabel(n.asset)} size={32} />,
+                      // cut to cents (4 places for a coin), never rounded up: the field and Max keep every unit
                       title: (
                         <>
-                          {formatAssetAmount(n.amountWei, n.asset)} <span className="text-mute">{assetLabel(n.asset)}</span>
+                          {formatAssetShort(n.amountWei, n.asset)} <span className="text-mute">{assetLabel(n.asset)}</span>
                         </>
                       ),
+                      network: network.label,
                       sub: exposed ? `${kind}, ${day}` : day,
                       warn: exposed,
                       extra: n.note ? <PaymentNoteLine note={n.note} className="mt-0.5 text-[12px] text-soft" /> : undefined,
@@ -3010,6 +3021,12 @@ export function MoveView() {
                         </p>
                       )
                     ) : null}
+                    {/* Paying yourself is allowed and useful: a quiet line, no warning and no extra step. */}
+                    {payingSelf && (
+                      <p aria-live="polite" className="mt-2 text-[12.5px] leading-relaxed text-mute">
+                        {OWN_GLOAM_ADDRESS_NOTE}
+                      </p>
+                    )}
                     {(contacts.length > 0 || recipientTag.trim().startsWith("gloamr1.")) && (
                       <div className="mt-3 flex flex-wrap items-center gap-1.5">
                         {contacts.map((c) => (
@@ -3232,25 +3249,21 @@ export function MoveView() {
                           inputMode="decimal"
                           autoComplete="off"
                           ref={cashOutInputRef}
-                          value={cashOutInput}
+                          // The whole balance is real text here until something else is typed. Cleared,
+                          // the field is empty and cashes out nothing: a muted 0, never a value.
+                          value={cashOutText}
                           onChange={(e) => setCashOutInput(e.target.value)}
-                          // Empty means the whole balance, shown as the placeholder. On focus the
-                          // number becomes real text, so the cursor lands at its end and it can be edited.
-                          onFocus={(e) => {
-                            if (cashOutInput.trim() !== "") return;
-                            const el = e.currentTarget;
-                            setCashOutInput(maxEth);
-                            requestAnimationFrame(() => el.setSelectionRange(maxEth.length, maxEth.length));
-                          }}
-                          placeholder={maxEth}
+                          placeholder="0"
                           aria-describedby="cashout-amt-help"
-                          className="tnum min-w-0 flex-1 bg-transparent text-[32px] font-light leading-[1.25] tracking-[-0.02em] text-foreground outline-none! placeholder:text-foreground"
+                          className="tnum min-w-0 flex-1 bg-transparent text-[32px] font-light leading-[1.25] tracking-[-0.02em] text-foreground outline-none! placeholder:text-faint"
                         />
                         <span className="shrink-0 text-[15px] text-mute">{assetLabel(selected.asset)}</span>
                       </div>
-                      <p id="cashout-amt-help" className={`mt-1 text-[12.5px] leading-relaxed ${cashOutAmountInvalid ? "text-warn" : "text-mute"}`}>
-                        {cashOutAmountInvalid
-                          ? (amountTextError(cashOutInput, assetDecimals(selected.asset)) ??
+                      <p id="cashout-amt-help" className={`mt-1 text-[12.5px] leading-relaxed ${cashOutRead.invalid ? "text-warn" : "text-mute"}`}>
+                        {cashOutRead.empty
+                          ? CASH_OUT_EMPTY_HELP
+                          : cashOutRead.invalid
+                          ? (amountTextError(cashOutText, assetDecimals(selected.asset)) ??
                             `Enter an amount up to ${formatAssetLabel(noteWei, selected.asset)}.`)
                           : cashOutPartial
                             ? planActive
@@ -3261,15 +3274,14 @@ export function MoveView() {
                       <CashOutPercentChips
                         balance={noteWei}
                         decimals={assetDecimals(selected.asset)}
-                        current={cashOutAmountInvalid ? null : typedWei}
-                        maxActive={cashOutInput.trim() === "" || (!cashOutAmountInvalid && typedWei === noteWei)}
+                        current={cashOutRead.amount}
+                        maxActive={cashOutRead.max}
                         onPick={setCashOutInput}
-                        onMax={() => setCashOutInput("")}
+                        // the whole balance written back in, to the last unit
+                        onMax={() => setCashOutInput(null)}
                         onCustom={() => {
                           const el = cashOutInputRef.current;
                           if (!el) return;
-                          const v = cashOutInput.trim() === "" ? maxEth : cashOutInput;
-                          if (v !== cashOutInput) setCashOutInput(v);
                           el.focus();
                           requestAnimationFrame(() => el.select());
                         }}

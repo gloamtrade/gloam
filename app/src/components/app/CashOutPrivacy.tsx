@@ -25,7 +25,7 @@ export function CashOutAmountChips({
   presets: PresetAmount[];
   /** The amount in the field now (base units), or null while it is not valid. */
   current: bigint | null;
-  /** The field is empty, which cashes out the whole balance. */
+  /** The whole balance is in the field. (An empty field is no amount, never the whole balance.) */
   maxActive: boolean;
   onPick: (value: string) => void;
   onMax: () => void;
