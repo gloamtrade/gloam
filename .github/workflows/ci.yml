@@ -73,6 +73,15 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-bnb.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-bnb-everywhere.mts
 
+      # Email updates: the list (subscribe, unsubscribe, admin CSV) and sending it
+      # (markdown escaping, one message per person, one-click unsubscribe, never
+      # twice across a crash). A fake Resend and the in-process store: no email is sent.
+      - name: App email updates self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-updates-list.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-updates-mail.mts
+
       - name: SDK tests
         run: pnpm --filter @gloamtrade/sdk test
 
