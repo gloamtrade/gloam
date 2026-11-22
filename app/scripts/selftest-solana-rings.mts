@@ -391,12 +391,21 @@ ok(signer.address === getAddressDecoder().decode(new Uint8Array(pub)), "a 64-byt
 const ipReq = (ip: string) => new Request("http://localhost/api/solana/relay", { headers: { "x-forwarded-for": ip } });
 const now = Date.UTC(2026, 10, 22, 12, 0, 0);
 let allowed = 0;
-for (let i = 0; i < 8; i++) if (await server.ringsRelayRate(ipReq("198.51.100.1"), "rent", now)) allowed++;
+for (let i = 0; i < 8; i++) if ((await server.ringsRelayRate(ipReq("198.51.100.1"), "rent", now)) === "ok") allowed++;
 ok(allowed === server.RINGS_RELAY_LIMITS.rent.perIpPerDay, `rent: ${server.RINGS_RELAY_LIMITS.rent.perIpPerDay} a day per IP`);
 allowed = 0;
-for (let i = 0; i < 15; i++) if (await server.ringsRelayRate(ipReq("198.51.100.2"), "transact", now)) allowed++;
+for (let i = 0; i < 15; i++) if ((await server.ringsRelayRate(ipReq("198.51.100.2"), "transact", now)) === "ok") allowed++;
 ok(allowed === server.RINGS_RELAY_LIMITS.transact.perIpPerMin, `payments: ${server.RINGS_RELAY_LIMITS.transact.perIpPerMin} a minute per IP`);
-ok(await server.ringsRelayRate(ipReq("198.51.100.3"), "transact", now), "another IP still pays");
+ok((await server.ringsRelayRate(ipReq("198.51.100.3"), "transact", now)) === "ok", "another IP still pays");
+{
+  // a deployment with no shared count (a preview without Redis)
+  const nodeEnv = env.NODE_ENV;
+  env.NODE_ENV = "production";
+  ok((await server.ringsRelayRate(ipReq("198.51.100.4"), "rent", now, "mainnet")) === "unavailable", "mainnet without Redis: the relay pays no rent and says it is unavailable, not too many");
+  ok((await server.ringsRelayRate(ipReq("198.51.100.4"), "transact", now, "mainnet")) === "unavailable", "mainnet without Redis: no payments either");
+  ok((await server.ringsRelayRate(ipReq("198.51.100.5"), "rent", now, "devnet")) === "ok", "devnet without Redis: counts on this instance, so a preview can be tested");
+  env.NODE_ENV = nodeEnv;
+}
 
 // ---------------------------------------------------------------- screening
 

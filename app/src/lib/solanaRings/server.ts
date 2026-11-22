@@ -11,7 +11,7 @@ import "server-only";
  *    contents). Unset: the relay is off and says so.
  */
 import { createKeyPairSignerFromBytes, getBase58Encoder, type KeyPairSigner } from "@solana/kit";
-import { addRateCount, clientIp } from "@/lib/mcpRemote/rateLimit";
+import { SharedCountUnavailable, addRateCount, clientIp } from "@/lib/mcpRemote/rateLimit";
 import { SOLANA_RINGS_NETWORK, type RingsNetwork } from "./config";
 import { heliusHost } from "./proxyPolicy";
 
@@ -84,9 +84,13 @@ export async function ringsProxyRate(req: Request, calls: number, now = Date.now
 /**
  * The relay's limits. "rent" is a registration (about 0.0016 SOL of rent) or a
  * cash out that creates the recipient's token account (about 0.002 SOL), so it
- * is held tighter than a payment, and fails closed without the shared count.
- * Worst case at these limits the relay spends about 0.2 SOL a day on fees and
- * 1.1 SOL on rent.
+ * is held tighter than a payment. Worst case at these limits the relay spends
+ * about 0.2 SOL a day on fees and 1.1 SOL on rent.
+ *
+ * On mainnet the daily counts fail closed: without the shared count (Redis)
+ * the relay pays nothing and says it is unavailable, never "too many". On
+ * devnet, where the SOL is free, they fall back to this instance's own count,
+ * so a preview deployment without Redis can still be tested.
  */
 export const RINGS_RELAY_LIMITS = {
   rent: { perIpPerDay: 5, allPerDay: 300 },
@@ -95,22 +99,29 @@ export const RINGS_RELAY_LIMITS = {
 
 const DAY = 86_400;
 
-export async function ringsRelayRate(req: Request, kind: "rent" | "transact", now = Date.now()): Promise<boolean> {
+export type RelayRate = "ok" | "limited" | "unavailable";
+
+export async function ringsRelayRate(
+  req: Request,
+  kind: "rent" | "transact",
+  now = Date.now(),
+  network: RingsNetwork = SOLANA_RINGS_NETWORK
+): Promise<RelayRate> {
   const ip = clientIp(req);
+  const strict = { failClosed: network === "mainnet" };
   try {
     if (kind === "rent") {
-      // fail closed: without the shared count, the relay pays no rent
-      const mine = await addRateCount(ip, "sol-relay-rent", 1, now, DAY, { failClosed: true });
-      if (mine > RINGS_RELAY_LIMITS.rent.perIpPerDay) return false;
-      const all = await addRateCount("all", "sol-relay-rent-all", 1, now, DAY, { failClosed: true });
-      return all <= RINGS_RELAY_LIMITS.rent.allPerDay;
+      const mine = await addRateCount(ip, "sol-relay-rent", 1, now, DAY, strict);
+      if (mine > RINGS_RELAY_LIMITS.rent.perIpPerDay) return "limited";
+      const all = await addRateCount("all", "sol-relay-rent-all", 1, now, DAY, strict);
+      return all <= RINGS_RELAY_LIMITS.rent.allPerDay ? "ok" : "limited";
     }
     const t = RINGS_RELAY_LIMITS.transact;
-    if ((await addRateCount(ip, "sol-relay-tx", 1, now)) > t.perIpPerMin) return false;
-    if ((await addRateCount(ip, "sol-relay-tx-day", 1, now, DAY, { failClosed: true })) > t.perIpPerDay) return false;
-    if ((await addRateCount("all", "sol-relay-tx-all", 1, now)) > t.allPerMin) return false;
-    return (await addRateCount("all", "sol-relay-tx-all-day", 1, now, DAY, { failClosed: true })) <= t.allPerDay;
-  } catch {
-    return false;
+    if ((await addRateCount(ip, "sol-relay-tx", 1, now)) > t.perIpPerMin) return "limited";
+    if ((await addRateCount(ip, "sol-relay-tx-day", 1, now, DAY, strict)) > t.perIpPerDay) return "limited";
+    if ((await addRateCount("all", "sol-relay-tx-all", 1, now)) > t.allPerMin) return "limited";
+    return (await addRateCount("all", "sol-relay-tx-all-day", 1, now, DAY, strict)) <= t.allPerDay ? "ok" : "limited";
+  } catch (e) {
+    return e instanceof SharedCountUnavailable ? "unavailable" : "limited";
   }
 }
