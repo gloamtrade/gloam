@@ -443,21 +443,72 @@ export async function addToPrivate(s: RingsSession, asset: RingsAsset, amount: b
   return signature;
 }
 
-async function relayed(s: RingsSession, build: (feePayer: Address) => Promise<Transaction>): Promise<string> {
-  const feePayer = await relayer();
-  await syncRings(s);
-  const tx = await build(feePayer);
-  let signature: string;
+export type SendOptions = {
+  /** Called while it waits on Solana to learn whether a payment went through (up to about two minutes). */
+  onChecking?: () => void;
+};
+
+/**
+ * Send one payment the private account signs through Gloam's relay, so it
+ * can never go out twice (lib/solanaRings/send): stored as pending first, its
+ * notes freed only after a refusal that sent nothing or once the chain shows
+ * it never landed and never can.
+ */
+async function relayed(s: RingsSession, build: (feePayer: Address) => Promise<Transaction>, opts: SendOptions = {}): Promise<string> {
+  const { sendGuarded, pendingStore, pendingKey } = await import("./send");
+  const pending = pendingStore({ key: pendingKey(s.network, s.address), cipher: await accountCipher(s, PENDING_DOMAIN) });
+  return sendGuarded({
+    build: async () => {
+      const feePayer = await relayer();
+      await syncRings(s);
+      const unspent = s.wallet.utxos().filter((u) => !u.spent);
+      return checkedBuild(s, unspent, await build(feePayer));
+    },
+    send: (wire) => relay(wire),
+    release: () => reloadWallet(s),
+    confirm: (sig) => confirmPayments(s, sig),
+    resolve: (p) => settlePayments(s, p),
+    pending,
+    sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+    now: () => Date.now(),
+    ...(opts.onChecking ? { onChecking: opts.onChecking } : {}),
+  });
+}
+
+const PENDING_DOMAIN = "gloam/solana-pending/v1\n";
+
+/** A cipher of this account's own, under `domain` (lib/solanaRings/payrollStore runCipher). */
+async function accountCipher(s: RingsSession, domain?: string) {
+  const { runCipher } = await import("./payrollStore");
+  const viewing = s.keypair.viewingKey();
+  const secret = viewing.secretBytes();
   try {
-    signature = await relay(await ownerSigned(s, tx));
-  } catch (e) {
-    // the build reserved the notes it spends; drop that by reopening the saved state
-    await reloadWallet(s);
-    throw e;
+    return await runCipher(secret, s.address, domain);
+  } finally {
+    secret.fill(0);
+    viewing.destroy();
   }
-  const slot = await landed(s, signature);
-  await syncRings(s, slot);
-  return signature;
+}
+
+/**
+ * A built transaction, signed by the private account, with the nullifiers of
+ * the notes it spends (from `unspent`, read before the build) and its
+ * blockhash: what tells later whether it landed. Refused, and its notes freed,
+ * when those can't be read.
+ */
+async function checkedBuild(
+  s: RingsSession,
+  unspent: readonly { nullifier: Uint8Array }[],
+  tx: Transaction
+): Promise<{ wire: Uint8Array; nullifiers: string[]; blockhash: string }> {
+  const message = new Uint8Array(tx.messageBytes);
+  const nullifiers = unspent.filter((u) => containsBytes(message, u.nullifier)).map((u) => hex(u.nullifier));
+  const blockhash = (getCompiledTransactionMessageDecoder().decode(tx.messageBytes) as { lifetimeToken?: string }).lifetimeToken;
+  if (!nullifiers.length || !blockhash) {
+    await reloadWallet(s);
+    throw new Error("This payment couldn't be checked before sending, so it wasn't sent.");
+  }
+  return { wire: await ownerSigned(s, tx), nullifiers, blockhash };
 }
 
 async function reloadWallet(s: RingsSession): Promise<void> {
@@ -476,9 +527,11 @@ async function reloadWallet(s: RingsSession): Promise<void> {
  * Solana, by its address. Public on chain: both private accounts. Hidden: the
  * asset and the amount.
  */
-export async function payPrivately(s: RingsSession, to: string, asset: RingsAsset, amount: bigint): Promise<string> {
+export async function payPrivately(s: RingsSession, to: string, asset: RingsAsset, amount: bigint, opts?: SendOptions): Promise<string> {
   const { buildTransferTransaction } = await import("@heliuslabs/spr/wallet");
-  return relayed(s, (feePayer) =>
+  return relayed(
+    s,
+    (feePayer) =>
     buildTransferTransaction({
       client: s.client,
       wallet: s.wallet,
@@ -487,7 +540,8 @@ export async function payPrivately(s: RingsSession, to: string, asset: RingsAsse
       recipient: to as Address,
       amount,
       ...(asset.mint ? { asset: asset.mint as Address } : {}),
-    })
+    }),
+    opts
   );
 }
 
@@ -496,9 +550,11 @@ export async function payPrivately(s: RingsSession, to: string, asset: RingsAsse
  * default). Public on chain: the private account, the address, the asset and
  * the amount.
  */
-export async function cashOut(s: RingsSession, to: string, asset: RingsAsset, amount: bigint): Promise<string> {
+export async function cashOut(s: RingsSession, to: string, asset: RingsAsset, amount: bigint, opts?: SendOptions): Promise<string> {
   const { buildWithdrawalTransaction } = await import("@heliuslabs/spr/wallet");
-  return relayed(s, (feePayer) =>
+  return relayed(
+    s,
+    (feePayer) =>
     buildWithdrawalTransaction({
       client: s.client,
       wallet: s.wallet,
@@ -507,7 +563,8 @@ export async function cashOut(s: RingsSession, to: string, asset: RingsAsset, am
       recipient: to as Address,
       amount,
       ...(asset.mint ? { asset: asset.mint as Address, splTokenProgram: tokenProgram(asset) } : {}),
-    })
+    }),
+    opts
   );
 }
 
@@ -567,14 +624,7 @@ export async function buildPayments(
     payments: payments.map((p) => ({ recipient: p.address as Address, amount: p.amount })),
     ...(asset.mint ? { asset: asset.mint as Address } : {}),
   });
-  const message = new Uint8Array(tx.messageBytes);
-  const nullifiers = unspent.filter((u) => containsBytes(message, u.nullifier)).map((u) => hex(u.nullifier));
-  const blockhash = (getCompiledTransactionMessageDecoder().decode(tx.messageBytes) as { lifetimeToken?: string }).lifetimeToken;
-  if (!nullifiers.length || !blockhash) {
-    await reloadWallet(s);
-    throw new Error("This payment couldn't be checked before sending, so it wasn't sent.");
-  }
-  return { wire: await ownerSigned(s, tx), nullifiers, blockhash };
+  return checkedBuild(s, unspent, tx);
 }
 
 /** Send what buildPayments built through Gloam's relay. Rejects with RingsRelayError. */
@@ -613,7 +663,7 @@ export async function settlePayments(
     const v = st.value?.[0];
     if (v) {
       if (v.err) {
-        await reloadWallet(s);
+        await releaseNotes(s, f.nullifiers);
         return { state: "failed", message: "That batch failed on Solana, so nobody in it was paid. Resume to try again." };
       }
       if (v.confirmationStatus !== "confirmed" && v.confirmationStatus !== "finalized") return { state: "pending" };
@@ -647,8 +697,32 @@ export async function settlePayments(
   const after = await spentBy();
   if (after.spent) return { state: "landed", ...(after.signature ? { signature: after.signature } : {}) };
   if (!after.known) return { state: "unknown" };
-  await reloadWallet(s);
+  await releaseNotes(s, f.nullifiers);
   return { state: "dropped" };
+}
+
+type Reservations = {
+  _activeReservations?(nowMs: bigint): readonly { id: string; utxoHashes: readonly Uint8Array[] }[];
+  _releaseReservation?(id: string): void;
+};
+
+/**
+ * Free the notes `nullifiers` names, once a payment spending them can never
+ * land. The SDK keeps the build's reservation (two minutes) in the snapshot
+ * every sync saves, so reopening the snapshot would bring it back and the next
+ * payment would read as a low balance until it expired: drop the reservations
+ * that hold these notes instead, and save. With an SDK that no longer has
+ * those calls, reopen the snapshot (the reservation then lapses on its own).
+ */
+async function releaseNotes(s: RingsSession, nullifiers: readonly string[]): Promise<void> {
+  const w = s.wallet as unknown as Reservations;
+  if (typeof w._activeReservations !== "function" || typeof w._releaseReservation !== "function") return reloadWallet(s);
+  const held = new Set(s.wallet.utxos().filter((u) => nullifiers.includes(hex(u.nullifier))).map((u) => hex(u.outputContext.hash)));
+  for (const r of w._activeReservations(BigInt(Date.now()))) {
+    if (r.utxoHashes.some((h) => held.has(hex(h)))) w._releaseReservation(r.id);
+  }
+  const [spr, { savePersistedWallet }] = await Promise.all([import("@heliuslabs/spr"), import("@heliuslabs/spr/wallet")]);
+  await savePersistedWallet({ wallet: s.wallet, store: snapshotStore(s.network, s.address), cipher: spr.walletSnapshotCipher(s.keypair) }).catch(() => undefined);
 }
 
 /** A build error that fewer people per transaction would get past. */
@@ -659,15 +733,8 @@ export function paymentsTooBig(e: unknown): boolean {
 
 /** This private account's payroll runs in this browser, sealed under a key from its viewing secret. */
 export async function ringsPayrollStore(s: RingsSession) {
-  const { payrollStore, payrollStoreKey, runCipher } = await import("./payrollStore");
-  const viewing = s.keypair.viewingKey();
-  const secret = viewing.secretBytes();
-  try {
-    return payrollStore({ key: payrollStoreKey(s.network, s.address), cipher: await runCipher(secret, s.address) });
-  } finally {
-    secret.fill(0);
-    viewing.destroy();
-  }
+  const { payrollStore, payrollStoreKey } = await import("./payrollStore");
+  return payrollStore({ key: payrollStoreKey(s.network, s.address), cipher: await accountCipher(s) });
 }
 
 /** A Solana address, by shape. */
