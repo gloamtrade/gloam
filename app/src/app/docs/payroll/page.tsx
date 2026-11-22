@@ -5,11 +5,12 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
+import { liveMainnetNames } from "@/lib/mainnet";
 
 export const metadata: Metadata = {
   title: "Private payroll",
   description:
-    "Pay a whole team privately on Robinhood Chain or Tempo: upload a list, pay everyone at once, and nobody sees who got what. Includes the Gloam relay, which keeps your wallet off the record.",
+    `Pay a whole team privately on ${liveMainnetNames()}: upload a list, pay everyone at once, and nobody sees who got what. Includes the Gloam relay, which keeps your wallet off the record.`,
 };
 
 export default function DocsPayrollPage() {
@@ -18,7 +19,7 @@ export default function DocsPayrollPage() {
       title="Private payroll"
       lede="Upload a list, pay everyone at once, and nobody sees who got what. Not even your wallet shows up, because Gloam sends each payment for you."
       glance={[
-        { label: "Networks", value: "Robinhood Chain, Tempo" },
+        { label: "Networks", value: liveMainnetNames() },
         { label: "Pay in", value: "USDG, USDC.e and other stablecoins" },
         { label: "People per run", value: "Up to 200" },
         { label: "Status", value: "Live on mainnet and testnet" },
@@ -252,11 +253,13 @@ const hash = await relayIntent(payment.intent); // your wallet stays off the rec
 
       <h2>No middlemen</h2>
       <p>
-        The vaults on both networks were redeployed so that nobody, including
+        The vaults on every network are built so that nobody, including
         the Gloam team, can move your money or quietly change the rules. There is
-        no admin withdraw, and any change to how proofs or prices are checked
-        has to be announced on-chain three days before it can take effect. Pool
-        addresses are on <Link href="/docs/chain">Networks</Link>.
+        no admin withdraw, and the proof checkers can never be replaced. Raising a
+        limit, listing an asset or raising the fee has to be announced on-chain
+        three days before it takes effect. Who can change what is on{" "}
+        <Link href="/compliance">Compliance</Link>, and pool addresses are on{" "}
+        <Link href="/docs/chain">Networks</Link>.
       </p>
     </DocsLayout>
   );
