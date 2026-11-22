@@ -39,10 +39,9 @@ import {
 import type { LocalKeys, ShieldedKeypair, Wallet } from "@heliuslabs/spr";
 import type { SprClient } from "@heliuslabs/spr/client";
 import { accountMessage, deriveAccount, isPlainSignature } from "./account";
-import { ringsAssets, ringsUrls, SOLANA_RINGS_NETWORK, walletChain, type RingsAsset, type RingsNetwork } from "./config";
+import { ringsAssets, ringsBalancesFrom, ringsUrls, SOLANA_RINGS_NETWORK, walletChain, type RingsAsset, type RingsNetwork } from "./config";
 import { signOrSendSolana, signSolanaMessage, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
 
-const SOL_MINT_ADDRESS = "So11111111111111111111111111111111111111112";
 const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111" as Address;
 // Public Solana program ids (SPL Token, Token-2022), not secrets.
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" as Address; // ggignore
@@ -244,10 +243,7 @@ export async function syncRings(s: RingsSession, requireSlot?: bigint): Promise<
 
 /** The private balance of each listed asset, in base units. */
 export function ringsBalances(s: RingsSession): Record<string, bigint> {
-  const held = new Map(s.wallet.balances(true).map((b) => [b.mint as string, b.amount]));
-  const out: Record<string, bigint> = {};
-  for (const a of ringsAssets(s.network)) out[a.id] = held.get(a.mint ?? SOL_MINT_ADDRESS) ?? 0n;
-  return out;
+  return ringsBalancesFrom(s.wallet.balances(true), s.network);
 }
 
 /** Whether this private account can be paid privately (it has a registry record). */

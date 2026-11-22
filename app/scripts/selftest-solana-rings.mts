@@ -59,12 +59,23 @@ const relay = await import("../src/lib/solanaRings/relayPolicy");
 const server = await import("../src/lib/solanaRings/server");
 const screening = await import("../src/lib/screeningServer");
 const ofac = (await import("../src/lib/solanaRings/ofacSolana.json", { with: { type: "json" } })).default;
+const config = await import("../src/lib/solanaRings/config");
+const { SOL_MINT } = await import("@heliuslabs/spr");
 
 let n = 0;
 const ok = (cond: unknown, msg: string) => {
   assert.ok(cond, msg);
   n++;
 };
+
+// ---------------------------------------------------------------- balances
+
+ok(config.RINGS_SOL_MINT === SOL_MINT, "SOL is looked up under the SDK's own SOL mint");
+{
+  const usdc = config.ringsAssets("mainnet").find((a) => a.id === "usdc")!.mint!;
+  const got = config.ringsBalancesFrom([{ mint: SOL_MINT, amount: 50_000_000n }, { mint: usdc, amount: 7n }], "mainnet");
+  ok(got.sol === 50_000_000n && got.usdc === 7n && got.usdt === 0n, "a private SOL and USDC balance read back as held");
+}
 
 // ---------------------------------------------------------------- account layer
 

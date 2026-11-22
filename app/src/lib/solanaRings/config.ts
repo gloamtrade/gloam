@@ -68,6 +68,24 @@ export function ringsAssets(network: RingsNetwork = SOLANA_RINGS_NETWORK): reado
   return RINGS_ASSETS[network];
 }
 
+/**
+ * How the Rings SDK names SOL in a private balance: the system program's
+ * address (the SDK's SOL_MINT), not the wrapped SOL mint. scripts/
+ * selftest-solana-rings.mts checks it against the SDK.
+ */
+export const RINGS_SOL_MINT = "11111111111111111111111111111111";
+
+/** Each listed asset's private balance, in base units, from the SDK wallet's balances. */
+export function ringsBalancesFrom(
+  held: readonly { mint: string; amount: bigint }[],
+  network: RingsNetwork = SOLANA_RINGS_NETWORK
+): Record<string, bigint> {
+  const byMint = new Map(held.map((b) => [b.mint, b.amount]));
+  const out: Record<string, bigint> = {};
+  for (const a of ringsAssets(network)) out[a.id] = byMint.get(a.mint ?? RINGS_SOL_MINT) ?? 0n;
+  return out;
+}
+
 /** The plain words every Solana screen uses for what stays private. */
 export const RINGS_PRIVACY_NOTE =
   "On Solana, a private payment hides the asset and the amount. The two private accounts it moves between are visible, and adding money shows the wallet it came from.";
