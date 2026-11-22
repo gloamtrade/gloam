@@ -65,6 +65,13 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-rings.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-payroll.mts
 
+      # Each sign-in's own private account in a browser: signed out shows nothing, a second
+      # wallet sees and spends none of the first's, the first account goes to its owner on
+      # evidence only, backups stay per account. In-memory storage and a stand-in backup service.
+      - name: App account self-tests
+        working-directory: app
+        run: ../mcp/node_modules/.bin/tsx scripts/selftest-account-scope.mts
+
       # BNB Chain (off by default): off, no pool, on, and bad values; the pruned-logs check
       # end to end through the app's own transports. Fake RPCs only, nothing reaches a host.
       - name: App BNB Chain self-tests

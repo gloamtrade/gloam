@@ -297,6 +297,21 @@ export default function DocsPrivacyPage() {
         backup is the only way back. Browsers or passkeys without PRF support
         keep the device key, unchanged.
       </p>
+      <h3>One private account per sign-in</h3>
+      <p>
+        Each sign-in has its own private account in a browser: its notes, its
+        Gloam address and names, its payroll runs and claim links. Signed out,
+        the app shows none of them. Another wallet signed in on the same browser
+        sees and spends none of yours, and switching back shows yours again. A
+        payment to your Gloam address opens only for you.
+      </p>
+      <p>
+        <strong>Honest limit.</strong> The accounts in one browser share its
+        device key, so the app keeps them apart, not separate encryption. Someone
+        who can run code in that browser profile could still open them, as
+        before. A passkey lock covers every account in the browser, so it is
+        offered only while the browser holds one.
+      </p>
       <h3>Sanctions screening</h3>
       <p>
         Before a deposit, and before the relay submits a cash out, Gloam checks

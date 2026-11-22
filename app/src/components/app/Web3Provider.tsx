@@ -13,6 +13,7 @@ import { CashOutProofRefresh } from "./CashOutProofRefresh";
 import { ReconnectWatchdog } from "./ReconnectWatchdog";
 import { PeopleCount } from "./PeopleCount";
 import { RecoverySync } from "./RecoverySync";
+import { AccountScope } from "./AccountScope";
 
 // Brings the private balance back on a new device after sign-in. Loaded apart from the page.
 const AutoRestore = dynamic(() => import("./AutoRestore"), { ssr: false });
@@ -44,6 +45,8 @@ export function Web3Provider({ children }: { children: ReactNode }) {
               <TurnkeyKitGate />
             </>
           )}
+          {/* Binds the signed-in account's own private account before anything private is read (lib/accountScope) */}
+          <AccountScope />
           <CashOutProofRefresh />
           <RecoverySync />
           <AutoRestore />

@@ -8,6 +8,7 @@
  * whichever network the app is on. Nothing here moves money.
  */
 import { formatUnits, getAddress, isAddress, zeroAddress, type Address, type Hex } from "viem";
+import { scopedKey } from "./accountSlot";
 import { receiveTagFromPoint } from "./receiveTag";
 
 /** The registry on Robinhood Chain mainnet (deployed 21 Nov 2026, block 119798738). Set to null to switch names off. */
@@ -255,13 +256,18 @@ export function nameDate(seconds: number): string {
 
 // ---------------------------------------------------------------- this browser's names
 
-/** Names bought or checked in this browser. Only the names: the chain holds the rest. */
-const MINE_KEY = "gloam.names.mine.v1";
+/**
+ * Names bought or checked by the signed-in account in this browser. Only the
+ * names: the chain holds the rest. Each sign-in has its own list (lib/accountSlot).
+ */
+export const MINE_KEY = "gloam.names.mine.v1";
 
 export function loadMyNames(): string[] {
   if (typeof window === "undefined") return [];
+  const key = scopedKey(MINE_KEY);
+  if (!key) return [];
   try {
-    const raw = JSON.parse(window.localStorage.getItem(MINE_KEY) ?? "[]");
+    const raw = JSON.parse(window.localStorage.getItem(key) ?? "[]");
     return Array.isArray(raw) ? raw.filter((n): n is string => typeof n === "string" && isValidName(n)) : [];
   } catch {
     return [];
@@ -269,8 +275,10 @@ export function loadMyNames(): string[] {
 }
 
 function saveMyNames(names: string[]) {
+  const key = scopedKey(MINE_KEY);
+  if (!key) return;
   try {
-    window.localStorage.setItem(MINE_KEY, JSON.stringify(names.slice(0, 20)));
+    window.localStorage.setItem(key, JSON.stringify(names.slice(0, 20)));
   } catch {
     /* private mode: the name still works, it just is not listed here next time */
   }

@@ -61,6 +61,7 @@ import {
   updateLocalNote,
   type LocalNote,
 } from "@/lib/shield";
+import { accountShown, SIGNED_OUT_MESSAGE } from "@/lib/accountSlot";
 
 // ------------------------------------------------------------------ types
 
@@ -624,6 +625,8 @@ export function runPayroll(batch: PayrollBatch, deps: PayrollEngineDeps): Promis
  * this run's payments without failing.
  */
 export function runNetworkProblem(batch: Pick<PayrollBatch, "chainId" | "pool">, client: { chain?: { id: number } }): string | null {
+  // a run spends the signed-in account's notes: none while no one is signed in (lib/accountSlot)
+  if (!accountShown()) return SIGNED_OUT_MESSAGE;
   const problem = noteNetworkProblem(batch, getActiveNetwork());
   if (problem) return problem === NOTE_OTHER_NETWORK_MESSAGE ? "This run is on another network. Switch to it, then resume." : problem;
   if (client.chain && client.chain.id !== batch.chainId) return NETWORK_SWITCHING_MESSAGE;
@@ -912,6 +915,14 @@ async function payRow(
           .filter((n) => BigInt(n.amountWei) >= amount)
           .sort((a, b) => (BigInt(a.amountWei) < BigInt(b.amountWei) ? -1 : 1))
       );
+      // the signed-in account's own note, like every spend path (lib/noteVault noteOwnerProblem)
+      const notYours = note ? noteNetworkProblem(note, batch) : null;
+      if (notYours) {
+        row.status = "queued";
+        row.error = notYours;
+        await emit();
+        throw new PayrollStop();
+      }
       if (!note) {
         batch.status = "needs_funds";
         row.status = "queued";

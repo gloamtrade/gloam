@@ -8,7 +8,8 @@ import { knownTokens } from "./tokens";
 import { getActiveNetwork, type GloamNetwork } from "./networks";
 import { makeBoundNote } from "./note";
 import { readAmountText } from "./amountText";
-import { dataKeyLocked, getAllNotes, setAllNotes, syncFromDisk, unlockNoteVault } from "./noteVault";
+import { dataKeyLocked, getAllNotes, noteOwnerProblem, setAllNotes, syncFromDisk, unlockNoteVault } from "./noteVault";
+import { accountScopeOn, boundAccount, SIGNED_OUT_MESSAGE } from "./accountSlot";
 import { readDemo } from "./demoFlag";
 import type { VaultSwapRefundInfo } from "./vaultSwap";
 import type { NameClaimRefundInfo } from "./nameClaim";
@@ -363,8 +364,8 @@ export function notesOnNetwork<T extends Pick<LocalNote, "chainId" | "pool">>(no
   return notes.filter((n) => inActiveScope(n, scope));
 }
 
-/** What every view that would show the private balance says while no wallet is connected. */
-export const SIGNED_OUT_BALANCE_MESSAGE = "Connect a wallet to see your private balance.";
+/** What every view that would show the private balance says while no one is signed in. */
+export const SIGNED_OUT_BALANCE_MESSAGE = SIGNED_OUT_MESSAGE;
 
 /**
  * The notes of `notes` a view shows to `wallet`, the wallet connected now.
@@ -382,6 +383,16 @@ export const SIGNED_OUT_BALANCE_MESSAGE = "Connect a wallet to see your private 
  *
  * Display only: nothing here changes or drops a note. Background work (claim
  * sweep, spent checks, cash outs, recovery backup) reads the store itself.
+ *
+ * Since 22 Nov 2026 each sign-in has its own store (lib/accountSlot), and the
+ * store is the line: every note in it is the bound account's, whichever wallet
+ * was connected when it was made here (a browser's first account can hold
+ * notes a second wallet made before the change, and hiding them would leave
+ * them on no screen at all). So with the scope on, `wallet` sees its store's
+ * notes, and the chain rows of its own deposits, when it is the account bound
+ * to this page, and nothing otherwise: a note a view still holds from another
+ * account is in neither. `from` still decides with the scope off (self-tests
+ * that predate it).
  */
 export function notesForWallet<T extends Pick<LocalNote, "from">>(
   notes: readonly T[],
@@ -389,6 +400,15 @@ export function notesForWallet<T extends Pick<LocalNote, "from">>(
 ): T[] {
   if (!wallet) return [];
   const lower = wallet.toLowerCase();
+  if (accountScopeOn() && !readDemo()) {
+    if (boundAccount() !== lower) return [];
+    const held = new Set(getAllNotes().map((n) => `${n.id}|${n.commitment.toLowerCase()}`));
+    return notes.filter((n) => {
+      const x = n as Partial<LocalNote>;
+      if (x.source === "chain") return x.from?.toLowerCase() === lower;
+      return typeof x.id === "string" && typeof x.commitment === "string" && held.has(`${x.id}|${x.commitment.toLowerCase()}`);
+    });
+  }
   return notes.filter((n) => !n.from || n.from.toLowerCase() === lower);
 }
 
@@ -438,8 +458,19 @@ export const NETWORK_SWITCHING_MESSAGE = "The network is still switching. Wait a
  * note's own chain and vault, the network lib code reads (the tree, the
  * proving keys, the relay's chain) must be `net` too: a proof is only ever
  * built and sent for the chain the page shows.
+ *
+ * A note (anything with an id and a commitment) must also be in the store of
+ * the account signed in now (lib/noteVault noteOwnerProblem): nothing is spent
+ * while no one is signed in, and never another sign-in's note.
  */
-export function noteNetworkProblem(note: { chainId: number; pool?: string | null }, net: NetScope): string | null {
+export function noteNetworkProblem(
+  note: { chainId: number; pool?: string | null; id?: unknown; commitment?: unknown },
+  net: NetScope
+): string | null {
+  if (typeof note.id === "string" && typeof note.commitment === "string") {
+    const owner = noteOwnerProblem(note);
+    if (owner) return owner;
+  }
   if (!net.pool || note.chainId !== net.chainId || !note.pool || note.pool.toLowerCase() !== net.pool.toLowerCase()) {
     return NOTE_OTHER_NETWORK_MESSAGE;
   }

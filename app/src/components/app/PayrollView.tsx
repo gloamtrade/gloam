@@ -7,6 +7,8 @@ import { useWriteContract } from "wagmi";
 import type { Address, Hex } from "viem";
 import { demoHistory, simulatePayroll, useAppAccount } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
+import { useShownAccount } from "./AccountScope";
+import { useWalletState } from "@/hooks/useWalletState";
 import { PayrollInvoice } from "./PayrollInvoice";
 import { PaymentNoteLine } from "./PaymentNote";
 import { DueBanner } from "./payroll/DueBanner";
@@ -333,12 +335,16 @@ function Rail({
 
 // ------------------------------------------------------------------ view
 
+const NO_BATCHES: PayrollBatch[] = [];
+
 export function PayrollView() {
   const reduce = useReducedMotion();
   const { address, isConnected, chainId: walletChainId, demo } = useAppAccount();
   const { network, networkKey } = useNetwork();
   const pool = network.pool;
   const { open, refresh: refreshNotes } = useLocalShieldNotes(address);
+  // Runs are the signed-in account's own (lib/accountScope): read once its account is bound, gone on sign out.
+  const shownAccount = useShownAccount();
   const { loading: treeLoading, leafIndexForCommitment, refresh: refreshTree } = useShieldTree();
   const { writeContractAsync } = useWriteContract();
   const openGated = useOpenGatedTokens();
@@ -488,7 +494,7 @@ export function PayrollView() {
   }, [network.chainId, demo]);
 
   // ---------------------------------------------------------------- runs
-  const [batches, setBatches] = useState<PayrollBatch[]>([]);
+  const [batches, setBatches] = useWalletState<PayrollBatch[]>(demo ? "demo" : shownAccount, NO_BATCHES);
   const [active, setActive] = useState<PayrollBatch | null>(null);
   const [running, setRunning] = useState(false);
   const startGate = useRef(false);
@@ -514,9 +520,9 @@ export function PayrollView() {
 
   const reloadBatches = useCallback(() => {
     // A demo keeps its runs in memory only.
-    if (!pool || demo) return Promise.resolve();
+    if (!pool || demo || !shownAccount) return Promise.resolve();
     return loadBatches(network.chainId, pool).then(setBatches);
-  }, [network.chainId, pool, demo]);
+  }, [network.chainId, pool, demo, shownAccount, setBatches]);
   useEffect(() => {
     if (!pool) return;
     let live = true;
@@ -529,14 +535,16 @@ export function PayrollView() {
               withDemoProofRecords
             )
           )
-        : loadBatches(network.chainId, pool);
+        : shownAccount
+          ? loadBatches(network.chainId, pool)
+          : Promise.resolve(NO_BATCHES);
     void load.then((b) => {
       if (live) setBatches(b);
     });
     return () => {
       live = false;
     };
-  }, [network.chainId, pool, demo, assetOptions]);
+  }, [network.chainId, pool, demo, assetOptions, shownAccount, setBatches]);
 
   const walletOnChain = walletChainId === network.chainId;
   const blocker = !isConnected

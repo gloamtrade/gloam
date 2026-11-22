@@ -26,6 +26,7 @@
  * rules. Version 1 backups stay on the server after that, and can always be opened.
  */
 import { getAddress, hexToBytes, keccak256, type Address, type Hex } from "viem";
+import { onAccountBound, scopedKey, writableKey } from "./accountSlot";
 import { readDemo } from "./demoFlag";
 import { dataKeyLocked, getAllNotes, onNotesSaved, openJson, sealJson, setAllNotes, storedNotesOpen, syncFromDisk, unlockNoteVault } from "./noteVault";
 import { PROMPT_DID_NOT_OPEN } from "./passkey";
@@ -404,6 +405,8 @@ async function readNotesNow(): Promise<void> {
 }
 
 async function collect(): Promise<Payload> {
+  // A save replaces the backup: with no account bound there is nothing here to save, never an empty copy.
+  if (scopedKey(CONFIG_KEY) === null) throw new RecoveryError("Sign in to back up your private account.");
   await readNotesNow();
   // A save replaces the backup, so an empty list from notes that didn't open must never be one.
   if (!(await storedNotesOpen())) throw new RecoveryError("This browser can't open its private balance, so the backup stays as it is.");
@@ -557,16 +560,26 @@ function deleteRemote(backup: { id: string; write: string }): Promise<Response |
 
 /* ------------------------------------------------------------ state */
 
-const CONFIG_KEY = "gloam.recovery.v1";
+/**
+ * The recovery settings of the browser's first account. Each sign-in keeps its
+ * own (lib/accountSlot): its own backup, its own key, turned on and off apart.
+ */
+export const CONFIG_KEY = "gloam.recovery.v1";
 /** contentMark of the last save, to tell on a page load whether something since never went up. */
 const MARK_KEY = "gloam.recovery.mark.v1";
 /** Set when the person turns recovery off on this browser, cleared when it is turned on again. */
 const TURNED_OFF_KEY = "gloam.recovery.off.v1";
 
+/** The bound account's value of `base`, or null (none bound, or nothing there). */
+function readOwn(base: string): string | null {
+  const key = scopedKey(base);
+  return key ? localStorage.getItem(key) : null;
+}
+
 /** The person turned recovery off on this browser, so nothing may offer to turn it on for them. */
 export function recoveryTurnedOffHere(): boolean {
   try {
-    return localStorage.getItem(TURNED_OFF_KEY) === "1";
+    return readOwn(TURNED_OFF_KEY) === "1";
   } catch {
     return false;
   }
@@ -575,8 +588,9 @@ export function recoveryTurnedOffHere(): boolean {
 /** A storage that refuses (private mode, a full quota) must not stop recovery turning on or off. */
 function markTurnedOff(off: boolean) {
   try {
-    if (off) localStorage.setItem(TURNED_OFF_KEY, "1");
-    else localStorage.removeItem(TURNED_OFF_KEY);
+    const key = writableKey(TURNED_OFF_KEY);
+    if (off) localStorage.setItem(key, "1");
+    else localStorage.removeItem(key);
   } catch {
     /* the mark is a courtesy: the setting itself is saved */
   }
@@ -695,8 +709,10 @@ function shownState(c: Config | null): Partial<RecoveryState> {
 }
 
 function loadConfig(): Promise<Config | null> {
+  // No account bound to this page yet: nothing to read, and nothing kept, so the bind reads it (below).
+  if (scopedKey(CONFIG_KEY) === null) return Promise.resolve(null);
   return (loading ??= (async () => {
-    config = await openJson<Config>(localStorage.getItem(CONFIG_KEY));
+    config = await openJson<Config>(readOwn(CONFIG_KEY));
     setState({ ready: true, ...shownState(config) });
     return config;
   })());
@@ -706,10 +722,12 @@ async function saveConfig(next: Config | null) {
   config = next;
   // a later loadConfig() reads this, not the settings as they were first read
   loading = Promise.resolve(next);
-  if (next) localStorage.setItem(CONFIG_KEY, await sealJson(next));
-  else {
-    localStorage.removeItem(CONFIG_KEY);
-    localStorage.removeItem(MARK_KEY);
+  if (next) {
+    const sealed = await sealJson(next);
+    localStorage.setItem(writableKey(CONFIG_KEY), sealed);
+  } else {
+    localStorage.removeItem(writableKey(CONFIG_KEY));
+    localStorage.removeItem(writableKey(MARK_KEY));
   }
   setState(shownState(next));
 }
@@ -777,7 +795,7 @@ async function upload(c: Config, { skipSame = false }: { skipSame?: boolean } = 
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!stillOn(current) || savesPaused(current)) return;
     const payload = await collect();
-    if (skipSame && attempt === 0 && localStorage.getItem(MARK_KEY) === (await contentMark(payload))) return;
+    if (skipSame && attempt === 0 && readOwn(MARK_KEY) === (await contentMark(payload))) return;
     const blob = await seal(current, payload);
     if (!stillOn(current)) return;
     const res = await putBackup(current, blob, current.n + 1);
@@ -787,7 +805,7 @@ async function upload(c: Config, { skipSame = false }: { skipSame?: boolean } = 
       // Turned off while this was saving: it stays off.
       if (stillOn(current)) {
         await saveConfig({ ...config!, n: data.n, savedAt: data.t, retryAt: undefined });
-        localStorage.setItem(MARK_KEY, mark);
+        localStorage.setItem(writableKey(MARK_KEY), mark);
       }
       return;
     }
@@ -1038,7 +1056,7 @@ export async function pullBackup({ force = false }: { force?: boolean } = {}): P
       // Everything here is already in the backup: say so, so the change this pull made saves nothing.
       // Anything the backup lacks still goes up, as a change always does.
       const mine = await collect().catch(() => null);
-      if (mine && holdsAll(theirs, mine)) localStorage.setItem(MARK_KEY, await contentMark(mine));
+      if (mine && holdsAll(theirs, mine)) localStorage.setItem(writableKey(MARK_KEY), await contentMark(mine));
       return added;
     });
   } catch {
@@ -1069,10 +1087,34 @@ async function catchUp(): Promise<void> {
   // Work already waiting (resume) saves everything anyway.
   if (!c || stopping || unfinished(c)) return;
   const current = await collect().catch(() => null);
-  if (current && stillOn(c) && localStorage.getItem(MARK_KEY) !== (await contentMark(current))) schedule();
+  if (current && stillOn(c) && readOwn(MARK_KEY) !== (await contentMark(current))) schedule();
 }
 
 let started = false;
+
+/**
+ * An account was bound to this page (lib/accountSlot): its own settings, read
+ * fresh. Before a bind nothing was read (loadConfig), so nothing of another
+ * account is held here; a switch of account reloads the page.
+ */
+if (typeof window !== "undefined") {
+  onAccountBound(() => {
+    window.clearTimeout(timer);
+    window.clearTimeout(retryTimer);
+    config = null;
+    loading = null;
+    failures = 0;
+    lastPull = 0;
+    state = OFF;
+    for (const fn of subscribers) fn();
+    if (started) {
+      void loadConfig().then(() => {
+        resume();
+        return catchUp();
+      });
+    }
+  });
+}
 
 /** Keep the backup current from now on. Safe to call more than once. */
 export function startRecoverySync() {
@@ -1087,7 +1129,7 @@ export function startRecoverySync() {
   // Another tab moved the backup or turned recovery off: follow it, so this tab
   // can't save to the old backup or write the old settings back.
   window.addEventListener("storage", (e) => {
-    if (e.key !== CONFIG_KEY) return;
+    if (e.key === null || e.key !== scopedKey(CONFIG_KEY)) return;
     loading = null;
     void loadConfig().then(resume);
   });

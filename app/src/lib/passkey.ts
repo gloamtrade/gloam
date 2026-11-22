@@ -22,6 +22,11 @@ import {
   type VaultStatus,
 } from "./noteVault";
 import { b64, b64url, bytes, randomBytes, unb64, unb64url, type PasskeyWrapRecord } from "./passkeyWrap";
+import { otherAccountsHere } from "./accountScope";
+
+/** One passkey lock covers every private account in the browser, so it is only offered where there is one. */
+export const OTHER_ACCOUNTS_MESSAGE =
+  "This browser also holds another sign-in's private account, and a passkey lock would lock it too. Nothing changed.";
 
 export const NO_PRF_MESSAGE =
   "This browser or passkey can't lock your vault. Nothing changed: your balance stays encrypted on this device, as before.";
@@ -151,6 +156,7 @@ function storedRecord(): PasskeyWrapRecord {
  */
 export async function protectWithPasskey(): Promise<void> {
   if ((await passkeySupport()) === "no") throw new PasskeyError(NO_PRF_MESSAGE, "unsupported");
+  if (otherAccountsHere()) throw new PasskeyError(OTHER_ACCOUNTS_MESSAGE, "failed");
   const rpId = window.location.hostname;
   const prfSalt = randomBytes(32);
   let cred: PublicKeyCredential | null;
