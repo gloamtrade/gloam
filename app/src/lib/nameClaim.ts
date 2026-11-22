@@ -11,7 +11,7 @@
  *
  * Shared by the app and the relay server: no browser-only imports here.
  */
-import { concatHex, encodeAbiParameters, getContractAddress, keccak256, stringToBytes, type Address, type Hex } from "viem";
+import { concatHex, encodeAbiParameters, getContractAddress, keccak256, stringToBytes, type Address, type Hex, type PublicClient } from "viem";
 import { SWAP_ESCROW_INIT_CODE, refundAmountFor, vaultFeeOf } from "./vaultSwap";
 import { GLOAM_TOKEN } from "./buybacks";
 
@@ -191,4 +191,91 @@ export function claimEscrowKey(s: NameClaimSpend, c: NameClaimClaim, r: NameClai
     refundCommitment: r.commitment,
     refundAmount: r.amount,
   };
+}
+
+/**
+ * On a private name claim's refund note (lib/nameClaimRun): the claim it was made for.
+ * The spent note's nullifier is the refund note's `sweptFrom`, and the refund is the
+ * note itself, so with this a sync can work out the claim's escrow, see the money
+ * waiting there if the note's unshield went out on its own, and send the same claim
+ * again for the registrar's refunding branch (finishNameClaimRefund). Neither proof is
+ * kept: that branch never reads the spend proof, and the refund's shield proof is made
+ * again from the note's secret.
+ */
+export type NameClaimRefundInfo = {
+  registrar: Address;
+  /** The claimed note's amount, a decimal string. */
+  amount: string;
+  name: string;
+  keyX: Hex;
+  keyY: Hex;
+  holder: Address;
+  /** A decimal string. */
+  years: string;
+  /** The relay's send of this claim, once it answered: a sync reads how it ended if this tab never heard. */
+  sent?: { hash: Hex; at: number };
+};
+
+/** The claim a refund note was made for, as the registrar takes it. */
+export function nameRefundClaim(info: NameClaimRefundInfo): NameClaimClaim {
+  return { name: info.name, keyX: info.keyX, keyY: info.keyY, holder: info.holder, years: BigInt(info.years) };
+}
+
+/** The escrow a name claim's refund note waits on. */
+export function nameRefundEscrow(info: NameClaimRefundInfo, nullifier: Hex, refundCommitment: Hex, refundAmount: bigint): Address {
+  const key = claimEscrowKey(
+    { proof: "0x", root: "0x", nullifier, amount: BigInt(info.amount) },
+    nameRefundClaim(info),
+    { proof: "0x", commitment: refundCommitment, amount: refundAmount }
+  );
+  return nameEscrowAddress(info.registrar, key);
+}
+
+const balanceOfAbi = [
+  { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
+] as const;
+
+/**
+ * Does a name claim's money wait at its escrow, at `blockNumber`? Only the registrar
+ * opens the escrow, and only through a claim, so money there means the note's unshield
+ * went out on its own and the claim can still put it back as the refund note (the
+ * refunding branch needs at least the refund's amount there). Anything less is a
+ * claim that already ran, or dust someone sent: nothing comes back from it.
+ */
+export async function nameEscrowHolds(
+  client: Pick<PublicClient, "readContract">,
+  info: NameClaimRefundInfo,
+  nullifier: Hex,
+  refundCommitment: Hex,
+  refundAmount: bigint,
+  blockNumber?: bigint
+): Promise<boolean> {
+  const escrow = nameRefundEscrow(info, nullifier, refundCommitment, refundAmount);
+  const held = await client.readContract({
+    address: GLOAM_TOKEN,
+    abi: balanceOfAbi,
+    functionName: "balanceOf",
+    args: [escrow],
+    ...(blockNumber !== undefined ? { blockNumber } : {}),
+  });
+  return held >= refundAmount;
+}
+
+/**
+ * After a claim this tab never heard the end of: asks `read` every `everyMs` until
+ * `name` points to `tag` (the name landed), for up to `waitMs`. False when it never did.
+ */
+export async function waitForNameClaim(
+  read: (name: string) => Promise<{ tag: string } | null>,
+  name: string,
+  tag: string,
+  opts: { waitMs?: number; everyMs?: number; sleep?: (ms: number) => Promise<void> } = {}
+): Promise<boolean> {
+  const { waitMs = 90_000, everyMs = 5_000, sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) } = opts;
+  for (let waited = 0; ; waited += everyMs) {
+    const record = await read(name).catch(() => null);
+    if (record && record.tag === tag) return true;
+    if (waited + everyMs > waitMs) return false;
+    await sleep(everyMs);
+  }
 }

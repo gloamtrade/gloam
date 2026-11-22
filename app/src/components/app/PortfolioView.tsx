@@ -786,8 +786,8 @@ export function PortfolioView() {
                         {n.refundHeld && (
                           <p className="mt-0.5 text-[12.5px] text-warn">
                             {n.refundHeld === "blocked"
-                              ? "A swap of this couldn't finish, and the vault isn't taking this token back right now. It stays held and comes back once the vault takes it again. Gloam tries each time you open the app."
-                              : "A swap of this couldn't finish, so it's on its way back to your private balance."}
+                              ? `${n.nameClaim ? "A name claim with this" : "A swap of this"} couldn't finish, and the vault isn't taking this token back right now. It stays held and comes back once the vault takes it again. Gloam tries each time you open the app.`
+                              : `${n.nameClaim ? "A name claim with this" : "A swap of this"} couldn't finish, so it's on its way back to your private balance.`}
                           </p>
                         )}
                         {canExitVaultSwap(n) && <SwapExit note={n} onDone={refreshVault} />}

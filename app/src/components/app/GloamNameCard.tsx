@@ -30,8 +30,8 @@ import { SuccessModal } from "./SuccessModal";
 import { Select } from "@/components/ui/Select";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { isUnsecuredClaim } from "@/lib/claimSweep";
-import { NAMES_REGISTRAR_ADDRESS, noteForPrice } from "@/lib/nameClaim";
-import { pickClaimNote, runPrivateNameClaim } from "@/lib/nameClaimRun";
+import { NAMES_REGISTRAR_ADDRESS, noteForPrice, waitForNameClaim } from "@/lib/nameClaim";
+import { CLAIM_MAYBE_SENT, pickClaimNote, runPrivateNameClaim } from "@/lib/nameClaimRun";
 import {
   GLOAM_NAMES_ADDRESS,
   GLOAM_NAMES_CHAIN_ID,
@@ -412,15 +412,27 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
     const span = years;
     setBusy(`Getting @${wanted}…`);
     void run("Getting the name", async () => {
-      const { refunded } = await runPrivateNameClaim({
-        notes: privateGloam,
-        claim: { name: wanted, keyX: point.x, keyY: point.y, holder: address, years: span },
-        price,
-        feeBps,
-        owner: address,
-        onStatus: (text) => setProgress({ step: 1, of: 1, text }),
-      });
-      if (refunded) throw new Error("The claim couldn't finish, so the money went back to your private balance, less the vault's fee.");
+      try {
+        const { refunded } = await runPrivateNameClaim({
+          notes: privateGloam,
+          claim: { name: wanted, keyX: point.x, keyY: point.y, holder: address, years: span },
+          price,
+          feeBps,
+          owner: address,
+          onStatus: (text) => setProgress({ step: 1, of: 1, text }),
+        });
+        // the refund note is the note less 1%: the vault's cash-out fee, the rest to the treasury
+        if (refunded) throw new Error("The claim couldn't finish, so the money went back to your private balance, less 1% in fees.");
+      } catch (e) {
+        if (!(e instanceof Error && e.message === CLAIM_MAYBE_SENT)) throw e;
+        // how it ended wasn't heard: the registry says whether the name landed
+        setProgress({ step: 1, of: 1, text: `Checking Robinhood Chain for @${wanted}…` });
+        if (!(await waitForNameClaim(readGloamName, wanted, tag))) {
+          throw new Error(
+            `We can't see @${wanted} on Robinhood Chain yet. The claim may still land, so check back in a few minutes. Your money is safe in the vault either way.`
+          );
+        }
+      }
       rememberMyName(wanted);
       setDraft("");
       setCopied(false);
