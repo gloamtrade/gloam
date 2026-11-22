@@ -193,10 +193,14 @@ const bodyHtml = (md: string) => render.blocksToEmailHtml(render.parseMarkdown(m
   });
   ok(e.html.startsWith("<!doctype html>"), "a full document");
   ok(e.html.includes("max-width:600px"), "one column, 600px at most");
-  ok(e.html.includes('src="https://www.gloam.trade/brand/kit/email/gloam-mark-email.png"'), "the mark is a hosted PNG");
+  ok(e.html.includes('src="https://www.gloam.trade/brand/kit/email/gloam-email-header.png"'), "the header art is a hosted PNG");
+  ok(e.html.includes('src="https://www.gloam.trade/brand/kit/email/gloam-email-header-dark.png"') && e.html.includes(".gl-dark-img{display:block!important"), "a dark header for dark mode");
+  ok(/class="gl-dark-img" style="display:none;max-height:0;overflow:hidden;mso-hide:all;"/.test(e.html), "the dark header is hidden unless dark mode shows it");
+  ok(e.html.includes("@font-face{font-family:Aeonik;font-style:normal;font-weight:300;src:url(https://www.gloam.trade/fonts/Aeonik-Light.woff2)"), "Aeonik from the site where a mail app loads web fonts");
+  ok(e.html.includes("background:#F4F4F5") && e.html.includes('class="gl-card"'), "a white card on the app's ground");
   ok(e.html.includes("#2E7D53") && e.html.includes("Gloam update, 22 November 2026"), "the green label with the day");
   ok(e.html.includes('content="light dark"') && e.html.includes("prefers-color-scheme:dark"), "dark mode colours for mail apps that use them");
-  ok(e.html.includes("background:#FFFFFF"), "white background");
+  ok(e.html.includes("background:#FFFFFF"), "the card is white");
   ok(e.html.includes("You asked for Gloam updates"), "the footer says why");
   ok(e.html.includes(`href="${render.UNSUBSCRIBE_MARK}"`) && e.html.includes('href="https://www.gloam.trade/updates/2026-11-22-private-payroll-is-live"'), "unsubscribe and web links in the footer");
   ok(e.html.includes(">First paragraph is the preview line."), "the preheader is the first line");
@@ -210,6 +214,23 @@ const bodyHtml = (md: string) => render.blocksToEmailHtml(render.parseMarkdown(m
   ok(render.checkUpdate("x", "x".repeat(20_001))?.includes("20,000"), "body length");
   ok(render.checkUpdate("x", `see ${render.UNSUBSCRIBE_MARK}`) !== null, "the link mark can't be typed into a body");
   eq(render.checkUpdate("Fine", "Fine"), null, "a good update passes");
+}
+
+// a paragraph that is one link and nothing else is a button
+{
+  const blocks = render.parseMarkdown("Read on.\n\n[Open Gloam](https://www.gloam.trade/app)\n\nSee [the docs](/docs) too.\n\nhttps://www.gloam.trade\n\n[Bad](javascript:alert(1))\n\n[Two](https://a.example) [links](https://b.example)");
+  eq(blocks.map((b) => b.t).join(","), "paragraph,button,paragraph,paragraph,paragraph,paragraph", "only a lone [label](link) is a button");
+  const btn = blocks[1] as { t: "button"; href: string; label: string };
+  eq(btn.href, "https://www.gloam.trade/app", "the button's link");
+  eq(btn.label, "Open Gloam", "the button's label");
+  const tricky = render.parseMarkdown('[<b>Go</b> "now"](https://www.gloam.trade)');
+  eq(tricky[0]?.t, "button", "a label with markup is still a button");
+  const html = render.blocksToEmailHtml(tricky);
+  ok(html.includes("&lt;b&gt;Go&lt;/b&gt; &quot;now&quot;") && !html.includes("<b>"), "the button label is escaped");
+  ok(html.includes('class="gl-btn"') && html.includes('href="https://www.gloam.trade/"'), "a filled button cell with the link");
+  eq(render.blocksToText(blocks.slice(1, 2)), "Open Gloam: https://www.gloam.trade/app", "plain text: label and link");
+  eq(render.summaryOf(render.parseMarkdown("[Open Gloam](https://www.gloam.trade/app)")), "Open Gloam", "a button alone still gives a preview line");
+  ok(!render.blocksToEmailHtml(render.parseMarkdown("[Bad](javascript:alert(1))")).includes("javascript"), "no button for an unsafe link");
 }
 
 // ============================================================ a fake Resend

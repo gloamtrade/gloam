@@ -119,7 +119,7 @@ function saveDraft(subject: string, body: string) {
   }
 }
 
-const SAMPLE = "Write the update here.\n\n**Bold**, [a link](https://www.gloam.trade) and lists:\n\n- one point\n- another";
+const SAMPLE = "Write the update here.\n\n**Bold**, [a link](https://www.gloam.trade) and lists:\n\n- one point\n- another\n\n[Open Gloam](https://www.gloam.trade/app)";
 
 function RunStatus({ run }: { run: Run }) {
   const p = run.progress;
@@ -261,7 +261,7 @@ function Compose({ data, runner }: { data: MailData; runner: ReturnType<typeof u
             />
           </label>
           <p className="text-[12.5px] leading-relaxed text-mute">
-            Markdown: # heading, **bold**, *italic*, [link](https://…), - list, 1. list. A new line is a line break; a blank line starts a paragraph.
+            Markdown: # heading, **bold**, *italic*, [link](https://…), - list, 1. list. A link alone on its own line becomes a button. A new line is a line break; a blank line starts a paragraph.
           </p>
 
           <div className="border-t border-line pt-4">

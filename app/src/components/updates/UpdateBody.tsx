@@ -32,6 +32,16 @@ export function UpdateBody({ body }: { body: string }) {
           return b.level === 1 ? <h2 key={i}>{c}</h2> : <h3 key={i}>{c}</h3>;
         }
         if (b.t === "paragraph") return <p key={i}>{inline(b.c, `p${i}`)}</p>;
+        if (b.t === "button") {
+          const external = !b.href.startsWith("https://www.gloam.trade/") && !b.href.startsWith("mailto:");
+          return (
+            <p key={i} className="not-prose">
+              <a href={b.href} className="btn btn-ink btn-lg" {...(external ? { target: "_blank", rel: "noreferrer" } : {})}>
+                {b.label}
+              </a>
+            </p>
+          );
+        }
         const items = b.items.map((it, j) => <li key={j}>{inline(it, `l${i}-${j}`)}</li>);
         return b.ordered ? (
           <ol key={i} start={b.start === 1 ? undefined : b.start}>

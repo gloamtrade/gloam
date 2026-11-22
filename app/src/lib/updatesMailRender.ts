@@ -5,8 +5,8 @@
  *
  * The body is a small piece of markdown: # headings (three levels),
  * paragraphs (a single newline is a line break), - or 1. lists, **bold**,
- * *italic*, [links](https://...) and bare https:// links. Nothing else is
- * markup: every character the admin types is escaped, so no HTML gets in.
+ * *italic*, [links](https://...) and bare https:// links. A paragraph that is
+ * only one [link](https://...) becomes a button. Nothing else is markup: every character the admin types is escaped, so no HTML gets in.
  * A link is kept only when it is https, http or mailto (a path like /docs
  * points at the site); anything else stays as plain text.
  */
@@ -22,7 +22,9 @@ export const BODY_MAX = 20_000;
  */
 export const UNSUBSCRIBE_MARK = "%%GLOAM_UNSUBSCRIBE_URL%%";
 
-export const LOGO_URL = `${SITE}/brand/kit/email/gloam-mark-email.png`;
+/** The header art, light and dark (source: scripts/brand/email-header.html). */
+export const HEADER_URL = `${SITE}/brand/kit/email/gloam-email-header.png`;
+export const HEADER_DARK_URL = `${SITE}/brand/kit/email/gloam-email-header-dark.png`;
 
 export type Inline =
   | { t: "text"; v: string }
@@ -34,7 +36,8 @@ export type Inline =
 export type Block =
   | { t: "heading"; level: 1 | 2 | 3; c: Inline[] }
   | { t: "paragraph"; c: Inline[] }
-  | { t: "list"; ordered: boolean; start: number; items: Inline[][] };
+  | { t: "list"; ordered: boolean; start: number; items: Inline[][] }
+  | { t: "button"; href: string; label: string };
 
 // ------------------------------------------------------------------ escaping
 
@@ -202,6 +205,8 @@ export function parseInline(s: string, inLink = false): Inline[] {
 const HEADING = /^(#{1,3})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/;
 const BULLET = /^[ \t]{0,3}[-*+][ \t]+(.*)$/;
 const NUMBERED = /^[ \t]{0,3}(\d{1,6})[.)][ \t]+(.*)$/;
+/** A paragraph that is one [label](address) and nothing else: a button. */
+const BUTTON_LINE = /^\[[^\]\n]+\]\(\S+\)$/;
 
 type OpenList = { ordered: boolean; start: number; items: string[] };
 
@@ -213,6 +218,16 @@ export function parseMarkdown(src: string): Block[] {
   let list = null as OpenList | null;
 
   const endPara = () => {
+    if (para.length === 1 && BUTTON_LINE.test(para[0]!)) {
+      const c = parseInline(para[0]!);
+      const only = c.length === 1 ? c[0]! : null;
+      const label = only && only.t === "link" ? inlineText(only.c).trim() : "";
+      if (only && only.t === "link" && label) {
+        blocks.push({ t: "button", href: only.href, label });
+        para = [];
+        return;
+      }
+    }
     if (para.length) blocks.push({ t: "paragraph", c: parseInline(para.join("\n")) });
     para = [];
   };
@@ -280,6 +295,7 @@ export function blocksToText(blocks: Block[]): string {
     .map((b) => {
       if (b.t === "heading") return inlineText(b.c);
       if (b.t === "paragraph") return inlineText(b.c);
+      if (b.t === "button") return `${b.label}: ${b.href.startsWith("mailto:") ? b.href.slice(7) : b.href}`;
       return b.items.map((it, i) => `${b.ordered ? `${b.start + i}.` : "-"} ${inlineText(it).replace(/\n/g, "\n   ")}`).join("\n");
     })
     .join("\n\n");
@@ -289,7 +305,8 @@ export function blocksToText(blocks: Block[]): string {
 export function summaryOf(blocks: Block[], max = 160): string {
   const first = blocks.find((b) => b.t === "paragraph") ?? blocks[0];
   if (!first) return "";
-  const text = (first.t === "list" ? first.items.map(inlineText).join(", ") : inlineText(first.c)).replace(/\s+/g, " ").trim();
+  const raw = first.t === "list" ? first.items.map(inlineText).join(", ") : first.t === "button" ? first.label : inlineText(first.c);
+  const text = raw.replace(/\s+/g, " ").trim();
   if (text.length <= max) return text;
   const cut = text.slice(0, max - 1);
   return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), max - 20))}…`;
@@ -303,6 +320,9 @@ const SOFT = "#34373C";
 const MUTE = "#5F636A";
 const LINE = "#E4E6E9";
 const GREEN = "#2E7D53";
+/** Around the card, and the card itself: the app's ground and panel. */
+const GROUND = "#F4F4F5";
+const CARD = "#FFFFFF";
 
 function inlineHtml(nodes: Inline[]): string {
   let out = "";
@@ -332,6 +352,11 @@ export function blocksToEmailHtml(blocks: Block[]): string {
         return `<${tag} class="gl-ink" style="${H_STYLE[b.level]}font-family:${FONT};">${inlineHtml(b.c)}</${tag}>`;
       }
       if (b.t === "paragraph") return `<p class="gl-soft" style="${p}font-family:${FONT};">${inlineHtml(b.c)}</p>`;
+      if (b.t === "button") {
+        // a "bulletproof" button: a filled cell with the link inside, so it
+        // stays a button where a mail app drops padding or rounded corners on links
+        return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 24px;"><tr><td class="gl-btn" bgcolor="${INK}" style="border-radius:999px;background:${INK};"><a href="${escapeHtml(b.href)}" class="gl-btn-a" style="display:inline-block;padding:14px 26px;font-family:${FONT};font-size:15px;line-height:20px;font-weight:500;letter-spacing:-0.005em;color:#FFFFFF;text-decoration:none;border-radius:999px;">${escapeHtml(b.label)}</a></td></tr></table>`;
+      }
       const tag = b.ordered ? "ol" : "ul";
       const start = b.ordered && b.start !== 1 ? ` start="${b.start}"` : "";
       const items = b.items
@@ -372,11 +397,15 @@ export function checkUpdate(subject: unknown, body: unknown): string | null {
 }
 
 /**
- * The whole email, HTML and plain text. One column, at most 600px, white, the
- * Gloam mark at the top (a hosted PNG: Gmail and Outlook show no SVG), the
- * subject as the title, the body, then the footer: why they get it, their own
- * unsubscribe link and the web version. Mail apps with a dark mode that honour
- * prefers-color-scheme (Apple Mail, Outlook.com) get the site's dark colours.
+ * The whole email, HTML and plain text, in Gloam's look: a white card on the
+ * app's grey ground, the header art on top (the lockup under the green glow; a
+ * hosted PNG, since Gmail and Outlook show no SVG), a green label with the day,
+ * the subject large in Aeonik Light, the body, then the footer under the card:
+ * why they get it, their own unsubscribe link and the web version.
+ * Aeonik loads from the site where a mail app allows web fonts (Apple Mail,
+ * iOS); elsewhere it falls back to the system sans. Mail apps with a dark mode
+ * that honour prefers-color-scheme (Apple Mail, Outlook.com) get the app's
+ * dark colours and the dark header.
  */
 export function renderUpdateEmail(input: EmailInput): { html: string; text: string } {
   const subject = input.subject.trim();
@@ -387,6 +416,10 @@ export function renderUpdateEmail(input: EmailInput): { html: string; text: stri
   const day = escapeHtml(fmtDay(input.day));
   const small = `margin:0;font-size:13px;line-height:20px;color:${MUTE};font-family:${FONT};`;
   const footLink = `color:${MUTE};text-decoration:underline;text-underline-offset:2px;`;
+  const headerImg = (src: string) =>
+    `<img src="${src}" width="600" alt="Gloam" style="display:block;width:100%;max-width:600px;height:auto;border:0;outline:none;">`;
+  const fontFace = (weight: number, file: string) =>
+    `@font-face{font-family:Aeonik;font-style:normal;font-weight:${weight};src:url(${SITE}/fonts/${file}.woff2) format("woff2");}`;
 
   const html = `<!doctype html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -399,46 +432,61 @@ export function renderUpdateEmail(input: EmailInput): { html: string; text: stri
 <meta name="supported-color-schemes" content="light dark">
 <title>${escapeHtml(subject)}</title>
 <style>
+${fontFace(300, "Aeonik-Light")}
+${fontFace(400, "Aeonik-Regular")}
+${fontFace(500, "Aeonik-Medium")}
 :root{color-scheme:light dark;supported-color-schemes:light dark;}
 body{margin:0;padding:0;width:100%;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}
 table{border-collapse:collapse;}
 img{border:0;outline:none;text-decoration:none;}
-@media (max-width:620px){.gl-pad{padding-left:20px!important;padding-right:20px!important;}.gl-title{font-size:26px!important;line-height:32px!important;}}
+@media (max-width:620px){.gl-pad{padding-left:24px!important;padding-right:24px!important;}.gl-title{font-size:28px!important;line-height:34px!important;}.gl-outer{padding:12px 8px 32px!important;}}
 @media (prefers-color-scheme:dark){
-.gl-bg{background:#08090A!important;}
+.gl-ground{background:#08090A!important;}
+.gl-card{background:#111214!important;}
 .gl-ink,.gl-link{color:#F4F5F6!important;}
 .gl-soft{color:#CDD0D4!important;}
 .gl-mute,.gl-mute a{color:#9B9FA6!important;}
 .gl-green{color:#8FD3AD!important;}
 .gl-rule{border-color:#232529!important;}
+.gl-btn{background:#F4F5F6!important;}
+.gl-btn-a{color:#0B0C0E!important;}
+.gl-light-img{display:none!important;max-height:0!important;}
+.gl-dark-img{display:block!important;max-height:none!important;overflow:visible!important;}
 }
 [data-ogsc] .gl-ink,[data-ogsc] .gl-link{color:#F4F5F6!important;}
 [data-ogsc] .gl-soft{color:#CDD0D4!important;}
 [data-ogsc] .gl-mute,[data-ogsc] .gl-mute a{color:#9B9FA6!important;}
 [data-ogsc] .gl-green{color:#8FD3AD!important;}
+[data-ogsc] .gl-btn-a{color:#0B0C0E!important;}
+[data-ogsb] .gl-btn{background:#F4F5F6!important;}
 </style>
 <!--[if mso]><style>body,table,td,p,a,li,h1,h2,h3,h4{font-family:Arial,sans-serif!important;}</style><![endif]-->
 </head>
-<body class="gl-bg" style="margin:0;padding:0;background:#FFFFFF;">
+<body class="gl-ground" style="margin:0;padding:0;background:${GROUND};">
 <div style="display:none;max-height:0;max-width:0;overflow:hidden;opacity:0;mso-hide:all;">${escapeHtml(preheader)}&#8199;&#847;&#8199;&#847;&#8199;&#847;&#8199;&#847;&#8199;&#847;&#8199;&#847;</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="gl-bg" style="background:#FFFFFF;">
-<tr><td align="center" style="padding:40px 12px 48px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="gl-ground" bgcolor="${GROUND}" style="background:${GROUND};">
+<tr><td align="center" class="gl-outer" style="padding:32px 12px 40px;">
 <!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;">
-<tr><td class="gl-pad" style="padding:0 32px 32px;">
-<a href="${SITE}" style="text-decoration:none;"><img src="${LOGO_URL}" width="36" height="36" alt="Gloam" style="display:block;width:36px;height:36px;border:0;"></a>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="gl-card" bgcolor="${CARD}" style="max-width:600px;background:${CARD};border-radius:24px;">
+<tr><td style="padding:0;font-size:0;line-height:0;">
+<a href="${SITE}" style="display:block;text-decoration:none;"><span class="gl-light-img" style="display:block;">${headerImg(HEADER_URL)}</span><!--[if !mso]><!--><span class="gl-dark-img" style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${headerImg(HEADER_DARK_URL)}</span><!--<![endif]--></a>
 </td></tr>
-<tr><td class="gl-pad" style="padding:0 32px;">
-<p class="gl-green" style="margin:0 0 10px;font-size:13px;line-height:20px;color:${GREEN};font-family:${FONT};">Gloam update, ${day}</p>
-<h1 class="gl-ink gl-title" style="margin:0 0 24px;font-size:30px;line-height:36px;font-weight:300;letter-spacing:-0.02em;color:${INK};font-family:${FONT};">${escapeHtml(subject)}</h1>
+<tr><td class="gl-pad" style="padding:4px 40px 16px;">
+<p class="gl-green" style="margin:0 0 12px;font-size:13px;line-height:20px;font-weight:500;color:${GREEN};font-family:${FONT};">Gloam update, ${day}</p>
+<h1 class="gl-ink gl-title" style="margin:0 0 24px;font-size:34px;line-height:40px;font-weight:300;letter-spacing:-0.025em;color:${INK};font-family:${FONT};">${escapeHtml(subject)}</h1>
 ${blocksToEmailHtml(blocks)}
 </td></tr>
-<tr><td class="gl-pad" style="padding:24px 32px 0;">
+<tr><td class="gl-pad" style="padding:8px 40px 36px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="gl-rule" style="border-top:1px solid ${LINE};padding-top:20px;">
+<p class="gl-ink" style="margin:0;font-size:15px;line-height:22px;font-weight:500;color:${INK};font-family:${FONT};">Gloam</p>
+<p class="gl-mute" style="${small}">Private money on public chains.</p>
+</td></tr></table>
+</td></tr>
+</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;">
+<tr><td class="gl-pad" align="center" style="padding:24px 40px 0;">
 <p class="gl-mute" style="${small}">You asked for Gloam updates, so we sent you this one.</p>
 <p class="gl-mute" style="${small}padding-top:6px;"><a href="${unsub}" style="${footLink}">Unsubscribe</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;<a href="${web}" style="${footLink}">View on the web</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;<a href="${SITE}" style="${footLink}">gloam.trade</a></p>
-<p class="gl-mute" style="${small}padding-top:6px;">Gloam, private money on public chains.</p>
-</td></tr></table>
 </td></tr>
 </table>
 <!--[if mso]></td></tr></table><![endif]-->

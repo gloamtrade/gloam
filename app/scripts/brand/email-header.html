@@ -1,0 +1,39 @@
+<!doctype html>
+<!--
+  The header of every Gloam update email: the lockup under the brand glow, at
+  the top of the email's card. Rendered to
+  app/public/brand/kit/email/gloam-email-header{,-dark}.png at 2x by
+  scripts/brand/render-email-header.sh.
+  The rounded top corners are baked in: outside them is the email's ground
+  (#F4F4F5 light, #08090A dark), inside is the card (#FFFFFF light, #111214
+  dark), and the glow has faded to the card colour by the bottom edge, so the
+  image runs straight into the text under it.
+-->
+<html lang="en"><head><meta charset="utf-8"><title>Gloam email header</title>
+<style>
+@font-face{font-family:Aeonik;font-weight:500;src:url("../../public/fonts/Aeonik-Medium.woff2") format("woff2")}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:600px;height:168px;overflow:hidden}
+body{background:#F4F4F5;font-family:Aeonik,sans-serif}
+.card{position:relative;width:600px;height:168px;border-radius:24px 24px 0 0;overflow:hidden;background:#FFFFFF;color:#0B0C0E}
+.glow{position:absolute;right:-260px;top:-300px;width:760px;height:460px;background:
+  radial-gradient(closest-side,rgba(74,222,128,.42),rgba(74,222,128,.16) 52%,rgba(74,222,128,0) 100%)}
+.glow2{position:absolute;right:120px;top:-200px;width:420px;height:300px;background:
+  radial-gradient(closest-side,rgba(46,125,83,.10),rgba(46,125,83,0) 100%)}
+.lockup{position:absolute;left:40px;top:52px;display:flex;align-items:center;gap:11px;font-weight:500;font-size:27px;letter-spacing:-.015em}
+.lockup svg{width:34px;height:34px;display:block}
+.tile{fill:#0B0C0E}.win{fill:#FFFFFF}
+body.dark{background:#08090A}
+body.dark .card{background:#111214;color:#F4F5F6}
+body.dark .glow{background:radial-gradient(closest-side,rgba(74,222,128,.30),rgba(46,125,83,.16) 52%,rgba(46,125,83,0) 100%)}
+body.dark .glow2{background:radial-gradient(closest-side,rgba(46,125,83,.22),rgba(46,125,83,0) 100%)}
+body.dark .tile{fill:#FFFFFF}body.dark .win{fill:#0B0C0E}
+</style></head>
+<body>
+<script>if (location.hash === "#dark") document.body.className = "dark";</script>
+<div class="card">
+  <div class="glow2"></div>
+  <div class="glow"></div>
+  <div class="lockup"><svg viewBox="0 0 32 32"><rect class="tile" width="32" height="32" rx="9"/><rect class="win" x="15" y="4" width="12" height="12" rx="3.5"/></svg>Gloam</div>
+</div>
+</body></html>
