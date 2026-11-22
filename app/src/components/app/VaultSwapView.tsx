@@ -33,6 +33,8 @@ import {
   assetLabel,
   formatAssetAmount,
   formatAssetLabel,
+  formatAssetShort,
+  formatAssetShortLabel,
   formatFeePercent,
   parseAssetAmount,
   shieldPoolAbi,
@@ -1129,7 +1131,7 @@ export function VaultSwapView() {
         title="Swapped"
         body={
           receipt
-            ? `${formatAssetLabel(receipt.receiveAmount, receipt.receive)} is in your private balance.`
+            ? `${formatAssetShortLabel(receipt.receiveAmount, receipt.receive)} is in your private balance.`
             : ""
         }
         detail={
@@ -1170,8 +1172,9 @@ function SwapPair({
   const to = tokenFor(chainId, receive);
   const fromSymbol = from?.symbol ?? assetLabel(pay);
   const toSymbol = to?.symbol ?? assetLabel(receive);
-  const paid = formatAssetAmount(payAmount, pay);
-  const got = formatAssetAmount(receiveAmount, receive);
+  // short, cut down (never rounded up), like the other success dialogs
+  const paid = formatAssetShort(payAmount, pay);
+  const got = formatAssetShort(receiveAmount, receive);
   return (
     <div
       className="flex items-center justify-center gap-2 rounded-[18px] bg-surface px-3 py-4 sm:gap-3 sm:px-4"

@@ -12,6 +12,7 @@ import { chainLogo } from "@/lib/bridge";
 import { TokenLogo } from "./TokenLogo";
 import type { BridgeStage } from "@/lib/bridge";
 import { shortAddress } from "@/lib/chain";
+import { stableTextDown } from "@/lib/amountShort";
 import {
   crossChainAmountProblem,
   crossChainSource,
@@ -33,8 +34,8 @@ function ChainLogo({ id, size = 18 }: { id: number; size?: number }) {
   );
 }
 
-const money = (v: string) =>
-  Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** A stablecoin amount from Relay, to cents and cut down: "At least" never reads more than the order's minimum. */
+const money = (v: string) => stableTextDown(v);
 
 /** "Lands on": this chain as today, or another chain, in one dropdown. */
 export function CrossChainPicker({
