@@ -190,6 +190,28 @@ check("owner, treasury and deployer on the mainnet-pool vaults only; the relayer
   }
 });
 
+check("the Sepolia testnets list the owner wallet, never the mainnet guard or Safe", () => {
+  let seen = 0;
+  for (const key of ["base", "ethereum"] as const) {
+    const e = byKey[key];
+    if (!e?.live || !e.network.paymentsPool) continue;
+    seen++;
+    const owners = e.rows.filter((r) => r.role === "owner");
+    assert.deepEqual(owners.map((r) => r.name), ["Owner"], `${key} owner rows`);
+    assert.ok(same(owners[0]!.address, dir.GLOAM_OWNER), `${key} owner is the owner wallet`);
+    assert.ok(!e.rows.some((r) => dir.GLOAM_OWNER_GUARD && same(r.address, dir.GLOAM_OWNER_GUARD)), `${key} names no guard`);
+    assert.ok(!e.rows.some((r) => same(r.address, dir.GLOAM_OWNER_SAFE)), `${key} names no Safe`);
+    // Its owner check counts the owner wallet only: the guard holding a testnet vault would be news.
+    const n = e.network;
+    const held = dir.vaultChecks(n, { ...RH_READ, owner: dir.GLOAM_OWNER_GUARD!, feeRecipient: dir.GLOAM_TREASURY });
+    assert.equal(held.find((c) => c.label === "Owner as listed")!.ok, false, `${key} guard is not its listed owner`);
+  }
+  assert.ok(seen > 0, "a Sepolia testnet with a payments vault was checked");
+  // A testnet never takes a mainnet's born-guarded addresses (keyed by network, not by chain).
+  assert.equal(dir.BORN_GUARDED.elysium, undefined);
+  assert.ok(dir.BORN_GUARDED["bnb-mainnet"] && dir.BORN_GUARDED["elysium-mainnet"]);
+});
+
 check("the accounts match the deployment records", () => {
   const records = ["base-sepolia", "ethereum-sepolia", "base-mainnet", "ethereum-mainnet"]
     .map((name) => new URL(`../../contracts/deployments/${name}.json`, import.meta.url))

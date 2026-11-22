@@ -85,8 +85,9 @@ let persistAsked = false;
 
 /**
  * Asks the browser to keep this site's storage (navigator.storage.persist), so it
- * doesn't clear the note key under storage pressure. Once per page load, and only
- * when there is something to keep. A refusal changes nothing and shows nothing.
+ * doesn't clear the note key under storage pressure. Called from the person's own
+ * actions (a deposit, a claim, turning on a backup), never on page load, since some
+ * browsers answer it with a prompt. Once per page load. A refusal changes nothing.
  */
 export function keepStorage(): void {
   if (persistAsked || typeof navigator === "undefined") return;

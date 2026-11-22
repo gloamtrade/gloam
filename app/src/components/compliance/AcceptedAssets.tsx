@@ -6,17 +6,20 @@ import { isNoLimit } from "@gloamtrade/sdk";
 import { contractDirectory, type DirectoryEntry } from "@/lib/contractDirectory";
 import { publicClientFor } from "@/lib/rhClient";
 import { NATIVE_ASSET, shieldPoolAbi } from "@/lib/shield";
-import { shieldTokensFor, supportsNativeShield } from "@/lib/tokens";
+import { shieldTokensFor, supportsNativeShield, swapDisplayTokensFor } from "@/lib/tokens";
 
 /**
  * /compliance#assets: what each live mainnet vault takes, with its deposit
  * limits read from the vault as the page loads. Nothing here is typed in: the
- * assets are the ones Add lists (lib/tokens), and the limits are the vault's own
+ * assets are the ones Add lists and the ones private swaps land in (lib/tokens:
+ * shieldTokensFor, swapDisplayTokensFor), and the limits are the vault's own
  * answer (depositLimitsOn, depositLimit), so a limit raised, lowered or closed
- * shows as it stands.
+ * shows as it stands. A swap-only asset the vault has not opened is left out:
+ * the vault doesn't take it.
  */
 
-type Asset = { symbol: string; address: Address; decimals: number };
+/** `swapOnly`: listed for swaps, not on Add; shown only while the vault takes it. */
+type Asset = { symbol: string; address: Address; decimals: number; swapOnly?: boolean };
 type Limit = { per: bigint; total: bigint } | "off";
 type Row = Asset & { limit: Limit | null };
 type State = { status: "loading" } | { status: "done"; rows: Row[] } | { status: "error" };
@@ -25,10 +28,26 @@ const MAINNETS: DirectoryEntry[] = contractDirectory(false).filter((e) => e.live
 
 function assetsOf(e: DirectoryEntry): Asset[] {
   const n = e.network;
-  const tokens: Asset[] = shieldTokensFor(n.chainId).map((t) => ({ symbol: t.symbol, address: t.address, decimals: t.decimals }));
-  return supportsNativeShield(n.chainId)
-    ? [{ symbol: n.primaryAsset.symbol, address: NATIVE_ASSET, decimals: n.primaryAsset.decimals }, ...tokens]
-    : tokens;
+  const seen = new Set<string>();
+  const add = (a: Asset): boolean => {
+    const k = a.address.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  };
+  const native: Asset[] = supportsNativeShield(n.chainId)
+    ? [{ symbol: n.primaryAsset.symbol, address: NATIVE_ASSET, decimals: n.primaryAsset.decimals }]
+    : [];
+  const listed: Asset[] = shieldTokensFor(n.chainId).map((t) => ({ symbol: t.symbol, address: t.address, decimals: t.decimals }));
+  const swaps: Asset[] = swapDisplayTokensFor(n.chainId).map((t) => ({ symbol: t.symbol, address: t.address, decimals: t.decimals, swapOnly: true }));
+  return [...native, ...listed, ...swaps].filter(add);
+}
+
+/** A swap-only asset shows only when the vault takes it: limits off, or a limit above zero. */
+function shown(r: Row): boolean {
+  if (!r.swapOnly) return true;
+  if (r.limit === "off") return true;
+  return r.limit !== null && r.limit.per > 0n && r.limit.total > 0n;
 }
 
 async function readLimits(e: DirectoryEntry): Promise<Row[]> {
@@ -47,7 +66,7 @@ async function readLimits(e: DirectoryEntry): Promise<Row[]> {
         .catch(() => null)
     )
   );
-  return assets.map((a, i) => ({ ...a, limit: limits[i] ?? null }));
+  return assets.map((a, i) => ({ ...a, limit: limits[i] ?? null })).filter(shown);
 }
 
 function amount(v: bigint, decimals: number): string {

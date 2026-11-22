@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { UserRejectedRequestError, ContractFunctionExecutionError, ContractFunctionRevertedError, parseAbi } from "viem";
 
-const { walletErrorForPeople, lacksGasFunds, NO_GAS_FUNDS_TEXT } = await import("../src/lib/walletErrors");
+const { walletErrorForPeople, lacksGasFunds, NO_GAS_FUNDS_TEXT, NO_FEE_STABLECOIN_TEXT } = await import("../src/lib/walletErrors");
 
 let n = 0;
 function check(name: string, fn: () => void) {
@@ -67,6 +67,14 @@ check("no gas coin for the fee reads as that, however the wallet words it", () =
   }
   // a token's own "exceeds balance" is about the token, not the fee
   assert.ok(!lacksGasFunds(new Error("ERC20: transfer amount exceeds balance")));
+});
+
+check("on Tempo the missing fee is a stablecoin, never a gas coin", () => {
+  const e = new Error("insufficient funds for gas * price + value: balance 0");
+  assert.ok(lacksGasFunds(e));
+  assert.equal(walletErrorForPeople(e, undefined, { feeIn: "stablecoin" }), NO_FEE_STABLECOIN_TEXT);
+  assert.ok(!/gas coin/.test(NO_FEE_STABLECOIN_TEXT));
+  assert.equal(walletErrorForPeople(e), NO_GAS_FUNDS_TEXT, "elsewhere it is the gas coin");
 });
 
 check("a revert with no reason keeps viem's one line", () => {

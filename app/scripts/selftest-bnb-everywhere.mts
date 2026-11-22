@@ -120,18 +120,18 @@ ok(ungated.length === 0, `BNB Chain copy with no gate: ${ungated.join(", ")}`);
 // /verify's planned addresses match the deployments record, before and after the deploy.
 const { BORN_GUARDED } = await import("../src/lib/contractDirectory");
 const record = JSON.parse(readFileSync(join(APP, "../contracts/deployments/bnb-mainnet.json"), "utf8"));
-const planned = BORN_GUARDED.bnb!;
+const planned = BORN_GUARDED["bnb-mainnet"]!;
 const same = (a: string | undefined, b: string | undefined) => Boolean(a && b) && a!.toLowerCase() === b!.toLowerCase();
 if (record.contracts?.ShieldPoolPayments) {
-  ok(same(planned.deployer, record.deployer), "BORN_GUARDED.bnb.deployer = the deploy's");
-  ok(same(planned.poseidon, record.contracts.PoseidonT3), "BORN_GUARDED.bnb.poseidon = the deploy's PoseidonT3");
-  ok(same(planned.guard, record.contracts.VaultOwnerGuard), "BORN_GUARDED.bnb.guard = the deploy's VaultOwnerGuard");
-  ok(same(planned.controller, record.guard?.controller) || same(planned.controller, record.guard?.pendingController), "BORN_GUARDED.bnb.controller = the guard's controller");
+  ok(same(planned.deployer, record.deployer), "BORN_GUARDED[bnb-mainnet].deployer = the deploy's");
+  ok(same(planned.poseidon, record.contracts.PoseidonT3), "BORN_GUARDED[bnb-mainnet].poseidon = the deploy's PoseidonT3");
+  ok(same(planned.guard, record.contracts.VaultOwnerGuard), "BORN_GUARDED[bnb-mainnet].guard = the deploy's VaultOwnerGuard");
+  ok(same(planned.controller, record.guard?.controller) || same(planned.controller, record.guard?.pendingController), "BORN_GUARDED[bnb-mainnet].controller = the guard's controller");
 } else {
-  ok(same(planned.deployer, record.plan.deployer), "BORN_GUARDED.bnb.deployer = the plan's");
-  ok(same(planned.poseidon, record.plan.PoseidonT3), "BORN_GUARDED.bnb.poseidon = the plan's PoseidonT3");
-  ok(same(planned.guard, record.plan.VaultOwnerGuard), "BORN_GUARDED.bnb.guard = the plan's VaultOwnerGuard");
-  ok(same(planned.controller, record.plan.guardController) && same(planned.controller, SAFE), "BORN_GUARDED.bnb.controller = the Safe");
+  ok(same(planned.deployer, record.plan.deployer), "BORN_GUARDED[bnb-mainnet].deployer = the plan's");
+  ok(same(planned.poseidon, record.plan.PoseidonT3), "BORN_GUARDED[bnb-mainnet].poseidon = the plan's PoseidonT3");
+  ok(same(planned.guard, record.plan.VaultOwnerGuard), "BORN_GUARDED[bnb-mainnet].guard = the plan's VaultOwnerGuard");
+  ok(same(planned.controller, record.plan.guardController) && same(planned.controller, SAFE), "BORN_GUARDED[bnb-mainnet].controller = the Safe");
 }
 
 // ---------------------------------------------------------------- the lists
@@ -248,18 +248,18 @@ if (MODE !== "on") {
   const entry = contractDirectory().find((d) => d.key === "bnb-mainnet");
   ok(entry?.live && entry.kind === "mainnet", "on: /verify lists it");
   const rows = entry!.rows;
-  ok(rows.some((r) => r.name === "Owner guard" && same(r.address, BORN_GUARDED.bnb!.guard)), "on: the guard row");
+  ok(rows.some((r) => r.name === "Owner guard" && same(r.address, planned.guard)), "on: the guard row");
   ok(rows.some((r) => r.name === "Guard controller" && same(r.address, SAFE)), "on: the Safe runs the guard");
   ok(!rows.some((r) => same(r.address, "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8")), "on: no owner-wallet row");
   ok(rows.some((r) => r.role === "deployer" && same(r.address, "0xec9993765e249e8e9DC677B7BCB61F78b31c6b60")), "on: its own deployer");
   const read = {
-    owner: BORN_GUARDED.bnb!.guard,
+    owner: planned.guard,
     pendingOwner: ZERO,
     setupMode: false,
     changeDelay: 3n * 24n * 60n * 60n,
     verifier: "0x29053A713E3a7D37053374446869a6f55858FcEf",
     shieldVerifier: "0xAEB8cb99B3BB43eB230F9fEB7293fB5E39080016",
-    poseidon: BORN_GUARDED.bnb!.poseidon,
+    poseidon: planned.poseidon,
     feeRecipient: "0xB3900ac9350903218e4c7597bAb0f008F01B30B8",
     withdrawFeeBps: 50,
     cashOutVerifier: null,

@@ -31,7 +31,7 @@ import { isTempoWallet } from "@/lib/tempoWallet";
 import { EMBEDDED_CONNECTOR_ID } from "@/lib/embeddedWallet";
 import { TURNKEY_CAN_OPEN_TEXT } from "@/lib/embeddedRecovery";
 import { useAutoRestore } from "@/hooks/useAutoRestore";
-import { backupRoute, backupSkippedAt, backupStepNeeded, skipBackupStep, type BackupRoute } from "@/lib/backupGate";
+import { backupRoute, backupSkippedAt, backupStepNeeded, keepStorage, skipBackupStep, type BackupRoute } from "@/lib/backupGate";
 import { useWalletState } from "@/hooks/useWalletState";
 
 type Busy = "on-wallet" | "on-passkey" | "restore-wallet" | "restore-passkey" | "restore-older" | "save" | "off" | "update" | "older" | null;
@@ -161,14 +161,16 @@ function useRecovery() {
     }
   }
 
-  const turnOn = (source: RecoverySource) =>
-    run(source === "wallet" ? "on-wallet" : "on-passkey", async () =>
+  const turnOn = (source: RecoverySource) => {
+    keepStorage();
+    return run(source === "wallet" ? "on-wallet" : "on-passkey", async () =>
       turnedOn(
         source === "wallet"
           ? await turnOnWithWallet(wallet())
           : await connectRecovery(await keysFromSecret("passkey", await passkeySecret("create")), address),
       ),
     );
+  };
 
   const restore = (source: RecoverySource) =>
     run(source === "wallet" ? "restore-wallet" : "restore-passkey", async () => {
@@ -199,6 +201,7 @@ function useRecovery() {
 
   const save = () =>
     run("save", async () => {
+      keepStorage();
       await backupNow();
       return "Backed up.";
     });
@@ -545,7 +548,9 @@ export function RecoveryNudge({ hasBalance, hasDeposits }: { hasBalance: boolean
   const busy = Boolean(r.busy);
   const label = noBackup ? "Try now" : source === "wallet" ? "Turn on with your wallet" : "Turn on with a passkey";
   // Holding a private balance with no backup: hidden for two days at most, never a week.
-  const snooze = () => snoozeNudge(hasBalance && !r.state.on ? HOLDING_SNOOZE_MS : NUDGE_SNOOZE_MS);
+  const snoozeMs = hasBalance && !r.state.on ? HOLDING_SNOOZE_MS : NUDGE_SNOOZE_MS;
+  const snooze = () => snoozeNudge(snoozeMs);
+  const hideLabel = snoozeMs === HOLDING_SNOOZE_MS ? "Hide for two days" : "Hide for a week";
 
   return (
     <section aria-labelledby="recovery-nudge-title" className="gl-card flex gap-4 max-sm:items-start max-sm:p-5 sm:items-center sm:py-4 sm:pl-6 sm:pr-4">
@@ -617,8 +622,8 @@ export function RecoveryNudge({ hasBalance, hasDeposits }: { hasBalance: boolean
         <button
           type="button"
           onClick={snooze}
-          aria-label="Hide for a week"
-          title="Hide for a week"
+          aria-label={hideLabel}
+          title={hideLabel}
           className="-mr-1.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground max-sm:-mt-1.5"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
