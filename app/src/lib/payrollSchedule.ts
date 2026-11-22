@@ -16,6 +16,7 @@
  * calendar days written as YYYY-MM-DD.
  */
 import { formatUnits, type Address } from "viem";
+import { scopedKey, writableKey } from "@/lib/accountSlot";
 import { openJson, sealJson } from "@/lib/noteVault";
 import { assetDecimals } from "@/lib/shield";
 import type { DraftRow, PayeeKind, PayrollBatch } from "@/lib/payroll";
@@ -372,11 +373,19 @@ export function runTitle(s: PayrollSchedule, payday: string, today: string = iso
 
 // ------------------------------------------------------------------ storage
 
-const STORE_KEY = "gloam.payroll.schedules.v1";
+/** The schedules of the browser's first account; every other sign-in's carry a suffix (lib/accountSlot). */
+export const STORE_KEY = "gloam.payroll.schedules.v1";
 const STORE_LOCK = "gloam-payroll-schedules";
 
 /** How many schedules this browser keeps, across every network. */
 export const MAX_SCHEDULES = 50;
+
+/** The bound account's schedules as stored (none with no account bound). */
+function storedRaw(): string | null {
+  if (typeof window === "undefined") return null;
+  const key = scopedKey(STORE_KEY);
+  return key ? window.localStorage.getItem(key) : null;
+}
 
 /**
  * Every saved schedule. `forWrite` refuses when schedules are stored but cannot
@@ -384,7 +393,7 @@ export const MAX_SCHEDULES = 50;
  */
 async function readAll(
   forWrite = false,
-  raw = typeof window === "undefined" ? null : window.localStorage.getItem(STORE_KEY)
+  raw = storedRaw()
 ): Promise<PayrollSchedule[]> {
   if (typeof window === "undefined") return [];
   const all = await openJson<PayrollSchedule[]>(raw);
@@ -405,7 +414,7 @@ export async function loadSchedules(chainId: number, pool: Address): Promise<Pay
  */
 export function onSchedulesChangedElsewhere(onChange: () => void): () => void {
   const onStorage = (e: StorageEvent) => {
-    if (e.key === STORE_KEY || e.key === null) onChange();
+    if (e.key === null || e.key === scopedKey(STORE_KEY)) onChange();
   };
   window.addEventListener("storage", onStorage);
   return () => window.removeEventListener("storage", onStorage);
@@ -426,14 +435,16 @@ function withStoreLock<T>(fn: () => Promise<T>): Promise<T> {
  * whole: nothing is ever cut to make room.
  */
 async function mutate(change: (all: PayrollSchedule[]) => PayrollSchedule[]): Promise<void> {
+  // the bound account's schedules: with none bound this throws and nothing is written
+  const key = writableKey(STORE_KEY);
   await withStoreLock(async () => {
     for (let attempt = 0; ; attempt++) {
-      const raw = window.localStorage.getItem(STORE_KEY);
+      const raw = window.localStorage.getItem(key);
       const next = change(await readAll(true, raw));
       // Names and Gloam addresses: sealed under the same device key as notes and runs.
       const sealed = await sealJson(next);
-      if (window.localStorage.getItem(STORE_KEY) !== raw && attempt < 5) continue;
-      window.localStorage.setItem(STORE_KEY, sealed);
+      if (window.localStorage.getItem(key) !== raw && attempt < 5) continue;
+      window.localStorage.setItem(key, sealed);
       return;
     }
   });

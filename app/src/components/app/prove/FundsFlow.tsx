@@ -3,6 +3,7 @@
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { formatUnits } from "viem";
 import { FUNDS_MAX_NOTES, encodeProof, proveFunds } from "@/lib/proofs";
+import { noteOwnerProblem } from "@/lib/noteVault";
 import {
   assetDecimals,
   assetLabel,
@@ -147,6 +148,12 @@ export function FundsFlow({ notes, empty }: { notes: LocalNote[]; empty: ReactNo
 
   async function create() {
     if (!canCreate || threshold == null) return;
+    // A proof carries each balance's spend marker: only the signed-in account's own (lib/noteVault).
+    const notYours = selected.map((n) => noteOwnerProblem(n)).find(Boolean);
+    if (notYours) {
+      setErr({ tone: "danger", text: notYours });
+      return;
+    }
     setErr(null);
     setBusy(true);
     const expiresAt = expiresAtFor(expiry);

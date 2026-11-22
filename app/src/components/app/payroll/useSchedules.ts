@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Address } from "viem";
 import { assetDecimals } from "@/lib/shield";
+import { useShownAccount } from "../AccountScope";
+import { useWalletState } from "@/hooks/useWalletState";
 import {
   deleteSchedule,
   demoSchedule,
@@ -53,6 +55,8 @@ function useToday(): string {
  * The saved payroll schedules for this network and vault. In the recording
  * demo they live in memory only, seeded with one example that is due.
  */
+const NO_SCHEDULES: PayrollSchedule[] = [];
+
 export function useSchedules({
   chainId,
   pool,
@@ -65,7 +69,9 @@ export function useSchedules({
   /** The currency the demo's example schedule pays in. */
   demoAsset: Address | undefined;
 }) {
-  const [schedules, setSchedules] = useState<PayrollSchedule[]>([]);
+  // The signed-in account's own schedules (lib/accountScope): read once its account is bound, gone on sign out.
+  const shownAccount = useShownAccount();
+  const [schedules, setSchedules] = useWalletState<PayrollSchedule[]>(demo ? "demo" : shownAccount, NO_SCHEDULES);
   const today = useToday();
   // The demo's example is seeded for the day the page opened, so a new day
   // does not reset what was done with it.
@@ -74,7 +80,7 @@ export function useSchedules({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!pool) return;
+    if (!pool || (!demo && !shownAccount)) return;
     let live = true;
     let reads = 0;
     const read = () => {
@@ -95,7 +101,7 @@ export function useSchedules({
       live = false;
       stop?.();
     };
-  }, [chainId, pool, demo, demoAsset, demoDay]);
+  }, [chainId, pool, demo, demoAsset, demoDay, shownAccount, setSchedules]);
 
   // Saved first, shown after: a write refused because the stored schedules
   // cannot be opened must not look like it worked.
@@ -105,7 +111,7 @@ export function useSchedules({
       if (!demo) await saveSchedule(s);
       setSchedules((prev) => [s, ...prev.filter((x) => x.id !== s.id)]);
     },
-    [demo]
+    [demo, setSchedules]
   );
 
   // Deleted only once it is gone from storage: a refused delete keeps the
@@ -122,7 +128,7 @@ export function useSchedules({
       setSchedules((prev) => prev.filter((x) => x.id !== id));
       return true;
     },
-    [demo]
+    [demo, setSchedules]
   );
 
   const togglePause = useCallback(
@@ -142,7 +148,7 @@ export function useSchedules({
       // A run that finished settles its payday from its own record too (see PayrollView), so a refused write here only costs the reminder.
       if (!demo) await markSchedulePaid(id, payday, batchId).catch(() => undefined);
     },
-    [demo]
+    [demo, setSchedules]
   );
 
   return { schedules, today, error, save, remove, togglePause, markPaid };

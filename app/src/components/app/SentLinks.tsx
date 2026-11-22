@@ -35,6 +35,7 @@ import {
   subscribeSentLinks,
 } from "@/lib/sentLinksStore";
 import { useNetwork } from "./NetworkProvider";
+import { useShownAccount } from "./AccountScope";
 import { PaymentNoteLine } from "./PaymentNote";
 import { StatusPill } from "./StatusPill";
 
@@ -77,7 +78,9 @@ export function SentLinks({
   const { network } = useNetwork();
   const pool = network.pool;
   const chainId = network.chainId;
-  const scope = pool ? `${chainId}:${pool.toLowerCase()}` : "";
+  // the signed-in account's own codes (lib/accountScope): read again once it is bound, gone when it isn't
+  const shownAccount = useShownAccount();
+  const scope = pool && shownAccount ? `${chainId}:${pool.toLowerCase()}:${shownAccount}` : "";
 
   const [loaded, setLoaded] = useState<{ scope: string; list: SentLink[] } | null>(null);
   const [openPref, setOpenPref] = useState<boolean | null>(null);
@@ -133,7 +136,7 @@ export function SentLinks({
   );
 
   const reload = useCallback(() => {
-    if (!pool) return;
+    if (!pool || !scope) return;
     const at = scope;
     void loadSentLinks(chainId, pool)
       .then((rows) => {
@@ -152,7 +155,7 @@ export function SentLinks({
     return subscribeSentLinks(reload);
   }, [reload]);
 
-  if (!pool) return null;
+  if (!pool || !scope) return null;
 
   function toggle() {
     const next = !isOpen;

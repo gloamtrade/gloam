@@ -33,8 +33,14 @@
  * only once the new blob is on disk and reads back the same; when the browser
  * refuses it (storage full, private mode) it rejects with NoteSaveError, so a
  * deposit or payment is never sent with a secret that was not saved.
+ *
+ * Each sign-in has its own store (lib/accountSlot): the keys here are the ones
+ * of the account bound to this page, and nothing is read or written before one
+ * is. The data key and its passkey are the browser's, shared by every account
+ * on it, so turning a passkey on or off reseals them all.
  */
 import type { LocalNote } from "./shield";
+import { accountScopeOn, accountShown, onAccountBound, scopedKey, SignedOutError, SIGNED_OUT_MESSAGE } from "./accountSlot";
 import { readDemo } from "./demoFlag";
 import { demoNotes, setDemoNotes } from "./demo/store";
 import {
@@ -46,8 +52,9 @@ import {
   type PasskeyWrapRecord,
 } from "./passkeyWrap";
 
+/** The notes of the browser's first account. Every other account's carry a suffix (lib/accountSlot): read notesKey(). */
 export const NOTES_KEY = "gloam.shield.notes.v1";
-/** Public parts of the passkey wrap (the PRF output never touches disk). */
+/** Public parts of the passkey wrap (the PRF output never touches disk). One per browser: it guards every account's data. */
 export const PASSKEY_KEY = "gloam.vault.passkey.v1";
 /** A notes blob that could not be opened is copied here before it is replaced. */
 const UNREADABLE_KEY = "gloam.shield.notes.unreadable.v1";
@@ -56,6 +63,13 @@ const ARCHIVE_PREFIX = "gloam.vault.archive.";
 const ENC_PREFIX = "gloamenc1:";
 /** Ids of notes removed on this browser, so a merge from another tab does not bring them back. */
 const REMOVED_KEY = "gloam.shield.notes.removed.v1";
+
+/** Where the bound account's notes are, or null while no account is bound (read nothing, write nothing). */
+export function notesKey(): string | null {
+  return scopedKey(NOTES_KEY);
+}
+const removedKey = () => scopedKey(REMOVED_KEY);
+const unreadableKey = () => scopedKey(UNREADABLE_KEY);
 const REMOVED_KEEP = 1000;
 /** The Web Lock every tab takes around a notes write. */
 const WRITE_LOCK = "gloam-notes-write";
@@ -267,8 +281,10 @@ const pendingAdded = new Set<string>();
 const pendingChanged = new Map<string, LocalNote>();
 
 function readRemoved(): Map<string, number> {
+  const key = removedKey();
+  if (!key) return new Map();
   try {
-    const raw = JSON.parse(localStorage.getItem(REMOVED_KEY) ?? "[]");
+    const raw = JSON.parse(localStorage.getItem(key) ?? "[]");
     const out = new Map<string, number>();
     if (Array.isArray(raw)) for (const r of raw) if (r && typeof r.id === "string") out.set(r.id, Number(r.at) || 0);
     return out;
@@ -300,6 +316,10 @@ async function readDiskNotes(raw: string | null): Promise<LocalNote[] | null> {
  * cross-tab lock. Resolves only once the blob is stored and reads back the same.
  */
 async function writeBlob(): Promise<void> {
+  // The bound account's keys, read once: a page binds one account (lib/accountSlot).
+  const notesAt = notesKey();
+  const removedAt = removedKey();
+  if (!notesAt || !removedAt) throw new SignedOutError();
   await withWriteLock(async () => {
     for (let attempt = 0; ; attempt++) {
       // a snapshot: notes saved in this tab while this write runs go in the next one
@@ -307,7 +327,7 @@ async function writeBlob(): Promise<void> {
       const gone = new Set(pendingRemoved);
       const back = new Set(pendingAdded);
       const changed = new Map(pendingChanged);
-      const raw = localStorage.getItem(NOTES_KEY);
+      const raw = localStorage.getItem(notesAt);
       const disk = await readDiskNotes(raw);
       const removed = readRemoved();
       for (const id of gone) removed.set(id, Date.now());
@@ -324,18 +344,18 @@ async function writeBlob(): Promise<void> {
       }
       const enc = await encrypt(JSON.stringify(merged));
       // Without a lock, another tab may have written while this one encrypted: merge again.
-      if (localStorage.getItem(NOTES_KEY) !== raw && attempt < 5) continue;
+      if (localStorage.getItem(notesAt) !== raw && attempt < 5) continue;
       const removedList = [...removed.entries()]
         .sort((a, b) => b[1] - a[1])
         .slice(0, REMOVED_KEEP)
         .map(([id, at]) => ({ id, at }));
       try {
-        localStorage.setItem(NOTES_KEY, enc);
-        localStorage.setItem(REMOVED_KEY, JSON.stringify(removedList));
+        localStorage.setItem(notesAt, enc);
+        localStorage.setItem(removedAt, JSON.stringify(removedList));
       } catch (e) {
         throw new NoteSaveError(e);
       }
-      if (localStorage.getItem(NOTES_KEY) !== enc) throw new NoteSaveError();
+      if (localStorage.getItem(notesAt) !== enc) throw new NoteSaveError();
       for (const id of gone) pendingRemoved.delete(id);
       for (const id of back) pendingAdded.delete(id);
       for (const [id, n] of changed) if (pendingChanged.get(id) === n) pendingChanged.delete(id);
@@ -379,12 +399,40 @@ function flushWrites(): Promise<void> {
   return writeChain;
 }
 
-// Synchronous bootstrap: a legacy plaintext blob is loaded now so reads work
-// before the async unlock; an encrypted blob waits for unlock to decrypt.
+/** Settles once every note write queued in this tab has landed (or failed): before a page reload. */
+export function notesSettled(): Promise<void> {
+  return flushWrites();
+}
+
+/** A legacy plaintext blob is loaded at once so reads work before the async unlock; an encrypted one waits for it. */
+function loadPlainNow() {
+  const key = notesKey();
+  const raw = key ? localStorage.getItem(key) : null;
+  if (raw && !raw.startsWith(ENC_PREFIX)) cache = parseNotes(raw);
+}
+
+/**
+ * An account was bound (lib/accountSlot): start from its notes. Nothing of
+ * another account is held here, since a page binds one (a switch reloads), and
+ * before the bind this tab read and wrote nothing.
+ */
+async function enterAccount() {
+  await flushWrites();
+  cache = [];
+  pendingRemoved.clear();
+  pendingAdded.clear();
+  pendingChanged.clear();
+  unlockPromise = null;
+  loadPlainNow();
+  emit();
+}
+
+// Synchronous bootstrap: listeners, and with the account scope off (self-tests)
+// the legacy plaintext blob, as before.
 function initSync() {
   if (typeof window === "undefined") return;
-  const raw = localStorage.getItem(NOTES_KEY);
-  if (raw && !raw.startsWith(ENC_PREFIX)) cache = parseNotes(raw);
+  loadPlainNow();
+  onAccountBound(enterAccount);
 
   // A note written while the vault is locked waits for the passkey. Warn
   // before the page closes so it is never silently dropped.
@@ -422,10 +470,13 @@ function onModeChangedElsewhere() {
 /** Ensure the encrypted store is decrypted (or legacy plaintext migrated) into the cache. */
 export function unlockNoteVault(): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
+  // No account bound: nothing to open. The bind starts over (enterAccount), so this runs again then.
+  const key = notesKey();
+  if (!key) return Promise.resolve();
   return (unlockPromise ??= (async () => {
     // Read the blob only once the key is ready (a passkey vault waits here).
-    if (localStorage.getItem(NOTES_KEY)?.startsWith(ENC_PREFIX)) await getKey();
-    const raw = localStorage.getItem(NOTES_KEY);
+    if (localStorage.getItem(key)?.startsWith(ENC_PREFIX)) await getKey();
+    const raw = localStorage.getItem(key);
     if (raw && raw.startsWith(ENC_PREFIX)) {
       try {
         const disk = parseNotes(await decrypt(raw));
@@ -437,7 +488,8 @@ export function unlockNoteVault(): Promise<void> {
       } catch {
         // Wrong key or corrupt blob: keep the cache, and keep a copy of the
         // ciphertext aside so a later write can never destroy it.
-        if (!localStorage.getItem(UNREADABLE_KEY)) localStorage.setItem(UNREADABLE_KEY, raw);
+        const aside = unreadableKey();
+        if (aside && !localStorage.getItem(aside)) localStorage.setItem(aside, raw);
       }
     } else if (raw) {
       // Legacy plaintext already in cache from initSync: re-persist encrypted.
@@ -451,8 +503,10 @@ export function unlockNoteVault(): Promise<void> {
 /** Re-read the encrypted blob from disk into the cache (cross-tab updates). */
 export async function syncFromDisk(): Promise<void> {
   if (typeof window === "undefined") return;
-  if (localStorage.getItem(NOTES_KEY)?.startsWith(ENC_PREFIX)) await getKey();
-  const raw = localStorage.getItem(NOTES_KEY);
+  const key = notesKey();
+  if (!key) return;
+  if (localStorage.getItem(key)?.startsWith(ENC_PREFIX)) await getKey();
+  const raw = localStorage.getItem(key);
   if (raw && raw.startsWith(ENC_PREFIX)) {
     try {
       cache = foldIn(parseNotes(await decrypt(raw)), readRemoved());
@@ -471,7 +525,8 @@ export async function syncFromDisk(): Promise<void> {
  */
 export async function storedNotesOpen(): Promise<boolean> {
   if (typeof window === "undefined") return true;
-  const raw = localStorage.getItem(NOTES_KEY);
+  const key = notesKey();
+  const raw = key ? localStorage.getItem(key) : null;
   if (!raw?.startsWith(ENC_PREFIX)) return true;
   try {
     await decrypt(raw);
@@ -481,11 +536,31 @@ export async function storedNotesOpen(): Promise<boolean> {
   }
 }
 
-/** All notes in the in-memory cache (unfiltered). */
+/** All notes in the in-memory cache (unfiltered): the bound account's, none before one is bound. */
 export function getAllNotes(): LocalNote[] {
   // Recording demo: the pretend wallet's notes, never this browser's own.
   if (readDemo()) return demoNotes();
   return cache;
+}
+
+/** Why a spend refuses a note that is not the signed-in account's. */
+export const NOTE_NOT_YOURS_MESSAGE = "This balance isn't in the private account you're signed in with.";
+
+/**
+ * Why `note` can't be spent or proved by the account signed in now, or null.
+ * Every spend path asks (lib/shield noteNetworkProblem, which they all call
+ * before proving), like the chain and vault check: nothing is spent while no
+ * one is signed in, and never a note that is not in the signed-in account's
+ * store (one held in a view from before a sign out or a switch, say). Off with
+ * the account scope off (self-tests that predate it) and in the recording demo.
+ */
+export function noteOwnerProblem(note: { id?: unknown; commitment?: unknown }): string | null {
+  if (!accountScopeOn() || readDemo()) return null;
+  if (!accountShown()) return SIGNED_OUT_MESSAGE;
+  const id = typeof note.id === "string" ? note.id : null;
+  const commitment = typeof note.commitment === "string" ? note.commitment.toLowerCase() : null;
+  if (!id || !commitment) return NOTE_NOT_YOURS_MESSAGE;
+  return cache.some((n) => n.id === id && n.commitment.toLowerCase() === commitment) ? null : NOTE_NOT_YOURS_MESSAGE;
 }
 
 /**
@@ -500,6 +575,8 @@ export function setAllNotes(next: LocalNote[]): Promise<void> {
     setDemoNotes(next);
     return Promise.resolve();
   }
+  // No account bound to this page: there is nowhere to save, and nothing changes here.
+  if (typeof window !== "undefined" && notesKey() === null) return Promise.reject(new SignedOutError());
   const before = new Map(cache.map((n) => [n.id, n]));
   const after = new Set(next.map((n) => n.id));
   for (const id of before.keys()) if (!after.has(id)) {
@@ -603,7 +680,7 @@ function sealedEntries(): [string, string][] {
   const out: [string, string][] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    if (!k || k.startsWith(ARCHIVE_PREFIX) || k === UNREADABLE_KEY) continue;
+    if (!k || k.startsWith(ARCHIVE_PREFIX) || k === UNREADABLE_KEY || k.startsWith(`${UNREADABLE_KEY}@`)) continue;
     const v = localStorage.getItem(k);
     if (v && v.startsWith(ENC_PREFIX)) out.push([k, v]);
   }

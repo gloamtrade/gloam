@@ -11,11 +11,17 @@
  * The tag's private key is sealed at rest like the notes (see storage below).
  */
 
+import { accountShown, scopedKey, SignedOutError, writableKey } from "./accountSlot";
 import { readDemo } from "./demoFlag";
 
-const ID_KEY = "gloam.receive.identity.v1";
+/**
+ * The receive key of the browser's first account. Every other sign-in's carries
+ * a suffix (lib/accountSlot), so each has its own Gloam address and only the
+ * account it belongs to opens payments sent to it.
+ */
+export const ID_KEY = "gloam.receive.identity.v1";
 /** Earlier receive keys, kept so payments sent to an older Gloam address still open. */
-const PREV_KEY = "gloam.receive.identity.prev.v1";
+export const PREV_KEY = "gloam.receive.identity.prev.v1";
 /** Fired on window whenever the receive key changes (recovery backs it up). */
 export const RECEIVE_IDENTITY_EVENT = "gloam:receive-identity";
 export const RECEIVE_TAG_PREFIX = "gloamr1.";
@@ -117,8 +123,10 @@ function setAside(key: string, raw: string) {
   }
 }
 
-/** One slot: sealed (opened), plain JSON from an earlier version (sealed now), or null. */
-async function readSlot(key: string): Promise<unknown> {
+/** One slot: sealed (opened), plain JSON from an earlier version (sealed now), or null. Null too with no account bound. */
+async function readSlot(base: string): Promise<unknown> {
+  const key = scopedKey(base);
+  if (!key) return null;
   const raw = localStorage.getItem(key);
   if (!raw) return null;
   const v = await vault();
@@ -155,12 +163,14 @@ async function loadKeys(): Promise<{ current: StoredIdentity | null; previous: S
 }
 
 async function saveCurrent(s: StoredIdentity) {
-  localStorage.setItem(ID_KEY, await (await vault()).sealJson(s));
+  const key = writableKey(ID_KEY);
+  localStorage.setItem(key, await (await vault()).sealJson(s));
   window.dispatchEvent(new Event(RECEIVE_IDENTITY_EVENT));
 }
 
 async function savePrevious(list: StoredIdentity[]) {
-  localStorage.setItem(PREV_KEY, await (await vault()).sealJson(list));
+  const key = writableKey(PREV_KEY);
+  localStorage.setItem(key, await (await vault()).sealJson(list));
 }
 
 function validStored(s: unknown): s is StoredIdentity {
@@ -201,9 +211,14 @@ export function importReceiveKeys(data: { current?: unknown; previous?: unknown 
   });
 }
 
-/** Load or create sticky receive identity for this browser. */
+/**
+ * Load or create the signed-in account's sticky receive identity. With no
+ * account bound to this page it throws SignedOutError and makes nothing: a
+ * signed-out page shows no Gloam address.
+ */
 export function getOrCreateReceiveIdentity(): Promise<ReceiveIdentity> {
   return serial(async () => {
+    if (typeof window !== "undefined" && (scopedKey(ID_KEY) === null || !accountShown())) throw new SignedOutError();
     let { current } = await loadKeys();
     if (!current) {
       current = await generateIdentity();
@@ -216,6 +231,7 @@ export function getOrCreateReceiveIdentity(): Promise<ReceiveIdentity> {
 /** New tag. Payments to the old tag still open: its key is kept among the earlier ones. */
 export function rotateReceiveIdentity(): Promise<ReceiveIdentity> {
   return serial(async () => {
+    if (scopedKey(ID_KEY) === null || !accountShown()) throw new SignedOutError();
     const { current: old, previous } = await loadKeys();
     if (old && !previous.some((p) => p.publicSpkiB64 === old.publicSpkiB64)) {
       await savePrevious([old, ...previous]);
@@ -439,9 +455,12 @@ export async function decryptTicketWithLocalTag(
   if (!s.startsWith(PAY_TO_TAG_PREFIX)) {
     throw new Error("Not a pay-to-tag package (gloam2t…).");
   }
+  // Only the signed-in account's keys: a payment sent to another account's address waits for that account.
+  if (!accountShown()) throw new SignedOutError();
   const { current, previous } = await serial(loadKeys);
   const keys = [...(current ? [current] : []), ...previous];
   if (!keys.length) {
+    if (scopedKey(ID_KEY) === null) throw new SignedOutError();
     throw new Error("No receive tag in this browser, generate one under Claim.");
   }
   const raw = b64urlDecode(s.slice(PAY_TO_TAG_PREFIX.length));

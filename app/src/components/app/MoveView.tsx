@@ -104,6 +104,7 @@ import {
 import { DevKeysBanner } from "./DevKeysBanner";
 import { PaymentTicketShare } from "./PaymentTicketShare";
 import { SentLinks } from "./SentLinks";
+import { useShownAccount } from "./AccountScope";
 import { makeSentLink, paymentNullifier, type SentLink } from "@/lib/sentLinks";
 import { removeSentLink, saveSentLink } from "@/lib/sentLinksStore";
 import { surelyNotSent, walletErrorForPeople } from "@/lib/walletErrors";
@@ -248,6 +249,8 @@ export function MoveView() {
   const shieldLive = isShieldDeployed();
   const poseidonMode = HASH_SCHEME === "poseidon";
   const { address, isConnected, chainId, connector } = useAppAccount();
+  /** The signed-in account once its own private account is bound to this page (lib/accountScope): null before, and signed out. */
+  const shownAccount = useShownAccount();
   /** `to` is the Gloam wallet connected now (lib/sweepCheck sweepVerdict: its own sponsored deposits look like a sweep). */
   const ownGloamWallet = (to: string | null | undefined) =>
     Boolean(
@@ -426,8 +429,10 @@ export function MoveView() {
   /** The Gloam address a direct payment is sealed to: the one typed, or the one the name points at. */
   const payTag =
     payRecipient.kind === "name" ? (nameLookup.status === "found" ? nameLookup.record.tag : "") : recipientTag.trim();
-  const [myIdentity, setMyIdentity] = useState<ReceiveIdentity | null>(null);
-  /** To is this browser's own Gloam address (typed, or behind an @name): still sent, with a note on why it helps. */
+  // The signed-in account's own Gloam address: gone on sign out (Duke, 22 Nov 2026: Receive still
+  // showed his address and QR after Sign out), and another sign-in reads its own.
+  const [myIdentity, setMyIdentity] = useWalletState<ReceiveIdentity | null>(shownAccount, null);
+  /** To is the signed-in account's own Gloam address (typed, or behind an @name): still sent, with a note on why it helps. */
   const payingSelf = payStyle === "direct" && !payToWallet && isValidReceiveTag(payTag) && isOwnGloamAddress(payTag, myIdentity?.tag);
   const [tagCopied, setTagCopied] = useState(false);
   const [shareLocked, setShareLocked] = useState(false);
@@ -2019,9 +2024,9 @@ export function MoveView() {
   }
 
   async function scanInbox() {
-    // This browser's Gloam address is not a wallet's: what it was paid is read only
-    // while one is connected, so a signed-out page never lists anyone's payments.
-    if (!address) return;
+    // Payments to the signed-in account's own Gloam address: read only once its account is
+    // bound, so a signed-out page never lists anyone's payments.
+    if (!address || !shownAccount) return;
     if (!isPayMemoLive()) {
       setInboxStatus(
         "Not available on this network yet. Ask the sender for a claim link."
@@ -2411,15 +2416,16 @@ export function MoveView() {
     }
   }
 
-  // Sticky receive tag for direct private pay
+  // Sticky receive tag for direct private pay: the signed-in account's own, and none while signed out
   useEffect(() => {
     if (mode !== "receive" && mode !== "send") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- saved contacts are the signed-in account's; read again each time Send opens
+    if (mode === "send") setContacts(shownAccount ? loadContacts() : []);
+    if (!shownAccount) return;
     void getOrCreateReceiveIdentity().then(setMyIdentity).catch(() => {
-      /* crypto unavailable */
+      /* crypto unavailable, or signed out meanwhile */
     });
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- saved contacts live in this browser; read again each time Send opens
-    if (mode === "send") setContacts(loadContacts());
-  }, [mode]);
+  }, [mode, shownAccount, setMyIdentity]);
 
   // Payments found for one network are never listed on another: a switch clears the list.
   const shownNetworkKey = useRef(networkKey);
@@ -2433,11 +2439,11 @@ export function MoveView() {
   // Auto-scan inbox when opening Receive (if memo board live), again on a network switch,
   // and once a wallet connects (or another one does: the list starts over for it)
   useEffect(() => {
-    if (mode !== "receive" || !isPayMemoLive() || !address) return;
+    if (mode !== "receive" || !isPayMemoLive() || !address || !shownAccount) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- opening Receive scans the payment-message board, which marks the scan as running
     void scanInbox();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- open-tab scan once per enter
-  }, [mode, networkKey, address]);
+  }, [mode, networkKey, address, shownAccount]);
 
   // Live preview when pasting a ticket (amount only, not a full claim)
   useEffect(() => {
@@ -3802,6 +3808,10 @@ export function MoveView() {
                       />
                     </div>
                   </>
+                ) : !shownAccount ? (
+                  <p className="mt-3 rounded-[16px] bg-surface p-[16px] text-[13px] text-mute">
+                    {isConnected ? "Opening your private account…" : SIGNED_OUT_BALANCE_MESSAGE}
+                  </p>
                 ) : (
                   <p className="mt-3 rounded-[16px] bg-surface p-[16px] text-[13px] text-mute">
                     Making your address… This needs a secure browser connection.
@@ -3937,7 +3947,7 @@ export function MoveView() {
                   <h3 className="text-[15px] font-medium text-foreground">
                     Payments to you
                   </h3>
-                  {address && (
+                  {shownAccount && (
                     <button
                       type="button"
                       onClick={() => void scanInbox()}
@@ -3960,9 +3970,7 @@ export function MoveView() {
                     Not on this network yet. Paste the claim link under Claim a payment.
                   </p>
                 )}
-                {!address && memoLive && (
-                  <p className="mt-3 text-[13px] text-soft">Connect a wallet to see payments to you.</p>
-                )}
+                {!address && memoLive && <p className="mt-3 text-[13px] text-soft">{SIGNED_OUT_BALANCE_MESSAGE}</p>}
                 {inboxStatus && (
                   <p className="mt-3 text-[13px] text-soft" aria-live="polite">
                     {inboxStatus}

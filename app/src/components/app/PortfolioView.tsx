@@ -49,6 +49,7 @@ import {
   formatAssetAmount,
   isNativeAsset,
   isShieldDeployed,
+  SIGNED_OUT_BALANCE_MESSAGE,
 } from "@/lib/shield";
 import { isClaimedNote, isSecuredClaim, isUnsecuredClaim } from "@/lib/claimSweep";
 import { canExitVaultSwap } from "@/lib/vaultSwap";
@@ -556,7 +557,7 @@ export function PortfolioView() {
         formatUsd: formatUsdCompact,
       });
   const privateSub = !isConnected
-    ? "Connect a wallet to see your private balance."
+    ? SIGNED_OUT_BALANCE_MESSAGE
     : !onProduct
       ? `Switch your wallet to ${network.label} to see balances.`
       : restoring

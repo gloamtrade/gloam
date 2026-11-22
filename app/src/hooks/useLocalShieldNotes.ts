@@ -5,7 +5,7 @@ import type { Address } from "viem";
 import { publicClientFor } from "@/lib/rhClient";
 import { DEMO_ADDRESS, useDemoLive } from "@/lib/demo";
 import { readDemo } from "@/lib/demoFlag";
-import { unlockNoteVault, syncFromDisk, onNotesSaved, NOTES_KEY } from "@/lib/noteVault";
+import { unlockNoteVault, syncFromDisk, onNotesSaved, notesKey } from "@/lib/noteVault";
 import {
   isUnsecuredClaim,
   reconcileClaims,
@@ -35,6 +35,7 @@ import {
   type LocalNote,
 } from "@/lib/shield";
 import { useNetwork } from "@/components/app/NetworkProvider";
+import { useShownAccount } from "@/components/app/AccountScope";
 import type { GloamNetwork } from "@/lib/networks";
 
 /**
@@ -64,6 +65,9 @@ export function useLocalShieldNotes(address?: string | null) {
   // connected, so a view that reads wagmi's own account (VaultTradePanel) still
   // lists them, as before.
   const wallet = demo ? address || DEMO_ADDRESS : address;
+  // The account whose store is bound to this page (lib/accountScope): the store reads
+  // nothing before the bind, so everything below reads again once it lands.
+  const shownAccount = useShownAccount();
   const [local, setLocal] = useState<LocalNote[]>([]);
   const [chain, setChain] = useState<LocalNote[]>([]);
   const [ready, setReady] = useState(false);
@@ -86,7 +90,7 @@ export function useLocalShieldNotes(address?: string | null) {
     setLocal(loadWalletNotes(wallet, network));
     setReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wallet, network.key]);
+  }, [wallet, network.key, shownAccount]);
 
   // every note asked at once (lib/spentCheck), not one read after another
   const reconcileSpent = useCallback(
@@ -165,7 +169,7 @@ export function useLocalShieldNotes(address?: string | null) {
       if (still()) setSyncing(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address, reconcileSpent, network.key, settled]);
+  }, [address, reconcileSpent, network.key, settled, shownAccount]);
 
   const refresh = useCallback(() => {
     refreshLocal();
@@ -201,7 +205,7 @@ export function useLocalShieldNotes(address?: string | null) {
 
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key === NOTES_KEY) void syncFromDisk().then(refreshLocal);
+      if (e.key !== null && e.key === notesKey()) void syncFromDisk().then(refreshLocal);
     };
     const onFocus = () => {
       const now = Date.now();

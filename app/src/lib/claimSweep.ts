@@ -57,7 +57,7 @@ import {
   waitForTx,
 } from "./relay/client";
 import { publicClientFor } from "./rhClient";
-import { dataKeyLocked, getAllNotes, syncFromDisk, unlockNoteVault } from "./noteVault";
+import { dataKeyLocked, getAllNotes, noteOwnerProblem, syncFromDisk, unlockNoteVault } from "./noteVault";
 import { readDemo } from "./demoFlag";
 import {
   FILES_RETRY,
@@ -474,6 +474,9 @@ async function secureOnce(p: SecureParams, env: ClaimEnv): Promise<SecureResult>
   if (!pool || note.chainId !== env.chainId || note.pool.toLowerCase() !== pool.toLowerCase()) {
     throw new Error("Switch to the network this payment is on to secure it.");
   }
+  // Only the signed-in account's own claim (lib/noteVault noteOwnerProblem), like every spend path.
+  const notYours = noteOwnerProblem(note);
+  if (notYours) throw new Error(notYours);
   // Secured already, by another try that landed: nothing to send.
   const moved = landedMoveOf(note.id);
   if (moved) return securedResult(moved, null);

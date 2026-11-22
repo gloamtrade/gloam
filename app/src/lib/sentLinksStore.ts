@@ -14,13 +14,15 @@
  * chain: its codes are for a pretend wallet.
  */
 import type { Address, Hex } from "viem";
+import { scopedKey, writableKey } from "./accountSlot";
 import { readDemo } from "./demoFlag";
 import { openJson, sealJson } from "./noteVault";
 import { getRhPublicClient } from "./rhClient";
 import { shieldPoolAbi } from "./shield";
 import { addSentLink, capSentLinks, needsCheck, parseSentLinks, sameScope, type SentLink } from "./sentLinks";
 
-const STORE_KEY = "gloam.sentlinks.v1";
+/** The links of the browser's first account; every other sign-in's carry a suffix (lib/accountSlot). */
+export const STORE_KEY = "gloam.sentlinks.v1";
 /** A list that could not be opened is copied here before a new one is written. */
 const UNREADABLE_KEY = "gloam.sentlinks.unreadable.v1";
 
@@ -40,12 +42,14 @@ function emit() {
 async function readAll(): Promise<SentLink[]> {
   if (typeof window === "undefined") return [];
   if (readDemo()) return demoList;
-  const raw = window.localStorage.getItem(STORE_KEY);
+  const key = scopedKey(STORE_KEY);
+  const raw = key ? window.localStorage.getItem(key) : null;
   if (!raw) return [];
   const value = await openJson<unknown>(raw);
   if (value === null) {
     // Another key or damaged data: keep the ciphertext aside so a write never destroys it.
-    if (!window.localStorage.getItem(UNREADABLE_KEY)) window.localStorage.setItem(UNREADABLE_KEY, raw);
+    const aside = scopedKey(UNREADABLE_KEY);
+    if (aside && !window.localStorage.getItem(aside)) window.localStorage.setItem(aside, raw);
     return [];
   }
   return parseSentLinks(value);
@@ -57,7 +61,8 @@ async function writeAll(list: SentLink[]): Promise<void> {
     demoList = next;
     return;
   }
-  window.localStorage.setItem(STORE_KEY, await sealJson(next));
+  const key = writableKey(STORE_KEY);
+  window.localStorage.setItem(key, await sealJson(next));
 }
 
 let writeQueue: Promise<void> = Promise.resolve();
