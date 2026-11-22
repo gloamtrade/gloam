@@ -118,6 +118,9 @@ const SERVICES = [
   "https://api.relay.link",
   "https://api.dexscreener.com",
   "https://va.vercel-scripts.com",
+  // Solana Privacy Rings: the signed TEE policy the SDK pins its prover to (lib/solanaRings/client).
+  // Every Solana, indexer and prover call itself goes through Gloam's own /api/solana proxy.
+  "https://d3gbdb0egjwcw9.cloudfront.net",
 ];
 
 /**
