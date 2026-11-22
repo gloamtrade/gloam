@@ -15,6 +15,7 @@ import { FeeRiseNotice } from "./FeeRiseNotice";
 import { TestFundsNotice } from "./TestFundsNotice";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { VaultNavGroup, VaultNavGroupStatic, navActiveFill } from "./VaultNavGroup";
+import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 
 type NavItem = {
   href: string;
@@ -76,6 +77,19 @@ const nav: NavItem[] = [
       </svg>
     ),
   },
+  ...(SOLANA_RINGS_ENABLED
+    ? [
+        {
+          href: "/app/solana",
+          label: "Solana",
+          icon: (
+            <svg className={ic} viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path d="M6.5 7h12l-2 2.5h-12l2-2.5zM4.5 10.75h12l2 2.5h-12l-2-2.5zM6.5 14.5h12l-2 2.5h-12l2-2.5z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+            </svg>
+          ),
+        },
+      ]
+    : []),
   {
     href: "/app/disclose",
     label: "Prove",
