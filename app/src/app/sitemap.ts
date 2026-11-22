@@ -1,6 +1,8 @@
 import type { MetadataRoute } from "next";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { FRESH_WALLET_ENABLED } from "@/lib/freshWalletFlag";
+import { kvBackend } from "@/lib/partnersKv";
+import { listPublishedUpdates } from "@/lib/updatesMail";
 
 const SITE = "https://www.gloam.trade";
 
@@ -16,6 +18,7 @@ const PAGES: { path: string; priority: number }[] = [
   { path: "/docs", priority: 0.8 },
   { path: "/whitepaper", priority: 0.8 },
   { path: "/research", priority: 0.7 },
+  { path: "/updates", priority: 0.5 },
   { path: "/verify", priority: 0.7 },
   { path: "/security", priority: 0.7 },
   { path: "/compliance", priority: 0.5 },
@@ -70,6 +73,21 @@ const PAGES: { path: string; priority: number }[] = [
   { path: "/disclosures", priority: 0.2 },
 ];
 
-export default function sitemap(): MetadataRoute.Sitemap {
-  return PAGES.map(({ path, priority }) => ({ url: `${SITE}${path === "/" ? "" : path}`, priority }));
+/** Read again at most hourly, so a new email update joins the list without a deploy. */
+export const revalidate = 3600;
+
+/** Each email update that went out (/updates/<id>). A store that doesn't answer leaves them out this time. */
+async function updatePages(): Promise<MetadataRoute.Sitemap> {
+  if (kvBackend() !== "redis") return [];
+  try {
+    const updates = await listPublishedUpdates();
+    return updates.map((u) => ({ url: `${SITE}/updates/${u.id}`, lastModified: u.day, priority: 0.4 }));
+  } catch {
+    return [];
+  }
+}
+
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const pages = PAGES.map(({ path, priority }) => ({ url: `${SITE}${path === "/" ? "" : path}`, priority }));
+  return [...pages, ...(await updatePages())];
 }
