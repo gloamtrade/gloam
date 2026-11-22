@@ -11,6 +11,7 @@ import { readAmountText } from "./amountText";
 import { dataKeyLocked, getAllNotes, setAllNotes, syncFromDisk, unlockNoteVault } from "./noteVault";
 import { readDemo } from "./demoFlag";
 import type { VaultSwapRefundInfo } from "./vaultSwap";
+import type { NameClaimRefundInfo } from "./nameClaim";
 import type { DelayWindow } from "./relay/scheduled";
 import { scanDeposits } from "./depositScan";
 import { isElysiumFamilyChainId } from "./elysium";
@@ -672,7 +673,13 @@ export type LocalNote = {
    */
   vaultSwap?: VaultSwapRefundInfo;
   /**
-   * On a private swap's refund note, once a sync has found its money at the
+   * On a private name claim's refund note (lib/nameClaimRun): the claim it was made
+   * for, the same way: while the money waits at the claim's escrow the note stays
+   * pending, and a sync sends the claim again to put it back.
+   */
+  nameClaim?: NameClaimRefundInfo;
+  /**
+   * On a private swap's (or name claim's) refund note, once a sync has found its money at the
    * swap's escrow: "returning" while the refund is on its way, "blocked" while
    * the vault won't take it (its limit for the asset is closed or full). The
    * note stays pending and every sync tries again (heldSwapRefunds lists it).
@@ -988,6 +995,27 @@ function swapInfoOf(v: unknown): VaultSwapRefundInfo | undefined {
   };
 }
 
+function nameClaimInfoOf(v: unknown): NameClaimRefundInfo | undefined {
+  const o = v as Partial<NameClaimRefundInfo> | null;
+  if (!o || typeof o !== "object") return undefined;
+  const addr = (a: unknown): a is Address => typeof a === "string" && HEX_ADDRESS.test(a);
+  const field = (h: unknown): h is Hex => typeof h === "string" && HEX_32.test(h);
+  if (!addr(o.registrar) || !addr(o.holder) || !field(o.keyX) || !field(o.keyY)) return undefined;
+  if (typeof o.amount !== "string" || !DIGITS.test(o.amount) || typeof o.years !== "string" || !DIGITS.test(o.years)) return undefined;
+  if (typeof o.name !== "string" || !/^[a-z0-9_]{3,20}$/.test(o.name)) return undefined;
+  const sent = o.sent && typeof o.sent.hash === "string" && HEX_32.test(o.sent.hash) && timeOrNone(o.sent.at) ? { hash: o.sent.hash, at: o.sent.at } : undefined;
+  return {
+    registrar: o.registrar,
+    amount: o.amount,
+    name: o.name,
+    keyX: o.keyX,
+    keyY: o.keyY,
+    holder: o.holder,
+    years: o.years,
+    ...(sent ? { sent } : {}),
+  };
+}
+
 /**
  * A restored note, rebuilt from what a backup proves (the money fields, checked
  * by backupNoteValid) and nothing it merely says: the spend marker is worked
@@ -1022,6 +1050,7 @@ async function restoredNote(
     else if (!state.taken.has(from.id)) linked = { id: restoredId(from.id, state.taken), nullifier: from.nullifier };
   }
   const swap = linked ? swapInfoOf(n.vaultSwap) : undefined;
+  const nameClaim = linked ? nameClaimInfoOf(n.nameClaim) : undefined;
   const memo = typeof n.note === "string" && n.note.trim() ? n.note.slice(0, 500) : undefined;
   const marks = {
     ...(timeOrNone(n.fundsProofAt) ? { fundsProofAt: n.fundsProofAt } : {}),
@@ -1048,7 +1077,7 @@ async function restoredNote(
     ...(state.waiting ? { unfunded: true } : {}),
     ...(memo ? { note: memo } : {}),
     ...marks,
-    ...(linked ? { sweptFrom: linked, ...(n.sweepPending === true ? { sweepPending: true } : {}), ...(swap ? { vaultSwap: swap } : {}) } : {}),
+    ...(linked ? { sweptFrom: linked, ...(n.sweepPending === true ? { sweepPending: true } : {}), ...(swap ? { vaultSwap: swap } : {}), ...(nameClaim ? { nameClaim } : {}) } : {}),
   };
 }
 
@@ -1303,6 +1332,7 @@ export function updateLocalNote(
       | "proofOutAt"
       | "handoverUntil"
       | "vaultSwap"
+      | "nameClaim"
       | "refundHeld"
     >
   >
