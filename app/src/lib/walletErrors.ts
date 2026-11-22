@@ -133,9 +133,20 @@ export const WALLET_DECLINED_TEXT = "You declined it in your wallet, so it wasn'
 
 export const NO_GAS_FUNDS_TEXT = "This wallet doesn't have enough of the network's gas coin for the fee, so nothing was sent. Add a little and try again.";
 
-export function walletErrorForPeople(e: unknown, fallback = "It didn't go through. Try again."): string {
+/** Tempo has no gas coin: its fee comes out of a USD stablecoin the wallet holds. */
+export const NO_FEE_STABLECOIN_TEXT = "This wallet doesn't have enough of its fee stablecoin for the network fee, so nothing was sent. Add a little and try again.";
+
+/**
+ * `feeIn`: what the network takes its fee in. "stablecoin" on Tempo, where a
+ * wallet short of the fee is short of a stablecoin, not of a gas coin.
+ */
+export function walletErrorForPeople(
+  e: unknown,
+  fallback = "It didn't go through. Try again.",
+  { feeIn = "gas" }: { feeIn?: "gas" | "stablecoin" } = {},
+): string {
   if (walletDeclined(e)) return WALLET_DECLINED_TEXT;
-  if (lacksGasFunds(e)) return NO_GAS_FUNDS_TEXT;
+  if (lacksGasFunds(e)) return feeIn === "stablecoin" ? NO_FEE_STABLECOIN_TEXT : NO_GAS_FUNDS_TEXT;
   const text = walletErrorText(e).trim();
   if (!text) return fallback;
   return text.length > 280 ? `${text.slice(0, 277).trimEnd()}…` : text;

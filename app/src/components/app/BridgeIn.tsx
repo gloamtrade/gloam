@@ -44,6 +44,8 @@ import { SealedField } from "@/components/ui/SealedField";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useNetwork } from "./NetworkProvider";
 import { AmountProblem } from "./AmountProblem";
+import { BackupStep, useBackupGate } from "./RecoveryPanel";
+import { keepStorage } from "@/lib/backupGate";
 import { SuccessReceipt } from "./SuccessModal";
 
 const noopSubscribe = () => () => {};
@@ -310,6 +312,9 @@ function BridgeSheet({
   const privately = canPrivate && privateOn;
   const payerName = solWallet?.name ?? "your wallet";
   const [priv, setPriv] = useState<PrivateStage>({ kind: "idle" });
+  // Paying in privately makes a note only this browser holds: offer a backup first, as Shield does.
+  const backupGate = useBackupGate();
+  const [backupAsk, setBackupAsk] = useState(false);
   // The note and proof for the amount typed, kept until it is sent so a fresh price reuses them.
   const prepared = useRef<{ key: string; note: LocalNote; proof: Hex } | null>(null);
 
@@ -383,6 +388,7 @@ function BridgeSheet({
     setStage({ kind: "form", error: null });
     setStatus(null);
     setPriv({ kind: "idle" });
+    setBackupAsk(false);
     setWallet({ kind: "idle" });
     resetSend();
   }, [resetSend]);
@@ -715,8 +721,13 @@ function BridgeSheet({
   }
 
   /** Save the note, then have the wallet sign and send the order. */
-  async function confirmPrivate() {
+  async function confirmPrivate(afterBackup = false) {
     if (priv.kind !== "review" || priv.signing) return;
+    if (!afterBackup && backupGate.needed()) {
+      setBackupAsk(true);
+      return;
+    }
+    keepStorage();
     const r = priv;
     setPriv({ ...r, signing: true, progress: null, error: null });
     let quote = r.quote;
@@ -1477,6 +1488,22 @@ function BridgeSheet({
           <PrivateReview
             review={priv}
             onConfirm={() => void confirmPrivate()}
+            backup={
+              backupAsk && backupGate.route ? (
+                <BackupStep
+                  route={backupGate.route}
+                  onDone={() => {
+                    setBackupAsk(false);
+                    void confirmPrivate(true);
+                  }}
+                  onSkip={() => {
+                    backupGate.skip();
+                    setBackupAsk(false);
+                    void confirmPrivate(true);
+                  }}
+                />
+              ) : null
+            }
             onReset={() => {
               reset();
               backToNetwork();
@@ -1881,10 +1908,13 @@ function arrivesText(q: PrivateBridgeQuote): string {
 function PrivateReview({
   review,
   onConfirm,
+  backup,
   onReset,
 }: {
   review: Extract<PrivateStage, { kind: "review" }>;
   onConfirm: () => void;
+  /** The backup step, shown in place of the confirm button until it is done or skipped. */
+  backup: React.ReactNode;
   onReset: () => void;
 }) {
   const q = review.quote;
@@ -1959,9 +1989,13 @@ function PrivateReview({
         </p>
       )}
 
-      <button type="button" onClick={onConfirm} disabled={review.signing} className="btn btn-ink btn-lg btn-block mt-4">
-        {review.signing ? "Waiting for your wallet…" : confirm}
-      </button>
+      {backup ? (
+        <div className="mt-4">{backup}</div>
+      ) : (
+        <button type="button" onClick={onConfirm} disabled={review.signing} className="btn btn-ink btn-lg btn-block mt-4">
+          {review.signing ? "Waiting for your wallet…" : confirm}
+        </button>
+      )}
       {!review.signing && (
         <button type="button" onClick={onReset} className="btn btn-ghost btn-sm mt-3">
           Start over

@@ -179,6 +179,7 @@ import { lookupGloamName, useGloamName } from "@/hooks/useGloamName";
 import { GloamNameCard } from "./GloamNameCard";
 import { GLOAM_NAMES_ADDRESS } from "@/lib/gloamNames";
 import { BackupStep, useBackupGate } from "./RecoveryPanel";
+import { keepStorage } from "@/lib/backupGate";
 
 /** How securing a claim ended (lib/claimSweep), or "error" when it threw. */
 type SweepStatus = SweepResult["status"] | "error";
@@ -222,12 +223,16 @@ const TO_PLACEHOLDER: Record<ToKind, string> = {
   wallet: "0x… or name.eth",
 };
 
-/** The kind the text itself says (a pasted address, an ENS name, "@name"), else the one picked. */
+/**
+ * The kind the text itself says, else the one picked. Only text that can be
+ * nothing else switches it: a gloamr1 address, "@name", a full 0x address or
+ * an ENS name (it has a dot). "0xsam" could be a name, so the pick stands.
+ */
 function toKindOf(text: string, picked: ToKind): ToKind {
   const t = text.trim();
   if (t.startsWith("gloamr1.")) return "gloam";
   if (t.startsWith("@")) return "name";
-  if (/^0x/i.test(t) || t.includes(".")) return "wallet";
+  if (/^0x[0-9a-fA-F]{40}$/.test(t) || t.includes(".")) return "wallet";
   return picked;
 }
 
@@ -2225,6 +2230,8 @@ export function MoveView() {
     if (!network.pool || !address) {
       throw new Error("Connect a wallet first.");
     }
+    // A claimed payment lives in this browser: ask it to keep its storage.
+    keepStorage();
     // the vault reads below must be of the network shown, where the claim is saved
     const switching = noteNetworkProblem({ chainId: network.chainId, pool: network.pool }, network);
     if (switching) throw new Error(switching);

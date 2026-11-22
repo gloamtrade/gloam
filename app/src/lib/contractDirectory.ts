@@ -84,11 +84,13 @@ export const MAINNET_POSEIDON_T3: Address = "0x1a32C2c2A77225EC2dD3BF7be1018819b
  *
  * `controllerIsSafe`: BNB Chain's guard is run by the Gloam Owner Safe. Elysium's
  * is still run by the owner wallet, since Safe does not run on Elysium yet.
+ * Keyed by network, not chain family, so a testnet of the same chain never
+ * takes a mainnet guard.
  */
 export const BORN_GUARDED: Partial<
-  Record<GloamNetwork["family"], { deployer: Address; poseidon: Address; guard: Address; controller: Address; controllerIsSafe: boolean }>
+  Record<NetworkKey, { deployer: Address; poseidon: Address; guard: Address; controller: Address; controllerIsSafe: boolean }>
 > = {
-  bnb: {
+  "bnb-mainnet": {
     deployer: "0xec9993765e249e8e9DC677B7BCB61F78b31c6b60",
     poseidon: "0x62c435CE6886fa91e3b0e91500c6dC9219723457",
     guard: "0x633B24cf4C48CF68cB815BC87C110c47E218B4af",
@@ -96,7 +98,7 @@ export const BORN_GUARDED: Partial<
     controller: GLOAM_OWNER_SAFE,
     controllerIsSafe: true,
   },
-  elysium: {
+  "elysium-mainnet": {
     deployer: "0xec9993765e249e8e9DC677B7BCB61F78b31c6b60",
     poseidon: "0x62c435CE6886fa91e3b0e91500c6dC9219723457",
     guard: "0x268D7CAd645282D1e77461b5B2dd997bd54eFAf5",
@@ -254,7 +256,7 @@ function appRows(n: GloamNetwork): DirectoryRow[] {
       });
     }
   }
-  const own = BORN_GUARDED[n.family];
+  const own = BORN_GUARDED[n.key];
   if (n.paymentsPool && own) {
     // Born guarded from its own deployer: the guard owns the vault, the Safe runs the guard.
     rows.push(
@@ -290,7 +292,8 @@ function appRows(n: GloamNetwork): DirectoryRow[] {
     );
   } else if (n.paymentsPool) {
     // The four first mainnets: the guard has owned the vault since 12 November 2026, run by the Safe.
-    if (GLOAM_OWNER_GUARD) {
+    // The Sepolia testnets were never moved: the owner wallet still holds them.
+    if (GLOAM_OWNER_GUARD && !n.testnet) {
       rows.push(
         {
           role: "owner",
@@ -548,9 +551,10 @@ export function vaultChecks(n: GloamNetwork, r: VaultRead): VaultCheck[] {
       detail: `The vault's delay is ${formatDelay(r.changeDelay)}.`,
     },
   ];
-  const own = BORN_GUARDED[n.family];
+  const own = BORN_GUARDED[n.key];
   if (n.paymentsPool) {
-    checks.push(ownerCheck(r.owner, own?.guard ?? GLOAM_OWNER_GUARD));
+    // A testnet vault is held by the owner wallet alone, so the guard does not count there.
+    checks.push(ownerCheck(r.owner, own?.guard ?? (n.testnet ? null : GLOAM_OWNER_GUARD)));
   }
   checks.push({
     label: "No handover pending",

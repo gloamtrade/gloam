@@ -55,6 +55,7 @@ import { pickAddAsset } from "@/lib/vaultHub";
 import { faucetFor } from "@/lib/faucet";
 import { TempoFaucetButton } from "./TempoFaucetButton";
 import { BackupStep, useBackupGate } from "./RecoveryPanel";
+import { keepStorage } from "@/lib/backupGate";
 
 type TxKind = "shield" | "approve" | "pull" | null;
 type AssetChoice = "eth" | string; // eth | token id
@@ -775,6 +776,8 @@ export function ShieldView() {
       setBackupAsk(true);
       return;
     }
+    // A private balance is about to live in this browser: ask it to keep its storage.
+    keepStorage();
 
     const value = parseAmount();
     if (value === null) {
@@ -1325,7 +1328,9 @@ export function ShieldView() {
                   ? "This deposit is over the vault's deposit limit. Try a smaller amount."
                   : lacksGasFunds(writeError) && network.family !== "tempo"
                     ? noGasFundsText()
-                    : walletErrorForPeople(writeError))}
+                    : walletErrorForPeople(writeError, undefined, {
+                        feeIn: network.family === "tempo" ? "stablecoin" : "gas",
+                      }))}
             </p>
           )}
           {hash && !isSuccess && (

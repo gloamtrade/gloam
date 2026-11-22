@@ -388,12 +388,28 @@ export function ContractsSection() {
     return { text: directoryCsv(ENTRIES, read), missing };
   }
 
-  /** The same CSV on the clipboard, for whoever labels these addresses. */
+  /**
+   * The same CSV on the clipboard, for whoever labels these addresses. Safari
+   * only lets the click itself write to the clipboard, and the vault reads take
+   * longer than that, so the clipboard gets the CSV as a promise it waits for.
+   * Where that is not offered, the text is written once it is ready.
+   */
   async function copyCsv() {
     setCsv({ status: "preparing", how: "copy" });
+    const built = buildCsv();
     try {
-      const { text, missing } = await buildCsv();
-      await navigator.clipboard.writeText(text);
+      let copied = false;
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+        try {
+          const blob = built.then((b) => new Blob([b.text], { type: "text/plain" }));
+          await navigator.clipboard.write([new ClipboardItem({ "text/plain": blob })]);
+          copied = true;
+        } catch {
+          /* not with a promise here: write the text below */
+        }
+      }
+      const { text, missing } = await built;
+      if (!copied) await navigator.clipboard.writeText(text);
       setCsv({ status: "done", how: "copy", missing });
     } catch {
       setCsv({ status: "failed", how: "copy" });

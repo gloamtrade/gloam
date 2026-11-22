@@ -36,7 +36,6 @@
  */
 import type { LocalNote } from "./shield";
 import { readDemo } from "./demoFlag";
-import { keepStorage } from "./backupGate";
 import { demoNotes, setDemoNotes } from "./demo/store";
 import {
   b64,
@@ -424,8 +423,6 @@ function onModeChangedElsewhere() {
 export function unlockNoteVault(): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
   return (unlockPromise ??= (async () => {
-    // Notes on disk: ask the browser not to clear the key that opens them (lib/backupGate).
-    if (localStorage.getItem(NOTES_KEY)) keepStorage();
     // Read the blob only once the key is ready (a passkey vault waits here).
     if (localStorage.getItem(NOTES_KEY)?.startsWith(ENC_PREFIX)) await getKey();
     const raw = localStorage.getItem(NOTES_KEY);
@@ -520,7 +517,6 @@ export function setAllNotes(next: LocalNote[]): Promise<void> {
   }
   cache = next;
   if (typeof window === "undefined") return Promise.resolve();
-  if (next.length) keepStorage();
   const saved = enqueue(async () => {
     await unlockNoteVault();
     await writeBlob();
