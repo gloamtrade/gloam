@@ -26,12 +26,12 @@ check("the cash out button goes through one gate, held from the click to the end
 });
 
 check("a cash out clears the last payment's claim code, so its success shows the cash out", () => {
-  const starts = view.match(/setBusy\(true\);\s*\n\s*setPaidPrivately\(false\);(\s*\n\s*\/\/[^\n]*)?\s*\n\s*setShareBlob\(null\);\s*\n\s*setMemoPosted\(false\);/g) ?? [];
+  const starts = view.match(/setBusy\(true\);(\s*\n\s*\/\/[^\n]*)?\s*\n\s*setShareBlob\(null\);\s*\n\s*setMemoPosted\(false\);/g) ?? [];
   assert.equal(starts.length, 2, "onCashOut and onPrivateCashOut");
 });
 
 check("Claim and secure opens one code at a time", () => {
-  assert.match(view, /async function onImportNote\(\) \{\s*\n\s*if \(claimGate\.current\) return;/);
+  assert.match(view, /async function onImportNote\([^)]*\) \{\s*\n\s*if \(claimGate\.current\) return;/);
   assert.match(view, /disabled=\{!importText\.trim\(\) \|\| !isConnected \|\| working \|\| claimOpening\}/);
 });
 
@@ -54,7 +54,8 @@ check("a request link opened in the tab pays the requester, never a claim link",
 
 check("cash-out copy says the destination is public too", () => {
   assert.ok(!view.includes("Cashing out makes this amount public"));
-  assert.ok(view.includes("Cashing out makes the amount and where it goes public"));
+  // #325 cut it to one line that covers both the amount and the destination
+  assert.ok(view.includes("Cashing out is public."));
 });
 
 check("/claim: a damaged unlocked code asks for the whole message instead of offering a claim", () => {

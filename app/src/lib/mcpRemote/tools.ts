@@ -15,7 +15,7 @@ import { parseUnits, type Address } from "viem";
 import { swapMainnets, swapRouterFor, vaultSwapRouter } from "@/lib/vaultSwap";
 import { SWAP_PUBLIC_LINE, SWAP_QUOTE_PER_MINUTE, SwapQuoteError, quoteSwapServer, type SwapQuote } from "@/lib/swapQuote";
 import { knownTokens, shieldTokensFor } from "@/lib/tokens";
-import { redactRpcUrl } from "@gloamtrade/sdk";
+import { SDK_VERSION, redactRpcUrl } from "@gloamtrade/sdk";
 import { formatGwei, maxGasPriceWei } from "@/lib/relay/gasCeiling";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
 import {
@@ -922,7 +922,8 @@ function mppHowToMainnet(role: "pay" | "charge" | "both", network: NetworkKey): 
             ? named("RH_MAINNET_USDG", "      currency: RH_MAINNET_USDG, decimals: 6,             // or GLOAM_TOKEN, RH_MAINNET_PONS, RH_MAINNET_CASHCAT with decimals: 18", "USDG")
             : nativeStableLine(n);
   const getter = n.testnet ? "testnetNetwork" : "mainnetNetwork";
-  const sdkVersion = "0.8.1";
+  // the SDK this app is built with, so the guide never names an older release
+  const sdkVersion = SDK_VERSION;
   const netLines = `const net = ${getter}("${family}");                   // null until the pool is published
 if (!net) throw new Error("${where} pool not published yet");`;
   const charge = {

@@ -1822,9 +1822,11 @@ export function MoveView() {
       const { proofBytes } = await proveTransferInBrowser(w.circomInput);
 
       // Change stays with sender only. Payment secret goes solely into share package.
+      // eslint-disable-next-line react-hooks/purity -- runs from the Pay button's handler, never during render
+      const now = Date.now();
       if (BigInt(w.changeNote.amountWei) > 0n) {
         pendingChange.current = {
-          id: `chg-${Date.now()}`,
+          id: `chg-${now}`,
           chainId: network.chainId,
           pool: network.pool,
           asset: selected.asset,
@@ -1835,7 +1837,7 @@ export function MoveView() {
           bound: true,
           scheme: "poseidon",
           from: address,
-          createdAt: Date.now(),
+          createdAt: now,
           status: "open",
           source: "local",
         };

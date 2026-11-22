@@ -146,20 +146,20 @@ contract RedeployGuardTest is Test {
         }
     }
 
-    /// BNB Chain's file is in before its deploy and names no vault: only the deployer's own
-    /// nonces are checked until bnb-mainnet-after-deploy.sh writes the vault into it.
-    function test_bnb_record_before_its_deploy() public {
+    /// BNB Chain's file records its vault since the deploy on 19 November 2026 (the same address
+    /// as Elysium's, from the same deployer): a redeploy there is refused once that vault has code.
+    function test_bnb_reads_its_recorded_vault() public {
         (string memory file, address vault) = h.record(56);
         assertEq(file, "deployments/bnb-mainnet.json");
-        assertEq(vault, address(0), "no vault recorded yet");
+        assertEq(vault, ELYSIUM_VAULT, "the BNB vault, at the same address as Elysium's");
         vm.chainId(56);
         h.requireFirstDeploy(address(0));
+        vm.etch(vault, _code());
+        vm.expectRevert(_recordedRefusal(vault, file));
+        h.requireFirstDeploy(address(0));
+        vm.expectRevert(_recordedRefusal(vault, file));
         h.requireFirstDeploy(deployer);
-        // the deployer makes a vault-shaped contract at its nonce 0: refused from then on
-        vm.prank(deployer);
-        VaultShaped made = new VaultShaped();
-        vm.expectRevert(_deployerRefusal(address(made), 0));
-        h.requireFirstDeploy(deployer);
+        vm.etch(vault, "");
         // BNB's testnet (97) is not a mainnet: never checked
         (file, vault) = h.record(97);
         assertEq(bytes(file).length, 0);
