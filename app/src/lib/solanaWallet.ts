@@ -4,8 +4,9 @@
  * Solana wallets in this browser (Phantom, Solflare, Backpack and the rest),
  * found through the Wallet Standard: each wallet announces itself with a window
  * event, so no wallet SDK is bundled. Used to pay a private bridge order from
- * Solana (lib/bridgePrivate). Inside a phone wallet's own browser this finds
- * that wallet too.
+ * Solana (lib/bridgePrivate), and as the main wallet behind a Gloam private
+ * account on Solana (lib/solanaRings/client). Inside a phone wallet's own
+ * browser this finds that wallet too.
  */
 import { useSyncExternalStore } from "react";
 
@@ -17,6 +18,9 @@ type StandardFeatures = {
   "standard:connect"?: { connect(): Promise<{ accounts?: readonly StandardAccount[] } | undefined> };
   "solana:signAndSendTransaction"?: { signAndSendTransaction(input: TxInput): Promise<unknown> };
   "solana:signTransaction"?: { signTransaction(input: TxInput): Promise<readonly { signedTransaction: Uint8Array }[]> };
+  "solana:signMessage"?: {
+    signMessage(input: { account: StandardAccount; message: Uint8Array }): Promise<readonly { signedMessage: Uint8Array; signature: Uint8Array }[]>;
+  };
 };
 type StandardWallet = {
   name: string;
@@ -122,4 +126,49 @@ export async function paySolana(w: SolanaWallet, a: SolanaAccount, txBase64: str
   });
   const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: { message?: string } } | null;
   if (!json?.ok) throw new Error(json?.error?.message ?? "Couldn't send it to Solana. Try again.");
+}
+
+/** Whether this wallet can sign a plain message (what opens a Gloam private account). */
+export function canSignMessage(w: SolanaWallet): boolean {
+  return Boolean(w.wallet.features["solana:signMessage"]);
+}
+
+/** The wallet's Ed25519 signature over `message`, exactly as given. */
+export async function signSolanaMessage(w: SolanaWallet, a: SolanaAccount, message: Uint8Array): Promise<Uint8Array> {
+  const feature = w.wallet.features["solana:signMessage"];
+  if (!feature) throw new Error(`${w.name} can't sign a message here.`);
+  const [out] = await feature.signMessage({ account: a.account, message });
+  if (!out?.signature) throw new Error(`${w.name} didn't sign it.`);
+  // a wallet that signed different bytes than it was given did not sign this message
+  if (out.signedMessage && !sameBytes(out.signedMessage, message)) throw new Error(`${w.name} signed something else.`);
+  return new Uint8Array(out.signature);
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/**
+ * Sign `transaction` with the wallet and send it, on `chain`. Returns the 64-byte
+ * signature when the wallet sent it, or the signed transaction for the caller to
+ * send when the wallet only signs.
+ */
+export async function signOrSendSolana(
+  w: SolanaWallet,
+  a: SolanaAccount,
+  transaction: Uint8Array,
+  chain: string,
+): Promise<{ sent: Uint8Array } | { signed: Uint8Array }> {
+  const sendFeature = w.wallet.features["solana:signAndSendTransaction"];
+  if (sendFeature) {
+    const out = (await sendFeature.signAndSendTransaction({ account: a.account, chain, transaction })) as unknown;
+    const first = (Array.isArray(out) ? out[0] : out) as { signature?: Uint8Array } | undefined;
+    if (!(first?.signature instanceof Uint8Array) || first.signature.length !== 64) throw new Error(`${w.name} didn't send it.`);
+    return { sent: first.signature };
+  }
+  const signFeature = w.wallet.features["solana:signTransaction"];
+  if (!signFeature) throw new Error(`${w.name} can't sign this.`);
+  const [signed] = await signFeature.signTransaction({ account: a.account, chain, transaction });
+  if (!signed?.signedTransaction) throw new Error(`${w.name} didn't sign it.`);
+  return { signed: signed.signedTransaction };
 }
