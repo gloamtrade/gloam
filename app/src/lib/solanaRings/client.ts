@@ -261,15 +261,45 @@ async function ownerSigned(s: RingsSession, tx: Transaction): Promise<Uint8Array
   return encodeTx({ ...tx, signatures: { ...tx.signatures, ...sigs } } as Transaction);
 }
 
+/** Relay refusals that come before it sends anything (app/api/solana/relay). */
+const RELAY_NOT_SENT = new Set(["relay_off", "relay_unavailable", "relay_empty", "simulate_failed"]);
+
+/**
+ * The relay said no, or its answer was lost. `maybeSent`: it may have sent the
+ * transaction first (a lost answer, a timeout, a failure after the send), so
+ * the caller must check the chain before sending those notes again.
+ */
+export class RingsRelayError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string,
+    readonly maybeSent: boolean
+  ) {
+    super(message);
+    this.name = "RingsRelayError";
+  }
+}
+
 /** Hand a transaction the private account signed to Gloam's relay. Returns its signature. */
 async function relay(wire: Uint8Array): Promise<string> {
-  const res = await fetch(ringsUrls(location.origin).relay, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ tx: b64(wire) }),
-  });
-  const json = (await res.json().catch(() => null)) as { ok?: boolean; signature?: string; error?: { message?: string } } | null;
-  if (!json?.ok || !json.signature) throw new Error(json?.error?.message ?? "Gloam's relay didn't take it. Try again.");
+  let res: Response;
+  try {
+    res = await fetch(ringsUrls(location.origin).relay, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tx: b64(wire) }),
+    });
+  } catch {
+    throw new RingsRelayError("Gloam's relay didn't answer. Check your connection.", 0, "network", true);
+  }
+  const json = (await res.json().catch(() => null)) as { ok?: boolean; signature?: string; error?: { code?: string; message?: string } } | null;
+  if (!json?.ok || !json.signature) {
+    const code = json?.error?.code ?? "unknown";
+    // 4xx and the 5xx codes above are refused before the send; any other 5xx (or a reply that isn't the relay's) may come after it.
+    const maybeSent = res.ok || (res.status >= 500 && !RELAY_NOT_SENT.has(code));
+    throw new RingsRelayError(json?.error?.message ?? "Gloam's relay didn't take it. Try again.", res.status, code, maybeSent);
+  }
   return json.signature;
 }
 
@@ -481,6 +511,165 @@ export async function cashOut(s: RingsSession, to: string, asset: RingsAsset, am
   );
 }
 
+// ------------------------------------------------------------------ payroll (lib/solanaRings/payroll)
+
+/**
+ * Which of `owners` can be paid privately: each has a Rings registry record.
+ * One getMultipleAccounts per hundred addresses, not one read each.
+ */
+export async function registeredMany(s: RingsSession, owners: readonly string[]): Promise<Map<string, boolean>> {
+  const [{ getUserRecordAddress }, { USER_REGISTRY_PROGRAM }] = await Promise.all([import("@heliuslabs/spr/addresses"), import("./relayPolicy")]);
+  const out = new Map<string, boolean>();
+  const unique = [...new Set(owners)];
+  for (let i = 0; i < unique.length; i += 100) {
+    const chunk = unique.slice(i, i + 100);
+    const pdas = await Promise.all(chunk.map((o) => getUserRecordAddress(o as Address)));
+    const found = await s.client.getMultipleAccounts(pdas);
+    chunk.forEach((o, j) => {
+      const acct = found[j];
+      out.set(o, Boolean(acct && acct.owner === USER_REGISTRY_PROGRAM && acct.data.length > 0));
+    });
+  }
+  return out;
+}
+
+const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+
+function containsBytes(hay: Uint8Array, needle: Uint8Array): boolean {
+  outer: for (let i = 0; i + needle.length <= hay.length; i++) {
+    for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * One private transfer of `asset` paying each of `payments` (one to fifteen
+ * Gloam private accounts), built and signed by the private account, not sent.
+ * Names the notes it spends (their nullifiers) and its blockhash, so a run
+ * can tell later whether it landed. The notes stay set aside until it is sent
+ * and settled, or releasePayments.
+ */
+export async function buildPayments(
+  s: RingsSession,
+  asset: RingsAsset,
+  payments: readonly { address: string; amount: bigint }[]
+): Promise<{ wire: Uint8Array; nullifiers: string[]; blockhash: string }> {
+  const feePayer = await relayer();
+  await syncRings(s);
+  const { buildMultiTransferTransaction } = await import("@heliuslabs/spr/wallet");
+  const unspent = s.wallet.utxos().filter((u) => !u.spent);
+  const tx = await buildMultiTransferTransaction({
+    client: s.client,
+    wallet: s.wallet,
+    keys: s.keys,
+    feePayer,
+    payments: payments.map((p) => ({ recipient: p.address as Address, amount: p.amount })),
+    ...(asset.mint ? { asset: asset.mint as Address } : {}),
+  });
+  const message = new Uint8Array(tx.messageBytes);
+  const nullifiers = unspent.filter((u) => containsBytes(message, u.nullifier)).map((u) => hex(u.nullifier));
+  const blockhash = (getCompiledTransactionMessageDecoder().decode(tx.messageBytes) as { lifetimeToken?: string }).lifetimeToken;
+  if (!nullifiers.length || !blockhash) {
+    await reloadWallet(s);
+    throw new Error("This payment couldn't be checked before sending, so it wasn't sent.");
+  }
+  return { wire: await ownerSigned(s, tx), nullifiers, blockhash };
+}
+
+/** Send what buildPayments built through Gloam's relay. Rejects with RingsRelayError. */
+export function sendPayments(wire: Uint8Array): Promise<string> {
+  return relay(wire);
+}
+
+/** After a refusal that sent nothing: free the notes buildPayments set aside. */
+export function releasePayments(s: RingsSession): Promise<void> {
+  return reloadWallet(s);
+}
+
+/** Wait for a sent payment to land, then read it back. */
+export async function confirmPayments(s: RingsSession, signature: string): Promise<void> {
+  const slot = await landed(s, signature);
+  await syncRings(s, slot);
+}
+
+const fromHex = (h: string) => Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16));
+
+/**
+ * Where a payment left in flight stands (a closed tab, a lost answer). By its
+ * signature when there is one; else by its notes: spent means it landed. It
+ * counts as dropped only once its blockhash has expired (so it can never land)
+ * and, read up to then, its notes are still unspent.
+ */
+export async function settlePayments(
+  s: RingsSession,
+  f: { signature?: string; nullifiers: readonly string[]; blockhash: string }
+): Promise<import("./payroll").InflightResult> {
+  if (f.signature) {
+    const st = await proxyRpc<{ value: ({ err: unknown; confirmationStatus?: string | null; slot: number } | null)[] }>("getSignatureStatuses", [
+      [f.signature],
+      { searchTransactionHistory: true },
+    ]);
+    const v = st.value?.[0];
+    if (v) {
+      if (v.err) {
+        await reloadWallet(s);
+        return { state: "failed", message: "That batch failed on Solana, so nobody in it was paid. Resume to try again." };
+      }
+      if (v.confirmationStatus !== "confirmed" && v.confirmationStatus !== "finalized") return { state: "pending" };
+      await syncRings(s, BigInt(v.slot));
+      return { state: "landed", signature: f.signature };
+    }
+  }
+  const spentBy = async (): Promise<{ spent: boolean; signature?: string; known: boolean }> => {
+    const mine = new Map(s.wallet.utxos().map((u) => [hex(u.nullifier), u.spent]));
+    const known = f.nullifiers.every((n) => mine.has(n));
+    const spent = f.nullifiers.some((n) => mine.get(n) === true);
+    let signature: string | undefined;
+    if (spent) {
+      try {
+        const page = await s.client.getShieldedTransactionsByNullifiers({ nullifiers: f.nullifiers.map(fromHex) as never });
+        signature = page.data[0]?.signature as string | undefined;
+      } catch {
+        signature = undefined; // paid either way; the signature is a nicety
+      }
+    }
+    return { spent, known, ...(signature ? { signature } : {}) };
+  };
+  await syncRings(s);
+  const now = await spentBy();
+  if (now.spent) return { state: "landed", ...(now.signature ? { signature: now.signature } : {}) };
+  const valid = await proxyRpc<{ value: boolean }>("isBlockhashValid", [f.blockhash, { commitment: "confirmed" }]);
+  if (valid.value) return { state: "pending" };
+  // Expired: from here it can never land. Read up to now and look once more.
+  const slot = await proxyRpc<number>("getSlot", [{ commitment: "confirmed" }]);
+  await syncRings(s, BigInt(slot));
+  const after = await spentBy();
+  if (after.spent) return { state: "landed", ...(after.signature ? { signature: after.signature } : {}) };
+  if (!after.known) return { state: "unknown" };
+  await reloadWallet(s);
+  return { state: "dropped" };
+}
+
+/** A build error that fewer people per transaction would get past. */
+export function paymentsTooBig(e: unknown): boolean {
+  const codes = ringsErrorCodes(e);
+  return codes.has("INTERFACE_TRANSACTION_TOO_LARGE") || codes.has("WALLET_TOO_MANY_INPUTS") || codes.has("WALLET_INVALID_PAYMENT_COUNT");
+}
+
+/** This private account's payroll runs in this browser, sealed under a key from its viewing secret. */
+export async function ringsPayrollStore(s: RingsSession) {
+  const { payrollStore, payrollStoreKey, runCipher } = await import("./payrollStore");
+  const viewing = s.keypair.viewingKey();
+  const secret = viewing.secretBytes();
+  try {
+    return payrollStore({ key: payrollStoreKey(s.network, s.address), cipher: await runCipher(secret, s.address) });
+  } finally {
+    secret.fill(0);
+    viewing.destroy();
+  }
+}
+
 /** A Solana address, by shape. */
 export function isSolanaAddress(v: string): boolean {
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v)) return false;
@@ -491,11 +680,28 @@ export function isSolanaAddress(v: string): boolean {
   }
 }
 
+/**
+ * Every SDK error code on `e` and its causes: the SDK wraps an operation's
+ * error (WALLET_BUILD_TRANSFER) around the one that says why
+ * (WALLET_INSUFFICIENT_BALANCE), in causeCode, causeCodes and cause.
+ */
+export function ringsErrorCodes(e: unknown): Set<string> {
+  const out = new Set<string>();
+  let cur: unknown = e;
+  for (let depth = 0; cur && typeof cur === "object" && depth < 8; depth++) {
+    const x = cur as { code?: unknown; causeCode?: unknown; causeCodes?: unknown; cause?: unknown };
+    for (const c of [x.code, x.causeCode, ...(Array.isArray(x.causeCodes) ? x.causeCodes : [])]) if (typeof c === "string") out.add(c);
+    cur = x.cause;
+  }
+  return out;
+}
+
 /** Plain words for the SDK's error codes. */
 export function ringsErrorMessage(e: unknown): string {
+  if (e instanceof RingsRelayError) return e.message;
   const text = e instanceof Error ? e.message : String(e);
-  const code = (e as { code?: string; cause?: { code?: string } })?.code ?? (e as { cause?: { code?: string } })?.cause?.code ?? "";
-  const has = (c: string) => code === c || text.includes(c);
+  const codes = ringsErrorCodes(e);
+  const has = (c: string) => codes.has(c) || text.includes(c);
   if (has("WALLET_INSUFFICIENT_BALANCE")) return "Your private balance is too low for that.";
   if (has("WALLET_RECIPIENT_NOT_REGISTERED")) return "That address has no Gloam private account yet.";
   if (has("WALLET_TOO_MANY_INPUTS")) return "That needs too many small amounts at once. Try a smaller amount.";

@@ -3,7 +3,7 @@
 /**
  * Gloam on Solana: a private account opened by the main wallet's signature,
  * on Helius Solana Privacy Rings (lib/solanaRings). One idea per screen:
- * connect, set up, then the balance with Add, Pay and Cash out.
+ * connect, set up, then the balance with Add, Pay, Payroll and Cash out.
  *
  * What stays private, said where it applies: a private payment hides the asset
  * and the amount; the two private accounts it moves between show. Adding money
@@ -14,8 +14,9 @@ import { ringsAssets, RINGS_PRIVACY_NOTE, SOLANA_RINGS_NETWORK, type RingsAsset 
 import type { RelayStatus, RingsSession } from "@/lib/solanaRings/client";
 import { canSignMessage, connectSolana, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
 import { CopyButton } from "@/components/ui/CodeBlock";
+import { SolanaPayrollView } from "./SolanaPayrollView";
 
-type Tab = "balance" | "add" | "pay" | "cashout";
+type Tab = "balance" | "add" | "pay" | "payroll" | "cashout";
 
 const lib = () => import("@/lib/solanaRings/client");
 
@@ -49,6 +50,8 @@ export function SolanaRingsView() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("balance");
+  // Payroll stays mounted once opened, so a run keeps paying (and showing) while another tab is open.
+  const [payrollOpened, setPayrollOpened] = useState(false);
   const [balances, setBalances] = useState<Record<string, bigint>>({});
   const [ready, setReady] = useState<Record<string, boolean>>({ sol: true });
 
@@ -179,12 +182,13 @@ export function SolanaRingsView() {
   // 3. The account
   return (
     <div className="max-w-[560px] space-y-4">
-      <div role="tablist" aria-label="Private account" className="grid grid-cols-4 gap-2">
+      <div role="tablist" aria-label="Private account" className="grid grid-cols-5 gap-1.5 sm:gap-2">
         {(
           [
             ["balance", "Balance"],
             ["add", "Add"],
             ["pay", "Pay"],
+            ["payroll", "Payroll"],
             ["cashout", "Cash out"],
           ] as [Tab, string][]
         ).map(([k, label]) => (
@@ -193,9 +197,10 @@ export function SolanaRingsView() {
             type="button"
             role="tab"
             aria-selected={tab === k}
-            className={`gl-chip min-h-10 justify-center ${tab === k ? "border-foreground! text-foreground!" : ""}`}
+            className={`gl-chip min-h-10 justify-center px-1! ${tab === k ? "border-foreground! text-foreground!" : ""}`}
             onClick={() => {
               setTab(k);
+              if (k === "payroll") setPayrollOpened(true);
               setError(null);
               setDone(null);
             }}
@@ -279,6 +284,12 @@ export function SolanaRingsView() {
             })
           }
         />
+      )}
+
+      {payrollOpened && (
+        <div hidden={tab !== "payroll"}>
+          <SolanaPayrollView session={session} balances={balances} ready={ready} relayFunded={relay.funded} onBalances={setBalances} />
+        </div>
       )}
 
       {tab === "cashout" && (

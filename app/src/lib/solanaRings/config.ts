@@ -89,3 +89,12 @@ export function ringsBalancesFrom(
 /** The plain words every Solana screen uses for what stays private. */
 export const RINGS_PRIVACY_NOTE =
   "On Solana, a private payment hides the asset and the amount. The two private accounts it moves between are visible, and adding money shows the wallet it came from.";
+
+/** The same, for payroll, where one transaction pays up to 15 people (lib/solanaRings/payroll). */
+export const RINGS_PAYROLL_NOTE =
+  "On Solana, payroll hides the asset and every amount. Your private account and each person's private account are visible, and up to 15 people paid together share one transaction.";
+
+/** A Solana transaction on an explorer. */
+export function ringsExplorerTx(signature: string, network: RingsNetwork = SOLANA_RINGS_NETWORK): string {
+  return `https://solscan.io/tx/${encodeURIComponent(signature)}${network === "devnet" ? "?cluster=devnet" : ""}`;
+}
