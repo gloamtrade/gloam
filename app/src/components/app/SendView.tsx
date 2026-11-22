@@ -21,6 +21,7 @@ import { estimateMaxNativeSend, type MaxNativeSend } from "@/lib/nativeSend";
 import { NATIVE_CHOICE, hasNativeCoin, maxTokenSend, pickedToken, publicSendTargetProblem, publicSendTokens } from "@/lib/publicSend";
 import { getRhPublicClient } from "@/lib/rhClient";
 import { formatAssetAmount } from "@/lib/shield";
+import { shortAmount } from "@/lib/amountShort";
 import { isDollarStable } from "@/lib/tokens";
 import { amountTextError } from "@/lib/amountText";
 import { hasCoingeckoMarks, useCoingeckoMarks } from "@/hooks/useCoingeckoMarks";
@@ -185,7 +186,8 @@ export function SendView() {
     tokenSend.reset();
     setShowSuccess(false);
     handledHash.current = null;
-    setSentAmount(amount);
+    // the success dialog's amount: cents for a stablecoin, 4 places otherwise, never rounded up
+    setSentAmount(shortAmount(value, token?.decimals ?? 18, token?.kind === "stablecoin"));
     setSentSymbol(symbol);
     setSentTo(to);
     if (token) {

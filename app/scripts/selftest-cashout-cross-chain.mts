@@ -13,6 +13,10 @@
  *  - BNB Chain: USDT and USDC land there with 18 decimals, read from a real
  *    strict quote (captured 2026-11-19), and an 18-decimal answer read as 6
  *    is refused instead of shown a trillion times too big;
+ *  - BNB Chain as a source (USDT and USDC, 18 decimals): never its own
+ *    destination; the dollar bounds, the Relay request, the order's exact
+ *    amount and the fee split all in 18 decimals, read from a real strict quote
+ *    from BNB Chain USDT into Base USDC (captured 2026-11-22), one wei off refused;
  *  - crossChainProblem refuses a proof call that isn't bound to the quote:
  *    another address, another amount, a moved fee, another chain or asset;
  *  - the copy carries no em dashes.
@@ -56,6 +60,7 @@ const NOW = Date.UTC(2026, 10, 9, 12, 0, 0);
 
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/relay-xchain-strict-quote.json", import.meta.url), "utf8"));
 const bnbFixture = JSON.parse(readFileSync(new URL("./fixtures/relay-xchain-strict-quote-bnb.json", import.meta.url), "utf8"));
+const fromBnbFixture = JSON.parse(readFileSync(new URL("./fixtures/relay-xchain-strict-quote-from-bnb.json", import.meta.url), "utf8"));
 const USDT_BNB = "0x55d398326f99059fF775485246999027B3197955";
 const USDC_BNB = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
 const DEPOSIT: string = fixture.steps[0].depositAddress;
@@ -130,9 +135,25 @@ await test("every destination is USDC, USDT or USDG with an id the API can look 
   assert.equal(crossChainDestination(undefined), null);
 });
 
-await test("the BNB Chain vault is no source yet, and never its own destination", () => {
-  assert.deepEqual(crossChainDestinations(56, USDT_BNB), []);
-  assert.deepEqual(crossChainDestinations(56, USDC_BNB), []);
+await test("BNB Chain USDT and USDC are sources, in 18 decimals, and BNB Chain is never their destination", () => {
+  for (const asset of [USDT_BNB, USDC_BNB, USDT_BNB.toLowerCase(), USDC_BNB.toUpperCase().replace("0X", "0x")]) {
+    const ids = crossChainDestinations(56, asset).map((d) => d.id);
+    assert.deepEqual(ids, ["base-usdc", "ethereum-usdc", "arbitrum-usdc", "solana-usdc", "xlayer-usdc", "xlayer-usdg"], asset);
+    assert.ok(!ids.includes("bnb-usdt") && !ids.includes("bnb-usdc"));
+  }
+  assert.deepEqual(crossChainSource(56, USDT_BNB), { symbol: "USDT", address: USDT_BNB.toLowerCase(), decimals: 18 });
+  assert.deepEqual(crossChainSource(56, USDC_BNB), { symbol: "USDC", address: USDC_BNB.toLowerCase(), decimals: 18 });
+  // BNB (the gas coin) and BDX stay on BNB Chain
+  assert.deepEqual(crossChainDestinations(56, "0x0000000000000000000000000000000000000000"), []);
+  assert.deepEqual(crossChainDestinations(56, "0x9d10a1ec41Fe7878429BB457e31F9b050D38c633"), []);
+});
+
+await test("the BNB Chain sources are the vault's own listing (SDK BNB_MAINNET), decimals included", async () => {
+  const { BNB_MAINNET } = await import("@gloamtrade/sdk");
+  assert.equal(BNB_MAINNET.usdt.address.toLowerCase(), crossChainSource(56, USDT_BNB)!.address);
+  assert.equal(BNB_MAINNET.usdc.address.toLowerCase(), crossChainSource(56, USDC_BNB)!.address);
+  assert.equal(BNB_MAINNET.usdt.decimals, 18);
+  assert.equal(BNB_MAINNET.usdc.decimals, 18);
 });
 
 await test("recipients: a 0x wallet for EVM chains, a Solana address for Solana", () => {
@@ -166,6 +187,26 @@ await test("amount bounds: 1 to 25,000 dollars reach Relay", () => {
   assert.equal(crossChainAmountProblem(25_000_000_000n, 6), null);
   assert.ok(crossChainAmountProblem(999_999n, 6));
   assert.ok(crossChainAmountProblem(25_000_000_001n, 6));
+});
+
+const E18 = 10n ** 18n;
+
+await test("amount bounds in 18 decimals (BNB Chain): the same dollars, never read as 6", () => {
+  const d = crossChainSource(56, USDT_BNB)!.decimals;
+  assert.equal(crossChainAmountProblem(E18, d), null);
+  assert.equal(crossChainAmountProblem(25_000n * E18, d), null);
+  assert.ok(crossChainAmountProblem(E18 - 1n, d), "a wei under a dollar");
+  assert.ok(crossChainAmountProblem(25_000n * E18 + 1n, d), "a wei over 25,000");
+  // 9.95 USDT read with 6 decimals would be about 10 trillion dollars: refused, never sent on
+  assert.ok(crossChainAmountProblem(9_950_000_000_000_000_000n, 6));
+});
+
+await test("the fee split in 18 decimals is exact to the wei", () => {
+  const gross = 1_223_109_888_000_000_000_001n;
+  const net = cashOutNet(gross, 50);
+  assert.equal(net, gross - (gross * 50n) / 10_000n);
+  assert.equal(net, 1_216_994_338_560_000_000_001n);
+  assert.equal(cashOutNet(10n * E18, 50), 9_950_000_000_000_000_000n);
 });
 
 // ------------------------------------------------------------- the Relay request
@@ -314,6 +355,67 @@ await test("a BNB Chain quote binds the proof the same way", () => {
   assert.match(crossChainProblem(r.quote, { ...bnbCall, gross: 10_000_001n }, NOW) ?? "", /amount no longer matches/);
 });
 
+// ------------------------------------------------------------- from BNB Chain, 18 decimals in
+
+const FROM_BNB_AMOUNT = 9_950_000_000_000_000_000n;
+const fromBnbAsk = { sourceChainId: 56, asset: USDT_BNB, amount: FROM_BNB_AMOUNT, destination: base, recipient: RECIPIENT, refundTo: REFUND };
+
+await test("the request from BNB Chain carries the 18-decimal amount exactly", () => {
+  const body = crossChainRelayBody(fromBnbAsk);
+  assert.equal(body.amount, "9950000000000000000");
+  assert.equal(body.originChainId, 56);
+  assert.equal(body.originCurrency, USDT_BNB);
+  assert.equal(body.destinationChainId, 8453);
+  assert.equal(body.strict, true);
+  assert.equal(body.useDepositAddress, true);
+});
+
+await test("a real strict quote from BNB Chain USDT to Base USDC reads clean, 18 decimals in, 6 out", () => {
+  const r = readCrossChainQuote(fromBnbFixture, fromBnbAsk, NOW);
+  assert.ok(r.ok, r.ok ? "" : r.reason);
+  const q = r.quote;
+  assert.equal(q.sourceChainId, 56);
+  assert.equal(q.sourceChain, "BNB Chain");
+  assert.equal(q.sourceSymbol, "USDT");
+  assert.equal(q.amountIn, "9950000000000000000");
+  assert.equal(q.destination.id, "base-usdc");
+  assert.equal(q.destination.decimals, 6);
+  assert.equal(q.receive.amountRaw, "9894150");
+  assert.equal(q.receive.amount, "9.89415");
+  assert.equal(q.receive.minimum, "9.844679");
+  assert.equal(q.depositAddress, fromBnbFixture.steps[0].depositAddress);
+});
+
+await test("refused from BNB Chain: one wei more or less, the other stablecoin, or the amount in 6 decimals", () => {
+  const D = fromBnbFixture.steps[0].depositAddress as string;
+  // Relay's transfer, or the signed order, one wei off
+  assert.equal(refused((d) => (d.steps[0].items[0].data.data = transferData(D, FROM_BNB_AMOUNT + 1n)), fromBnbAsk, NOW, fromBnbFixture), "transfer amount");
+  assert.equal(refused((d) => (d.steps[0].items[0].data.data = transferData(D, FROM_BNB_AMOUNT - 1n)), fromBnbAsk, NOW, fromBnbFixture), "transfer amount");
+  assert.equal(refused((d) => (d.protocol.v2.orderData.inputs[0].payment.amount = "9950000000000000001"), fromBnbAsk, NOW, fromBnbFixture), "order amount");
+  // the fixture read against another ask
+  assert.equal(readCrossChainQuote(fromBnbFixture, { ...fromBnbAsk, amount: FROM_BNB_AMOUNT - 1n }, NOW).ok, false);
+  assert.equal(readCrossChainQuote(fromBnbFixture, { ...fromBnbAsk, amount: 9_950_000n }, NOW).ok, false, "the amount in 6 decimals");
+  assert.equal(readCrossChainQuote(fromBnbFixture, { ...fromBnbAsk, asset: USDC_BNB }, NOW).ok, false, "USDC instead of USDT");
+  assert.equal(readCrossChainQuote(fromBnbFixture, { ...fromBnbAsk, sourceChainId: 1 }, NOW).ok, false, "another chain");
+  assert.equal(refused((d) => (d.protocol.v2.orderData.inputs[0].refunds[0].recipient = RECIPIENT), fromBnbAsk, NOW, fromBnbFixture), "refund address");
+});
+
+await test("a quote from BNB Chain binds the proof to the wei", () => {
+  const r = readCrossChainQuote(fromBnbFixture, fromBnbAsk, NOW);
+  assert.ok(r.ok);
+  const gross = 10n * E18;
+  const c = { chainId: 56, asset: USDT_BNB, gross, feeBps: 50, to: r.quote.depositAddress, destinationId: "base-usdc", recipient: RECIPIENT, refundTo: REFUND };
+  assert.equal(crossChainProblem(r.quote, c, NOW), null);
+  assert.match(crossChainProblem(r.quote, { ...c, gross: gross + 1n }, NOW) ?? "", /amount no longer matches/);
+  assert.match(crossChainProblem(r.quote, { ...c, gross: gross - 2n }, NOW) ?? "", /amount no longer matches/);
+  // what counts is what the vault pays Relay, to the wei: one wei less in still pays exactly 9.95 out after the fee
+  assert.equal(cashOutNet(gross - 1n, 50), FROM_BNB_AMOUNT);
+  assert.equal(crossChainProblem(r.quote, { ...c, gross: gross - 1n }, NOW), null);
+  assert.match(crossChainProblem(r.quote, { ...c, feeBps: 25 }, NOW) ?? "", /amount no longer matches/);
+  assert.ok(crossChainProblem(r.quote, { ...c, asset: USDC_BNB }, NOW));
+  assert.ok(crossChainProblem(r.quote, { ...c, chainId: 8453 }, NOW));
+});
+
 // ------------------------------------------------------------- binding the proof
 
 const q = (() => {
@@ -374,6 +476,10 @@ await test("no em dashes in the new copy", () => {
 
 if (process.env.XCHAIN_LIVE === "1") {
   for (const [id, chainId, asset] of [
+    // from BNB Chain, 18 decimals in
+    ["base-usdc", 56, USDT_BNB],
+    ["solana-usdc", 56, USDC_BNB],
+    ["xlayer-usdg", 56, USDT_BNB],
     ["base-usdc", 4663, USDG_RH],
     ["solana-usdc", 4663, USDG_RH],
     ["arbitrum-usdc", 8453, USDC_BASE],
@@ -386,7 +492,9 @@ if (process.env.XCHAIN_LIVE === "1") {
     await test(`live: a strict quote ${chainId} to ${id} reads clean`, async () => {
       const destination = crossChainDestination(id)!;
       const recipient = destination.kind === "svm" ? "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1" : RECIPIENT;
-      const a = { sourceChainId: chainId, asset, amount: 9_950_000n, destination, recipient, refundTo: REFUND };
+      // 9.95 in the source's own decimals (18 on BNB Chain)
+      const amount = 995n * 10n ** BigInt(crossChainSource(chainId, asset)!.decimals - 2);
+      const a = { sourceChainId: chainId, asset, amount, destination, recipient, refundTo: REFUND };
       const res = await fetch("https://api.relay.link/quote", {
         method: "POST",
         headers: { "content-type": "application/json" },
