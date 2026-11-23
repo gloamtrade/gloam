@@ -45,7 +45,8 @@ export function CashOutReceiptSheet({
   const { symbol, decimals } = receiptToken(receipt.chainId, receipt.asset);
   const money = (raw: bigint) => `${exact(raw, decimals)} ${symbol}`;
   const when = new Date(receipt.time);
-  const day = when.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  // the day in UTC, like the time beside it: a cash out at 23:43 UTC is that day everywhere
+  const day = when.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
   const time = when.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "UTC", hour12: false });
 
   useModalFocus(dialog, onClose, { initial: closeRef });
