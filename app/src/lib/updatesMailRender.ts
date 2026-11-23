@@ -485,7 +485,7 @@ ${blocksToEmailHtml(blocks)}
 </table>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;">
 <tr><td class="gl-pad" align="center" style="padding:24px 40px 0;">
-<p class="gl-mute" style="${small}">You asked for Gloam updates, so we sent you this one.</p>
+<p class="gl-mute" style="${small}">You get Gloam updates because you signed up on gloam.trade or entered a Gloam contest.</p>
 <p class="gl-mute" style="${small}padding-top:6px;"><a href="${unsub}" style="${footLink}">Unsubscribe</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;<a href="${web}" style="${footLink}">View on the web</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;<a href="${SITE}" style="${footLink}">gloam.trade</a></p>
 </td></tr>
 </table>
@@ -502,7 +502,7 @@ ${blocksToEmailHtml(blocks)}
     blocksToText(blocks),
     "",
     "--",
-    "You asked for Gloam updates, so we sent you this one.",
+    "You get Gloam updates because you signed up on gloam.trade or entered a Gloam contest.",
     `Unsubscribe: ${input.unsubscribeUrl}`,
     `View on the web: ${input.webUrl}`,
     "Gloam, private money on public chains. https://www.gloam.trade",
