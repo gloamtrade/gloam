@@ -89,6 +89,8 @@ jobs:
       # Each sign-in's own private account in a browser: signed out shows nothing, a second
       # wallet sees and spends none of the first's, the first account goes to its owner on
       # evidence only, backups stay per account. In-memory storage and a stand-in backup service.
+      # The Turnkey kit loads only for a stored sign-in or a Sign in tap, and what needs it
+      # (the create-a-wallet sheet, the Solana sync behind its flag) renders inside it.
       - name: App account self-tests
         working-directory: app
         run: |
