@@ -224,6 +224,16 @@ export function swapLinkNetwork(hash: string): NetworkKey | null {
 }
 
 /**
+ * Where the Vault moves for a swap link (swapLinkNetwork `to`), or null to
+ * stay. With Solana picked it always moves, even to the EVM network it would
+ * go back to: staying left the link on "Swap is not on Solana yet".
+ */
+export function swapLinkMove(to: NetworkKey | null, current: NetworkKey, solana: boolean): NetworkKey | null {
+  if (!to) return null;
+  return to !== current || solana ? to : null;
+}
+
+/**
  * What the Vault says when ?tab=swap opens on a network without private swaps,
  * or null when this one has them. A swap link's own network, if it has swaps,
  * is moved to instead (swapLinkNetwork), so it gets no note.

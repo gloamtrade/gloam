@@ -7,7 +7,7 @@ import { Suspense, useEffect, useRef, useState, useSyncExternalStore, type Keybo
 import { VaultActionIcon, VaultHome } from "./VaultHome";
 import { useNetwork } from "./NetworkProvider";
 import { swapOpenTo, vaultSwapRouter } from "@/lib/vaultSwap";
-import { swapLinkNetwork, swapsElsewhereNote } from "@/lib/swapLink";
+import { swapLinkMove, swapLinkNetwork, swapsElsewhereNote } from "@/lib/swapLink";
 import { SwapsElsewhere } from "./SwapLinkBanner";
 import { useAppAccount } from "@/lib/demo";
 import { tabKeyTarget } from "@/lib/tabKeys";
@@ -134,8 +134,10 @@ export function VaultHub() {
     if (!settled || !swapLinkTo || switchedFor === hash) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the fragment is read after mount; this marks the link as moved for
     setSwitchedFor(hash);
-    if (swapLinkTo !== networkKey) setNetworkKey(swapLinkTo);
-  }, [settled, swapLinkTo, switchedFor, hash, networkKey, setNetworkKey]);
+    // with Solana picked it moves even to the last EVM network, which leaves Solana
+    const to = swapLinkMove(swapLinkTo, networkKey, solana);
+    if (to) setNetworkKey(to);
+  }, [settled, swapLinkTo, switchedFor, hash, networkKey, setNetworkKey, solana]);
   const switching = Boolean(swapLinkTo && swapLinkTo !== networkKey && switchedFor !== hash);
 
   // A claim link, a payment request or a link that names its network is for an
