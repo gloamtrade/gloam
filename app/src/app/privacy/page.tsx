@@ -3,6 +3,7 @@ import { liveMainnetNames } from "@/lib/mainnet";
 import Link from "next/link";
 import { LegalLayout } from "@/components/LegalLayout";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
+import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { rpcProxyNetworkNames } from "@/lib/rpcProxy";
 
@@ -10,7 +11,7 @@ export const metadata: Metadata = { title: "Privacy Policy" };
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="November 22, 2026">
+    <LegalLayout title="Privacy Policy" updated="November 23, 2026">
       <p>
         This Privacy Policy describes what information Gloam (&ldquo;we,&rdquo;
         &ldquo;us&rdquo;) handles when you use gloam.trade, the Gloam app, the
@@ -258,6 +259,17 @@ export default function PrivacyPage() {
           that signature, so Turnkey, and anyone with access to Gloam&apos;s
           Turnkey account, could open a backup made with it. The app says so
           before you choose it.
+        </p>
+      )}
+      {EMBEDDED_WALLETS && SOLANA_RINGS_ENABLED && (
+        <p>
+          A Gloam wallet also has a Solana account, in the same Turnkey wallet.
+          If you use it to open a private account on Solana, that private
+          account comes from its signature of a fixed message. Turnkey makes and
+          keeps that signature, so Turnkey, and anyone with access to
+          Gloam&apos;s Turnkey account, could open that private account. A
+          Solana wallet you hold yourself avoids that. The app says so before
+          you sign.
         </p>
       )}
       <h2>9. Tester applications and contest entries</h2>
