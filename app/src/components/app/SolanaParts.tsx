@@ -15,6 +15,8 @@ import { Spinner } from "@/components/ui/Spinner";
 import { CashOutPercentChips } from "./CashOutPrivacy";
 import { TokenLogo } from "./TokenLogo";
 import { shortSol, formatSolAmount, plainSolAmount, useSolana, type SolanaTask, type SolanaTaskKind } from "./SolanaAccount";
+import { GloamAccountHint, GloamAccountOpen } from "./GloamAccountParts";
+import { isGloamAccount } from "@/lib/turnkeySolana";
 
 /** "Solana mainnet" or "Solana devnet". */
 export const SOLANA_NET_LABEL = SOLANA_RINGS_NETWORK === "devnet" ? "devnet" : "mainnet";
@@ -345,30 +347,35 @@ function WalletGrid() {
   const connecting = sol.task?.kind === "connect";
   if (sol.wallets.length === 0) {
     return (
-      <p className="mt-5 rounded-[16px] bg-surface px-4 py-3.5 text-[13.5px] leading-relaxed text-soft">
-        No Solana wallet in this browser. Install Phantom, Solflare or Backpack, then reload this page.
-      </p>
+      <GloamAccountHint>
+        <p className="mt-5 rounded-[16px] bg-surface px-4 py-3.5 text-[13.5px] leading-relaxed text-soft">
+          No Solana wallet in this browser. Install Phantom, Solflare or Backpack, then reload this page.
+        </p>
+      </GloamAccountHint>
     );
   }
   return (
-    <div className="mt-5 grid gap-2 sm:grid-cols-2">
-      {sol.wallets.map((w) => (
-        <button
-          key={w.name}
-          type="button"
-          disabled={Boolean(sol.task)}
-          onClick={() => void sol.connect(w)}
-          className="flex h-[56px] items-center gap-3 rounded-2xl border border-line pl-3 pr-4 text-left text-[15px] text-foreground transition-colors hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-[9px] bg-white ring-1 ring-line">
-            {/* eslint-disable-next-line @next/next/no-img-element -- the wallet's own data-URL icon */}
-            {w.icon && <img src={w.icon} alt="" width={32} height={32} className="h-8 w-8 object-cover" />}
-          </span>
-          <span className="min-w-0 flex-1 truncate">{w.name}</span>
-          {connecting && <Spinner />}
-        </button>
-      ))}
-    </div>
+    <>
+      <GloamAccountHint />
+      <div className="mt-5 grid gap-2 sm:grid-cols-2">
+        {sol.wallets.map((w) => (
+          <button
+            key={w.name}
+            type="button"
+            disabled={Boolean(sol.task)}
+            onClick={() => void sol.connect(w)}
+            className="flex h-[56px] items-center gap-3 rounded-2xl border border-line pl-3 pr-4 text-left text-[15px] text-foreground transition-colors hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-[9px] bg-white ring-1 ring-line">
+              {/* eslint-disable-next-line @next/next/no-img-element -- the wallet's own data-URL icon */}
+              {w.icon && <img src={w.icon} alt="" width={32} height={32} className="h-8 w-8 object-cover" />}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{w.name}</span>
+            {connecting && <Spinner />}
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -431,14 +438,18 @@ export function SolanaGate({ lead }: { lead?: ReactNode }) {
       </>
     );
   } else {
+    // A Gloam account opens its private account with a passkey or a backup code, never a signature (GloamAccountOpen).
+    const gloam = isGloamAccount(main.wallet);
     body = (
       <>
         <h2 className="t-title text-foreground">{returning ? "Open your private account" : "Set up your private account"}</h2>
-        <p className="mt-1.5 max-w-[56ch] text-[14px] leading-relaxed text-mute">
-          {returning
-            ? `${main.wallet.name} signs one message to open it. Nothing new is created.`
-            : `${main.wallet.name} signs one message. That signature opens the same private account on any device, so there is nothing to back up.`}
-        </p>
+        {!gloam && (
+          <p className="mt-1.5 max-w-[56ch] text-[14px] leading-relaxed text-mute">
+            {returning
+              ? `${main.wallet.name} signs one message to open it. Nothing new is created.`
+              : `${main.wallet.name} signs one message. That signature opens the same private account on any device, so there is nothing to back up.`}
+          </p>
+        )}
         <div className="mt-5 flex items-center gap-3 rounded-[16px] border border-line py-2.5 pl-3 pr-2">
           <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-[9px] bg-white ring-1 ring-line">
             {/* eslint-disable-next-line @next/next/no-img-element -- the wallet's own data-URL icon */}
@@ -457,13 +468,22 @@ export function SolanaGate({ lead }: { lead?: ReactNode }) {
             Private payments on Solana are paused for a moment. Try again later.
           </p>
         )}
-        <SolanaActionButton
-          kind="setup"
-          label={returning ? "Sign to open" : "Sign and set up"}
-          stop={relay.funded ? null : "Paused for a moment"}
-          onClick={() => void sol.setUp()}
-          className="mt-5"
-        />
+        {gloam ? (
+          <GloamAccountOpen
+            returning={returning}
+            action={(label, onClick, stop) => (
+              <SolanaActionButton kind="setup" label={label} stop={relay.funded ? (stop ?? null) : "Paused for a moment"} onClick={onClick} className="mt-5" />
+            )}
+          />
+        ) : (
+          <SolanaActionButton
+            kind="setup"
+            label={returning ? "Sign to open" : "Sign and set up"}
+            stop={relay.funded ? null : "Paused for a moment"}
+            onClick={() => void sol.setUp()}
+            className="mt-5"
+          />
+        )}
         <SolanaSteps task={sol.task?.kind === "setup" ? sol.task : null} className="mt-4" />
         <SolanaError kind="setup" className="mt-4" />
       </>

@@ -33,6 +33,8 @@ import { embeddedAvailability, onEmbeddedAvailability, openEmbeddedSheet, signOu
 import { forgetClaim } from "@/lib/claimLinkStore";
 import { useNetwork } from "./NetworkProvider";
 import { SolanaWalletMenu } from "./SolanaWalletMenu";
+import { shortSol } from "./SolanaAccount";
+import { GLOAM_SOLANA_OFF, gloamSolana, onGloamSolana } from "@/lib/turnkeySolana";
 // Reads the kit's state from lib/turnkeyBridge; the kit itself loads only when needed (TurnkeyKitGate).
 import { TurnkeyHeaderSignIn } from "./TurnkeyHeaderSignIn";
 
@@ -539,6 +541,7 @@ function EvmWalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
               {copied ? <CheckGlyph /> : <CopyGlyph />}
             </button>
           </div>
+          {embedded && <GloamSolanaRow />}
           {isTempoFeeChain(network.chainId) && !demo && (
             <TempoFeeRow
               address={address as Address}
@@ -609,6 +612,40 @@ function EvmWalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** A Gloam wallet's Solana account (lib/turnkeySolana), once it has one: its address, to copy. */
+function GloamSolanaRow() {
+  const gloam = useSyncExternalStore(onGloamSolana, gloamSolana, () => GLOAM_SOLANA_OFF);
+  const [copied, setCopied] = useState(false);
+  const address = gloam.status === "ready" ? gloam.address : null;
+  if (!address) return null;
+  const copy = () => {
+    void navigator.clipboard?.writeText(address).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1400);
+      },
+      () => undefined
+    );
+  };
+  return (
+    <div className="-mt-1 flex items-center gap-3 pb-2.5 pl-2.5 pr-2.5">
+      <span className="text-[12.5px] text-mute">Solana</span>
+      <span className="tnum min-w-0 flex-1 truncate text-right text-[13px] text-foreground" title={address}>
+        {shortSol(address)}
+      </span>
+      <button
+        type="button"
+        onClick={copy}
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground"
+        aria-label={copied ? "Solana address copied" : "Copy Solana address"}
+        title={copied ? "Copied" : "Copy Solana address"}
+      >
+        {copied ? <CheckGlyph /> : <CopyGlyph />}
+      </button>
     </div>
   );
 }

@@ -36,6 +36,7 @@ import { RECEIVE_IDENTITY_EVENT, exportReceiveKeys, importReceiveKeys } from "./
 import { NEWER_KEY, VERSION1_SAVES_UNTIL } from "./recoveryEnd";
 import type { SentLink } from "./sentLinks";
 import { openSentLinks, restoreSentLinks, subscribeSentLinks } from "./sentLinksStore";
+import { SOLANA_CODES_SAVED_EVENT, codesForBackup, restoreCodes, type SolanaCodeEntry } from "./solanaRings/gloamCodes";
 import type { LocalNote } from "./shield";
 
 /**
@@ -363,6 +364,12 @@ type Payload = {
   links?: SentLink[];
   /** Payroll runs holding a payment that may still land, with its codes and secrets. */
   payroll?: PayrollBatch[];
+  /**
+   * Gloam accounts' backup-code secrets on Solana (lib/solanaRings/gloamCodes), only
+   * in a backup keyed by a passkey: a wallet-signature key may be a Gloam wallet's,
+   * which Turnkey keeps, and nothing Turnkey could open may carry these.
+   */
+  solana?: SolanaCodeEntry[];
 };
 
 function spendable(n: LocalNote): boolean {
@@ -404,7 +411,7 @@ async function readNotesNow(): Promise<void> {
   await syncFromDisk();
 }
 
-async function collect(): Promise<Payload> {
+async function collect(source?: RecoverySource): Promise<Payload> {
   // A save replaces the backup: with no account bound there is nothing here to save, never an empty copy.
   if (scopedKey(CONFIG_KEY) === null) throw new RecoveryError("Sign in to back up your private account.");
   await readNotesNow();
@@ -417,6 +424,7 @@ async function collect(): Promise<Payload> {
     receive: await exportReceiveKeys(),
     links: await openSentLinks(),
     payroll: await pendingPayrollRuns(),
+    ...(source === "passkey" ? { solana: await codesForBackup() } : {}),
   };
 }
 
@@ -490,6 +498,8 @@ async function mergePayload(p: Payload, owner?: string | null): Promise<number> 
   const added = mergeNotes(p.notes, owner);
   await restoreSentLinks(p.links);
   await restorePayrollRuns(p.payroll, owner);
+  // Never over a code kept here: the person saved that one. A failure never holds up the notes; the next pull tries again.
+  await restoreCodes(p.solana).catch(() => {});
   return added;
 }
 
@@ -794,7 +804,7 @@ async function upload(c: Config, { skipSame = false }: { skipSame?: boolean } = 
   let current = c;
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!stillOn(current) || savesPaused(current)) return;
-    const payload = await collect();
+    const payload = await collect(current.source);
     if (skipSame && attempt === 0 && readOwn(MARK_KEY) === (await contentMark(payload))) return;
     const blob = await seal(current, payload);
     if (!stillOn(current)) return;
@@ -838,7 +848,7 @@ async function saveConfirmed(to: RecoveryKeys, old: Payload | null, owner?: stri
   for (let attempt = 0; attempt < 2; attempt++) {
     const there = await fetchRemote(to.id);
     if (there) await absorb(await open(to, there.c), owner);
-    const res = await putBackup(to, await seal(to, await collect()), (there?.n ?? 0) + 1);
+    const res = await putBackup(to, await seal(to, await collect(to.source)), (there?.n ?? 0) + 1);
     if (res.status === 409 && attempt === 0) continue;
     if (!res.ok) throw await refusal(res);
     const back = await fetchRemote(to.id);
@@ -1055,7 +1065,7 @@ export async function pullBackup({ force = false }: { force?: boolean } = {}): P
       await saveConfig({ ...config!, n: remote.n, savedAt: remote.t, gone: undefined });
       // Everything here is already in the backup: say so, so the change this pull made saves nothing.
       // Anything the backup lacks still goes up, as a change always does.
-      const mine = await collect().catch(() => null);
+      const mine = await collect(now.source).catch(() => null);
       if (mine && holdsAll(theirs, mine)) localStorage.setItem(writableKey(MARK_KEY), await contentMark(mine));
       return added;
     });
@@ -1066,14 +1076,19 @@ export async function pullBackup({ force = false }: { force?: boolean } = {}): P
 
 /**
  * Whether `backup` already holds everything `here` would save: every note (or
- * this browser has seen it spent), every receive key, every open sent code and
- * every payroll run.
+ * this browser has seen it spent), every receive key, every open sent code,
+ * every payroll run and every Gloam account backup code it carries.
  */
 function holdsAll(backup: Payload, here: Payload): boolean {
   if (!carriedOver(here, backup)) return false;
   const codes = new Set((backup.links ?? []).map((l) => l.code));
   const runs = new Set((backup.payroll ?? []).map((b) => b.id));
-  return (here.links ?? []).every((l) => codes.has(l.code)) && (here.payroll ?? []).every((b) => runs.has(b.id));
+  const solana = new Set((backup.solana ?? []).map((e) => `${e.owner}:${e.secret}`));
+  return (
+    (here.links ?? []).every((l) => codes.has(l.code)) &&
+    (here.payroll ?? []).every((b) => runs.has(b.id)) &&
+    (here.solana ?? []).every((e) => solana.has(`${e.owner}:${e.secret}`))
+  );
 }
 
 /**
@@ -1086,7 +1101,7 @@ async function catchUp(): Promise<void> {
   const c = config;
   // Work already waiting (resume) saves everything anyway.
   if (!c || stopping || unfinished(c)) return;
-  const current = await collect().catch(() => null);
+  const current = await collect(c.source).catch(() => null);
   if (current && stillOn(c) && readOwn(MARK_KEY) !== (await contentMark(current))) schedule();
 }
 
@@ -1124,6 +1139,7 @@ export function startRecoverySync() {
   subscribeSentLinks(schedule);
   window.addEventListener(PAYROLL_SAVED_EVENT, schedule);
   window.addEventListener(RECEIVE_IDENTITY_EVENT, schedule);
+  window.addEventListener(SOLANA_CODES_SAVED_EVENT, schedule);
   window.addEventListener("online", resume);
   window.addEventListener("focus", resume);
   // Another tab moved the backup or turned recovery off: follow it, so this tab

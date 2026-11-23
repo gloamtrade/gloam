@@ -93,6 +93,20 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-account-scope.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-auto-receive.mts
 
+      # A Gloam wallet's Solana account (lib/turnkeySolana): made in the same Turnkey
+      # wallet at Turnkey's first Solana path, transactions signed in their own slot,
+      # no message signing (its private account never opens from a Turnkey signature),
+      # found like a wallet extension and gone on sign-out. What opens that private
+      # account (lib/solanaRings/gloamRoot): the same passkey on two devices opens the
+      # same account, an email sign-in's backup code restores it on a new device, and
+      # only a passkey-keyed recovery backup carries the code. Stand-in Turnkey,
+      # WebAuthn and /api/recovery: no request leaves the process.
+      - name: App Gloam wallet on Solana self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-turnkey-solana.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-gloam-solana-root.mts
+
       # BNB Chain (off by default): off, no pool, on, and bad values; the pruned-logs check
       # end to end through the app's own transports; a payment to a Gloam address landing
       # in a fresh browser through the vault client. Fake RPCs only, nothing reaches a host.
