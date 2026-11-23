@@ -678,7 +678,14 @@ export function AgentTopUpsView() {
           ) : isConnected ? (
             <>
               <button type="button" className="btn btn-ink btn-lg w-full" disabled={!ready || busy} onClick={() => void onSetUp()}>
-                {totals && token ? `Set aside ${formatAssetLabel(totals.total, token.address)}` : "Set up top-ups"}
+                {/* greyed out for a missing field: say which, as Pay and Solana's screens do */}
+                {!agentClean
+                  ? "Enter the agent's wallet"
+                  : totals && token
+                    ? `Set aside ${formatAssetLabel(totals.total, token.address)}`
+                    : amount === null
+                      ? "Enter an amount"
+                      : "Set up top-ups"}
               </button>
               <p className="text-center text-[12.5px] leading-relaxed text-mute">
                 {`Takes about ${topUpMinutes(count)} minutes with this tab open. Then you can close Gloam, and cancel any top-up before it goes.`}
