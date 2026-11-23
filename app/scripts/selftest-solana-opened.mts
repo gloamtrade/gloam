@@ -19,7 +19,8 @@
  *    memory for the visit, never in localStorage; the gate says "Open your
  *    private account" and "Sign to open" to a returning wallet, "Set up" to a
  *    new one; the wallet reconnects silently and the account reopens from the
- *    kept seed; Sign out forgets both; a wallet that switches accounts signs out.
+ *    kept seed; Sign out forgets both; a wallet that switches accounts signs out,
+ *    even mid-send (the sign out waits for the send, never drops).
  *  - lib/networks: the mainnets in the order the menu lists them (Robinhood
  *    Chain, Base, BNB Chain, Tempo, Ethereum, Elysium), Solana's slot right
  *    after Base, and the menu putting it there.
@@ -234,6 +235,8 @@ function idb() {
   ok(/forgetWallet\(browserStorage\(\)\)/.test(signOut) && /forgetAccount\(db\)/.test(signOut) && /closeRingsAccount/.test(signOut), "Sign out closes the account and forgets the wallet and the kept account");
   ok(/const disconnect = useCallback\(\(\) => signOut\(true\)/.test(code), "Disconnect is the same sign out");
   ok(/watchSolanaAccount\(main\.wallet, \(address\) => \{\s*if \(address && address !== mine\) signOut\(false\)/.test(code), "a wallet that switches accounts signs out");
+  ok(!/if \(busy\.current\) return;/.test(signOut) && /if \(busy\.current\) \{\s*signOutLater\.current = /.test(signOut), "a sign out asked mid-send (a wallet switching accounts) is held, never dropped");
+  ok(/if \(task \|\| busy\.current \|\| signOutLater\.current === null\) return;\s*signOut\(signOutLater\.current\)/.test(code), "and runs once the send ends");
   ok(/reconnectSolana\(w\)/.test(code) && /keptWallet\(browserStorage\(\)\)/.test(code), "on load the remembered wallet reconnects without a prompt");
   ok(/reopenRingsAccount\(/.test(code) && /seed\.fill\(0\)/.test(code), "the account reopens from the kept seed, and the copy is wiped");
   ok(/held\.seed\?\.fill\(0\)/.test(code) && code.indexOf("keepAccount(db") > code.indexOf("await l.syncRings(s);"), "a new seed is kept only once the account is open, then wiped");

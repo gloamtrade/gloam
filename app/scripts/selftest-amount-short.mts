@@ -274,6 +274,32 @@ test("buttons and review lines that repeat the amount field use the typed amount
   assert.match(lib, /`Bridge \$\{typedAmount\(text\)\} \$\{s\.symbol\} from your wallet`/);
 });
 
+// ------------------------------------------------------------- payroll: the deposit to add
+
+const { fundingPlan } = await import("../src/lib/payroll");
+const { summaryDecimals, assetDecimals, parseAssetAmount, NATIVE_ASSET } = await import("../src/lib/shield");
+
+test("payroll names the deposit to add with every unit, so adding it covers the run", () => {
+  nets.setShownNetworkKey("base-mainnet");
+  const E18 = 10n ** 18n;
+  // PayrollView's step: 0.000001 ETH for a coin, a cent for a stablecoin
+  const step = 10n ** BigInt(Math.max(assetDecimals(NATIVE_ASSET) - summaryDecimals(NATIVE_ASSET), 0));
+  const amounts = [(15n * E18) / 1000n, (4n * E18) / 1000n];
+  const notes = [E18 / 10_000n];
+  const plan = fundingPlan(amounts, notes, step);
+  assert.equal(formatAssetAmountExact(plan.shortfall, NATIVE_ASSET), "0.019");
+  // two places would name 0.01, and a run with 0.01 added is still short
+  assert.equal(formatAssetAmount(plan.shortfall, NATIVE_ASSET), "0.01");
+  assert.ok(fundingPlan(amounts, [...notes, parseAssetAmount("0.01", NATIVE_ASSET)!], step).shortfall > 0n);
+  // what the page names covers it
+  const named = parseAssetAmount(formatAssetAmountExact(plan.shortfall, NATIVE_ASSET), NATIVE_ASSET)!;
+  assert.equal(fundingPlan(amounts, [...notes, named], step).shortfall, 0n);
+  const payroll = src("../src/components/app/PayrollView.tsx");
+  assert.match(payroll, /`\$\{formatAssetAmountExact\(plan\.shortfall, asset\)\} \$\{token\.symbol\} short\. Add it as one deposit\.`/);
+  assert.match(payroll, /Add \{formatAssetAmountExact\(plan\.shortfall, asset\)\} \{token\.symbol\} privately/);
+  assert.ok(!/formatAssetAmount\(plan\.shortfall/.test(payroll), "no two-place shortfall left");
+});
+
 // ------------------------------------------------------------- copy
 
 test("no em dashes and no 'happy to' in the new copy", () => {

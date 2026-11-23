@@ -7,7 +7,8 @@
  *    address passes, as "deposit", with the relay paying only the fee; refused
  *    when the relay is the depositor or named anywhere in it, with anything
  *    else in the transaction, more than one deposit, a memo, an unlisted asset,
- *    under the floor, an unsigned depositor, or the mint's setup alongside;
+ *    under the floor, an unsigned depositor, the mint's setup alongside, or
+ *    signers no instruction names (each one 5,000 lamports more on the relay);
  *  - the relay route: such a deposit counts as a payment, not rent (the rent
  *    limit would stop the sixth), is screened, simulated and sent;
  *  - what is waiting at the account: token accounts read from their bytes,
@@ -39,6 +40,7 @@ import {
   getBase64Decoder,
   getBase64Encoder,
   getCompiledTransactionMessageDecoder,
+  getCompiledTransactionMessageEncoder,
   decompileTransactionMessage,
   getTransactionDecoder,
   getTransactionEncoder,
@@ -237,6 +239,34 @@ await refuse("the mint's one-time setup alongside a deposit", custom({ before: [
     (m) => appendTransactionMessageInstructions([raw], m)
   );
   await refuse("a malformed deposit", signedBy(compileTransaction(message as never) as Transaction, owner), /pool instruction/);
+}
+{
+  // Signers no instruction names: Solana charges the fee payer 5,000 lamports a
+  // signature, and a version 1 deposit has room for 37 more, so the relay would
+  // pay about four times its cap for someone's own 0.001 SOL deposit.
+  const tx = await deposit({ asset: SOL, amount: policy.RELAYED_DEPOSIT_MIN.sol!, tokenAccount: null, priorityFeeLamports: policy.RELAY_LIMITS.maxPriorityFeeLamports });
+  const extras = await Promise.all(Array.from({ length: 37 }, () => generateKeyPairSigner()));
+  const c = getCompiledTransactionMessageDecoder().decode(tx.messageBytes) as unknown as {
+    header: { numSignerAccounts: number; numReadonlySignerAccounts: number; numReadonlyNonSignerAccounts: number };
+    staticAccounts: Address[];
+    instructionHeaders: { programAccountIndex: number }[];
+    instructionPayloads: { instructionAccountIndices: number[] }[];
+  };
+  const at = c.header.numSignerAccounts;
+  const shift = (i: number) => (i >= at ? i + extras.length : i);
+  const staticAccounts = [...c.staticAccounts.slice(0, at), ...extras.map((e) => e.address), ...c.staticAccounts.slice(at)];
+  const messageBytes = getCompiledTransactionMessageEncoder().encode({
+    ...c,
+    header: { ...c.header, numSignerAccounts: at + extras.length, numReadonlySignerAccounts: c.header.numReadonlySignerAccounts + extras.length },
+    staticAccounts,
+    numStaticAccounts: staticAccounts.length,
+    instructionHeaders: c.instructionHeaders.map((h) => ({ ...h, programAccountIndex: shift(h.programAccountIndex) })),
+    instructionPayloads: c.instructionPayloads.map((p) => ({ ...p, instructionAccountIndices: p.instructionAccountIndices.map(shift) })),
+  } as never);
+  const padded = { messageBytes, signatures: Object.fromEntries(staticAccounts.slice(0, at + extras.length).map((a) => [a, null])) } as unknown as Transaction;
+  const w = await signedBy(padded, owner, ...extras);
+  ok(w.length <= 4096 && decompileTransactionMessage(getCompiledTransactionMessageDecoder().decode(getTransactionDecoder().decode(w).messageBytes) as never).instructions.length === 1, "the padded deposit is still one deposit and fits a version 1 transaction");
+  await refuse("a deposit carrying 37 signers no instruction names", Promise.resolve(w), /only the private account signs/);
 }
 
 // ---------------------------------------------------------------- the relay route takes it as a payment

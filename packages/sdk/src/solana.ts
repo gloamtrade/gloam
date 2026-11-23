@@ -58,6 +58,7 @@ import {
   SOLANA_ASSETS,
   SOLANA_RINGS_SOL_MINT,
   base58Decode,
+  base58Encode,
   isPlainSolanaSignature,
   isSolanaAddress,
   solanaAccountMessage,
@@ -228,6 +229,19 @@ async function relaySend(opts: SolanaOptions, wire: Uint8Array, blockhash: strin
   return json.signature;
 }
 
+/** A Solana RPC call that came back without a result: its JSON-RPC error code (null when there was none) and HTTP status. */
+export class SolanaRpcError extends Error {
+  constructor(
+    message: string,
+    readonly method: string,
+    readonly code: number | null,
+    readonly httpStatus: number
+  ) {
+    super(message);
+    this.name = "SolanaRpcError";
+  }
+}
+
 async function rpc<T>(opts: SolanaOptions, method: string, params: unknown[]): Promise<T> {
   const f = opts.fetch ?? fetch;
   const res = await f(solanaEndpoints(opts.baseUrl).rpc, {
@@ -235,10 +249,23 @@ async function rpc<T>(opts: SolanaOptions, method: string, params: unknown[]): P
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
-  const json = (await res.json().catch(() => null)) as { result?: T; error?: { message?: string } } | null;
-  if (!json || json.error || json.result === undefined) throw new Error(`Solana RPC ${method} failed: ${json?.error?.message ?? `HTTP ${res.status}`}`);
+  const json = (await res.json().catch(() => null)) as { result?: T; error?: { code?: unknown; message?: string } } | null;
+  if (!json || json.error || json.result === undefined) {
+    const code = typeof json?.error?.code === "number" ? json.error.code : null;
+    throw new SolanaRpcError(`Solana RPC ${method} failed: ${json?.error?.message ?? `HTTP ${res.status}`}`, method, code, res.status);
+  }
   return json.result;
 }
+
+/**
+ * sendTransaction answers that prove the transaction was not sent: a failed
+ * preflight (-32002), a bad signature (-32003), a node behind or a rate limit
+ * (-32005), a call refused as malformed or not allowed (-32600, -32601, -32602,
+ * -32700). Anything else (a lost connection, an answer that isn't JSON-RPC,
+ * Gloam's RPC proxy losing its upstream call: -32603, HTTP 502) can come after
+ * Solana took it.
+ */
+const SEND_REFUSED_CODES: ReadonlySet<number> = new Set([-32002, -32003, -32005, -32600, -32601, -32602, -32700]);
 
 // ------------------------------------------------------------------ transaction status
 
@@ -622,10 +649,30 @@ export async function addToSolanaPrivate(
     : {};
   const built = await buildDepositTransaction({ client: s.client, feePayer: main, depositor: main, recipient: s.keypair.shieldedAddress(), amount, ...spl });
   const wire = await asVersion0(account, built, main);
-  const blockhash = solanaTxBlockhash(wire);
   const signed = await s.wallet.signTransaction(wire);
-  const signature = await rpc<string>(s.opts, "sendTransaction", [getBase64Decoder().decode(signed), { encoding: "base64" }]);
-  return settle(account, signature, blockhash, input.timeoutMs, async () => {});
+  return sendWalletSignedSolanaTx(account, signed, input.timeoutMs);
+}
+
+/**
+ * Send a transaction the main wallet signed and pays for (an add), then wait
+ * for it like every send here. Its signature is the main wallet's, known
+ * before the send, so an unclear answer is followed on chain to landed, failed
+ * or dropped: only a node's own refusal (SEND_REFUSED_CODES) means it was not
+ * sent. Reading a lost answer as "not sent" let an add go out twice.
+ */
+export async function sendWalletSignedSolanaTx(account: GloamSolanaAccount, signed: Uint8Array, timeoutMs?: number): Promise<SolanaSendResult> {
+  const tx = getTransactionDecoder().decode(signed);
+  const own = (tx.signatures as Readonly<Record<string, Uint8Array | null>>)[account.mainAddress];
+  if (!own || own.every((b) => b === 0)) throw new Error("The main wallet did not sign this transaction.");
+  const signature = base58Encode(own);
+  const blockhash = solanaTxBlockhash(signed);
+  try {
+    await rpc<string>(account._.opts, "sendTransaction", [getBase64Decoder().decode(signed), { encoding: "base64" }]);
+  } catch (e) {
+    if (e instanceof SolanaRpcError && e.code !== null && SEND_REFUSED_CODES.has(e.code)) throw e;
+    // no clear answer: Solana may have it, so its signature decides
+  }
+  return settle(account, signature, blockhash, timeoutMs, async () => {});
 }
 
 function u32le(n: number): Uint8Array {

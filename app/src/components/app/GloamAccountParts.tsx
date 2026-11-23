@@ -5,15 +5,16 @@ import { Spinner } from "@/components/ui/Spinner";
 import { EMBEDDED_WALLETS, embeddedRpId } from "@/lib/embeddedWallet";
 import { embeddedAuth, onEmbeddedAuth } from "@/lib/turnkeyBridge";
 import { GLOAM_SOLANA_OFF, gloamSolana, onGloamSolana, retryGloamSolana } from "@/lib/turnkeySolana";
-import { keepCodeSecret, keptCodeSecret } from "@/lib/solanaRings/gloamCodes";
+import { codeRootFor, keptCodeSecret } from "@/lib/solanaRings/gloamCodes";
 import {
   BAD_CODE_TEXT,
-  GloamRootError,
   accountSeedFromRoot,
   backupCodeFor,
+  gloamOpenView,
   newCodeSecret,
   passkeyRoot,
   secretFromBackupCode,
+  type GloamOpenMode,
 } from "@/lib/solanaRings/gloamRoot";
 import { useSolana } from "./SolanaAccount";
 
@@ -65,13 +66,13 @@ export function GloamAccountHint({ children }: { children?: ReactNode }) {
 /** What the setup card's button is: the card's own SolanaActionButton, with `stop` when it can't go yet. */
 export type GloamAccountAction = (label: string, onClick: () => void, stop?: string | null) => ReactNode;
 
-type Mode = "auto" | "code-new" | "code-show" | "code-enter";
-
 /**
  * How a Gloam account (lib/turnkeySolana) opens its private account on Solana,
  * in the setup card: never from a signature, which Turnkey keeps, but from a
  * secret Turnkey never sees (lib/solanaRings/gloamRoot).
  *  - This browser keeps the account's backup code: it opens with no prompt.
+ *    The passkey and another code stay a tap away: a code kept here (made here,
+ *    or brought in by a recovery backup) never locks out the account another opens.
  *  - Signed in with a passkey: the passkey opens it (one prompt), on every
  *    device that has the passkey. "Use a backup code" stays open for a browser
  *    where the passkey can't.
@@ -85,7 +86,7 @@ export function GloamAccountOpen({ returning, action }: { returning: boolean; ac
   const owner = sol?.main?.account.address ?? null;
   const passkey = gloam.passkeys.length > 0;
   const [stored, setStored] = useState<{ owner: string; has: boolean } | null>(null);
-  const [mode, setMode] = useState<Mode>("auto");
+  const [mode, setMode] = useState<GloamOpenMode>("auto");
   const [fresh, setFresh] = useState<{ owner: string; secret: Uint8Array; code: string } | null>(null);
   const [saved, setSaved] = useState(false);
   const [typed, setTyped] = useState("");
@@ -119,22 +120,15 @@ export function GloamAccountOpen({ returning, action }: { returning: boolean; ac
   if (!sol || !owner) return null;
   const known = stored?.owner === owner ? stored.has : null;
 
-  /** Open with the code kept for this account (`secret`, or the one this browser keeps): keeps it first, never over another. */
-  const openWithCode = (secret: Uint8Array | null) =>
+  /**
+   * Open with a backup code: `secret` (made here, or `typed`), or the one this browser
+   * keeps. Kept first, never over another; a typed code opens even when another is kept (lib/solanaRings/gloamCodes codeRootFor).
+   */
+  const openWithCode = (secret: Uint8Array | null, typed = false) =>
     void sol.setUp({
       first: "Reading your backup code",
       seed: async (index) => {
-        let root: Uint8Array | null;
-        if (secret) {
-          root = await keepCodeSecret(owner, secret);
-          if (!root.every((b, i) => b === secret[i])) {
-            root.fill(0);
-            throw new GloamRootError("This browser holds another backup code for this account. Reload the page to open with it.", "badcode");
-          }
-        } else {
-          root = await keptCodeSecret(owner);
-          if (!root) throw new GloamRootError("This browser no longer holds your backup code. Enter it to open your private account.", "badcode");
-        }
+        const root = await codeRootFor(owner, secret, typed);
         try {
           return await accountSeedFromRoot(root, "code", index);
         } finally {
@@ -163,6 +157,8 @@ export function GloamAccountOpen({ returning, action }: { returning: boolean; ac
     </button>
   );
 
+  const view = gloamOpenView({ mode, known: Boolean(known), passkey, returning, fresh: fresh?.owner === owner });
+
   if (known === null) {
     return (
       <p role="status" aria-live="polite" className="mt-5 flex items-center gap-2.5 rounded-[16px] bg-surface px-4 py-3.5 text-[13.5px] text-foreground">
@@ -172,17 +168,19 @@ export function GloamAccountOpen({ returning, action }: { returning: boolean; ac
     );
   }
 
-  // Kept here: no prompt at all.
-  if (known && mode === "auto") {
+  // Kept here: no prompt at all. The passkey or another code is still the person's to pick.
+  if (view === "kept") {
     return (
       <>
         {lead("This browser keeps your backup code, so your private account opens with no prompt.")}
         {action(returning ? "Open your private account" : "Set up your private account", () => openWithCode(null))}
+        {passkey && link("Use my passkey instead", () => setMode("passkey"))}
+        {link("Use another backup code", () => setMode("code-enter"))}
       </>
     );
   }
 
-  if (mode === "code-show" && fresh?.owner === owner) {
+  if (view === "code-show" && fresh) {
     const copy = () =>
       void navigator.clipboard?.writeText(fresh.code).then(
         () => {
@@ -211,7 +209,7 @@ export function GloamAccountOpen({ returning, action }: { returning: boolean; ac
     );
   }
 
-  if (mode === "code-enter" || (mode === "auto" && !passkey && returning)) {
+  if (view === "code-enter") {
     const go = async () => {
       setProblem(null);
       const secret = await secretFromBackupCode(typed);
@@ -219,7 +217,7 @@ export function GloamAccountOpen({ returning, action }: { returning: boolean; ac
         setProblem(BAD_CODE_TEXT);
         return;
       }
-      openWithCode(secret);
+      openWithCode(secret, true);
     };
     return (
       <>
@@ -248,15 +246,15 @@ export function GloamAccountOpen({ returning, action }: { returning: boolean; ac
           </p>
         )}
         {action("Open your private account", () => void go(), typed.trim() ? null : "Enter your backup code")}
-        {link(passkey ? "Use my passkey instead" : returning ? "I don't have a code: set up a new private account" : "Back", () => {
+        {link(passkey ? "Use my passkey instead" : known ? "Back" : returning ? "I don't have a code: set up a new private account" : "Back", () => {
           setProblem(null);
-          setMode(passkey ? "auto" : "code-new");
+          setMode(passkey ? "passkey" : known ? "auto" : "code-new");
         })}
       </>
     );
   }
 
-  if (passkey && mode === "auto") {
+  if (view === "passkey") {
     return (
       <>
         {lead(
@@ -285,7 +283,7 @@ export function GloamAccountOpen({ returning, action }: { returning: boolean; ac
       {lead("A backup code opens it. The code is made in this browser, so Turnkey and Gloam's servers never see it.")}
       {action("Make my backup code", make)}
       {link("I have a backup code", () => setMode("code-enter"))}
-      {passkey && link("Use my passkey instead", () => setMode("auto"))}
+      {passkey && link("Use my passkey instead", () => setMode("passkey"))}
     </>
   );
 }

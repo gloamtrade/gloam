@@ -23,6 +23,8 @@
  *    transact (the cash-out recipient's token account). When that account does
  *    not exist yet the relay pays its rent (about 0.002 SOL), so the route
  *    counts it with registrations (ataAccounts names them).
+ * Exactly two signers, the relay and the private account: every extra
+ * signature is another 5,000 lamports the relay would pay.
  * Version 1 transactions only (what the SDK builds): the priority fee is a
  * config value there, capped here, and there are no compute-budget
  * instructions to inspect. The page sets that fee from Helius's recommended
@@ -159,8 +161,12 @@ export function checkSponsoredTransaction(wire: Uint8Array, relayer: string, lim
   const statics = compiled.staticAccounts as readonly string[];
   if (statics[0] !== relayer) return no("the relay must be the fee payer");
 
+  // The relay and the private account, nobody else. Solana charges the fee payer
+  // 5,000 lamports a signature, and a version 1 transaction fits about 40 of them:
+  // signers no instruction needs would make the relay pay over its fee cap.
   const signers = Object.keys(tx.signatures);
   if (signers.length < 2) return no("the private account must sign too");
+  if (signers.length > 2) return no("only the private account signs with the relay");
   for (const [who, sig] of Object.entries(tx.signatures)) {
     if (who === relayer) {
       if (!isEmptySignature(sig as Uint8Array | null)) return no("the relay signs last");

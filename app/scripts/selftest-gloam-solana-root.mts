@@ -17,6 +17,10 @@
  *  - the code is kept sealed in this browser and never replaced; a recovery backup
  *    keyed by a passkey carries it and brings it back on a new device, one keyed by
  *    a wallet signature (Turnkey's, for a Gloam wallet) never does
+ *  - a browser that keeps one code (made there by mistake, or brought in by a
+ *    backup) never locks the person out: a code they type opens its own account
+ *    and the kept one stays, and the setup card still offers the passkey and
+ *    another code
  *
  * Runs the app's own storage and recovery code with an in-memory browser
  * (scripts/browser-shim) and a stand-in /api/recovery and WebAuthn. Nothing
@@ -27,6 +31,7 @@
 import { localStorage, resetBrowser } from "./browser-shim.mjs";
 import assert from "node:assert/strict";
 import { createHash, createHmac, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { getAddressDecoder } from "@solana/kit";
 
 const win = globalThis.window as unknown as Record<string, unknown>;
@@ -262,6 +267,38 @@ await test("a passkey backup carries the code and brings it back on a new device
   const back = await codes.keptCodeSecret(OWNER);
   assert.ok(back && same(back, secret), "the code came back with the backup");
   assert.equal(await accountAddress(await root.accountSeedFromRoot(back!, "code", 0)), opened, "and opens the same private account");
+});
+
+await test("a browser that keeps one backup code still opens another the person types, and the passkey", async () => {
+  await recovery.turnOffRecovery({ deleteBackup: false }).catch(() => {});
+  resetBrowser();
+  const owner = getAddressDecoder().decode(new Uint8Array(randomBytes(32)));
+  const real = root.newCodeSecret(); // saved on the first device, where the money is
+  const made = root.newCodeSecret(); // made on this one by pressing "Make my backup code"
+  const realAccount = await accountAddress(await root.accountSeedFromRoot(real, "code", 0));
+  assert.ok(same(await codes.codeRootFor(owner, made), made), "a code made here is kept and opens");
+  // the person types the code they saved: it opens their account, and the one kept here stays
+  const typed = await codes.codeRootFor(owner, real.slice(), true);
+  assert.ok(same(typed, real), "a typed code opens as typed, even where another is kept");
+  assert.equal(await accountAddress(await root.accountSeedFromRoot(typed, "code", 0)), realAccount, "and opens the account it made");
+  assert.ok(same((await codes.keptCodeSecret(owner))!, made), "the kept code is never replaced");
+  assert.ok(same(await codes.codeRootFor(owner, null), made), "left to pick, the kept code opens");
+  // a code made on a screen from before another was kept is still refused
+  await assert.rejects(codes.codeRootFor(owner, root.newCodeSecret()), /another backup code/);
+  // the setup card: a kept code opens by default; the passkey and another code stay the person's to pick
+  const view = (mode: "auto" | "passkey" | "code-new" | "code-show" | "code-enter", known: boolean, passkey: boolean, returning = true, fresh = false) =>
+    root.gloamOpenView({ mode, known, passkey, returning, fresh });
+  assert.equal(view("auto", true, true), "kept");
+  assert.equal(view("passkey", true, true), "passkey", "the passkey opens even where a code is kept");
+  assert.equal(view("code-enter", true, false), "code-enter", "another code can be typed where one is kept");
+  assert.equal(view("auto", false, true), "passkey");
+  assert.equal(view("auto", false, false, true), "code-enter");
+  assert.equal(view("auto", false, false, false), "code-new");
+  assert.equal(view("code-show", false, false, false, true), "code-show");
+  const card = readFileSync(new URL("../src/components/app/GloamAccountParts.tsx", import.meta.url), "utf8");
+  const kept = card.slice(card.indexOf('if (view === "kept")'), card.indexOf('if (view === "code-show"'));
+  assert.ok(kept.includes('setMode("passkey")') && kept.includes('setMode("code-enter")'), "the kept-code card links to the passkey and to another code");
+  assert.ok(/openWithCode\(secret, true\)/.test(card), "the code the person types opens as typed");
 });
 
 console.log(`selftest-gloam-solana-root: ${passed} passed`);

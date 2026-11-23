@@ -269,6 +269,56 @@ await assert.rejects(() => sol.cashOutSolana(account, { to: walletA.address, ass
 checks += 4;
 ok(/too low/.test(sol.solanaErrorMessage({ code: "WALLET_BUILD_TRANSFER", cause: { code: "WALLET_INSUFFICIENT_BALANCE" } })), "SDK error codes in plain words, through causes");
 
+// ---------------------------------------------------------------- an add's own send: a lost answer is followed on chain
+{
+  const kit = await import("@solana/kit");
+  let sendAnswer = () => reply(1, "unused");
+  let sends = 0;
+  const routed = async (u, i = {}) => {
+    if (String(u).endsWith("/api/solana/rpc") && typeof i.body === "string" && JSON.parse(i.body).method === "sendTransaction") {
+      sends++;
+      return sendAnswer();
+    }
+    return fakeFetch(u, i);
+  };
+  const acct = await sol.openSolanaAccount({ wallet: walletA, fetch: routed });
+  let n = 0;
+  const signedAdd = async () => {
+    const msg = kit.pipe(
+      kit.createTransactionMessage({ version: 0 }),
+      (m) => kit.setTransactionMessageFeePayer(walletA.address, m),
+      (m) => kit.setTransactionMessageLifetimeUsingBlockhash({ blockhash: BLOCKHASH, lastValidBlockHeight: 1000n }, m),
+      (m) => kit.appendTransactionMessageInstructions([{ programAddress: "ComputeBudget111111111111111111111111111111", data: Uint8Array.of(2, ++n, 0, 0, 0) }], m)
+    );
+    const wire = new Uint8Array(kit.getTransactionEncoder().encode(kit.compileTransaction(msg)));
+    const signed = await walletA.signTransaction(wire);
+    return { signed, signature: sol.base58Encode(kit.getTransactionDecoder().decode(signed).signatures[walletA.address]) };
+  };
+  // Gloam's RPC proxy lost its upstream call after passing it on (-32603, HTTP 502): Solana has it, so its
+  // signature decides (here it reached Solana and failed there; landed reads the same way, then syncs)
+  let t = await signedAdd();
+  sendAnswer = () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32603, message: "Upstream RPC unavailable" } }), { status: 502 });
+  chain.statuses.set(t.signature, { slot: 77, err: { InstructionError: [1, "Custom"] }, confirmationStatus: "confirmed" });
+  await assert.rejects(() => sol.sendWalletSignedSolanaTx(acct, t.signed, 10_000), (e) => e instanceof sol.SolanaTxError && e.state === "failed" && e.signature === t.signature);
+  checks++;
+  // the connection dropped and Solana never saw it: dropped once its blockhash expires, so it is safe to add again
+  t = await signedAdd();
+  sendAnswer = () => {
+    throw new TypeError("fetch failed");
+  };
+  chain.validBlockhash = false;
+  await assert.rejects(() => sol.sendWalletSignedSolanaTx(acct, t.signed, 10_000), (e) => e instanceof sol.SolanaTxError && e.state === "dropped" && e.signature === t.signature);
+  checks++;
+  chain.validBlockhash = true;
+  // the node refused it (failed preflight): not sent, said at once
+  t = await signedAdd();
+  sendAnswer = () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32002, message: "Transaction simulation failed" } }));
+  await assert.rejects(() => sol.sendWalletSignedSolanaTx(acct, t.signed, 10_000), (e) => e instanceof sol.SolanaRpcError && e.code === -32002 && /simulation failed/.test(e.message));
+  checks++;
+  ok(sends === 3, "each add was sent once");
+  sol.closeSolanaAccount(acct);
+}
+
 sol.closeSolanaAccount(account);
 sol.closeSolanaAccount(other);
 console.log(`solana.selftest: ok (${checks} assertions${appChecked ? ", app derivation parity and relay policy checked" : ", app checks skipped on this Node"})`);

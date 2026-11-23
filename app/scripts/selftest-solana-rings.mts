@@ -382,6 +382,8 @@ await refuse("a version 0 transaction", wire({ version: 0, instructions: [transa
 await refuse("without the private account's signature", wire({ instructions: [transact], ownerSigns: false }), /signature is missing/);
 await refuse("already signed by the relay", wire({ instructions: [transact], relayerSigns: true }), /signs last/);
 await refuse("only the relay signing", wire({ instructions: [ixFor(POOL, [16], [])] }), /must sign too/);
+// every signature is 5,000 lamports more the relay pays: nobody but the private account signs with it
+await refuse("a second signer beside the private account", wire({ instructions: [ixFor(POOL, [16, 1, 2, 3], [owner, stranger])] }), /only the private account signs/);
 await refuse("a priority fee over the cap", wire({ instructions: [transact], priorityFee: relay.RELAY_LIMITS.maxPriorityFeeLamports + 1n }), /priority fee/);
 {
   const r = relay.checkSponsoredTransaction(await wire({ instructions: [transact], units: 600_000 }), relayer.address, {

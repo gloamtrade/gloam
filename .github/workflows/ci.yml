@@ -93,6 +93,7 @@ jobs:
         working-directory: app
         run: |
           ../mcp/node_modules/.bin/tsx scripts/selftest-account-scope.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-kit-load.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-auto-receive.mts
 
       # A Gloam wallet's Solana account (lib/turnkeySolana): made in the same Turnkey

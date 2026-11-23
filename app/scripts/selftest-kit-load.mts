@@ -208,7 +208,9 @@ test("the app no longer wraps its pages in the kit; the gate starts it beside th
   assert.match(gate, /setEmbeddedAvailability\("unavailable"\);\s*\n\s*setEmbeddedAuth\("signed-out"\);\s*\n\s*dropSignInWaiting\(\);/);
 
   const appKit = read("../src/components/app/TurnkeyAppKit.tsx");
-  assert.match(appKit, /<TurnkeyKitProvider>\s*<EmbeddedWalletFlow \/>\s*<\/TurnkeyKitProvider>/);
+  // The kit wraps the sign-in flow, and (with Solana on) the Gloam wallet's Solana account sync,
+  // which needs the kit too and so loads with it, never before it.
+  assert.match(appKit, /<TurnkeyKitProvider>\s*<EmbeddedWalletFlow \/>\s*(\{SOLANA_RINGS_ENABLED && <TurnkeySolanaSync \/>\}\s*)?<\/TurnkeyKitProvider>/);
   const kit = read("../src/components/app/TurnkeyKit.tsx");
   assert.match(kit, /<TurnkeyWagmiSync \/>\s*<GloamSignInSheet \/>/, "the sheet and the sync come with the kit");
   const sync = read("../src/components/app/TurnkeyWagmiSync.tsx");
