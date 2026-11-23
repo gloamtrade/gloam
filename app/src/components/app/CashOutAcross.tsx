@@ -5,6 +5,14 @@
  * balances, and the panel that shows "2 of 3 cashed out", finishes one a
  * refresh cut short, stops the parts not sent yet, and lists each part's
  * receipt once it's done.
+ *
+ * To a partner's request wallet (the same rule as a single cash out's, MoveView
+ * requestPartner), every part's cash out carries the link's code and one tag for
+ * the whole cash out: through the relay with the send (one transaction or one by
+ * one), from the wallet registered before the wallet is asked. The partner counts
+ * it as one cash out of the whole amount (lib/partnerAttribution). A set-aside step
+ * never carries it. The code is held in this tab only: parts a refresh leaves to
+ * finish go without it.
  */
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -26,6 +34,7 @@ import { cashOutTogetherRefused, freshPath, splitForCashOut, splitMaybeSent, typ
 import { getLogsSafe } from "@/lib/logRange";
 import { getAllNotes } from "@/lib/noteVault";
 import { relayUnshield, relayUnshieldBatch, waitForTx } from "@/lib/relay/client";
+import { newLinkPayment, registerLinkSpend, settlePartnerTx } from "@/lib/partnerLinkClient";
 import { batchesOn } from "@/lib/relay/batch";
 import { publicClientFor } from "@/lib/rhClient";
 import { formatAssetLabel, shieldPoolAbi, updateLocalNote } from "@/lib/shield";
@@ -39,13 +48,17 @@ export type CashOutAcross = {
   running: boolean;
   status: string | null;
   error: string | null;
-  start: (run: CashOutAcrossRun) => Promise<void>;
+  /** `link`: cashing out to a partner's request wallet, its code (null otherwise). */
+  start: (run: CashOutAcrossRun, link?: { code: string } | null) => Promise<void>;
   resume: () => Promise<void>;
   cancel: () => Promise<void>;
   close: () => void;
 };
 
 const STORE = { loadAll: loadCashOutRuns, load: loadCashOutRun, save: saveCashOutRun };
+
+/** A partner's link a run cashes out to the request wallet of: its code, the wallet, and the tag every part carries. */
+type RunLink = { runId: string; code: string; to: Address; payment: Hex };
 
 export function useCashOutAcross(
   address: Address | undefined,
@@ -64,6 +77,8 @@ export function useCashOutAcross(
   const [error, setError] = useState<string | null>(null);
   const stop = useRef(false);
   const runningNow = useRef(false);
+  // the partner's link the run started here cashes out to, if any: this tab only
+  const link = useRef<RunLink | null>(null);
   const latest = useRef(opts);
   useEffect(() => {
     latest.current = opts;
@@ -93,6 +108,14 @@ export function useCashOutAcross(
       setError(null);
       setRun(r);
       const client = publicClientFor(network);
+      // a partner's request wallet: only a cash out to that very wallet carries the code and the tag
+      const from = link.current?.runId === r.id ? link.current : null;
+      const linkFor = (to: Address) => (from && to.toLowerCase() === from.to.toLowerCase() ? from : null);
+      // a send that carried the code is counted once it lands (the relay counts its own too)
+      const countedIf = (l: RunLink | null) => (h: Hex) => {
+        if (l) settlePartnerTx({ chainId: r.chainId, txHash: h });
+        return h;
+      };
       try {
         const done = await runCashOutAcross(r, {
           load: loadCashOutRun,
@@ -125,7 +148,11 @@ export function useCashOutAcross(
           },
           submit: (call) => {
             setStatus(r.relay ? "Sending through the Gloam relay…" : "Confirm the cash out in your wallet…");
-            return r.relay ? relayUnshield(call) : latest.current.walletUnshield(call);
+            const l = linkFor(call.to);
+            if (r.relay) return relayUnshield({ ...call, ...(l ? { partnerCode: l.code, partnerPayment: l.payment } : {}) }).then(countedIf(l));
+            // from the wallet: registered under the code now, before the wallet is asked, bound to this part's proof
+            if (l) registerLinkSpend({ code: l.code, chainId: r.chainId, nullifier: call.nullifier, proof: call.proof, payment: l.payment });
+            return latest.current.walletUnshield(call).then(countedIf(l));
           },
           // through the relay, every part in one transaction where the network has Multicall3
           // (lib/relay/batch), at the fee confirmed; a batch the relay surely didn't send
@@ -134,7 +161,14 @@ export function useCashOutAcross(
             ? {
                 submitTogether: (calls: CashOutCall[]) => {
                   setStatus("Sending every part together through the Gloam relay…");
-                  return relayUnshieldBatch({ chainId: r.chainId, pool: r.pool, feeBps: r.feeBps!, parts: calls });
+                  const l = calls.every((c) => linkFor(c.to)) ? from : null;
+                  return relayUnshieldBatch({
+                    chainId: r.chainId,
+                    pool: r.pool,
+                    feeBps: r.feeBps!,
+                    parts: calls,
+                    ...(l ? { partnerCode: l.code, partnerPayment: l.payment } : {}),
+                  }).then(countedIf(l));
                 },
                 togetherRefused: cashOutTogetherRefused,
               }
@@ -181,7 +215,7 @@ export function useCashOutAcross(
   );
 
   const start = useCallback(
-    async (r: CashOutAcrossRun) => {
+    async (r: CashOutAcrossRun, from?: { code: string } | null) => {
       if (runningNow.current) return;
       let begun: { run: CashOutAcrossRun; started: boolean };
       try {
@@ -195,6 +229,8 @@ export function useCashOutAcross(
         setError("A cash out of yours isn't finished yet. Resume it, or stop the rest, before a new one.");
         return;
       }
+      // only this run, started to the partner's request wallet now: never one left from before
+      link.current = from ? { runId: begun.run.id, code: from.code, to: begun.run.to, payment: newLinkPayment() } : null;
       await go(begun.run);
     },
     [go]

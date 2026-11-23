@@ -1399,7 +1399,9 @@ export function MoveView() {
       noteAmounts: amounts,
     });
     setCashOutInput(null);
-    await cashAcross.start(run);
+    // From a partner's link to the request's own wallet, as a single cash out: every part carries the code.
+    const fromLink = requestPartner(to);
+    await cashAcross.start(run, fromLink ? { code: fromLink.code } : null);
   }
 
   async function onCashOut() {
@@ -2187,7 +2189,11 @@ export function MoveView() {
         note: cleanPaymentNote(payNote) || undefined,
       });
       setSendAmount("");
-      await across.start(run);
+      // From a partner's link, to the request's own Gloam address (the rule a single payment
+      // follows, onPrivateSend): every part carries the code, and the parts count as one payment.
+      const linkCode =
+        request?.partnerCode && request.toKind === "gloam" && payStyle === "direct" && recipientTag.trim() === request.to ? request.partnerCode : null;
+      await across.start(run, linkCode ? { code: linkCode } : null);
     } catch (e) {
       setError(walletErrorForPeople(e, "The payment didn't go through. Try again."));
     } finally {

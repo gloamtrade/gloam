@@ -138,6 +138,8 @@ export async function relayTransfer(p: {
   commitments: readonly [Hex, Hex];
   /** A partner's link code: the relay counts the payment to them once it lands (lib/partnerAttribution). */
   partnerCode?: string;
+  /** With the code, on every part of a payment in parts: the parts count as one payment. */
+  partnerPayment?: Hex;
 }): Promise<Hex> {
   const { hash, memoTicket } = await post({ action: "transfer", ...p });
   // commitments[0] is the payment, the one its heads-up is for
@@ -148,10 +150,17 @@ export async function relayTransfer(p: {
 /**
  * A payment in parts as one transaction (lib/relay/batch): every part's transfer and its
  * message, all landing or none. Refused with nothing sent where it can't go in one
- * (code batch_big, batch_parts): the caller sends the parts one by one instead.
+ * (code batch_big, batch_parts): the caller sends the parts one by one instead. From a
+ * partner's link it carries the code (and the payment's tag), counted as one payment.
  */
-export async function relayTransferBatch(p: { chainId: number; parts: readonly BatchPart[] }): Promise<Hex> {
-  return (await post({ action: "transferBatch", chainId: p.chainId, parts: p.parts })).hash;
+export async function relayTransferBatch(p: { chainId: number; parts: readonly BatchPart[]; partnerCode?: string; partnerPayment?: Hex }): Promise<Hex> {
+  return (await post({ action: "transferBatch", chainId: p.chainId, parts: p.parts, ...linkFields(p) })).hash;
+}
+
+/** A partner link's code and payment tag, only when there is a code. */
+function linkFields(p: { partnerCode?: string; partnerPayment?: Hex }): { partnerCode?: string; partnerPayment?: Hex } {
+  if (!p.partnerCode) return {};
+  return { partnerCode: p.partnerCode, ...(p.partnerPayment ? { partnerPayment: p.partnerPayment } : {}) };
 }
 
 /** A batch the relay refused before sending: the parts can still go one by one. */
@@ -162,11 +171,19 @@ export const BATCH_REFUSED_CODES: ReadonlySet<string> = new Set(["batch_big", "b
  * to the same wallet, all landing or none. `feeBps` is the cash-out fee the person
  * confirmed: the relay refuses it (code fee_moved) if the vault's fee is now higher.
  * Refused with nothing sent where it can't go in one (batch_big, batch_network, an older
- * relay that doesn't know it): the caller sends the parts one by one instead.
+ * relay that doesn't know it): the caller sends the parts one by one instead. From a
+ * partner's link it carries the code (and the cash out's tag), counted as one cash out.
  */
-export async function relayUnshieldBatch(p: { chainId: number; pool: Address; feeBps: number; parts: readonly UnshieldBatchPart[] }): Promise<Hex> {
+export async function relayUnshieldBatch(p: {
+  chainId: number;
+  pool: Address;
+  feeBps: number;
+  parts: readonly UnshieldBatchPart[];
+  partnerCode?: string;
+  partnerPayment?: Hex;
+}): Promise<Hex> {
   const parts = p.parts.map(({ proof, root, nullifier, asset, to, amount }) => ({ proof, root, nullifier, asset, to, amount }));
-  return (await post({ action: "unshieldBatch", chainId: p.chainId, pool: p.pool, feeBps: p.feeBps, parts })).hash;
+  return (await post({ action: "unshieldBatch", chainId: p.chainId, pool: p.pool, feeBps: p.feeBps, parts, ...linkFields(p) })).hash;
 }
 
 export async function relayUnshield(p: {
@@ -179,6 +196,8 @@ export async function relayUnshield(p: {
   amount: bigint;
   /** A partner's link code: the relay counts the cash out to them once it lands. */
   partnerCode?: string;
+  /** With the code, on every part of a cash out in parts: the parts count as one cash out. */
+  partnerPayment?: Hex;
 }): Promise<Hex> {
   return (await post({ action: "unshield", ...p })).hash;
 }
