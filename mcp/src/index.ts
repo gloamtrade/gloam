@@ -36,6 +36,20 @@ async function serve() {
     process.exit(1);
   }
 
+  let solanaKey = false;
+  try {
+    // Fail closed here too: a malformed Solana key must not start a server that later says it has none.
+    const { agentSolanaKey, solanaAccountIndex, solanaBaseUrl } = await import("./solana.js");
+    const key = agentSolanaKey(process.env);
+    solanaKey = key !== null;
+    key?.fill(0);
+    solanaAccountIndex(process.env);
+    solanaBaseUrl(process.env);
+  } catch (e) {
+    log(`Gloam MCP: ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  }
+
   const [{ StdioServerTransport }, { createGloamServer }, networks] = await Promise.all([
     import("@modelcontextprotocol/sdk/server/stdio.js"),
     import("./server.js"),
@@ -63,6 +77,7 @@ async function serve() {
   if (setup.mode === "access-key") {
     log(`Signer: Tempo access key ${setup.keyAddress} for account ${setup.owner}. On Tempo the protocol enforces the owner's limits; on Robinhood Chain the key signs as itself.`);
   }
+  log(solanaKey ? "Solana: GLOAM_AGENT_SOLANA_KEY is set; the gloam_solana_* tools can add, pay and cash out (spending limits apply)." : "Solana: no GLOAM_AGENT_SOLANA_KEY; the gloam_solana_* tools read only.");
   if (process.env.GLOAM_EXPOSE_NOTE_SECRETS?.trim() === "1") {
     log("WARNING: GLOAM_EXPOSE_NOTE_SECRETS=1. Note secrets are passed to and from the agent. This is unsafe.");
   }

@@ -231,7 +231,7 @@ export const TOOLS: Tool[] = [
       (MAINNET_ENABLED
       ? `The networks Gloam runs on, mainnets first, with each vault (pool) address, the private swap routers (${swapMainnets()} mainnet), the assets you can deposit (on mainnet: ${MAINNET_DEPOSITS_TEXT}; on testnet: OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain, and more on Base Sepolia and Ethereum Sepolia${ELYSIUM_TESTNET_ON ? ", and test USDC on Elysium testnet" : ""}), explorers, RPCs and the testnet faucets.`
       : "The networks Gloam runs on, with each vault (pool) address, the assets you can deposit (OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain), explorers, RPCs and faucets.") +
-      (SOLANA_RINGS_ENABLED ? ` With no network given, also Gloam on ${SOLANA_NAME} (Helius Privacy Rings, in the app only), listed apart.` : ""),
+      (SOLANA_RINGS_ENABLED ? ` With no network given, also Gloam on ${SOLANA_NAME} (Helius Privacy Rings: in the app, the SDK and the local MCP server), listed apart.` : ""),
     inputSchema: {
       type: "object",
       properties: { network: { ...NETWORK_PROP, description: `${NETWORK_PROP.description} ${LEAVE_OUT}` } },
@@ -384,6 +384,7 @@ function info(ctx: ToolContext) {
     ],
     status: STATUS,
     whatIsPublic: WHAT_IS_PUBLIC,
+    ...(SOLANA_RINGS_ENABLED ? { solana: solanaView(ctx.origin) } : {}),
     links: { ...appLinks(ctx.origin), github: "https://github.com/gloamtrade/gloam", email: "hello@gloam.trade" },
   };
 }
@@ -458,6 +459,9 @@ function networkView(key: NetworkKey, origin: string) {
  * from the networks: it has no Gloam vault, runs through Helius Privacy Rings,
  * hides less, and none of this server's other tools cover it.
  */
+const LOCAL_SOLANA = "@gloamtrade/mcp 0.11.0 or later, the gloam_solana_* tools with GLOAM_AGENT_SOLANA_KEY";
+const SDK_SOLANA = "@gloamtrade/sdk 0.9.0 or later, @gloamtrade/sdk/solana";
+
 function solanaView(origin: string) {
   return {
     name: SOLANA_NAME,
@@ -465,9 +469,10 @@ function solanaView(origin: string) {
     how: "Helius Privacy Rings (the open Default Ring), with Gloam's account layer on top. There is no Gloam vault on Solana.",
     privacy: RINGS_PRIVACY_NOTE,
     assets: ringsAssets().map((a) => ({ symbol: a.symbol, mint: a.mint, decimals: a.decimals })),
+    prover: "Proofs are made by Helius's prover, in an attested enclave.",
     fees: "Gloam's relay pays the Solana network fees, so a private account never needs SOL of its own.",
     app: `${origin}/app/solana`,
-    tools: "In the app only. This server's other tools, the local MCP server and the SDK cover the networks above.",
+    agents: `The local MCP server (${LOCAL_SOLANA}) and the SDK (${SDK_SOLANA}) open the same private account as the app from the same wallet: balance, add, pay and cash out on ${SOLANA_NAME}, under spending limits. This server only lists it.`,
   };
 }
 

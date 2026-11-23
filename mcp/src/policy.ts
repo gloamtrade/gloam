@@ -73,8 +73,19 @@ import {
   networkName as sdkNetworkName,
   testnetNetwork,
   mainnetNetwork,
+  isSolanaAddress,
+  SOLANA_ASSETS,
+  SOLANA_MAINNET_CHAIN_ID,
+  SOLANA_RINGS_SOL_MINT,
 } from "@gloamtrade/sdk";
 import type { NetworkKey } from "./networks.js";
+
+/**
+ * A network a limit can name: Gloam's EVM networks, and "solana-mainnet"
+ * (src/solana.ts), keyed by SOLANA_MAINNET_CHAIN_ID. Solana's assets are named
+ * by their mint (base58, matched exactly); SOL by the Rings SDK's SOL mint.
+ */
+export type LimitNetworkKey = NetworkKey | "solana-mainnet";
 
 export type SpendTool = "pay" | "send" | "shield" | "swap";
 /**
@@ -86,16 +97,16 @@ export const SPEND_TOOLS: SpendTool[] = ["pay", "send", "shield"];
 export const ALL_SPEND_TOOLS: SpendTool[] = ["pay", "send", "shield", "swap"];
 
 const TOOL_WORDS: Record<SpendTool, string> = {
-  pay: "pay privately (gloam_execute_private_pay)",
+  pay: "pay privately (gloam_execute_private_pay, and on Solana gloam_solana_pay and gloam_solana_cash_out)",
   send: "send publicly (gloam_execute_transfer)",
-  shield: "shield into a private balance (gloam_execute_shield)",
+  shield: "shield into a private balance (gloam_execute_shield, and on Solana gloam_solana_add)",
   swap: 'swap privately (gloam_execute_private_swap; the owner lists "swap" in tools to allow it)',
 };
 
 /** One money-moving action an agent asked for, before it is signed. */
 export type Spend = {
   tool: SpendTool;
-  network: NetworkKey;
+  network: LimitNetworkKey;
   chainId: number;
   asset: Address;
   amountWei: bigint;
@@ -173,7 +184,8 @@ export const NETWORK_CHAIN_IDS: Record<NetworkKey, number> = {
 };
 
 /** The chain id a limit's network names; refuses Elysium and BNB Chain while the SDK has no pool for them. */
-function networkChainId(key: NetworkKey): number {
+function networkChainId(key: LimitNetworkKey): number {
+  if (key === "solana-mainnet") return SOLANA_MAINNET_CHAIN_ID;
   const id = NETWORK_CHAIN_IDS[key];
   if (!id) throw new Error(`${key} is not available in this version of @gloamtrade/mcp yet. Update the package.`);
   return id;
@@ -232,6 +244,15 @@ export const KNOWN_ASSETS: KnownAsset[] = [
   // each with the decimals the SDK read on chain. Last, so a bare "USDT" or "USDC" keeps naming the
   // one it named before; name the network (bnb-mainnet) for BNB Chain's, and a limit then counts in 18 decimals.
   ...bnbKnownAssets(),
+  // Solana mainnet (gloam_solana_* tools): SOL, USDC and USDT by mint. Last, so a bare "USDC" or "USDT"
+  // keeps naming the one it named before; name the network (solana-mainnet) for Solana's. "SOL" is only here.
+  ...SOLANA_ASSETS.mainnet.map((a) => ({
+    symbol: a.symbol,
+    chainId: SOLANA_MAINNET_CHAIN_ID,
+    address: (a.mint ?? SOLANA_RINGS_SOL_MINT) as Address,
+    decimals: a.decimals,
+    stable: a.id !== "sol",
+  })),
 ];
 
 /** BNB Chain's listed assets as KnownAsset rows, or none while the SDK has no pool for it. */
@@ -255,7 +276,7 @@ export function assetLabel(chainId: number, asset: Address): string {
 // ------------------------------------------------------------------ config shape
 
 const amount = z.union([z.string(), z.number()]).transform((v) => String(v).trim());
-const network = z.enum(["robinhood", "tempo", "base", "ethereum", "robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "elysium", "bnb-mainnet"]);
+const network = z.enum(["robinhood", "tempo", "base", "ethereum", "robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "elysium", "bnb-mainnet", "solana-mainnet"]);
 
 const assetEntry = z
   .object({
@@ -361,6 +382,13 @@ export function resolveAgent(agent: string, raw: AgentConfig, source: string): A
       decimals = known?.decimals ?? entry.decimals ?? -1;
       if (decimals < 0) throw new Error(`Asset ${k} is not one Gloam knows; add "decimals" for it.`);
       symbol = known?.symbol ?? `${k.slice(0, 6)}…${k.slice(-4)}`;
+    } else if (isSolanaAddress(k)) {
+      // a Solana mint: only one Gloam lists on Solana (exact match, base58 is case-sensitive)
+      known = KNOWN_ASSETS.find((a) => a.chainId === SOLANA_MAINNET_CHAIN_ID && a.address === k);
+      if (!known || (wantChain != null && wantChain !== SOLANA_MAINNET_CHAIN_ID)) {
+        throw new Error(`Asset ${k} is not one Gloam lists on Solana (${SOLANA_ASSETS.mainnet.map((a) => a.symbol).join(", ")}).`);
+      }
+      ({ address, chainId, decimals, symbol } = known);
     } else {
       known = KNOWN_ASSETS.find(
         (a) => a.symbol.toLowerCase() === k.toLowerCase() && (wantChain == null || a.chainId === wantChain)
@@ -515,7 +543,7 @@ export function loadPolicy(env: Record<string, string | undefined>, readFile: (p
         mode: "invalid",
         agent,
         source,
-        error: `GLOAM_LIMIT_NETWORK "${limitNetwork}" is not a Gloam network. Use robinhood-mainnet, tempo-mainnet, base-mainnet, ethereum-mainnet, ${mainnetNetwork("elysium") ? "elysium-mainnet, " : ""}${mainnetNetwork("bnb") ? "bnb-mainnet, " : ""}robinhood, tempo, base${testnetNetwork("elysium") ? ", ethereum or elysium" : " or ethereum"}.`,
+        error: `GLOAM_LIMIT_NETWORK "${limitNetwork}" is not a Gloam network. Use robinhood-mainnet, tempo-mainnet, base-mainnet, ethereum-mainnet, solana-mainnet, ${mainnetNetwork("elysium") ? "elysium-mainnet, " : ""}${mainnetNetwork("bnb") ? "bnb-mainnet, " : ""}robinhood, tempo, base${testnetNetwork("elysium") ? ", ethereum or elysium" : " or ethereum"}.`,
       };
     }
     const assetKeys = list(env.GLOAM_LIMIT_ASSETS ?? "");
