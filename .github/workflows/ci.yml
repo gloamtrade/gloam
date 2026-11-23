@@ -101,6 +101,18 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-bnb.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-bnb-everywhere.mts
 
+      # Public activity on a mainnet: the first read covers the last week (a day on
+      # BNB Chain), newest blocks first, rows show as each span returns, Show older
+      # reads one more window, a call answers at its time limit while the read goes
+      # on, and nothing read in time is an error with Retry, never a skeleton. On
+      # Base and on BNB Chain; a stand-in chain, nothing reaches a host.
+      - name: App activity self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-activity-window.mts
+          NEXT_PUBLIC_BNB_ENABLED=1 NEXT_PUBLIC_BNB_POOL=0x89d3042390204f57b8b4F8949D3c2203E4002164 NEXT_PUBLIC_BNB_DEPLOY_BLOCK=134300000 NEXT_PUBLIC_BNB_LIVE_SINCE="21 November 2026" ../mcp/node_modules/.bin/tsx scripts/selftest-activity-window.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-activity-eth.mts
+
       # Email updates: the list (subscribe, unsubscribe, admin CSV) and sending it
       # (markdown escaping, one message per person, one-click unsubscribe, never
       # twice across a crash). A fake Resend and the in-process store: no email is sent.
