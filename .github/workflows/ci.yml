@@ -22,8 +22,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  packages:
-    name: Packages and examples
+  # Four jobs run side by side, so a run takes as long as the slowest one, not all of them.
+  app:
+    name: App self-tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -104,11 +105,57 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-updates-list.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-updates-mail.mts
 
+  sdk:
+    name: SDK and mppx-gloam
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # pnpm's version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The app's dependencies are installed too: some package tests check
+      # byte compatibility against the app's own source (claim links, receive
+      # tags). The app itself is not built here.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
       - name: SDK tests
         run: pnpm --filter @gloamtrade/sdk test
 
       - name: mppx-gloam tests
         run: pnpm --filter @gloamtrade/mppx-gloam test
+
+  mcp:
+    name: MCP and GAME plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # pnpm's version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The app's dependencies are installed too: some package tests check
+      # byte compatibility against the app's own source (claim links, receive
+      # tags). The app itself is not built here.
+      - name: Install
+        run: pnpm install --frozen-lockfile
 
       - name: MCP typecheck
         run: pnpm --filter @gloamtrade/mcp typecheck
@@ -121,6 +168,29 @@ jobs:
 
       - name: GAME plugin build
         run: pnpm --filter @gloamtrade/game-plugin-gloam build
+
+  examples:
+    name: Examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # pnpm's version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The app's dependencies are installed too: some package tests check
+      # byte compatibility against the app's own source (claim links, receive
+      # tags). The app itself is not built here.
+      - name: Install
+        run: pnpm install --frozen-lockfile
 
       - name: Examples typecheck
         run: pnpm --filter './examples/*' --workspace-concurrency=1 run --if-present typecheck
