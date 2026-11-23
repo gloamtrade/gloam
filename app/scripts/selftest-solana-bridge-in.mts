@@ -263,7 +263,12 @@ const postRelay = (wire: Uint8Array, ip = "203.0.113.7") =>
       body: JSON.stringify({ tx: getBase64Decoder().decode(wire) }),
     })
   );
-{
+// The relay counts by clock minute. Held still here, so a run that crosses a
+// minute can't split the burst below across two windows and let more through.
+const realRelayClock = server.ringsRelayClock.now;
+const relayAt = realRelayClock();
+server.ringsRelayClock.now = () => relayAt;
+try {
   const wire = await signedBy(await deposit(), owner);
   const res = await postRelay(wire);
   const json = (await res.json()) as { ok: boolean; signature?: string };
@@ -275,6 +280,10 @@ const postRelay = (wire: Uint8Array, ip = "203.0.113.7") =>
   let passed = 1;
   for (let i = 0; i < 12; i++) if ((await postRelay(await signedBy(await deposit({ amount: 20_000_000n + BigInt(i) }), owner))).status === 200) passed++;
   ok(passed === server.RINGS_RELAY_LIMITS.transact.perIpPerMin, `deposits count as payments: ${passed} a minute from one IP, past the rent limit of ${server.RINGS_RELAY_LIMITS.rent.perIpPerDay}`);
+  server.ringsRelayClock.now = () => relayAt + 60_000;
+  const nextMinute = await postRelay(await signedBy(await deposit({ amount: 20_000_000n + 12n }), owner));
+  ok(nextMinute.status === 200, "the same IP pays again the next minute");
+  server.ringsRelayClock.now = () => relayAt;
   const relayAsDepositor = await postRelay(encode(await deposit({ asset: SOL, depositor: relayer.address, tokenAccount: null, amount: 5_000_000n })), "203.0.113.8");
   ok(relayAsDepositor.status === 422, "the route refuses the relay as depositor before simulating");
   const screened = await (async () => {
@@ -282,6 +291,8 @@ const postRelay = (wire: Uint8Array, ip = "203.0.113.7") =>
     return postRelay(await signedBy(await deposit({ tokenAccount: bad }), owner), "203.0.113.9");
   })();
   ok(screened.status === 403, "a deposit naming an OFAC-listed Solana address is refused");
+} finally {
+  server.ringsRelayClock.now = realRelayClock;
 }
 globalThis.fetch = realFetch;
 
