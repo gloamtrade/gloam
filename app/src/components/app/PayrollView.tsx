@@ -75,6 +75,7 @@ import {
   type PayrollRowStatus,
 } from "@/lib/payroll";
 import { holdsPendingPayment } from "@/lib/payrollStore";
+import { isPayRun } from "@/lib/payAcross";
 import { lookupGloamName } from "@/hooks/useGloamName";
 import { walletErrorForPeople } from "@/lib/walletErrors";
 import {
@@ -564,7 +565,7 @@ export function PayrollView() {
   const reloadBatches = useCallback(() => {
     // A demo keeps its runs in memory only.
     if (!pool || demo || !shownAccount) return Promise.resolve();
-    return loadBatches(network.chainId, pool).then(setBatches);
+    return loadBatches(network.chainId, pool).then((b) => setBatches(b.filter((x) => !isPayRun(x))));
   }, [network.chainId, pool, demo, shownAccount, setBatches]);
   useEffect(() => {
     if (!pool) return;
@@ -579,7 +580,8 @@ export function PayrollView() {
             )
           )
         : shownAccount
-          ? loadBatches(network.chainId, pool)
+          ? // a payment Pay sent in parts runs on the same engine, but it isn't a payroll run
+            loadBatches(network.chainId, pool).then((b) => b.filter((x) => !isPayRun(x)))
           : Promise.resolve(NO_BATCHES);
     void load.then((b) => {
       if (live) setBatches(b);

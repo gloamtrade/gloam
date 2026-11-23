@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { formatUnits, isAddress, type Address, type Hex } from "viem";
@@ -16,7 +16,7 @@ import { useWalletState } from "@/hooks/useWalletState";
 import { usePoolDeposited } from "@/hooks/usePoolDeposited";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient, publicClientFor } from "@/lib/rhClient";
-import { HASH_SCHEME, dropUnsentNote, gasFor, noteNetworkProblem, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatAssetShort, formatAssetShortLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, SIGNED_OUT_BALANCE_MESSAGE, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
+import { HASH_SCHEME, activeSpendableNotes, dropUnsentNote, gasFor, noteNetworkProblem, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatAssetShort, formatAssetShortLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, SIGNED_OUT_BALANCE_MESSAGE, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
 import {
   claimNoteId,
   isClaimedNote,
@@ -151,6 +151,8 @@ import {
 import { cashOutPrivacyWarnings, depositWallets } from "@/lib/cashOutPrivacy";
 import { CashOutPercentChips, CashOutWarnings } from "./CashOutPrivacy";
 import { BalancePicker } from "./BalancePicker";
+import { PayAcrossPanel, usePayAcross } from "./PayAcross";
+import { newPayRun, planPayFrom } from "@/lib/payAcross";
 import { PrivacyCard } from "./PrivacyCard";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { codeFromHash } from "@/lib/claimLink";
@@ -472,6 +474,12 @@ export function MoveView() {
   const [relayStatus, setRelayStatus] = useState<RelayNetworkStatus | null>(null);
   const gasHigh = Boolean(relayStatus?.gasHigh);
   const [relayHash, setRelayHash] = useState<Hex | undefined>(undefined);
+  // A payment sent in parts (lib/payAcross): its progress, and one a refresh cut short.
+  const onAcrossSettled = useCallback(() => {
+    refreshNotes();
+    void refreshTree();
+  }, [refreshNotes, refreshTree]);
+  const across = usePayAcross(address, network, { signedIn: Boolean(shownAccount), onSettled: onAcrossSettled });
 
   // Drop the nudge's suggestion from the URL once read (it is already in the
   // form), so a refresh or a tab switch does not fill it in again.
@@ -1049,6 +1057,15 @@ export function MoveView() {
     ? formatUnits(BigInt(selected.amountWei), assetDecimals(selected.asset))
     : "0";
   const sendTypedWei = sendAmount.trim() && selected ? parseAssetAmount(sendAmount.trim(), selected.asset) : null;
+  // More than the picked balance holds, to a Gloam address or name: sent in parts from every
+  // balance in that token (lib/payAcross), each a private payment of its own.
+  const acrossPlan = useMemo(() => {
+    // the recording demo's balances are pretend: it pays from one balance only
+    if (readDemo() || mode !== "send" || payStyle !== "direct" || !selected || sendTypedWei == null || sendTypedWei <= 0n) return null;
+    if (sendTypedWei <= BigInt(selected.amountWei)) return null;
+    const same = activeSpendableNotes(notes).filter((n) => n.asset.toLowerCase() === selected.asset.toLowerCase());
+    return planPayFrom(sendTypedWei, same);
+  }, [mode, payStyle, selected, sendTypedWei, notes]);
 
   const cashOutAsset = selected?.asset as `0x${string}` | undefined;
   const { deposited: poolForCashOut } = usePoolDeposited(
@@ -2020,6 +2037,48 @@ export function MoveView() {
       pendingLink.current = null;
       pendingClaimLink.current = false;
       payTrack.current = null;
+    }
+  }
+
+  /** Pay more than one balance holds: the parts in acrossPlan, one after another, through the relay. */
+  async function onPayAcross(parts: bigint[], noteIds: string[]) {
+    if (!selected || !address || !network.pool || !poseidonMode || across.running) return;
+    setError(null);
+    try {
+      if (!relayOn || !relayAvailable) throw new Error("Turn on Hide my wallet to send it in parts in one go.");
+      if (gasHigh) throw new Error(gasHighMessage(network.label));
+      if (!isValidReceiveTag(payTag)) {
+        throw new Error(
+          payRecipient.kind === "name"
+            ? `No one has @${payRecipient.name} yet. Check the spelling, or paste their Gloam address.`
+            : "That Gloam address is incomplete or mistyped. Copy it again from their Receive page."
+        );
+      }
+      // a name is read again right before sending: it pays whoever holds it now
+      if (payRecipient.kind === "name") {
+        const fresh = await lookupGloamName(payRecipient.name);
+        if (fresh === "failed") throw new Error(`Could not check @${payRecipient.name} just now. Try again in a moment.`);
+        if (!fresh || fresh.tag !== payTag) {
+          setNameRefresh((n) => n + 1);
+          throw new Error(`@${payRecipient.name} just changed. Check who it pays, then try again.`);
+        }
+      }
+      const run = newPayRun({
+        chainId: network.chainId,
+        pool: network.pool,
+        asset: selected.asset,
+        payer: address,
+        tag: payTag,
+        label: payRecipient.kind === "name" ? `@${payRecipient.name}` : shortTag(payTag, 8, 10),
+        ...(payRecipient.kind === "name" ? { name: payRecipient.name } : {}),
+        parts,
+        noteIds,
+        note: cleanPaymentNote(payNote) || undefined,
+      });
+      setSendAmount("");
+      await across.start(run);
+    } catch (e) {
+      setError(walletErrorForPeople(e, "The payment didn't go through. Try again."));
     }
   }
 
@@ -3088,6 +3147,15 @@ export function MoveView() {
                       )}
                     </div>
                     <AmountProblem value={sendAmount} decimals={selected ? assetDecimals(selected.asset) : undefined} />
+                    {acrossPlan && selected && (
+                      <p aria-live="polite" className={`mt-2 text-[12.5px] leading-relaxed ${acrossPlan.ok ? "text-mute" : "text-danger"}`}>
+                        {acrossPlan.ok
+                          ? `Sent as ${acrossPlan.parts.length} private payments from your balance.${relayOn ? "" : " Turn on Hide my wallet to send them in one go."}`
+                          : acrossPlan.reason === "over_total"
+                            ? `That's more than your private balance in ${assetLabel(selected.asset)}. You can send up to ${formatAssetLabel(acrossPlan.most, selected.asset)}.`
+                            : `That needs too many payments at once. Send up to ${formatAssetLabel(acrossPlan.most, selected.asset)} now, then the rest.`}
+                      </p>
+                    )}
                     {selected && (
                       <CashOutPercentChips
                         balance={BigInt(selected.amountWei)}
@@ -3131,6 +3199,7 @@ export function MoveView() {
                     disabled={working}
                   />
 
+                  <PayAcrossPanel across={across} />
                   {!connectedOk ? (
                     connectPrompt("pay privately")
                   ) : (
@@ -3144,13 +3213,17 @@ export function MoveView() {
                         treeLoading ||
                         !relayChecked ||
                         working ||
+                        across.running ||
+                        Boolean(across.run && across.run.status !== "done") ||
                         payToWallet ||
                         (payStyle !== "bearer" && !recipientTag.trim()) ||
-                        (payStyle === "direct" && payRecipient.kind === "name" && nameLookup.status !== "found")
+                        (payStyle === "direct" && payRecipient.kind === "name" && nameLookup.status !== "found") ||
+                        Boolean(acrossPlan && (!acrossPlan.ok || !relayOn))
                       }
                       onClick={() => {
                         if (recipientTag.trim()) setPayStyle("direct");
-                        void onPrivateSend();
+                        if (acrossPlan?.ok) void onPayAcross(acrossPlan.parts, acrossPlan.noteIds);
+                        else void onPrivateSend();
                       }}
                       className="btn btn-ink btn-lg btn-block"
                     >

@@ -87,6 +87,12 @@ export type PayrollRow = {
   kind: PayeeKind;
   /** The Gloam name the list gave ("ada" for "@ada"); `recipient` is the address it held when the run was made. */
   payName?: string;
+  /**
+   * The note this row was planned to spend (lib/payAcross): paid from it while it
+   * is unspent and covers the row, so each part of a payment spends its own note
+   * and no part waits on another's change.
+   */
+  planNoteId?: string;
   /** raw units of the batch asset */
   amount: string;
   /** Private note sealed into their payment, e.g. "September salary". */
@@ -132,6 +138,8 @@ export type PayrollBatch = {
   /** Set when the run pays a saved schedule (lib/payrollSchedule): which one, and for which payday. */
   scheduleId?: string;
   payday?: string;
+  /** "pay": one payment from Pay sent in parts (lib/payAcross), not a payroll run, so Payroll never lists it. */
+  purpose?: "pay";
 };
 
 export type DraftRow = {
@@ -149,6 +157,8 @@ export type DraftRow = {
    * until then the row waits with NAME_PENDING.
    */
   payName?: string;
+  /** The note planned for this row (lib/payAcross); a list from Payroll has none. */
+  planNoteId?: string;
   error: string | null;
 };
 
@@ -482,6 +492,7 @@ export function newBatch(args: {
         recipient: r.recipient,
         kind: r.kind,
         ...(r.payName ? { payName: r.payName } : {}),
+        ...(r.planNoteId ? { planNoteId: r.planNoteId } : {}),
         amount: r.amount!.toString(),
         ...(r.note ? { note: r.note } : {}),
         status: "queued" as const,
@@ -967,13 +978,12 @@ async function payRow(
     // again exactly as it was. Otherwise a new one is built.
     let note: LocalNote | undefined;
     if (!row.spendNullifier) {
-      note = await unspentNote(
-        batch,
-        deps.client,
-        fundingNotes(batch.employer, batch.asset, tree, batch)
-          .filter((n) => BigInt(n.amountWei) >= amount)
-          .sort((a, b) => (BigInt(a.amountWei) < BigInt(b.amountWei) ? -1 : 1))
-      );
+      const covering = fundingNotes(batch.employer, batch.asset, tree, batch)
+        .filter((n) => BigInt(n.amountWei) >= amount)
+        .sort((a, b) => (BigInt(a.amountWei) < BigInt(b.amountWei) ? -1 : 1));
+      // the note this row was planned on goes first (lib/payAcross), then the smallest that covers it
+      const planned = row.planNoteId ? covering.filter((n) => n.id === row.planNoteId) : [];
+      note = await unspentNote(batch, deps.client, [...planned, ...covering.filter((n) => n.id !== row.planNoteId)]);
       // the signed-in account's own note, like every spend path (lib/noteVault noteOwnerProblem)
       const notYours = note ? noteNetworkProblem(note, batch) : null;
       if (notYours) {
