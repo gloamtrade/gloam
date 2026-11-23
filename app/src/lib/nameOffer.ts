@@ -51,3 +51,33 @@ export function shouldOfferName(s: {
 }): boolean {
   return s.registryLive && !s.demo && s.signedIn && !s.closed && s.owned === false;
 }
+
+export const NAME_OWNED_KEY = "gloam.names.owned.v1";
+/** How long a sure answer about owning a name is trusted, ms. */
+export const NAME_OWNED_TTL_MS = 6 * 60 * 60 * 1000;
+
+/** This account's last sure answer (owns a name or not), if fresh. Unknown reads as null. */
+export function cachedNameOwned(now = Date.now()): boolean | null {
+  if (typeof window === "undefined") return null;
+  const key = scopedKey(NAME_OWNED_KEY);
+  if (!key) return null;
+  try {
+    const v = JSON.parse(window.localStorage.getItem(key) ?? "null") as { owned?: unknown; at?: unknown } | null;
+    if (!v || typeof v.owned !== "boolean" || typeof v.at !== "number" || now - v.at > NAME_OWNED_TTL_MS) return null;
+    return v.owned;
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps a sure answer for this account only; an unknown one is never kept. */
+export function rememberNameOwned(owned: boolean | null, now = Date.now()): void {
+  if (typeof window === "undefined" || owned === null) return;
+  const key = scopedKey(NAME_OWNED_KEY);
+  if (!key) return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify({ owned, at: now }));
+  } catch {
+    /* storage off: it is read again next visit */
+  }
+}

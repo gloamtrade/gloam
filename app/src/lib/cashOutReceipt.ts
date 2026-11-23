@@ -11,6 +11,12 @@
  * Which cash outs are yours: every note this browser holds has its spend
  * marker (nullifier), and a cash out names the one it spent. findCashOuts asks
  * the vault for Unshielded logs with those markers, nothing else.
+ *
+ * Only a plain cash out gets a receipt. A private swap and a name purchase
+ * also pay out of the vault (to an escrow, or the registrar), but the money
+ * stays inside Gloam: a transaction sent to a swap router or the names
+ * registrar, one with a swap or names log, or one that also puts a note back
+ * in the vault is refused (ReceiptGuard).
  */
 import {
   TransactionReceiptNotFoundError,
@@ -22,6 +28,13 @@ import {
   type PublicClient,
 } from "viem";
 import { walkLogs, walkTuning } from "./leafIndex";
+import { GLOAM_NAMES_ADDRESS } from "./gloamNames";
+import { NAMES_REGISTRAR_ADDRESS } from "./nameClaim";
+import { VAULT_EVENTS, VAULT_SWAP_TOPIC } from "./partnerVerify";
+import { EVERY_SWAP_ROUTER, swapRoutersOn } from "./vaultSwap";
+import { isNativeAsset, type LocalNote } from "./shield";
+import { allNetworks, type GloamNetwork } from "./networks";
+import { knownTokens, nativeTokenFor } from "./tokens";
 
 export const UNSHIELDED_EVENT = {
   type: "event",
@@ -46,8 +59,31 @@ export const WITHDRAW_FEE_EVENT = {
 
 const RECEIPT_ABI = [UNSHIELDED_EVENT, WITHDRAW_FEE_EVENT] as const;
 
-/** The network a receipt is read on: its id, its vault and its name. */
-export type ReceiptNetwork = { chainId: number; pool: Address | null; label: string; deployBlock?: bigint | null; logRange?: bigint };
+/**
+ * What makes a vault payout not a plain cash out: Gloam's swap routers and the
+ * names registrar (a transaction sent to one, or paying one), and contracts
+ * whose logs mean the money stayed inside Gloam (the names registry).
+ */
+export type ReceiptGuard = { notTo: readonly string[]; noLogsFrom: readonly string[] };
+
+/** The guard for a chain: every swap router Gloam has, and on Robinhood Chain the names contracts. */
+export function receiptGuardFor(chainId: number): ReceiptGuard {
+  const routers = [...swapRoutersOn(chainId).map((r) => r.address), ...EVERY_SWAP_ROUTER];
+  const names = chainId === 4663 ? [GLOAM_NAMES_ADDRESS, NAMES_REGISTRAR_ADDRESS].filter((a): a is Address => Boolean(a)) : [];
+  return { notTo: [...routers, ...names].map((a) => a.toLowerCase()), noLogsFrom: names.map((a) => a.toLowerCase()) };
+}
+
+/** The network a receipt is read on: its id, its vault and its name. `guard` defaults to receiptGuardFor(chainId). */
+export type ReceiptNetwork = {
+  chainId: number;
+  pool: Address | null;
+  label: string;
+  deployBlock?: bigint | null;
+  logRange?: bigint;
+  guard?: ReceiptGuard;
+};
+
+const INSIDE_GLOAM = "This transaction kept the money inside Gloam (a private swap or a name), so it isn't a cash out to a wallet.";
 
 export type CashOutReceipt = {
   chainId: number;
@@ -116,6 +152,23 @@ export async function readCashOutReceipt(
   if (unshields.length === 0) {
     return { ok: false, reason: "not_cash_out", message: `This transaction isn't a cash out from the Gloam vault on ${net.label}.` };
   }
+
+  const tx = await client.getTransaction({ hash: h as Hex }).catch(() => null);
+  if (!tx) return { ok: false, reason: "unreadable", message: `Couldn't read ${net.label} just now. Try again in a moment.` };
+  // a private swap or a name purchase pays out of the vault too, but the money stays inside Gloam
+  const guard = net.guard ?? receiptGuardFor(net.chainId);
+  const notTo = new Set(guard.notTo.map((a) => a.toLowerCase()));
+  const noLogsFrom = new Set(guard.noLogsFrom.map((a) => a.toLowerCase()));
+  const vaultKinds = parseEventLogs({ abi: VAULT_EVENTS, logs: fromVault as Log[], strict: false }).map((e) => e.eventName);
+  if (
+    (tx.to && notTo.has(tx.to.toLowerCase())) ||
+    receipt.logs.some((l) => noLogsFrom.has(l.address.toLowerCase()) || l.topics[0] === VAULT_SWAP_TOPIC) ||
+    vaultKinds.includes("Shielded") ||
+    vaultKinds.includes("Transferred") ||
+    unshields.some((e) => notTo.has((e.args as { to: Address }).to.toLowerCase()))
+  ) {
+    return { ok: false, reason: "not_cash_out", message: INSIDE_GLOAM };
+  }
   const want = opts.nullifier?.toLowerCase();
   const pick = (want && unshields.find((e) => (e.args as { nullifier: Hex }).nullifier.toLowerCase() === want)) || unshields[0]!;
   const u = pick.args as { nullifier: Hex; asset: Address; to: Address; amount: bigint };
@@ -124,10 +177,7 @@ export async function readCashOutReceipt(
   );
   const fee = feeLog ? (feeLog.args as { fee: bigint }).fee : 0n;
 
-  const [block, tx] = await Promise.all([
-    client.getBlock({ blockNumber: receipt.blockNumber }).catch(() => null),
-    client.getTransaction({ hash: h as Hex }).catch(() => null),
-  ]);
+  const block = await client.getBlock({ blockNumber: receipt.blockNumber }).catch(() => null);
   if (!block) return { ok: false, reason: "unreadable", message: `Couldn't read ${net.label} just now. Try again in a moment.` };
 
   return {
@@ -145,7 +195,7 @@ export async function readCashOutReceipt(
       fee,
       delivered: u.amount > fee ? u.amount - fee : 0n,
       nullifier: u.nullifier,
-      sentBy: tx?.from ?? null,
+      sentBy: tx.from ?? null,
       inTx: unshields.length,
     },
   };
@@ -175,6 +225,7 @@ export async function findCashOuts(
 ): Promise<FoundCashOut[]> {
   if (!net.pool || nullifiers.length === 0) return [];
   const unique = [...new Set(nullifiers.map((n) => n.toLowerCase() as Hex))];
+  const notTo = new Set((net.guard ?? receiptGuardFor(net.chainId)).notTo.map((a) => a.toLowerCase()));
   const to = head ?? (await client.getBlockNumber());
   const from = net.deployBlock ?? 0n;
   const tuning = walkTuning(net.chainId, net.logRange ?? 10_000n);
@@ -189,6 +240,8 @@ export async function findCashOuts(
       // only the markers asked for, whatever a node sends back
       if (!chunk.includes(a.nullifier.toLowerCase() as Hex)) continue;
       if (!l.transactionHash || l.blockNumber == null) continue;
+      // a swap's or a name's payout to Gloam's own contract is not a cash out
+      if (notTo.has(a.to.toLowerCase())) continue;
       out.push({ txHash: l.transactionHash, blockNumber: l.blockNumber, nullifier: a.nullifier, asset: a.asset, to: a.to, amount: a.amount });
     }
   }
@@ -201,4 +254,34 @@ export async function findCashOuts(
       return true;
     })
     .sort((a, b) => (a.blockNumber === b.blockNumber ? 0 : a.blockNumber > b.blockNumber ? -1 : 1));
+}
+
+/**
+ * The spend markers of this account's notes on `pool` that may have been
+ * cashed out: never a note a private swap or a name purchase spent (it paid
+ * the money to Gloam's own escrow or registrar, and came back as a refund).
+ */
+export function cashOutMarkers(notes: Pick<LocalNote, "id" | "chainId" | "pool" | "nullifier" | "swapProofAt" | "vaultSwap" | "nameClaim" | "sweptFrom">[], chainId: number, pool: string): Hex[] {
+  const p = pool.toLowerCase();
+  const insideGloam = new Set(
+    notes.filter((n) => (n.vaultSwap || n.nameClaim) && n.sweptFrom).map((n) => (n.sweptFrom as { id: string }).id)
+  );
+  return notes
+    .filter((n) => n.chainId === chainId && n.pool.toLowerCase() === p && n.nullifier && !n.swapProofAt && !insideGloam.has(n.id))
+    .map((n) => n.nullifier as Hex);
+}
+
+/** The network a receipt was read on, by its chain id: never the one the app shows now. */
+export function receiptNetworkOf(chainId: number): GloamNetwork | null {
+  return allNetworks().find((n) => n.chainId === chainId) ?? null;
+}
+
+/** The asset's symbol and decimals on the receipt's own chain. */
+export function receiptToken(chainId: number, asset: string): { symbol: string; decimals: number } {
+  if (isNativeAsset(asset)) {
+    const t = nativeTokenFor(chainId);
+    return { symbol: t.symbol, decimals: 18 };
+  }
+  const t = knownTokens(chainId).find((x) => x.address.toLowerCase() === asset.toLowerCase());
+  return t ? { symbol: t.symbol, decimals: t.decimals } : { symbol: `${asset.slice(0, 6)}…${asset.slice(-4)}`, decimals: 18 };
 }

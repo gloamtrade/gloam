@@ -4,9 +4,18 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Mark } from "@/components/Logo";
 import { useModalFocus } from "@/hooks/useModalFocus";
+import { formatUnits } from "viem";
 import { shortAddress } from "@/lib/chain";
-import { receiptNumber, type CashOutReceipt } from "@/lib/cashOutReceipt";
-import { assetLabel, formatAssetAmountExact } from "@/lib/shield";
+import { receiptNetworkOf, receiptNumber, receiptToken, type CashOutReceipt } from "@/lib/cashOutReceipt";
+import type { BridgeMark } from "@/lib/cashOutBridge";
+
+/** Every unit kept, cents padded: "1,250.50". */
+function exact(raw: bigint, decimals: number): string {
+  const [whole, frac = ""] = formatUnits(raw, decimals).split(".");
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const digits = frac.padEnd(Math.min(2, decimals), "0");
+  return digits ? `${grouped}.${digits}` : grouped;
+}
 
 /**
  * A Gloam receipt for a cash out to a public wallet, the same sheet as the
@@ -17,22 +26,24 @@ import { assetLabel, formatAssetAmountExact } from "@/lib/shield";
  */
 export function CashOutReceiptSheet({
   receipt,
-  testnet,
-  explorerTx,
-  explorerAddress,
+  bridge,
   onClose,
 }: {
   receipt: CashOutReceipt;
-  testnet: boolean;
-  explorerTx: (hash: string) => string;
-  explorerAddress: (addr: string) => string;
+  /** Where a cross-chain cash out was bridging to, when this browser made it (lib/cashOutBridge). */
+  bridge?: BridgeMark | null;
   onClose: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const number = receiptNumber(receipt);
-  const symbol = assetLabel(receipt.asset);
-  const money = (raw: bigint) => `${formatAssetAmountExact(raw, receipt.asset, 2)} ${symbol}`;
+  // links, testnet and the token are the receipt's own chain's, whatever the app shows now
+  const net = receiptNetworkOf(receipt.chainId);
+  const testnet = Boolean(net?.testnet);
+  const explorerTx = (h: string) => net?.explorerTx(h) ?? "#";
+  const explorerAddress = (a: string) => net?.explorerAddress(a) ?? "#";
+  const { symbol, decimals } = receiptToken(receipt.chainId, receipt.asset);
+  const money = (raw: bigint) => `${exact(raw, decimals)} ${symbol}`;
   const when = new Date(receipt.time);
   const day = when.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
   const time = when.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "UTC", hour12: false });
@@ -130,13 +141,24 @@ export function CashOutReceiptSheet({
 
             <dl className="grid grid-cols-2 gap-x-6 gap-y-5 border-b border-line py-7 sm:grid-cols-4">
               <Meta k="Sent from" v="Gloam vault" sub="A private balance" />
-              <Meta k="Sent to" v={shortAddress(receipt.to, 4)} sub="Public wallet" />
+              {bridge ? (
+                <Meta k="Sent to" v="Relay" sub={`Bridging to ${bridge.chain}`} />
+              ) : (
+                <Meta k="Sent to" v={shortAddress(receipt.to, 4)} sub="Public wallet" />
+              )}
               <Meta k="Network" v={receipt.network} sub={testnet ? "Testnet" : "Mainnet"} />
               <Meta k="Currency" v={symbol} sub={receipt.network} />
             </dl>
 
             <dl className="divide-y divide-line border-b border-line text-[13.5px]">
-              <Row k="Recipient wallet">
+              {bridge && (
+                <Row k={`Lands on ${bridge.chain}`}>
+                  <span className="tnum break-all">
+                    {bridge.recipient}, as {bridge.symbol}
+                  </span>
+                </Row>
+              )}
+              <Row k={bridge ? "Relay address" : "Recipient wallet"}>
                 <a
                   href={explorerAddress(receipt.to)}
                   target="_blank"
@@ -167,7 +189,7 @@ export function CashOutReceiptSheet({
                   <dd className="tnum text-foreground">{receipt.fee > 0n ? money(receipt.fee) : "None"}</dd>
                 </div>
                 <div className="mt-2 flex items-baseline justify-between gap-4 border-t border-foreground/80 pt-3">
-                  <dt className="text-[14px] text-foreground">Received by the wallet</dt>
+                  <dt className="text-[14px] text-foreground">{bridge ? "Paid to Relay" : "Received by the wallet"}</dt>
                   <dd className="tnum text-[22px] font-light tracking-[-0.015em] text-foreground">{money(receipt.delivered)}</dd>
                 </div>
               </dl>
@@ -180,6 +202,11 @@ export function CashOutReceiptSheet({
                 read from that transaction, and anyone can check it with the link above. It doesn&apos;t show your
                 private balance, your other payments or where the money came from.
               </p>
+              {bridge && (
+                <p className="mt-2">
+                  Relay then delivered it on {bridge.chain}, minus its own fee. That part is on {bridge.chain}&apos;s explorer.
+                </p>
+              )}
               <p className="mt-2">Made in your browser from the public chain. Gloam does not keep a copy.</p>
             </div>
 
