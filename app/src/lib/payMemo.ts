@@ -4,8 +4,9 @@
  */
 
 import { parseEventLogs, type Address, type Hex, type PublicClient } from "viem";
-import { walkLogs, walkTuning } from "./leafIndex";
+import { walkLogs, walkTuning, type WalkTuning } from "./leafIndex";
 import { getActiveNetwork, type GloamNetwork, type PayMemoBoard } from "./networks";
+import { archiveLogClientFor } from "./rhClient";
 import { readDemo } from "./demoFlag";
 import { demoPaymentMemos } from "./demo/chain";
 
@@ -75,6 +76,18 @@ export function memoBytesToTicket(data: Hex): string {
   return new TextDecoder().decode(bytes);
 }
 
+/**
+ * On a network whose public RPCs keep little history (BNB Chain, about a day of
+ * logs), the board's blocks older than this are read from the archive directly
+ * (lib/rhClient archiveLogClientFor): about 12.5 hours of BNB Chain blocks, well
+ * inside what publicnode keeps. Newer blocks are read as before. If the public
+ * RPC ever keeps less, the pruned-logs check still sends the gap to the archive.
+ */
+export const PUBLIC_LOG_BLOCKS = 100_000n;
+
+/** The archive's walk: gloam.trade's proxy takes 10,000 blocks a read (a smaller cap splits it). */
+const ARCHIVE_WALK: WalkTuning = { span: 10_000n, parallel: 3, spacingMs: 120 };
+
 export type ScannedMemo = {
   paymentCommitment: Hex;
   poster: Address;
@@ -114,7 +127,19 @@ export async function fetchPaymentMemos(
       ] as const);
   const latest = toBlock ?? (await client.getBlockNumber());
   if (latest < fromBlock) return [];
-  const raw = await walkLogs(client, board.address, fromBlock, latest, walkTuning(net.chainId, net.logRange));
+  const tuning = walkTuning(net.chainId, net.logRange);
+  // old blocks straight from the archive where the public RPCs dropped them, the rest as before
+  const archive = net.logCanary ? archiveLogClientFor(net) : null;
+  const split = latest > PUBLIC_LOG_BLOCKS ? latest - PUBLIC_LOG_BLOCKS : 0n;
+  const raw =
+    archive && fromBlock < split
+      ? (
+          await Promise.all([
+            walkLogs(archive, board.address, fromBlock, split - 1n, ARCHIVE_WALK),
+            walkLogs(client, board.address, split, latest, tuning),
+          ])
+        ).flat()
+      : await walkLogs(client, board.address, fromBlock, latest, tuning);
   const logs = parseEventLogs({ abi: [{ type: "event", name: "PaymentMemo", inputs }], logs: raw, strict: false });
   const out: ScannedMemo[] = [];
   for (const log of logs) {
