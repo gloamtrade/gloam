@@ -5,7 +5,7 @@
 
 import { parseEventLogs, type Address, type Hex, type PublicClient } from "viem";
 import { walkLogs, walkTuning } from "./leafIndex";
-import { getActiveNetwork, type PayMemoBoard } from "./networks";
+import { getActiveNetwork, type GloamNetwork, type PayMemoBoard } from "./networks";
 import { readDemo } from "./demoFlag";
 import { demoPaymentMemos } from "./demo/chain";
 
@@ -89,13 +89,15 @@ export type ScannedMemo = {
 export async function fetchPaymentMemos(
   client: PublicClient,
   fromBlockOverride?: bigint,
-  toBlock?: bigint
+  toBlock?: bigint,
+  /** The network to read; the one the app shows when left out. */
+  network?: GloamNetwork
 ): Promise<ScannedMemo[]> {
   // Recording demo: the board holds the one payment waiting for the pretend wallet.
   if (readDemo()) return demoPaymentMemos();
-  const board = activePayMemo();
+  const net = network ?? getActiveNetwork();
+  const board = net.payMemo;
   if (!board) return [];
-  const net = getActiveNetwork();
   // a memo from before the pool existed can't be for one of its notes, so start at whichever came later
   const floor = net.deployBlock != null && net.deployBlock > board.deployBlock ? net.deployBlock : board.deployBlock;
   const fromBlock = fromBlockOverride ?? floor;

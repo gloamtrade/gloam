@@ -2057,6 +2057,8 @@ export function MoveView() {
             await noteCommitmentPoseidon(hexToField(pack.secret), BigInt(pack.amountWei), pack.asset)
           ).toLowerCase();
           if (commitment !== m.paymentCommitment.toLowerCase() || seen.has(commitment)) continue;
+          // already in this balance: it landed on its own (lib/autoReceive) or was claimed here
+          if (loadLocalNotes(address, network).some((n) => n.commitment.toLowerCase() === commitment)) continue;
           if (!network.pool || (pack.pool && pack.pool.toLowerCase() !== network.pool.toLowerCase())) continue;
           const [inVault, spent] = await Promise.all([
             client.readContract({ address: network.pool, abi: shieldPoolAbi, functionName: "commitmentSeen", args: [commitment as Hex] }),
@@ -2085,7 +2087,7 @@ export function MoveView() {
       setInboxStatus(
         hits.length
           ? `Found ${hits.length} ${hits.length === 1 ? "payment" : "payments"} for you.`
-          : "No new payments yet."
+          : "Nothing waiting. Payments to your Gloam address land in your balance on their own."
       );
     } catch {
       // an RPC error's text names the endpoint and the request: no use to read
