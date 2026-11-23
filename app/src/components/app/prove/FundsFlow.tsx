@@ -8,6 +8,7 @@ import {
   assetDecimals,
   assetLabel,
   formatAssetAmount,
+  formatAssetAmountExact,
   parseAssetAmount,
   updateLocalNote,
   type LocalNote,
@@ -212,7 +213,8 @@ export function FundsFlow({ notes, empty }: { notes: LocalNote[]; empty: ReactNo
           token={done.token}
           headline={
             <>
-              Holds at least {formatAssetAmount(done.threshold, done.asset)}{" "}
+              {/* what the proof states, so every unit: the rest of the app shows two places */}
+              Holds at least {formatAssetAmountExact(done.threshold, done.asset)}{" "}
               <span className="text-mute">{assetLabel(done.asset)}</span>
             </>
           }
@@ -453,7 +455,7 @@ function FundsAside({
             label: "At least",
             value:
               asset && threshold != null && threshold > 0n
-                ? `${formatAssetAmount(threshold, asset)} ${assetLabel(asset)}`
+                ? `${formatAssetAmountExact(threshold, asset)} ${assetLabel(asset)}`
                 : unset,
           },
           { label: "Who it is for", value: verifier.trim() || unset },

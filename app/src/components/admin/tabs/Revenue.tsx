@@ -7,7 +7,7 @@ import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { MetricCard } from "../cards";
 import { DayBars, StemChart } from "../charts";
 import { adminName, flowPricing, notInDollars, weekChange } from "../data";
-import { fmtDay, fmtEth, fmtUsd, fmtUsdBig, fmtUsdShort, n } from "../format";
+import { fmtAmount, fmtDay, fmtEth, fmtUsd, fmtUsdBig, fmtUsdShort, n } from "../format";
 import { dayPoints } from "../series";
 import { sideRevenueDays, type Side } from "../side";
 import { DataTable, Loading, Note, Panel, StatStrip } from "../ui";
@@ -41,7 +41,7 @@ export function RevenueTab({ side, bridgeFeeBps }: { side: Side; bridgeFeeBps: n
       <DataTable
         headers={["Network", "Asset", "Earned", "USD", "Cash-outs", "Waiting", "Collected"]}
         rows={nets.flatMap((m) =>
-          (m.revenue?.feeRows ?? []).map((r) => [adminName(getNetwork(m.key)), r.symbol, r.earned, fmtUsd(r.earnedUsd), n(r.count), r.owed ?? "Unknown", r.collected])
+          (m.revenue?.feeRows ?? []).map((r) => [adminName(getNetwork(m.key)), r.symbol, fmtAmount(r.earned), fmtUsd(r.earnedUsd), n(r.count), r.owed == null ? "Unknown" : fmtAmount(r.owed), fmtAmount(r.collected)])
         )}
         empty="No cash-out fees yet"
         minWidth={560}

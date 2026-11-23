@@ -7,6 +7,7 @@ import { TokenLogo } from "@/components/app/TokenLogo";
 import { chainLogoSrc } from "@/lib/chainLogo";
 import { liveMainnetCountWords, liveMainnetNames } from "@/lib/mainnet";
 import { getPublicStats, type PublicNetwork, type PublicStats } from "@/lib/publicStats";
+import { displayAmountText } from "@/lib/amountShort";
 
 /**
  * Public numbers for every Gloam mainnet, server-rendered from the cached
@@ -40,11 +41,9 @@ function fmtUsd(n: number): string {
   return usdFmt.format(n);
 }
 
-function fmtHeld(held: string, stable: boolean): string {
-  const n = Number(held);
-  if (!Number.isFinite(n)) return held;
-  if (n > 0 && n < 0.0001) return "<0.0001";
-  return n.toLocaleString("en-US", { maximumFractionDigits: stable ? 2 : 4 });
+/** A token amount held, two places, cut down (lib/amountShort). */
+function fmtHeld(held: string): string {
+  return displayAmountText(held);
 }
 
 function utcDate(ms: number, withYear = true): string {
@@ -127,7 +126,7 @@ function HeldList({ stats }: { stats: PublicStats }) {
               <span className="block text-[12.5px] text-mute">
                 {/* `stable` means a $1 coin, where the amount is the dollar figure. `held` is cut to two
                     decimals and dollars are rounded, so using it here would read a cent apart. */}
-                {r.stable && r.heldUsd != null ? fmtHeld(String(r.heldUsd), true) : fmtHeld(r.held, r.stable)} {r.symbol}
+                {r.stable && r.heldUsd != null ? fmtHeld(String(r.heldUsd)) : fmtHeld(r.held)} {r.symbol}
               </span>
             </span>
           </li>

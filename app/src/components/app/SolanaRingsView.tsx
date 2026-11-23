@@ -20,9 +20,6 @@ type Tab = "balance" | "add" | "pay" | "payroll" | "cashout";
 
 const lib = () => import("@/lib/solanaRings/client");
 
-/** While a payment whose answer was lost is checked on Solana (up to about two minutes). */
-const CHECKING = "Checking on Solana whether it went through";
-
 function short(a: string) {
   return `${a.slice(0, 4)}...${a.slice(-4)}`;
 }
@@ -37,11 +34,9 @@ export function parseAmount(text: string, decimals: number): bigint | null {
   return v > 0n ? v : null;
 }
 
+import { displayAmount } from "@/lib/amountShort";
 export function formatAmount(v: bigint, decimals: number): string {
-  const base = 10n ** BigInt(decimals);
-  const whole = v / base;
-  const frac = (v % base).toString().padStart(decimals, "0").replace(/0+$/, "").slice(0, 6);
-  return frac ? `${whole.toLocaleString("en-US")}.${frac}` : whole.toLocaleString("en-US");
+  return displayAmount(v, decimals);
 }
 
 export function SolanaRingsView() {
@@ -99,6 +94,8 @@ export function SolanaRingsView() {
   );
 
   const usable = useMemo(() => wallets.filter(canSignMessage), [wallets]);
+  // each step of a send (lib/solanaRings/client ringsStepLabel) shows in place of the busy label
+  const steps = useMemo(() => ({ onStep: (_step: unknown, label: string) => setBusy(label) }), []);
 
   if (!relay) return <div aria-busy="true" className="gl-card h-[320px] max-w-[560px] motion-safe:animate-pulse" />;
 
@@ -164,7 +161,7 @@ export function SolanaRingsView() {
               const s = await l.openRingsAccount({ wallet: main.wallet, account: main.account });
               try {
                 setBusy("Getting it ready");
-                await l.ensureRegistered(s);
+                await l.ensureRegistered(s, steps);
                 setBusy("Reading your balance");
                 await refresh(s);
               } catch (e) {
@@ -256,7 +253,7 @@ export function SolanaRingsView() {
           onSubmit={(asset, amount) =>
             run(`Confirm in ${main.wallet.name}`, async () => {
               const l = await lib();
-              await l.addToPrivate(session, asset, amount);
+              await l.addToPrivate(session, asset, amount, steps);
               setBalances(l.ringsBalances(session));
               return `Added ${formatAmount(amount, asset.decimals)} ${asset.symbol}.`;
             })
@@ -281,7 +278,7 @@ export function SolanaRingsView() {
               if (!(await l.isRegistered(session, to!))) {
                 throw new Error("That address has no Gloam private account. Use Cash out to pay any Solana address.");
               }
-              await l.payPrivately(session, to!, asset, amount, { onChecking: () => setBusy(CHECKING) });
+              await l.payPrivately(session, to!, asset, amount, steps);
               setBalances(l.ringsBalances(session));
               return `Paid ${formatAmount(amount, asset.decimals)} ${asset.symbol} privately to ${short(to!)}.`;
             })
@@ -309,7 +306,7 @@ export function SolanaRingsView() {
           onSubmit={(asset, amount, to) =>
             run("Cashing out", async () => {
               const l = await lib();
-              await l.cashOut(session, to!, asset, amount, { onChecking: () => setBusy(CHECKING) });
+              await l.cashOut(session, to!, asset, amount, steps);
               setBalances(l.ringsBalances(session));
               return `Sent ${formatAmount(amount, asset.decimals)} ${asset.symbol} to ${short(to!)}.`;
             })

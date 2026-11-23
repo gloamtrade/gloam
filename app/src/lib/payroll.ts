@@ -51,7 +51,7 @@ import { getActiveNetwork, getNetwork, NETWORK_KEYS, type GloamNetwork } from "@
 import {
   activeSpendableNotes,
   assetDecimals,
-  formatAssetAmount,
+  formatAssetAmountExact,
   loadLocalNotes,
   noteNetworkProblem,
   NETWORK_SWITCHING_MESSAGE,
@@ -554,7 +554,8 @@ export function exportResultsCsv(
     return [
       r.name,
       r.kind === "gloam" ? r.recipient : "claim link",
-      formatAssetAmount(r.amount, batch.asset, 6),
+      // every unit, never the two places the screen shows
+      formatAssetAmountExact(r.amount, batch.asset),
       opts.assetLabel,
       r.status,
       link,

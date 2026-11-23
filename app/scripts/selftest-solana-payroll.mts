@@ -420,6 +420,25 @@ const paidOnce = (chain: ReturnType<typeof fakeChain>, run: PayrollRun, label: s
   paidOnce(chain, out, "G2");
 }
 
+// G3. Solana never says (an in-flight batch stays pending): the run pauses at the deadline, the batch
+// still in flight, and a resume settles it before anything else is sent. Never an endless wait.
+{
+  const chain = fakeChain();
+  const h = harness(chain, { send: ["lost-not-sent"], validFor: 1_000_000 });
+  const out = await P.runPayroll(mkRun(2), h.deps);
+  eq(out.state, "paused", "G3: paused, not waiting forever");
+  eq(out.error, P.BATCH_STILL_CHECKING, "G3: says Solana hasn't answered yet");
+  ok(out.inflight !== null && out.rows.every((r) => r.status === "checking"), "G3: the batch stays in flight, never sent again blind");
+  const waited = h.sleeps.filter((x) => x === P.INFLIGHT_POLL_MS).length * P.INFLIGHT_POLL_MS;
+  ok(waited >= P.INFLIGHT_MAX_MS && waited < P.INFLIGHT_MAX_MS + 2 * P.INFLIGHT_POLL_MS, `G3: stopped at the deadline (${waited} ms of checks)`);
+  eq(chain.sends.length, 1, "G3: sent once");
+  const h2 = harness(chain, { validFor: 0 });
+  const done = await P.runPayroll(JSON.parse(JSON.stringify(out)) as PayrollRun, h2.deps);
+  eq(done.state, "done", "G3: resumed, settled as dropped, paid");
+  eq(chain.sends.length, 2, "G3: sent again only once it could no longer land");
+  paidOnce(chain, done, "G3");
+}
+
 // H. Confirmation timed out but it landed: asked by signature, paid once.
 {
   const chain = fakeChain();

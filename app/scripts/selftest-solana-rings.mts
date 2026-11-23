@@ -11,12 +11,18 @@
  *    transacts the private account signed, the relay as fee payer, the fee
  *    capped; never a deposit, a transfer of the relay's SOL, or another program;
  *  - the relay's key parsing and limits, and the Solana OFAC screen;
+ *  - landing a send (lib/solanaRings/landing) on a fake clock: the same signed
+ *    transaction sent again until it is confirmed, "dropped" said only after
+ *    its blockhash expired with it unseen, one automatic resend after a drop
+ *    (never a second), no wait without an end when the chain never answers,
+ *    the relay's own rebroadcast (the route too, with Helius faked), and the
+ *    priority fee from Helius's recommended price within the cap;
  *  - Pay and Cash out through the relay (lib/solanaRings/send) against a fake
  *    chain that keeps a ledger, with a person who tries again after an error:
  *    a relay answer lost after the send, a confirmation that times out, a tab
- *    closed mid-payment, a failure on chain. Nobody is paid twice, and a
- *    payment's notes are freed only when nothing was sent or the chain shows
- *    it never landed.
+ *    closed mid-payment, a failure on chain, a payment Solana dropped. Nobody
+ *    is paid twice, and a payment's notes are freed only when nothing was sent
+ *    or the chain shows it never landed.
  *
  * No network. Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-solana-rings.mts
  */
@@ -419,13 +425,340 @@ ok(ofac.addresses.length >= 1 && ofac.addresses.every((a: string) => /^[1-9A-HJ-
 ok(!(await screening.screenOtherChainAddresses([cashOutTo, ofac.addresses[0]!])), "an OFAC-listed Solana address is refused");
 ok(await screening.screenOtherChainAddresses([cashOutTo, owner.address]), "other addresses pass");
 
+// ---------------------------------------------------------------- landing a send
+
+{
+  const L = await import("../src/lib/solanaRings/landing");
+  const { getTreeAddress } = await import("@heliuslabs/spr/addresses");
+  type SigStatus = import("../src/lib/solanaRings/landing").SigStatus;
+
+  /**
+   * A fake clock: sleeps resolve in due order, and only once everything else
+   * has run (a setImmediate after the microtasks), so a call that answers at
+   * once beats its timeout, and one that never answers loses to it.
+   */
+  function fakeClock(start = 1_000_000) {
+    let t = start;
+    const timers: { due: number; done: () => void }[] = [];
+    const drain = () => {
+      if (!timers.length) return;
+      let i = 0;
+      for (let j = 1; j < timers.length; j++) if (timers[j]!.due < timers[i]!.due) i = j;
+      const [next] = timers.splice(i, 1);
+      t = Math.max(t, next!.due);
+      next!.done();
+    };
+    return {
+      now: () => t,
+      sleep: (ms: number) =>
+        new Promise<void>((done) => {
+          timers.push({ due: t + ms, done });
+          setImmediate(drain);
+        }),
+    };
+  }
+
+  /**
+   * One sent transaction on a fake chain. It lands once `landAfterSends`
+   * rebroadcasts reached it, or at `landAt`; it shows as processed from
+   * `processedAt`; its blockhash stops being valid at `expiresAt`.
+   */
+  function sent(o: { expiresAt: number; landAt?: number; landAfterSends?: number; processedAt?: number; failed?: boolean; rpcDown?: boolean; hang?: boolean }) {
+    const clk = fakeClock();
+    const start = clk.now();
+    const at = (ms: number | undefined) => (ms === undefined ? Infinity : start + ms);
+    const c = { sends: [] as number[], reads: [] as { t: number; seen: boolean }[], landed: false };
+    const landed = () => c.landed || clk.now() >= at(o.landAt) || (o.landAfterSends !== undefined && c.sends.length >= o.landAfterSends);
+    const deps: import("../src/lib/solanaRings/landing").LandingDeps = {
+      ...clk,
+      status: async (): Promise<SigStatus> => {
+        if (o.hang) return new Promise(() => {});
+        if (o.rpcDown) throw new Error("upstream");
+        if (o.failed && clk.now() >= at(o.processedAt ?? 0)) return { seen: true, failed: true, confirmed: true, slot: 41n };
+        c.landed = landed();
+        const st: SigStatus = c.landed
+          ? { seen: true, failed: false, confirmed: true, slot: 42n }
+          : clk.now() >= at(o.processedAt)
+            ? { seen: true, failed: false, confirmed: false, slot: 40n }
+            : { seen: false };
+        c.reads.push({ t: clk.now(), seen: st.seen });
+        return st;
+      },
+      blockhashValid: async () => {
+        if (o.hang) return new Promise(() => {});
+        if (o.rpcDown) throw new Error("upstream");
+        return clk.now() < at(o.expiresAt);
+      },
+      rebroadcast: async () => void c.sends.push(clk.now()),
+    };
+    return { deps, c, clk, start, expiry: at(o.expiresAt) };
+  }
+
+  ok(L.sigStatusFrom(null).seen === false, "status: not seen");
+  {
+    const v = L.sigStatusFrom({ err: null, confirmationStatus: "processed", slot: 5 });
+    ok(v.seen && !v.confirmed && !v.failed && v.slot === 5n, "status: processed is seen, not yet confirmed");
+    const f = L.sigStatusFrom({ err: { InstructionError: [0, "Custom"] }, confirmationStatus: "confirmed", slot: 6 });
+    ok(f.seen && f.failed, "status: an error is a failure");
+    ok(L.sigStatusFrom({ err: null, confirmationStatus: "finalized", slot: 7 }).seen && (L.sigStatusFrom({ err: null, confirmationStatus: "finalized", slot: 7 }) as { confirmed: boolean }).confirmed, "status: finalized is confirmed");
+  }
+
+  // the same signed transaction goes out again until it lands
+  {
+    const f = sent({ expiresAt: 60_000, landAfterSends: 3 });
+    const r = await L.awaitLanding(f.deps);
+    ok(r.state === "landed" && r.slot === 42n, "rebroadcast: it lands after the same transaction went out again");
+    ok(f.c.sends.length === 3, `rebroadcast: sent again until it landed, then no more (${f.c.sends.length})`);
+    ok(f.c.sends.every((t, i) => i === 0 || t - f.c.sends[i - 1]! >= L.REBROADCAST_MS), "rebroadcast: about every two seconds, never faster");
+  }
+  // dropped: only once the blockhash expired, and it stayed unseen after that
+  {
+    const f = sent({ expiresAt: 60_000 });
+    const r = await L.awaitLanding(f.deps);
+    const after = f.c.reads.filter((x) => x.t >= f.expiry);
+    ok(r.state === "dropped", "dropped: a transaction never seen is dropped once its blockhash expired");
+    ok(f.clk.now() >= f.expiry && after.length >= L.DROP_CHECKS && after.every((x) => !x.seen), "dropped: never before expiry, and only after reads made after it");
+    const lastSend = Math.max(...f.c.sends);
+    ok(
+      f.c.sends.length >= 20 && lastSend < f.expiry + L.BLOCKHASH_CHECK_MS + L.LANDING_POLL_MS,
+      `dropped: rebroadcast all along while it could land, stopped once the expiry was read (${f.c.sends.length} sends)`
+    );
+    ok(f.clk.now() - f.start < 90_000, "dropped: said within seconds of expiry, not at the outer deadline");
+  }
+  {
+    const f = sent({ expiresAt: 60_000, landAt: 61_000 });
+    const r = await L.awaitLanding(f.deps);
+    ok(r.state === "landed", "a transaction a lagging node shows only just after expiry still counts as landed, never dropped");
+  }
+  {
+    const f = sent({ expiresAt: 60_000, processedAt: 5_000, landAt: 64_000 });
+    ok((await L.awaitLanding(f.deps)).state === "landed", "processed before expiry, confirmed after: landed");
+  }
+  {
+    const f = sent({ expiresAt: 60_000, processedAt: 3_000, failed: true });
+    ok((await L.awaitLanding(f.deps)).state === "failed", "failed on chain: said as failed, not dropped");
+  }
+  {
+    const f = sent({ expiresAt: 60_000 });
+    const r = await L.awaitLanding({ ...f.deps, graceMs: 15_000 });
+    ok(r.state === "dropped" && f.clk.now() >= f.expiry + 15_000, "a wallet that sent it itself: dropped only after a grace past expiry");
+  }
+  // no infinite wait
+  {
+    const f = sent({ expiresAt: 60_000, hang: true });
+    const r = await L.awaitLanding(f.deps);
+    const took = f.clk.now() - f.start;
+    ok(r.state === "unknown", "no answer at all (every read hangs): unknown, never dropped");
+    ok(took >= L.LANDING_MAX_MS && took <= L.LANDING_MAX_MS + 3 * L.CALL_TIMEOUT_MS, `no answer at all: the wait ends at its deadline (${took} ms)`);
+  }
+  {
+    const f = sent({ expiresAt: 60_000, rpcDown: true });
+    const r = await L.awaitLanding(f.deps);
+    ok(r.state === "unknown" && f.clk.now() - f.start <= L.LANDING_MAX_MS + 2 * L.LANDING_POLL_MS, "every read failing: unknown at the deadline, never dropped");
+  }
+  {
+    const f = sent({ expiresAt: 60_000 });
+    const r = await L.awaitLanding({ ...f.deps, blockhashValid: null });
+    ok(r.state === "unknown" && f.c.sends.length > 0, "no blockhash known: never called dropped, ends at the deadline");
+  }
+
+  // one automatic resend after a drop, never a second
+  {
+    const chain = { registered: false, builds: 0, sends: 0, resends: 0 };
+    const r = await L.landWithOneResend<number>({
+      build: async () => (chain.registered ? null : ++chain.builds),
+      sendAndWait: async (n) => {
+        chain.sends++;
+        if (n === 1) return { state: "dropped" };
+        chain.registered = true;
+        return { state: "landed", slot: 9n };
+      },
+      onResend: () => void chain.resends++,
+      recheck: true,
+    });
+    ok(r.state === "landed" && chain.sends === 2 && chain.resends === 1, "dropped, then built and sent once more on its own: landed");
+  }
+  {
+    const chain = { builds: 0, sends: 0 };
+    const r = await L.landWithOneResend<number>({
+      build: async () => ++chain.builds,
+      sendAndWait: async () => (chain.sends++, { state: "dropped" }),
+      recheck: true,
+    });
+    ok(r.state === "dropped" && chain.sends === 2 && chain.builds === 3, "dropped twice: never a third send; the last build only reads whether it is done");
+  }
+  {
+    let registered = false;
+    let sends = 0;
+    const r = await L.landWithOneResend<number>({
+      build: async () => (registered ? null : 1),
+      sendAndWait: async () => {
+        sends++;
+        if (sends === 2) registered = true; // the registry shows it after all (another tab)
+        return { state: "dropped" };
+      },
+      recheck: true,
+    });
+    ok(r.state === "done" && sends === 2, "a registration another tab made is found on the recheck: done, nothing more sent");
+  }
+  {
+    let sends = 0;
+    const r = await L.landWithOneResend<number>({ build: async () => null, sendAndWait: async () => (sends++, { state: "landed", slot: 1n }) });
+    ok(r.state === "done" && sends === 0, "already registered: nothing built, nothing sent");
+  }
+  {
+    let sends = 0;
+    const r = await L.landWithOneResend<number>({ build: async () => 1, sendAndWait: async () => (sends++, { state: "unknown" }) });
+    ok(r.state === "unknown" && sends === 1, "unknown (the chain didn't answer): never sent again on its own");
+  }
+
+  // the relay's own rebroadcast
+  {
+    const clk = fakeClock();
+    let sends = 0;
+    let reads = 0;
+    const r = await L.relayBroadcast({
+      ...clk,
+      send: async () => void sends++,
+      status: async () => (++reads >= 5 ? { seen: true, failed: false, confirmed: false, slot: 1n } : { seen: false }),
+    });
+    ok(r.accepted && r.seen && sends === r.sends && sends >= 2 && sends <= 3, `relay: sent again every two seconds until Solana saw it (${sends} sends)`);
+  }
+  {
+    const clk = fakeClock();
+    const start = clk.now();
+    const r = await L.relayBroadcast({ ...clk, send: async () => Promise.reject(new Error("no")), status: async () => ({ seen: false }) });
+    ok(!r.accepted && !r.seen && clk.now() - start >= L.RELAY_WINDOW_MS && r.sends >= 3, "relay: no send taken and never seen: said so after its window, no signature handed back");
+  }
+  {
+    const clk = fakeClock();
+    let reads = 0;
+    const r = await L.relayBroadcast({
+      ...clk,
+      send: async () => Promise.reject(new Error("AlreadyProcessed")),
+      status: async () => (++reads >= 2 ? { seen: true, failed: false, confirmed: true, slot: 1n } : { seen: false }),
+    });
+    ok(r.accepted && r.seen, "relay: a send the RPC refused but Solana saw counts as sent");
+  }
+  {
+    const clk = fakeClock();
+    const start = clk.now();
+    const r = await L.relayBroadcast({ ...clk, send: () => new Promise(() => {}), status: () => new Promise(() => {}) });
+    ok(!r.accepted && clk.now() - start <= L.RELAY_WINDOW_MS + 3 * L.RELAY_CALL_TIMEOUT_MS, "relay: a hung RPC never holds the request past its window");
+  }
+
+  // the priority fee
+  ok(L.RINGS_TREE === getTreeAddress(0), "the fee estimate's tree is the SDK's tree 0");
+  ok(L.priorityFeeFor(null, 450_000) === L.RELAY_PRIORITY_FEE_FLOOR, "fee: no estimate, the floor (what it paid before)");
+  ok(L.priorityFeeFor(1_000, 450_000) === L.RELAY_PRIORITY_FEE_FLOOR, "fee: a quiet chain, the floor");
+  ok(L.priorityFeeFor(100_000, 200_000) === 24_000n, "fee: Helius's price times the units, with 20% headroom");
+  ok(L.priorityFeeFor(5_000_000, 450_000) === relay.RELAY_LIMITS.maxPriorityFeeLamports, "fee: a busy chain, never over the relay's cap");
+  ok(L.priorityFeeFor(Number.NaN, 450_000) === L.RELAY_PRIORITY_FEE_FLOOR && L.priorityFeeFor(-1, 450_000) === L.RELAY_PRIORITY_FEE_FLOOR, "fee: a nonsense estimate, the floor");
+  ok(relay.RELAY_LIMITS.maxPriorityFeeLamports === 50_000n, "the relay's cap: 50,000 lamports a transaction (0.00005 SOL)");
+  {
+    // set on what the SDK built, before the private account signs: only the fee changes
+    const { getTransactionDecoder, getCompiledTransactionMessageDecoder, decompileTransactionMessage } = await import("@solana/kit");
+    const unsigned = getTransactionDecoder().decode(await wire({ instructions: [transact], ownerSigns: false, priorityFee: 10_000n }));
+    ok(Buffer.from(L.withPriorityFee(unsigned, 10_000n).messageBytes).equals(Buffer.from(unsigned.messageBytes)), "fee: the same fee gives the same bytes");
+    const patched = L.withPriorityFee(unsigned, 37_000n);
+    const before = getCompiledTransactionMessageDecoder().decode(unsigned.messageBytes) as unknown as { staticAccounts: string[]; lifetimeToken: string };
+    const after = getCompiledTransactionMessageDecoder().decode(patched.messageBytes) as unknown as { staticAccounts: string[]; lifetimeToken: string };
+    const msg = decompileTransactionMessage(getCompiledTransactionMessageDecoder().decode(patched.messageBytes) as never) as unknown as {
+      config: { priorityFeeLamports: bigint; computeUnitLimit: number };
+      instructions: { data: Uint8Array }[];
+    };
+    ok(msg.config.priorityFeeLamports === 37_000n && msg.config.computeUnitLimit === 450_000, "fee: set, the compute limit kept");
+    ok(after.staticAccounts.join() === before.staticAccounts.join() && after.lifetimeToken === before.lifetimeToken, "fee: the accounts and blockhash kept");
+    ok(Buffer.from(msg.instructions[0]!.data).equals(Buffer.from([16, 1, 2, 3])), "fee: the instructions kept");
+    ok(L.computeUnitsOf(patched.messageBytes) === 450_000 && L.blockhashOfMessage(patched.messageBytes) === before.lifetimeToken, "fee: units and blockhash read back");
+    const [ownerSigs] = await owner.signTransactions([patched as never]);
+    const ownerSigned = new Uint8Array(getTransactionEncoder().encode({ ...patched, signatures: { ...patched.signatures, ...ownerSigs } } as never));
+    ok(check(ownerSigned).ok, "fee: the relay policy takes it once the private account signed");
+    const over = L.withPriorityFee(unsigned, relay.RELAY_LIMITS.maxPriorityFeeLamports + 1n);
+    const [overSigs] = await owner.signTransactions([over as never]);
+    const overWire = new Uint8Array(getTransactionEncoder().encode({ ...over, signatures: { ...over.signatures, ...overSigs } } as never));
+    const v2 = check(overWire);
+    ok(!v2.ok && /priority fee/.test(v2.reason), "fee: one set over the cap is still refused by the relay");
+    assert.throws(() => L.withPriorityFee({ ...patched, signatures: { ...patched.signatures, ...ownerSigs } } as never, 20_000n), /before anyone signs/);
+    n++;
+    ok(L.signatureOfWire(ownerSigned) === null, "the signature is the fee payer's: none until the relay signs");
+  }
+
+  // the relay route, with Helius faked: the fee price on GET, the rebroadcast on POST
+  {
+    env.GLOAM_SOLANA_RELAYER_SECRET = getBase58Decoder().decode(new Uint8Array([...seed, ...pub]));
+    const realFetch = globalThis.fetch;
+    const calls: { method: string; params: unknown[] }[] = [];
+    let statusReads = 0;
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+      assert.ok(String(url).startsWith("https://mainnet.helius-rpc.com/"), "the relay only calls Helius");
+      const c = JSON.parse(String(init?.body)) as { id: unknown; method: string; params: unknown[] };
+      calls.push({ method: c.method, params: c.params });
+      const result =
+        c.method === "getBalance"
+          ? { value: 1_000_000_000 }
+          : c.method === "getPriorityFeeEstimate"
+            ? { priorityFeeEstimate: 31_234.5 }
+            : c.method === "simulateTransaction"
+              ? { value: { err: null, logs: [] } }
+              : c.method === "sendTransaction"
+                ? "relayed-signature"
+                : c.method === "getSignatureStatuses"
+                  ? { value: [++statusReads >= 3 ? { err: null, confirmationStatus: "processed", slot: 7, confirmations: 0 } : null] }
+                  : null;
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: c.id, result }), { headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const relayRoute = await import("../src/app/api/solana/relay/route");
+    const got = await relayRoute.GET();
+    const gotText = await got.text();
+    const status = JSON.parse(gotText) as { on: boolean; relayer: string; priorityMicroLamports: number | null };
+    ok(status.on && status.relayer === signer.address && status.priorityMicroLamports === 31_235, "relay GET: names the relay and Helius's recommended fee price");
+    const est = calls.find((c) => c.method === "getPriorityFeeEstimate")!;
+    ok(
+      JSON.stringify(est.params) === JSON.stringify([{ accountKeys: [L.RINGS_TREE, relay.SHIELDED_POOL_PROGRAM, relay.USER_REGISTRY_PROGRAM], options: { recommended: true } }]),
+      "relay GET: priced by the pool's tree and programs, Helius's recommended level"
+    );
+    ok(!gotText.includes(FAKE_KEY), "relay GET: the key never comes back");
+
+    const tx = await wire({ feePayer: signer.address, instructions: [transact] });
+    const t0 = Date.now();
+    const res = await relayRoute.POST(
+      new Request("http://localhost/api/solana/relay", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.40" },
+        body: JSON.stringify({ tx: Buffer.from(tx).toString("base64") }),
+      })
+    );
+    const body = (await res.json()) as { ok?: boolean; signature?: string; tx?: string };
+    const sends = calls.filter((c) => c.method === "sendTransaction");
+    const signedBack = body.tx ? new Uint8Array(Buffer.from(body.tx, "base64")) : new Uint8Array();
+    ok(res.status === 200 && body.ok === true, "relay POST: sent");
+    ok(sends.length >= 2 && sends.every((c) => (c.params[1] as { maxRetries?: number; skipPreflight?: boolean }).maxRetries === 0), `relay POST: sent again until Solana saw it, retries its own (${sends.length} sends)`);
+    ok(new Set(sends.map((c) => c.params[0])).size === 1 && sends[0]!.params[0] === body.tx, "relay POST: the same signed transaction every time, handed back to the page");
+    ok(body.signature === L.signatureOfWire(signedBack) && body.signature !== "relayed-signature", "relay POST: its signature is the relay's own, read from what it signed");
+    ok(Date.now() - t0 < L.RELAY_WINDOW_MS + 2_000, "relay POST: answered once Solana saw it, inside its window");
+    globalThis.fetch = realFetch;
+  }
+}
+
 // ---------------------------------------------------------------- Pay and Cash out: never twice
 
 {
   const send = await import("../src/lib/solanaRings/send");
   const { INFLIGHT_POLL_MS } = await import("../src/lib/solanaRings/payroll");
   type Pending = import("../src/lib/solanaRings/send").Pending;
-  type SendMode = "ok" | "429" | "422" | "503-empty" | "lost-landed" | "lost-not-sent" | "lost-landed-late" | "sent-fails-on-chain" | "hang-landed" | "hang-not-sent";
+  type SendMode =
+    | "ok"
+    | "429"
+    | "422"
+    | "503-empty"
+    | "lost-landed"
+    | "lost-not-sent"
+    | "lost-landed-late"
+    | "sent-fails-on-chain"
+    | "sent-never-lands"
+    | "hang-landed"
+    | "hang-not-sent";
   type Tx = { id: number; note: number; blockhash: string; sig: string; landed: boolean; failed: boolean; landsAfterChecks: number };
   const nf = (note: number) => note.toString(16).padStart(64, "0");
 
@@ -494,6 +827,8 @@ ok(await screening.screenOtherChainAddresses([cashOutTo, owner.address]), "other
             throw refuse(0, "network", true);
           case "sent-fails-on-chain":
             tx.failed = true;
+            return tx.sig;
+          case "sent-never-lands":
             return tx.sig;
           case "hang-landed":
             land(tx);
@@ -590,9 +925,37 @@ ok(await screening.screenOtherChainAddresses([cashOutTo, owner.address]), "other
   }
   {
     const w = world();
-    const said = await payAndRetry(w, ["lost-not-sent"], { checks: { n: 3 } });
-    ok(said[0] === send.NOT_SENT, "an answer lost and it never went: says so once its blockhash expired");
-    ok(w.paid.length === 1 && said[1] === "ok sig1", "and the retry pays once");
+    let resends = 0;
+    const deps = page(w, ["lost-not-sent"], { checks: { n: 3 } });
+    deps.onResend = () => void resends++;
+    ok((await send.sendGuarded(deps)) === "sig1", "an answer lost and it never went: once its blockhash expired, sent once more on its own");
+    ok(w.paid.length === 1 && w.sends === 2 && resends === 1 && !w.storage.size, "and paid once, the person told it went again, nothing left pending");
+  }
+  {
+    const w = world();
+    const said = await payAndRetry(w, ["lost-not-sent", "lost-not-sent"], { checks: { n: 2 } });
+    ok(said[0] === send.NOT_SENT && w.sends === 3, "dropped twice: never a third send on its own, says plainly nothing moved");
+    ok(w.paid.length === 1 && said[1] === "ok sig2", "and the person's retry pays once");
+  }
+  {
+    // confirmed by signature as dropped (sent, never seen, blockhash expired): the same, sent once more
+    const w = world();
+    const deps = page(w, ["sent-never-lands", "ok"]);
+    ok((await send.sendGuarded(deps)) === "sig1" && w.paid.length === 1 && w.sends === 2, "sent and dropped by Solana: sent once more, paid once");
+  }
+  {
+    // Solana never says: settling stops by the deadline, keeps it pending, and the next try settles it first
+    const w = world();
+    let t = 0;
+    const deps = page(w, ["lost-not-sent"], { checks: { n: 1_000_000 } });
+    deps.now = () => t;
+    deps.sleep = async (ms) => void (t += ms);
+    await assert.rejects(send.sendGuarded(deps), (e: Error) => e.message === send.STILL_CHECKING);
+    n++;
+    ok(t >= send.SETTLE_MAX_MS && t < send.SETTLE_MAX_MS + 10_000, "no endless wait: settling stops at its deadline");
+    ok(w.storage.size === 1 && w.paid.length === 0, "and keeps the payment stored as pending, its notes held");
+    const said = await payAndRetry(w, ["ok"]);
+    ok(said[0] === "ok sig1" && w.paid.length === 1, "the next try settles it first (dropped), then pays once");
   }
   // a confirmation that times out, though it landed
   {
@@ -652,7 +1015,7 @@ ok(await screening.screenOtherChainAddresses([cashOutTo, owner.address]), "other
     await assert.rejects(liar.save(p), /didn't save/);
     n++;
   }
-  for (const m of [send.LAST_PAYMENT_LANDED, send.NOT_SENT, send.FAILED_ON_CHAIN, send.NOT_SURE, send.NOT_SAVED]) {
+  for (const m of [send.LAST_PAYMENT_LANDED, send.NOT_SENT, send.FAILED_ON_CHAIN, send.NOT_SURE, send.NOT_SAVED, send.STILL_CHECKING]) {
     ok(!/[\u2014\u2013]/.test(m) && !/happy to/i.test(m) && m.length < 160, `plain words: ${m.slice(0, 30)}`);
   }
 }

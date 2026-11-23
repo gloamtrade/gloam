@@ -143,7 +143,7 @@ await test("a payment to my Gloam address lands in my balance with nothing tappe
 
   const landed = await auto.receiveWaitingPayments(NET as never, ME, { client, force: true });
   assert.equal(landed.length, 1);
-  assert.equal(landed[0]!.label, "0.003 ETH");
+  assert.equal(landed[0]!.label, "<0.01 ETH", "two places, cut down: 0.003 ETH reads <0.01");
   assert.equal(landed[0]!.note, "1st week tip");
   assert.equal(landed[0]!.networkKey, "ethereum-mainnet");
   const saved = mine();
@@ -218,8 +218,8 @@ await test("paced, never twice, and read on from where it stopped", async () => 
 
 await test("the label names the coin of the network it landed on", async () => {
   // shown: Ethereum. A payment of native coin on BNB Chain is BNB, not ETH
-  assert.equal(auto.receivedLabel({ chainId: 56, primaryAsset: { symbol: "BNB", address: null, decimals: 18 } } as never, "500000000000000000", ETH), "0.5 BNB");
-  assert.equal(auto.receivedLabel({ chainId: 1, primaryAsset: { symbol: "ETH", address: null, decimals: 18 } } as never, "3000000000000000", ETH), "0.003 ETH");
+  assert.equal(auto.receivedLabel({ chainId: 56, primaryAsset: { symbol: "BNB", address: null, decimals: 18 } } as never, "500000000000000000", ETH), "0.50 BNB");
+  assert.equal(auto.receivedLabel({ chainId: 1, primaryAsset: { symbol: "ETH", address: null, decimals: 18 } } as never, "3000000000000000", ETH), "<0.01 ETH");
 });
 
 await test("another tab saving the same payment mid-pass leaves one note", async () => {

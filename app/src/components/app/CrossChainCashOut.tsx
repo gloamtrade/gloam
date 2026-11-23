@@ -12,7 +12,7 @@ import { chainLogo } from "@/lib/bridge";
 import { TokenLogo } from "./TokenLogo";
 import type { BridgeStage } from "@/lib/bridge";
 import { shortAddress } from "@/lib/chain";
-import { stableTextDown } from "@/lib/amountShort";
+import { displayAmountText } from "@/lib/amountShort";
 import {
   crossChainAmountProblem,
   crossChainSource,
@@ -34,8 +34,8 @@ function ChainLogo({ id, size = 18 }: { id: number; size?: number }) {
   );
 }
 
-/** A stablecoin amount from Relay, to cents and cut down: "At least" never reads more than the order's minimum. */
-const money = (v: string) => stableTextDown(v);
+/** An amount from Relay, two places and cut down: "At least" never reads more than the order's minimum. */
+const money = (v: string) => displayAmountText(v);
 
 /** "Lands on": this chain as today, or another chain, in one dropdown. */
 export function CrossChainPicker({

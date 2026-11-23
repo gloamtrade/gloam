@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { formatUnits, getAddress, isAddress, type Address } from "viem";
 import { useReadContract } from "wagmi";
 import { largestTopUpNote, pickTopUpNote } from "@/lib/agentTopUp";
-import { shortAddress } from "@/lib/chain";
+import { formatEth, shortAddress } from "@/lib/chain";
 import type { OwnedCashOutJob } from "@/lib/cashOutLater";
 import { findCashOutLink, linkMessage } from "@/lib/cashOutPlan";
 import { depositWallets, presetAmounts, sameAmountDeposit, sameAmountText } from "@/lib/cashOutPrivacy";
@@ -59,12 +59,6 @@ import { WalletMenu } from "./WalletMenu";
 const READ_MS = 15_000;
 
 const WHEN: [FundWhen, string][] = [["now", "Now"], ...PLAN_WINDOWS.map(([k, label]): [FundWhen, string] => [k, label])];
-
-function ethLabel(wei: bigint): string {
-  if (wei === 0n) return "0 ETH";
-  const n = Number(wei) / 1e18;
-  return `${n.toLocaleString("en-US", { maximumFractionDigits: 6 })} ETH`;
-}
 
 export function FreshWalletView() {
   const { address, isConnected } = useAppAccount();
@@ -551,7 +545,7 @@ export function FreshWalletView() {
             {state ? (
               <dl className="mt-3 text-[13.5px]">
                 <SummaryRow label="USDG in the wallet" value={formatAssetLabel(state.walletUsdg, STATION_USDG)} />
-                <SummaryRow label="ETH in the wallet" value={ethLabel(state.walletEth)} />
+                <SummaryRow label="ETH in the wallet" value={`${formatEth(state.walletEth)} ETH`} />
                 <SummaryRow label="USDG at the station" value={formatAssetLabel(state.stationUsdg, STATION_USDG)} />
                 <SummaryRow label="Station" value={state.made ? "Made" : "Not made yet"} />
               </dl>

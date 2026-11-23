@@ -16,7 +16,7 @@ import { useWalletState } from "@/hooks/useWalletState";
 import { usePoolDeposited } from "@/hooks/usePoolDeposited";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient, publicClientFor } from "@/lib/rhClient";
-import { HASH_SCHEME, dropUnsentNote, gasFor, noteNetworkProblem, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatAssetShort, formatAssetShortLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, SIGNED_OUT_BALANCE_MESSAGE, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
+import { HASH_SCHEME, dropUnsentNote, gasFor, noteNetworkProblem, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetAmountExact, formatAssetLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, SIGNED_OUT_BALANCE_MESSAGE, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
 import {
   claimNoteId,
   isClaimedNote,
@@ -198,6 +198,9 @@ class DeadCodeError extends Error {}
 /** Direct (pay to sticky tag) vs open bearer ticket */
 type PayStyle = "direct" | "bearer";
 
+/** A payment's amount for its claim code: two places on screen, every unit in the text it is shared with. */
+type ShareAmount = { shown: string; exact: string };
+
 /**
  * Move = direct pay-to-tag + bearer tickets + cash out.
  * Never uses a public 0x as the private path.
@@ -366,7 +369,7 @@ export function MoveView() {
   const [shareBlob, setShareBlob] = useState<string | null>(null);
   /** The claim code the sender has copied, downloaded or shared, so the success dialog can let go. */
   const [savedCode, setSavedCode] = useState<string | null>(null);
-  const [shareAmountLabel, setShareAmountLabel] = useState<string | null>(null);
+  const [shareAmountLabel, setShareAmountLabel] = useState<ShareAmount | null>(null);
   const [sendPassphrase, setSendPassphrase] = useState("");
   const [importText, setImportText] = useState("");
   const [importPassphrase, setImportPassphrase] = useState("");
@@ -702,7 +705,7 @@ export function MoveView() {
   const spentNoteId = useRef<string | null>(null);
   /** Change only, never store the payment note on the sender */
   const pendingChange = useRef<LocalNote | null>(null);
-  const pendingShare = useRef<{ blob: string; amountLabel: string } | null>(
+  const pendingShare = useRef<{ blob: string; amountLabel: ShareAmount } | null>(
     null
   );
   /**
@@ -1898,7 +1901,7 @@ export function MoveView() {
       setSentTo(
         payStyle === "direct"
           ? {
-              amount: formatAssetShortLabel(w.paymentNote.amountWei, w.paymentNote.asset),
+              amount: formatAssetLabel(w.paymentNote.amountWei, w.paymentNote.asset),
               to: payRecipient.kind === "name" ? `@${payRecipient.name}` : shortTag(payTag, 8, 10),
             }
           : null
@@ -1924,7 +1927,11 @@ export function MoveView() {
       }
       pendingShare.current = {
         blob: share,
-        amountLabel: formatAssetShortLabel(w.paymentNote.amountWei, w.paymentNote.asset),
+        amountLabel: {
+          shown: formatAssetLabel(w.paymentNote.amountWei, w.paymentNote.asset),
+          // the share text keeps every unit
+          exact: `${formatAssetAmountExact(w.paymentNote.amountWei, w.paymentNote.asset)} ${assetLabel(w.paymentNote.asset)}`,
+        },
       };
       // Sent links record. The nullifier is worked out now, the same way a claim
       // does, so its status can be checked later without the phrase.
@@ -2838,10 +2845,10 @@ export function MoveView() {
                     return {
                       id: n.id,
                       mark: <AssetMark id={logoIdFor(n.asset)} symbol={assetLabel(n.asset)} size={32} />,
-                      // cut to cents (4 places for a coin), never rounded up: the field and Max keep every unit
+                      // two places, cut down, never rounded up: the field and Max keep every unit
                       title: (
                         <>
-                          {formatAssetShort(n.amountWei, n.asset)} <span className="text-mute">{assetLabel(n.asset)}</span>
+                          {formatAssetAmount(n.amountWei, n.asset)} <span className="text-mute">{assetLabel(n.asset)}</span>
                         </>
                       ),
                       network: network.label,
@@ -3227,7 +3234,8 @@ export function MoveView() {
                   {shareBlob && (
                     <PaymentTicketShare
                       code={shareBlob}
-                      amountLabel={shareAmountLabel}
+                      amountLabel={shareAmountLabel?.shown}
+                      shareLabel={shareAmountLabel?.exact}
                       locked={shareLocked}
                       onSaved={() => setSavedCode(shareBlob)}
                     />
@@ -3729,7 +3737,8 @@ export function MoveView() {
               <div className="mt-6">
                 <PaymentTicketShare
                   code={shareBlob}
-                  amountLabel={shareAmountLabel}
+                  amountLabel={shareAmountLabel?.shown}
+                  shareLabel={shareAmountLabel?.exact}
                   locked={shareLocked}
                   onSaved={() => setSavedCode(shareBlob)}
                 />
@@ -4098,7 +4107,8 @@ export function MoveView() {
           mustSaveCode && shareBlob ? (
             <PaymentTicketShare
               code={shareBlob}
-              amountLabel={shareAmountLabel}
+              amountLabel={shareAmountLabel?.shown}
+              shareLabel={shareAmountLabel?.exact}
               locked={shareLocked}
               stacked
               onSaved={() => setSavedCode(shareBlob)}
