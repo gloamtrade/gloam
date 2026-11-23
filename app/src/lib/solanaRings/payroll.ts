@@ -42,6 +42,8 @@ export const RELAY_MIN_GAP_MS = 7_000;
 export const RELAY_LIMITED_TRIES = 6;
 /** How often an in-flight batch is checked again while its blockhash is still valid. */
 export const INFLIGHT_POLL_MS = 4_000;
+/** Longest an in-flight batch is checked before the run pauses with it still in flight (a blockhash lasts about a minute). */
+export const INFLIGHT_MAX_MS = 4 * 60_000;
 
 const U64_MAX = (1n << 64n) - 1n;
 
@@ -432,6 +434,7 @@ export type PayrollDeps = {
 export const RELAY_BUSY = "Gloam's relay is at its limit for now. Your run is saved: resume in a few minutes.";
 export const SAVE_FAILED = "This browser couldn't save the run, so the next batch wasn't sent. Free some space and resume.";
 export const BATCH_DROPPED = "The last batch didn't land on Solana, so nobody in it was paid. Resume to send it again.";
+export const BATCH_STILL_CHECKING = "Solana hasn't said yet whether the last batch went through. Resume in a minute to check it again.";
 
 function setRows(run: PayrollRun, idx: readonly number[], patch: Partial<RunRow>): void {
   for (const i of idx) run.rows[i] = { ...run.rows[i]!, ...patch };
@@ -468,6 +471,7 @@ export async function runPayroll(run: PayrollRun, deps: PayrollDeps): Promise<Pa
   let size = PAYROLL_BATCH_MAX;
   let limited = 0;
   let drops = 0;
+  let checkingSince: number | null = null;
 
   for (;;) {
     // 1. A batch in flight is settled before anything else is sent.
@@ -475,6 +479,7 @@ export async function runPayroll(run: PayrollRun, deps: PayrollDeps): Promise<Pa
       const f = run.inflight;
       setRows(run, f.rows, { status: "checking" });
       deps.onChange?.(run);
+      checkingSince ??= deps.now();
       let r: InflightResult;
       try {
         r = await deps.resolve(f);
@@ -483,9 +488,12 @@ export async function runPayroll(run: PayrollRun, deps: PayrollDeps): Promise<Pa
       }
       if (r.state === "pending") {
         if (deps.stopRequested()) return pause();
+        // never forever: it stays in flight, so a resume checks it again first
+        if (deps.now() - checkingSince >= INFLIGHT_MAX_MS) return pause(BATCH_STILL_CHECKING);
         await deps.sleep(INFLIGHT_POLL_MS);
         continue;
       }
+      checkingSince = null;
       run.inflight = null;
       if (r.state === "landed") {
         drops = 0;

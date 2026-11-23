@@ -18,7 +18,9 @@
  *    counts it with registrations (ataAccounts names them).
  * Version 1 transactions only (what the SDK builds): the priority fee is a
  * config value there, capped here, and there are no compute-budget
- * instructions to inspect.
+ * instructions to inspect. The page sets that fee from Helius's recommended
+ * price (lib/solanaRings/landing priorityFeeFor), 10,000 lamports at least;
+ * the cap bounds what one busy moment can cost the relay.
  */
 import {
   decompileTransactionMessage,
@@ -54,7 +56,7 @@ export type RelayLimits = {
   maxInstructions: number;
 };
 
-export const RELAY_LIMITS: RelayLimits = { maxPriorityFeeLamports: 25_000n, maxComputeUnits: 1_400_000, maxInstructions: 4 };
+export const RELAY_LIMITS: RelayLimits = { maxPriorityFeeLamports: 50_000n, maxComputeUnits: 1_400_000, maxInstructions: 4 };
 
 export type RelayVerdict =
   | {
