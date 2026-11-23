@@ -174,6 +174,27 @@ test("a private cash out of everything: the run stays on screen until the last p
   assert.equal(shown[2]!.after, "empty");
 });
 
+test("paying or cashing out across every balance: the form stays on the run until its last part", () => {
+  const a = note("dep-6", "3000000");
+  const b = note("dep-7", "2000000");
+  const frames: Frame[] = [];
+  let store = [a, b];
+  frames.push({ step: "part 1 of 2", inFlow: true, store });
+  store = patch(store, "dep-6", { status: "recovered" });
+  frames.push({ step: "part 2 of 2", inFlow: true, store });
+  store = patch(store, "dep-7", { status: "recovered" });
+  frames.push({ step: "last part landing", inFlow: true, store });
+  frames.push({ step: "run over", inFlow: false, store });
+  const shown = frames.map((f) => render(f, a));
+  assert.equal(shown[2]!.before, "empty");
+  for (const s of shown.slice(0, -1)) {
+    assert.equal(s.after, "form", s.step);
+    assert.equal(s.picked, "dep-6", s.step);
+  }
+  // over, nothing left: the empty state, with the run's panel (Paid, or Resume) above it in MoveView
+  assert.equal(shown.at(-1)!.after, "empty");
+});
+
 test("a held balance never outlives its flow", () => {
   const spent = note("dep-4", "1000000", { status: "recovered" });
   const other = note("dep-5", "2000000");

@@ -1083,7 +1083,9 @@ export function MoveView() {
   // A payment or cash out from its start until its result closes: proving, in the wallet, on its
   // way, confirming, the heads-up after it, and the success dialog. The balance it spends stays
   // picked the whole time, even after the list drops it (spent, its change not landed yet).
-  const inFlow = busy || isPending || confirming || (showSuccess && Boolean(txHash));
+  // A payment or cash out in parts counts from its checks to its last part.
+  const inFlow =
+    busy || isPending || confirming || (showSuccess && Boolean(txHash)) || cashOutChecking || across.running || cashAcross.running;
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the flow is over: the next one holds its own balance
     if (!inFlow) setFlowNote(null);
@@ -1418,6 +1420,7 @@ export function MoveView() {
     setCashOutInput(null);
     // From a partner's link to the request's own wallet, as a single cash out: every part carries the code.
     const fromLink = requestPartner(to);
+    setFlowNote(selected);
     await cashAcross.start(run, fromLink ? { code: fromLink.code } : null);
   }
 
@@ -2175,6 +2178,7 @@ export function MoveView() {
     if (!selected || !address || !network.pool || !poseidonMode || across.running) return;
     payAcrossGate.current = true;
     setBusy(true);
+    setFlowNote(selected);
     setError(null);
     try {
       if (!relayOn || !relayAvailable) throw new Error("Turn on Hide my wallet to send it in parts in one go.");
@@ -3927,6 +3931,17 @@ export function MoveView() {
               <div className="mt-6 space-y-4">
                 {scheduledLine}
                 <ScheduledCashOuts rows={scheduledRows} liveFeeBps={liveFeeBps} gasHigh={gasHigh} onCancel={cancelScheduled} />
+              </div>
+            )}
+            {/* A payment or cash out in parts that spent the whole balance: how it ended, or Resume, stays on screen. */}
+            {mode === "send" && across.run && (
+              <div className="mt-6">
+                <PayAcrossPanel across={across} />
+              </div>
+            )}
+            {mode === "cashout" && cashAcross.run && (
+              <div className="mt-6">
+                <CashOutAcrossPanel across={cashAcross} networkKey={network.key} />
               </div>
             )}
             {/* A payment that spent the whole balance: its claim code stays on screen, as it does under the form. */}
