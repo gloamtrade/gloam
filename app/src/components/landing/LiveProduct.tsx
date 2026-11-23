@@ -298,7 +298,8 @@ export function LiveProduct() {
       <p className="relative mt-3 text-center text-[13px] text-mute">
         Try the controls. The buttons open the real app.
       </p>
-      <div className="relative mx-auto mt-8 grid max-w-[1080px] gap-4 md:grid-cols-3">
+      {/* three across from a laptop up; below that one column, so a tablet's cards don't wrap every chip and label */}
+      <div className="relative mx-auto mt-8 grid max-w-[1080px] gap-x-4 gap-y-10 max-lg:max-w-[440px] lg:grid-cols-3 lg:gap-y-4">
         {CARDS.map(({ Card: Demo, label, body, href }) => (
           <div key={label} className="flex flex-col">
             <div className="gl-glass flex flex-1 flex-col p-2">
