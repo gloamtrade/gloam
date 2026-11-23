@@ -32,6 +32,9 @@ type NavItem = {
 
 const ic = "h-[18px] w-[18px] shrink-0";
 
+/** The footer's links: a 40px tap target on a phone, plain text from a tablet up. */
+const FOOT_LINK = "inline-flex min-h-10 items-center hover:text-foreground sm:min-h-0";
+
 const nav: NavItem[] = [
   {
     href: "/app",
@@ -399,28 +402,28 @@ export function AppShell({
                   ? "Gloam on Tempo testnet. Private stablecoin payments for people and agents."
                   : `Gloam on ${network.label} testnet. Not investment, legal or tax advice.`}
             </p>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="-my-2 flex flex-wrap items-center gap-x-4 sm:my-0 sm:gap-y-2">
               {SHOW_TESTNETS && (
-                <IntentLink href="/docs/testnet" className="hover:text-foreground">
+                <IntentLink href="/docs/testnet" className={FOOT_LINK}>
                   Testnet guide
                 </IntentLink>
               )}
-              <IntentLink href="/app/settings#help" className="hover:text-foreground">
+              <IntentLink href="/app/settings#help" className={FOOT_LINK}>
                 Help
               </IntentLink>
-              <IntentLink href="/privacy" className="hover:text-foreground">
+              <IntentLink href="/privacy" className={FOOT_LINK}>
                 Privacy
               </IntentLink>
-              <IntentLink href="/terms" className="hover:text-foreground">
+              <IntentLink href="/terms" className={FOOT_LINK}>
                 Terms
               </IntentLink>
-              <IntentLink href="/cookies" className="hover:text-foreground">
+              <IntentLink href="/cookies" className={FOOT_LINK}>
                 Cookies
               </IntentLink>
-              <a href="https://t.me/gloamhq" target="_blank" rel="noreferrer" className="hover:text-foreground">
+              <a href="https://t.me/gloamhq" target="_blank" rel="noreferrer" className={FOOT_LINK}>
                 Telegram
               </a>
-              <a href="https://x.com/gloamtrade" target="_blank" rel="noreferrer" className="hover:text-foreground">
+              <a href="https://x.com/gloamtrade" target="_blank" rel="noreferrer" className={FOOT_LINK}>
                 X
               </a>
             </div>
