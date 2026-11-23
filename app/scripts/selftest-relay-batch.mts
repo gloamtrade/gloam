@@ -27,6 +27,12 @@
  *  - may have gone out keeps every lock; refused by the node drops them all
  *  - through the route, rate limits count each part
  *
+ * A partner's link (lib/partnerAttribution): either one in one go hands its
+ * before-broadcast hook the one aggregate3 call that goes out, which names every
+ * part; a batch refused before it goes out never calls it, one the node refuses
+ * takes it back; through the route, a link's code and payment tag change nothing
+ * about the send.
+ *
  * fetch is stubbed: chain calls go to an in-process fake. The relay key is a
  * throwaway made here. Nothing reaches any host.
  *
@@ -47,6 +53,7 @@ const batch = await import("../src/lib/relay/batch");
 const { inflightKey, takeInflight, readSent, markSwapEscrow } = await import("../src/lib/relay/inflight");
 const { getNetwork } = await import("../src/lib/networks");
 const { POST: relayPost } = await import("../src/app/api/relay/route");
+const { spendIdOf } = await import("../src/lib/partnerAttribution");
 
 let passed = 0;
 async function test(name: string, fn: () => void | Promise<void>) {
@@ -527,6 +534,63 @@ await test("through /api/relay: unshieldBatch answers one hash, each part counts
     if (r.status === 429) limitedAt = i;
   }
   assert.ok(limitedAt > 0 && limitedAt <= 68, `six parts count as six cash outs against the limits (limited at batch ${limitedAt})`);
+});
+
+// ---------------------------------------------------------------- a partner's link
+await test("a partner link's hook is handed the one aggregate3 call that goes out, naming every part; never for a refused batch", async () => {
+  const handed: { to: Address; data: Hex }[] = [];
+  let undone = 0;
+  const hooks = {
+    beforeBroadcast: (tx: { to: Address; data: Hex }) => {
+      handed.push(tx);
+      return () => void undone++;
+    },
+  };
+  // a payment in one go
+  const parts = [part(true), part(), part(true)];
+  assert.equal(await server.relayTransferBatch(net, { parts }, undefined, hooks), TX_HASH);
+  assert.equal(handed.length, 1);
+  assert.equal(getAddress(handed[0]!.to), batch.MULTICALL3);
+  assert.equal(handed[0]!.data, parseTransaction(sentRaw[sentRaw.length - 1]!).data, "exactly the call that went out");
+  assert.deepEqual(spendIdOf(net, { to: handed[0]!.to, input: handed[0]!.data })?.nullifiers, parts.map((p) => p.nullifier));
+  // a cash out in one go
+  const cashParts = [cash(), cash({ amount: "7000000" })];
+  assert.equal(await server.relayUnshieldBatch(net, cashBody(cashParts), undefined, hooks), TX_HASH);
+  assert.equal(handed.length, 2);
+  assert.equal(getAddress(handed[1]!.to), batch.MULTICALL3);
+  assert.equal(handed[1]!.data, parseTransaction(sentRaw[sentRaw.length - 1]!).data);
+  assert.deepEqual(spendIdOf(net, { to: handed[1]!.to, input: handed[1]!.data })?.nullifiers, cashParts.map((p) => p.nullifier));
+  // refused before anything goes out: never called
+  await assert.rejects(server.relayTransferBatch(net, { parts: [part()] }, undefined, hooks), isRelayError("batch_parts", 400));
+  await assert.rejects(server.relayUnshieldBatch(net, cashBody([cash(), cash({ to: OTHER })]), undefined, hooks), isRelayError("batch_mismatch", 400));
+  assert.equal(handed.length, 2);
+  assert.equal(undone, 0);
+  // the node refused it: what the hook returned takes the binding back
+  chain.send = "reject";
+  await assert.rejects(server.relayUnshieldBatch(net, cashBody([cash(), cash()]), undefined, hooks), (e: unknown) => e instanceof server.RelayError && e.code !== "maybe_sent");
+  chain.send = "ok";
+  assert.equal(handed.length, 3);
+  assert.equal(undone, 1);
+});
+
+await test("through /api/relay: a link's code and payment tag on either batch change nothing about the send", async () => {
+  const send = (body: Record<string, unknown>, ip: string) =>
+    relayPost(
+      new Request("https://gloam.trade/api/relay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-forwarded-for": ip },
+        body: JSON.stringify({ chainId: net.chainId, ...body }),
+      })
+    );
+  const link = { partnerCode: "AbCdEfGhIjKlMnOpQrSt", partnerPayment: `0x${"5a".repeat(32)}` };
+  const before = sentRaw.length;
+  const pay = await send({ action: "transferBatch", parts: [part(true), part()], ...link }, "198.51.100.41");
+  assert.equal(pay.status, 200);
+  assert.deepEqual(await pay.json(), { ok: true, hash: TX_HASH });
+  const out = await send({ action: "unshieldBatch", ...cashBody([cash(), cash()]), ...link }, "198.51.100.42");
+  assert.equal(out.status, 200);
+  assert.deepEqual(await out.json(), { ok: true, hash: TX_HASH });
+  assert.equal(sentRaw.length, before + 2, "each went out as one transaction");
 });
 
 console.log(`\n${passed} relay batch checks passed`);
