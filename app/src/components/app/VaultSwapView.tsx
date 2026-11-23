@@ -1435,7 +1435,7 @@ function PrivacyNotes({ venue }: { venue: string }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex min-h-14 w-full items-center justify-between gap-4 rounded-[inherit] px-5 py-4 text-left transition-colors duration-200 hover:bg-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/15 sm:px-6"
+        className="flex min-h-14 w-full items-center justify-between gap-4 rounded-[inherit] px-5 py-4 text-left transition-colors duration-200 hover:bg-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/15 sm:px-7"
       >
         <span className="min-w-0">
           <span className="flex items-center gap-2 font-medium text-foreground">
@@ -1454,7 +1454,7 @@ function PrivacyNotes({ venue }: { venue: string }) {
         }`}
       >
         <div className="min-h-0 overflow-hidden">
-          <div className="border-t border-line px-5 pb-6 pt-5 sm:px-6">
+          <div className="border-t border-line px-5 pb-6 pt-5 sm:px-7">
             <p className="font-medium text-foreground">Private</p>
             <ul className="mt-2 space-y-2">
               <li>Who swapped. The Gloam relay sends it, so your wallet never shows.</li>
