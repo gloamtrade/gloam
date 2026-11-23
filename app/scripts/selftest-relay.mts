@@ -15,6 +15,10 @@
  *    and lets the note move, after the hash is back; a successful one, a
  *    missing one, a failed read or a send with no hash keeps it, and copies
  *    sent meanwhile are refused without a second send
+ *  - a note whose cash outs or private sends reverted twice this hour waits
+ *    (note_wait) before its dry run, on every chain, alone: single, scheduled
+ *    and private sends of it share the count; a send that landed or may have
+ *    gone out counts nothing
  *  - a send that may have reached a node (a dropped connection, a 502, a
  *    private RPC that took it and never answered) is reported maybe_sent and
  *    never sent again, with the public RPC never handed the raw send; only a
@@ -59,6 +63,7 @@ process.env.GLOAM_RELAYER_PRIVATE_KEY = generatePrivateKey();
 const {
   IN_FLIGHT_MESSAGE,
   MAYBE_SENT_MESSAGE,
+  NOTE_WAIT_MESSAGE,
   RELAY_MEMO_MAX_BYTES,
   RelayError,
   asMemo,
@@ -68,7 +73,9 @@ const {
   relayTransfer,
   relayUnshield,
   sendFailure,
+  sendUnshieldNow,
 } = await import("../src/lib/relay/server");
+const { readRateLimit } = await import("../src/lib/mcpRemote/rateLimit");
 const relayClient = await import("../src/lib/relay/client");
 const { INFLIGHT_TTL_SEC, inflightKey, releaseIfReverted, takeInflight } = await import("../src/lib/relay/inflight");
 const {
@@ -834,6 +841,103 @@ await test("a send with no hash never reads a receipt, and keeps the lock even i
   await new Promise((r) => setTimeout(r, 30));
   assert.deepEqual(receiptReads, []);
   assert.equal(await lockFree(nul), false);
+});
+
+// ---------------------------------------------------------------- a note that keeps reverting
+
+/** The reverts the relay counted against a note this hour (lib/relay/server assertNoteUnderReverts). */
+const noteReverts = (nul: Hex) => readRateLimit(nul, "relay-note-reverts", Date.now(), 3600);
+
+/** Waits until a reverted receipt gave the note's lock back: its revert was counted just before. */
+async function untilFree(nul: Hex) {
+  for (let i = 0; i < 400; i++) {
+    if (await lockFree(nul)) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  assert.fail("the reverted receipt freed the note");
+}
+
+const noteWait = isRelayError("note_wait", 429, NOTE_WAIT_MESSAGE);
+
+await test("cash out: a note whose cash outs reverted twice this hour waits, before its dry run, and alone", async () => {
+  reset({ receipt: "reverted" });
+  const nul = nullifier();
+  for (let i = 0; i < 2; i++) {
+    assert.equal(await relayUnshield(net, unshieldBody(nul, CLEAN)), TX_HASH);
+    await untilFree(nul);
+  }
+  assert.equal(await noteReverts(nul), 2, "each revert counted once");
+  calls.length = 0;
+  await assert.rejects(relayUnshield(net, unshieldBody(nul, CLEAN)), noteWait);
+  assert.ok(!calls.includes("eth_estimateGas"), "no dry run");
+  assert.equal(sends.length, 2, "nothing more went out");
+  assert.ok(await lockFree(nul), "the lock was given back");
+  // the same note scheduled, through the route, or as a private send: one count
+  await assert.rejects(sendUnshieldNow(net, unshieldBody(nul, CLEAN)), noteWait);
+  const res = await relayPost(req("http://localhost/api/relay", { chainId: net.chainId, action: "unshield", ...unshieldBody(nul, CLEAN) }, "203.0.113.90"));
+  assert.equal(res.status, 429);
+  assert.deepEqual(await res.json(), { ok: false, error: NOTE_WAIT_MESSAGE, code: "note_wait" });
+  await assert.rejects(relayTransfer(net, transferBody(nul)), noteWait);
+  assert.equal(sends.length, 2);
+  // a spent note still says so first
+  chain.spent = true;
+  await assert.rejects(relayUnshield(net, unshieldBody(nul, CLEAN)), isRelayError("AlreadySpent", 409));
+  // nobody else waits
+  reset({ receipt: "success" });
+  assert.equal(await relayUnshield(net, unshieldBody(nullifier(), CLEAN)), TX_HASH);
+  assert.equal(sends.length, 1, "another note goes");
+});
+
+await test("a scheduled cash out that reverts counts against its note too", async () => {
+  reset({ receipt: "reverted" });
+  const nul = nullifier();
+  assert.equal(await sendUnshieldNow(net, unshieldBody(nul, CLEAN)), TX_HASH);
+  await untilFree(nul);
+  assert.equal(await relayUnshield(net, unshieldBody(nul, CLEAN)), TX_HASH);
+  await untilFree(nul);
+  assert.equal(await noteReverts(nul), 2);
+  await assert.rejects(sendUnshieldNow(net, unshieldBody(nul, CLEAN)), noteWait);
+  assert.equal(sends.length, 2);
+});
+
+await test("send: a note whose private sends reverted twice this hour waits too", async () => {
+  reset({ receipt: "reverted" });
+  const nul = nullifier();
+  for (let i = 0; i < 2; i++) {
+    assert.equal(await relayTransfer(net, transferBody(nul)), TX_HASH);
+    await untilFree(nul);
+  }
+  calls.length = 0;
+  await assert.rejects(relayTransfer(net, transferBody(nul)), noteWait);
+  assert.ok(!calls.includes("eth_estimateGas"), "no dry run");
+  await assert.rejects(relayUnshield(net, unshieldBody(nul, CLEAN)), noteWait);
+  assert.equal(sends.length, 2);
+});
+
+await test("a send that landed, or may have gone out, counts nothing against its note; the caller's own hook still runs", async () => {
+  reset({ receipt: "success" });
+  const ended: string[] = [];
+  const hooks = { onEnd: async (status: "success" | "reverted") => void ended.push(status) };
+  const landed = nullifier();
+  assert.equal(await relayUnshield(net, unshieldBody(landed, CLEAN), undefined, hooks), TX_HASH);
+  for (let i = 0; i < 400 && !ended.length; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(ended, ["success"]);
+  assert.equal(await noteReverts(landed), 0);
+  // a reverted one hands the hook its end as well, beside the count
+  reset({ receipt: "reverted" });
+  const reverted = nullifier();
+  assert.equal(await relayUnshield(net, unshieldBody(reverted, CLEAN), undefined, hooks), TX_HASH);
+  await untilFree(reverted);
+  assert.deepEqual(ended, ["success", "reverted"]);
+  assert.equal(await noteReverts(reverted), 1);
+  // no hash: nobody saw it land, so it never counts, whatever the chain shows later
+  reset({ send: "drop", receipt: "reverted" });
+  const maybe = nullifier();
+  await assert.rejects(relayUnshield(net, unshieldBody(maybe, CLEAN)), isRelayError("maybe_sent", 502, MAYBE_SENT_MESSAGE));
+  await assert.rejects(relayTransfer(net, transferBody(nullifier())), isRelayError("maybe_sent", 502, MAYBE_SENT_MESSAGE));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(await noteReverts(maybe), 0);
+  reset();
 });
 
 await test("the watch only ever frees on a reverted receipt, and gives up keeping the lock", async () => {

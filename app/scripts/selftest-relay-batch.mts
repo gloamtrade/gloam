@@ -30,6 +30,12 @@
  *  - may have gone out keeps every lock; refused by the node drops them all
  *  - through the route, rate limits count each part
  *
+ * A note that keeps reverting (lib/relay/server assertNoteUnderReverts): either one in
+ * one go that reverts on chain counts a revert against every part's note; one part whose
+ * note reverted twice this hour refuses the batch as note_wait before its dry run, every
+ * lock dropped, and the other parts still go; one that lands or may have gone out counts
+ * nothing.
+ *
  * A partner's link (lib/partnerAttribution): either one in one go hands its
  * before-broadcast hook the one aggregate3 call that goes out, which names every
  * part; a batch refused before it goes out never calls it, one the node refuses
@@ -55,6 +61,7 @@ const server = await import("../src/lib/relay/server");
 const batch = await import("../src/lib/relay/batch");
 const { inflightKey, takeInflight, readSent, markSwapEscrow } = await import("../src/lib/relay/inflight");
 const { getNetwork } = await import("../src/lib/networks");
+const { readRateLimit } = await import("../src/lib/mcpRemote/rateLimit");
 const { POST: relayPost } = await import("../src/app/api/relay/route");
 const { spendIdOf } = await import("../src/lib/partnerAttribution");
 
@@ -96,6 +103,8 @@ const chain = {
   code: MULTICALL3_CODE as Hex,
   /** The vault's cash-out fee, in basis points. */
   feeBps: 50,
+  /** How the sent transaction ended, or "none" for no receipt yet. */
+  receipt: "none" as "none" | "success" | "reverted",
 };
 const sentRaw: Hex[] = [];
 const methods: string[] = [];
@@ -149,7 +158,25 @@ function answer(r: RpcReq): { result?: unknown; error?: { code: number; message:
     case "eth_getTransactionByHash":
       return { result: null };
     case "eth_getTransactionReceipt":
-      return { result: null };
+      if (chain.receipt === "none") return { result: null };
+      return {
+        result: {
+          transactionHash: String(r.params?.[0]),
+          transactionIndex: "0x0",
+          blockHash: BLOCK.hash,
+          blockNumber: "0x1",
+          from: "0x" + "00".repeat(20),
+          to: batch.MULTICALL3,
+          cumulativeGasUsed: "0x1",
+          gasUsed: "0x1",
+          effectiveGasPrice: "0x1",
+          contractAddress: null,
+          logs: [],
+          logsBloom: BLOCK.logsBloom,
+          status: chain.receipt === "success" ? "0x1" : "0x0",
+          type: "0x2",
+        },
+      };
     case "eth_sendRawTransaction":
       sentRaw.push(String(r.params?.[0]) as Hex);
       if (chain.send === "reject") return { error: { code: -32000, message: "insufficient funds for gas * price + value" } };
@@ -624,6 +651,97 @@ await test("through /api/relay: a link's code and payment tag on either batch ch
   assert.equal(out.status, 200);
   assert.deepEqual(await out.json(), { ok: true, hash: TX_HASH });
   assert.equal(sentRaw.length, before + 2, "each went out as one transaction");
+});
+
+// ---------------------------------------------------------------- a note that keeps reverting
+/** The reverts the relay counted against a note this hour. */
+const noteReverts = (nul: Hex) => readRateLimit(nul, "relay-note-reverts", Date.now(), 3600);
+/** Waits until a reverted receipt gave every lock back: the reverts were counted just before. */
+async function untilFree(nuls: Hex[]) {
+  for (let i = 0; i < 400; i++) {
+    const all = await Promise.all(nuls.map(free));
+    if (all.every(Boolean)) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  assert.fail("the reverted receipt gave every lock back");
+}
+
+await test("a cash out in one go that reverts counts against every part's note; twice in an hour, and each of them waits", async () => {
+  chain.receipt = "reverted";
+  const parts = [cash(), cash(), cash()];
+  for (let i = 0; i < 2; i++) {
+    assert.equal(await server.relayUnshieldBatch(net, cashBody(parts)), TX_HASH);
+    await untilFree(parts.map((p) => p.nullifier));
+  }
+  for (const p of parts) assert.equal(await noteReverts(p.nullifier), 2, "every part's note, once per revert");
+  methods.length = 0;
+  const before = sentRaw.length;
+  await assert.rejects(server.relayUnshieldBatch(net, cashBody(parts)), isRelayError("note_wait", 429));
+  assert.ok(!methods.includes("eth_estimateGas"), "no dry run");
+  // and each part alone, as a cash out or a private send
+  for (const p of parts) await assert.rejects(server.relayUnshield(net, { ...p }), isRelayError("note_wait", 429));
+  await assert.rejects(server.relayTransfer(net, { proof: PROOF, root: ROOT, nullifier: parts[0]!.nullifier, commitments: [fresh(), fresh()] }), isRelayError("note_wait", 429));
+  assert.equal(sentRaw.length, before, "nothing more went out");
+  for (const p of parts) assert.ok(await free(p.nullifier), "every lock dropped");
+  chain.receipt = "none";
+});
+
+await test("one part whose note is over its reverts refuses a cash out in one go, every lock dropped; the other parts still go", async () => {
+  chain.receipt = "reverted";
+  const tired = cash();
+  for (let i = 0; i < 2; i++) {
+    assert.equal(await server.relayUnshield(net, { ...tired }), TX_HASH);
+    await untilFree([tired.nullifier]);
+  }
+  chain.receipt = "none";
+  const parts = [cash(), tired, cash()];
+  methods.length = 0;
+  const before = sentRaw.length;
+  await assert.rejects(server.relayUnshieldBatch(net, cashBody(parts)), isRelayError("note_wait", 429));
+  assert.ok(!methods.includes("eth_estimateGas"), "no dry run");
+  assert.equal(sentRaw.length, before);
+  for (const p of parts) assert.ok(await free(p.nullifier), "every lock dropped");
+  for (const p of [parts[0]!, parts[2]!]) assert.equal(await noteReverts(p.nullifier), 0, "the refusal counted nothing");
+  assert.equal(await server.relayUnshieldBatch(net, cashBody([parts[0]!, parts[2]!])), TX_HASH);
+  assert.equal(sentRaw.length, before + 1, "the others went");
+});
+
+await test("a payment in one go: a revert counts against every part's note, and one part over refuses it", async () => {
+  chain.receipt = "reverted";
+  const parts = [part(true), part(), part()];
+  for (let i = 0; i < 2; i++) {
+    // each try with new notes out, as the app proves them afresh
+    const again = parts.map((p) => ({ ...p, commitments: [fresh(), fresh()] as [Hex, Hex] }));
+    assert.equal(await server.relayTransferBatch(net, { parts: again }), TX_HASH);
+    await untilFree(parts.map((p) => p.nullifier));
+  }
+  chain.receipt = "none";
+  for (const p of parts) assert.equal(await noteReverts(p.nullifier), 2);
+  const before = sentRaw.length;
+  await assert.rejects(server.relayTransferBatch(net, { parts: [part(), { ...parts[1]!, commitments: [fresh(), fresh()] }] }), isRelayError("note_wait", 429));
+  assert.equal(sentRaw.length, before);
+  assert.equal(await server.relayTransferBatch(net, { parts: [part(), part()] }), TX_HASH, "other notes go");
+});
+
+await test("either one in one go that lands, or may have gone out, counts nothing against its parts' notes", async () => {
+  chain.receipt = "success";
+  const ended: string[] = [];
+  const hooks = { onEnd: async (status: "success" | "reverted") => void ended.push(status) };
+  const cashParts = [cash(), cash()];
+  const payParts = [part(), part()];
+  assert.equal(await server.relayUnshieldBatch(net, cashBody(cashParts), undefined, hooks), TX_HASH);
+  assert.equal(await server.relayTransferBatch(net, { parts: payParts }, undefined, hooks), TX_HASH);
+  for (let i = 0; i < 400 && ended.length < 2; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(ended, ["success", "success"], "the caller's own hook still runs");
+  for (const p of [...cashParts, ...payParts]) assert.equal(await noteReverts(p.nullifier), 0);
+  chain.receipt = "reverted";
+  chain.send = "drop";
+  const maybe = [cash(), cash()];
+  await assert.rejects(server.relayUnshieldBatch(net, cashBody(maybe)), isRelayError("maybe_sent", 502));
+  chain.send = "ok";
+  await new Promise((r) => setTimeout(r, 30));
+  for (const p of maybe) assert.equal(await noteReverts(p.nullifier), 0, "nobody saw it land");
+  chain.receipt = "none";
 });
 
 console.log(`\n${passed} relay batch checks passed`);

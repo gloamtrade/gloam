@@ -376,6 +376,18 @@ await test("a passing failure retries, then gives up when long overdue", async (
   assert.equal(chain.sends.length, 2);
 });
 
+await test("a note waiting out its reverts (note_wait) sent nothing: the job tries again, never kept as may-be-sent", async () => {
+  const j = job();
+  const { store, chain } = await setup(j);
+  chain.failNextSend(() => {
+    throw new SendError("This balance can't try that again yet.", "note_wait");
+  });
+  assert.deepEqual(await runDueJobs(store, chain.deps), [{ id: j.id, status: "scheduled" }]);
+  const after = (await store.get(j.id))!;
+  assert.notEqual(after.maybeSent, true);
+  assert.ok(after.reason);
+});
+
 await test("an unreadable node sends nothing and tries again", async () => {
   const j = job();
   const { store, chain } = await setup(j);
