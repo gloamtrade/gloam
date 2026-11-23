@@ -17,7 +17,8 @@
  * The private note goes with the first part only, so it is read once.
  */
 import type { Address } from "viem";
-import { fundingPlan, newBatch, type DraftRow, type PayrollBatch } from "./payroll";
+import { fundingPlan, newBatch, withRunLock, type DraftRow, type PayrollBatch } from "./payroll";
+import { loadBatches, loadStoredRun, saveBatch } from "./payrollStore";
 
 /** At most this many parts in one payment: each is a relayed transfer and a proof on this device. */
 export const PAY_MAX_PARTS = 6;
@@ -173,4 +174,57 @@ export function cancelPayRest(run: PayrollBatch): PayrollBatch | null {
     status: "done",
     rows: run.rows.map((r) => (r.status === "paid" || r.status === "failed" ? r : { ...r, status: "failed" as const, error: "Cancelled" })),
   };
+}
+
+/** A pay run not finished: parts still to send, or one the chain hasn't settled. */
+export function payRunUnfinished(run: Pick<PayrollBatch, "status">): boolean {
+  return run.status !== "done";
+}
+
+/** This account's unfinished pay run on this vault, newest first, or null. */
+export function unfinishedPayRun(
+  runs: PayrollBatch[],
+  who: { employer: Address; chainId: number; pool: Address }
+): PayrollBatch | null {
+  const mine = runs.filter(
+    (r) =>
+      isPayRun(r) &&
+      payRunUnfinished(r) &&
+      r.chainId === who.chainId &&
+      r.pool.toLowerCase() === who.pool.toLowerCase() &&
+      r.employer.toLowerCase() === who.employer.toLowerCase()
+  );
+  return mine.sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+}
+
+/**
+ * Saves `run` to start it, unless this account already has a payment in parts
+ * not finished on this vault: then that one comes back to finish (Resume, or
+ * Stop the rest), and `run` is dropped unsaved. Held under one lock per account
+ * and vault, so two taps or two tabs at once start one payment, never two.
+ * Throws RUN_ELSEWHERE while another start holds the lock.
+ */
+export async function startPayRun(run: PayrollBatch): Promise<{ run: PayrollBatch; started: boolean }> {
+  const lock = `pay-start-${run.chainId}-${run.pool.toLowerCase()}-${run.employer.toLowerCase()}`;
+  return withRunLock(lock, async () => {
+    const left = unfinishedPayRun(await loadBatches(run.chainId, run.pool), { employer: run.employer, chainId: run.chainId, pool: run.pool });
+    if (left) return { run: left, started: false };
+    await saveBatch(run);
+    return { run, started: true };
+  });
+}
+
+/**
+ * Stop the rest, safely: under the run's own lock (RUN_ELSEWHERE while a tab is
+ * paying it) and from the stored run, never a copy loaded earlier. Null when a
+ * part is on its way (the chain settles it first).
+ */
+export async function stopPayRest(run: Pick<PayrollBatch, "id">): Promise<PayrollBatch | null> {
+  return withRunLock(run.id, async () => {
+    const fresh = await loadStoredRun(run.id);
+    if (!fresh) return null;
+    const stopped = cancelPayRest(fresh);
+    if (stopped) await saveBatch(stopped);
+    return stopped;
+  });
 }

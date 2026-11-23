@@ -386,6 +386,8 @@ export function MoveView() {
   const [cashOutChecking, setCashOutChecking] = useState(false);
   /** Opening a claim code (PBKDF2, spent check, tree sync) before it is saved: one at a time. */
   const claimGate = useRef(false);
+  /** Pay in parts: its name check runs before the run starts, so a second tap waits here. */
+  const payAcrossGate = useRef(false);
   /** Before a claim first lands in this browser: the backup step shows in place of the button (lib/backupGate). */
   const backupGate = useBackupGate();
   const [claimBackupAsk, setClaimBackupAsk] = useState(false);
@@ -2042,7 +2044,12 @@ export function MoveView() {
 
   /** Pay more than one balance holds: the parts in acrossPlan, one after another, through the relay. */
   async function onPayAcross(parts: bigint[], noteIds: string[]) {
+    // one tap at a time: the name check below waits on the network, and a second
+    // tap in that time would start the same payment again
+    if (payAcrossGate.current) return;
     if (!selected || !address || !network.pool || !poseidonMode || across.running) return;
+    payAcrossGate.current = true;
+    setBusy(true);
     setError(null);
     try {
       if (!relayOn || !relayAvailable) throw new Error("Turn on Hide my wallet to send it in parts in one go.");
@@ -2079,6 +2086,9 @@ export function MoveView() {
       await across.start(run);
     } catch (e) {
       setError(walletErrorForPeople(e, "The payment didn't go through. Try again."));
+    } finally {
+      payAcrossGate.current = false;
+      setBusy(false);
     }
   }
 
