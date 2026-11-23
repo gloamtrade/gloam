@@ -577,6 +577,12 @@ export function setAllNotes(next: LocalNote[]): Promise<void> {
   }
   // No account bound to this page: there is nowhere to save, and nothing changes here.
   if (typeof window !== "undefined" && notesKey() === null) return Promise.reject(new SignedOutError());
+  // Bound to an account that isn't the one signed in (the wallet keeps switching and the
+  // page can't reload again yet): a new note would land in the other account. Nothing is saved.
+  if (typeof window !== "undefined" && accountScopeOn() && !accountShown()) {
+    const known = new Set(cache.map((n) => n.id));
+    if (next.some((n) => !known.has(n.id))) return Promise.reject(new SignedOutError());
+  }
   const before = new Map(cache.map((n) => [n.id, n]));
   const after = new Set(next.map((n) => n.id));
   for (const id of before.keys()) if (!after.has(id)) {

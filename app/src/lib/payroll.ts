@@ -168,6 +168,39 @@ export const NAME_PENDING = "Looking up this name…";
 /** What looking up one Gloam name gave: the Gloam address it pays, nobody, or a failed read. */
 export type PayrollNameAnswer = { tag: string } | "none" | "failed";
 
+/** A name whose address is no longer what the list was checked against. */
+export type PayrollNameChange = { name: string; why: "changed" | "none" | "failed" };
+
+/**
+ * Names read again right before a run, against the answers the list was shown
+ * with: any that now point elsewhere, have no holder, or can't be read stop the
+ * run, so nothing stale is paid.
+ */
+export function payrollNameChanges(
+  fresh: ReadonlyArray<readonly [string, PayrollNameAnswer]>,
+  known: ReadonlyMap<string, PayrollNameAnswer>
+): PayrollNameChange[] {
+  const out: PayrollNameChange[] = [];
+  for (const [name, a] of fresh) {
+    const was = known.get(name);
+    const wasTag = was && typeof was === "object" ? was.tag : null;
+    if (a === "failed") out.push({ name, why: "failed" });
+    else if (a === "none") out.push({ name, why: "none" });
+    else if (a.tag !== wasTag) out.push({ name, why: "changed" });
+  }
+  return out;
+}
+
+/** One line for a run stopped by changed names: nothing was paid. */
+export function payrollNameChangeMessage(changes: PayrollNameChange[]): string {
+  const of = (why: PayrollNameChange["why"]) => changes.filter((c) => c.why === why).map((c) => `@${c.name}`);
+  const moved = [...of("changed"), ...of("none")];
+  if (moved.length) {
+    return `${moved.join(", ")} ${moved.length === 1 ? "points" : "point"} somewhere new since the list loaded, so nothing was paid. Check the list, then pay again.`;
+  }
+  return `Couldn't confirm ${of("failed").join(", ")} just now, so nothing was paid. Try again in a moment.`;
+}
+
 /** Every Gloam name the rows still need looked up, each once. */
 export function payrollNamesToLookUp(rows: DraftRow[], known: ReadonlyMap<string, PayrollNameAnswer>): string[] {
   const out = new Set<string>();

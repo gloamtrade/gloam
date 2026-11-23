@@ -24,7 +24,8 @@ import assert from "node:assert/strict";
 import "./browser-shim.mjs";
 import { parseUnits, type Address } from "viem";
 
-const { parsePayrollCsv, fundingPlan, PAYROLL_TEMPLATE, exportResultsCsv, claimLink, applyPayrollNames, payrollNamesToLookUp, NAME_PENDING, newBatch } = await import("../src/lib/payroll");
+const { parsePayrollCsv, fundingPlan, PAYROLL_TEMPLATE, exportResultsCsv, claimLink, applyPayrollNames, payrollNamesToLookUp, NAME_PENDING, newBatch, payrollNameChanges, payrollNameChangeMessage } = await import("../src/lib/payroll");
+const { peopleFromDraft, scheduleCsv } = await import("../src/lib/payrollSchedule");
 // a real Gloam address (a P-256 public key), for the name checks
 const PAYROLL_TAG = await (async () => {
   const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
@@ -259,6 +260,29 @@ test("an @name is paid like a Gloam address once it is looked up", () => {
   assert.equal(ada.recipient, TAG);
   assert.equal(ada.payName, "ada_obi", "the run keeps the name it was paid by");
   assert.ok(!batch.rows.some((r) => r.name === "Di" || r.name === "Ed"), "rows with a name problem are not in the run");
+});
+
+test("a name read again before the run stops it if the address moved", () => {
+  const OTHER = PAYROLL_TAG.slice(0, -4) + (PAYROLL_TAG.endsWith("AAAA") ? "BBBB" : "AAAA");
+  const known = new Map<string, "none" | "failed" | { tag: string }>([["ada", { tag: PAYROLL_TAG }], ["bob", { tag: PAYROLL_TAG }], ["cyd", { tag: PAYROLL_TAG }]]);
+  assert.deepEqual(payrollNameChanges([["ada", { tag: PAYROLL_TAG }]], known), [], "the same address: the run goes");
+  const changes = payrollNameChanges([["ada", { tag: OTHER }], ["bob", "none"], ["cyd", "failed"]], known);
+  assert.deepEqual(changes.map((c) => [c.name, c.why]), [["ada", "changed"], ["bob", "none"], ["cyd", "failed"]]);
+  assert.ok(payrollNameChangeMessage(changes).startsWith("@ada, @bob point somewhere new"), "the message names them, and says nothing was paid");
+  assert.ok(payrollNameChangeMessage(changes).includes("nothing was paid"));
+  assert.ok(payrollNameChangeMessage([{ name: "cyd", why: "failed" }]).startsWith("Couldn't confirm @cyd"));
+});
+
+test("a schedule keeps @names as names, so each payday pays the address it holds then", () => {
+  const { rows } = parsePayrollCsv(["name,gloam_address,amount", "Ada,@Ada_Obi,10", "Bo,,5"].join("\n"), ASSET);
+  const done = applyPayrollNames(rows, new Map([["ada_obi", { tag: PAYROLL_TAG }]]));
+  const people = peopleFromDraft(done);
+  assert.equal(people[0]!.recipient, "@ada_obi", "stored as the name, not today's address");
+  assert.equal(people[0]!.kind, "gloam");
+  const again = parsePayrollCsv(scheduleCsv(people, ASSET), ASSET).rows;
+  assert.equal(again[0]!.payName, "ada_obi", "loaded back into a run, it is looked up again");
+  assert.equal(again[0]!.error, NAME_PENDING);
+  assert.equal(again[1]!.kind, "link", "a claim link row stays one");
 });
 
 test("an 0x or a plain word still isn't a Gloam address", () => {
