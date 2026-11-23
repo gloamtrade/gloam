@@ -3,6 +3,7 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { BusyLabel } from "@/components/ui/Spinner";
 import type { AdminUpdate, SendProgress } from "@/lib/updatesMail";
+import type { DeliveryProblem } from "@/lib/updatesDelivery";
 import { BODY_MAX, SITE, SUBJECT_MAX, checkUpdate, fmtDay, renderUpdateEmail } from "@/lib/updatesMailRender";
 import { TickDonut } from "../charts";
 import { useAdminResource } from "../data";
@@ -60,6 +61,9 @@ type MailData = {
   backend: string;
   subscribers: number;
   updates: AdminUpdate[];
+  /** Resend's delivery webhook is set up (RESEND_WEBHOOK_SECRET). */
+  tracking?: boolean;
+  problems?: DeliveryProblem[];
 };
 
 const DRAFT_KEY = "gloam-admin-update-draft";
@@ -421,6 +425,9 @@ function SentUpdates({ data, runner }: { data: MailData; runner: ReturnType<type
       u.subject
     ),
     n(u.sent),
+    data.tracking ? n(u.delivery?.delivered ?? 0) : "Off",
+    data.tracking ? n(u.delivery?.bounced ?? 0) : "Off",
+    data.tracking ? n(u.delivery?.complained ?? 0) : "Off",
     n(u.failed),
     n(u.unknown),
     u.done ? "0" : n(u.left + u.pending),
@@ -443,7 +450,13 @@ function SentUpdates({ data, runner }: { data: MailData; runner: ReturnType<type
   const stoppedNotes = data.updates.filter((u) => u.note && (!u.done || u.failed > 0));
   return (
     <Panel title="Sent updates" sub="Each one is public at gloam.trade/updates once its first batch goes out">
-      <DataTable headers={["Day", "Subject", "Sent", "Failed", "Unknown", "Left", "Status", ""]} rows={rows} empty="No updates sent yet" minWidth={760} wrap={[1]} />
+      <DataTable
+        headers={["Day", "Subject", "Sent", "Delivered", "Bounced", "Spam", "Failed", "Unknown", "Left", "Status", ""]}
+        rows={rows}
+        empty="No updates sent yet"
+        minWidth={980}
+        wrap={[1]}
+      />
       {stoppedNotes.map((u) => (
         <p key={u.id} className="mt-3 text-[13px] text-mute">
           <span className="text-foreground">{u.subject}:</span> {u.note}
@@ -452,6 +465,43 @@ function SentUpdates({ data, runner }: { data: MailData; runner: ReturnType<type
       <Note>
         Nobody gets an update twice: a retry, a resume or a second click only sends to people not yet sent it. Unknown means a batch got no clear
         answer from Resend for a day, so it is never sent again. Failed means Resend refused the address; Retry failed tries them once more.
+        Delivered, Bounced and Spam come from Resend after the send.
+      </Note>
+    </Panel>
+  );
+}
+
+const PROBLEM_KIND: Record<DeliveryProblem["kind"], string> = { bounced: "Bounced", complained: "Marked as spam" };
+
+/** Bounces and spam complaints Resend reported, and whether the address came off the list. */
+function DeliveryProblems({ data }: { data: MailData }) {
+  const subjectOf = new Map(data.updates.map((u) => [u.id, u.subject]));
+  const problems = data.problems ?? [];
+  const rows = problems.map((p) => [
+    <span key="e" className="break-all">
+      {p.email}
+    </span>,
+    PROBLEM_KIND[p.kind],
+    <span key="d" className="text-mute">
+      {p.detail}
+    </span>,
+    p.updateId ? (subjectOf.get(p.updateId) ?? p.updateId) : "Test or other email",
+    new Date(p.at).toISOString().slice(0, 16).replace("T", " "),
+    p.removed ? "Taken off" : "Wasn't on it",
+  ]);
+  return (
+    <Panel title="Bounces and spam reports" sub="From Resend after each send. These addresses get no more updates.">
+      {data.tracking ? (
+        <DataTable headers={["Email", "What", "Detail", "Update", "When (UTC)", "List"]} rows={rows} empty="None so far" minWidth={860} wrap={[0, 2, 3]} />
+      ) : (
+        <p className="text-[14px] leading-relaxed text-soft">
+          Off. In Resend, open Webhooks, add https://www.gloam.trade/api/updates/webhook with the events email.delivered, email.bounced,
+          email.complained and email.delivery_delayed, then put its signing secret in Vercel as RESEND_WEBHOOK_SECRET (Production) and redeploy.
+        </p>
+      )}
+      <Note>
+        A hard bounce (an address that doesn&apos;t exist) or a spam report takes the address off the list at once, so it is never mailed
+        again. A soft bounce, like a full mailbox, is only counted. Opens and clicks aren&apos;t tracked.
       </Note>
     </Panel>
   );
@@ -490,6 +540,7 @@ export function UpdatesTab() {
       {mail.err && !mail.data && <Notice tone="danger">{mail.err}</Notice>}
       {mail.data && <Compose data={mail.data} runner={runner} />}
       {mail.data && <SentUpdates data={mail.data} runner={runner} />}
+      {mail.data && <DeliveryProblems data={mail.data} />}
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
         <Panel title="Where people joined">
           <TickDonut

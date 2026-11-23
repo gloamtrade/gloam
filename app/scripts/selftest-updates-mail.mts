@@ -746,6 +746,87 @@ resetMemoryKv();
   }
 }
 
+// ============================================================ delivery: Resend's webhook
+{
+  const { createHmac } = await import("node:crypto");
+  const dlv = await import("../src/lib/updatesDelivery");
+  const hook = await import("../src/app/api/updates/webhook/route");
+  resetMemoryKv();
+  const SECRET = `whsec_${Buffer.from("a-test-signing-secret-32-bytes!!").toString("base64")}`;
+  const sign = (id: string, ts: number, body: string, secret = SECRET) =>
+    `v1,${createHmac("sha256", Buffer.from(secret.slice(6), "base64")).update(`${id}.${ts}.${body}`).digest("base64")}`;
+  const now = Math.floor(Date.now() / 1000);
+
+  // the signature
+  const b = '{"type":"email.delivered"}';
+  ok(dlv.verifyWebhook(SECRET, { id: "msg_1", timestamp: String(now), signature: sign("msg_1", now, b) }, b, now), "a good signature passes");
+  ok(dlv.verifyWebhook(SECRET, { id: "msg_1", timestamp: String(now), signature: `v1,bm9wZQ== ${sign("msg_1", now, b)}` }, b, now), "one good signature among several passes");
+  ok(!dlv.verifyWebhook(SECRET, { id: "msg_1", timestamp: String(now), signature: sign("msg_1", now, b) }, `${b} `, now), "a changed body fails");
+  ok(!dlv.verifyWebhook(SECRET, { id: "msg_2", timestamp: String(now), signature: sign("msg_1", now, b) }, b, now), "another id fails");
+  ok(!dlv.verifyWebhook(SECRET, { id: "msg_1", timestamp: String(now - 600), signature: sign("msg_1", now - 600, b) }, b, now), "a call older than five minutes fails");
+  ok(!dlv.verifyWebhook(`whsec_${Buffer.from("another-secret-of-32-bytes-long!").toString("base64")}`, { id: "msg_1", timestamp: String(now), signature: sign("msg_1", now, b) }, b, now), "another secret fails");
+  ok(!dlv.verifyWebhook(SECRET, { id: "msg_1", timestamp: String(now), signature: null }, b, now), "no signature fails");
+
+  const call = (id: string, event: unknown, opts: { ts?: number; secret?: string } = {}) => {
+    const body = JSON.stringify(event);
+    const ts = opts.ts ?? now;
+    return hook.POST(
+      new Request("https://www.gloam.trade/api/updates/webhook", {
+        method: "POST",
+        headers: { "content-type": "application/json", "svix-id": id, "svix-timestamp": String(ts), "svix-signature": sign(id, ts, body, opts.secret) },
+        body,
+      }),
+    );
+  };
+  delete env.RESEND_WEBHOOK_SECRET;
+  eq((await call("m0", { type: "email.delivered" })).status, 503, "no secret set: tracking is off");
+  ok(!dlv.deliveryTrackingOn(), "and says so");
+  env.RESEND_WEBHOOK_SECRET = SECRET;
+  ok(dlv.deliveryTrackingOn(), "on once the secret is set");
+  eq((await call("m0", { type: "email.delivered" }, { secret: `whsec_${Buffer.from("not-the-secret-not-the-secret!!!").toString("base64")}` })).status, 401, "a forged call is refused");
+
+  await list.subscribeToUpdates("bad@example.com", "site");
+  await list.subscribeToUpdates("spam@example.com", "contest");
+  await list.subscribeToUpdates("full@example.com", "sign-in");
+  const U = "2026-11-23-gloam-this-week";
+  const ev = (type: string, emailId: string, to: string, extra: Record<string, unknown> = {}) => ({
+    type,
+    created_at: new Date().toISOString(),
+    data: { email_id: emailId, to: [to], subject: "x", tags: { update: U }, ...extra },
+  });
+  eq((await call("e1", ev("email.delivered", "em_1", "ok@example.com"))).status, 200, "a delivery is taken");
+  eq((await call("e1", ev("email.delivered", "em_1", "ok@example.com"))).status, 200, "the same call again is fine");
+  await call("e2", ev("email.delivered", "em_1", "ok@example.com")); // Resend's own retry under a new id
+  await call("e3", ev("email.delivered", "em_2", "two@example.com"));
+  await call("e4", ev("email.bounced", "em_3", "bad@example.com", { bounce: { type: "Permanent", subType: "General", message: "No such user" } }));
+  await call("e5", ev("email.complained", "em_4", "spam@example.com"));
+  await call("e6", ev("email.bounced", "em_5", "full@example.com", { bounce: { type: "Transient", subType: "MailboxFull", message: "Mailbox full" } }));
+  await call("e7", ev("email.opened", "em_1", "ok@example.com"));
+  await call("e8", { type: "email.bounced", data: { email_id: "em_9", to: ["stray@example.com"], bounce: { type: "Permanent" } } });
+  // tags as a list of { name, value } count the same
+  await call("e9", { type: "email.delivered", data: { email_id: "em_6", to: ["six@example.com"], tags: [{ name: "update", value: U }] } });
+
+  eq(await dlv.deliveryCounts(U), { delivered: 3, bounced: 2, complained: 1, delayed: 0 }, "counted once per email, opens ignored, soft bounce counted");
+  const left = (await list.listUpdatesSubscribers()).map((x) => x.email);
+  ok(!left.includes("bad@example.com"), "a hard bounce comes off the list");
+  ok(!left.includes("spam@example.com"), "a spam report comes off the list");
+  ok(left.includes("full@example.com"), "a full mailbox stays on it");
+  const probs = await dlv.listDeliveryProblems();
+  eq(probs.map((p) => [p.email, p.kind, p.removed, p.updateId]), [
+    ["stray@example.com", "bounced", false, null],
+    ["spam@example.com", "complained", true, U],
+    ["bad@example.com", "bounced", true, U],
+  ], "the admin sees each hard bounce and spam report, newest first");
+  ok(probs[2]!.detail.includes("No such user"), "with Resend's reason");
+
+  // the admin reads it with the sent updates
+  g.__testCookies = { [ADMIN_COOKIE]: createAdminSession()! };
+  const got = (await (await mailRoute.GET()).json()) as { data: { tracking: boolean; problems: unknown[] } };
+  eq([got.data.tracking, got.data.problems.length], [true, 3], "the admin sees tracking on and the problems");
+  g.__testCookies = {};
+  delete env.RESEND_WEBHOOK_SECRET;
+}
+
 // ============================================================ the list sources: only the updates list
 {
   const src = (await import("node:fs")).readFileSync(fileURLToPath(new URL("../src/lib/updatesMail.ts", import.meta.url)), "utf8");
