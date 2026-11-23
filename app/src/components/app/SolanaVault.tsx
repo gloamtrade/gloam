@@ -15,7 +15,8 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { RINGS_PRIVACY_NOTE, ringsAssets, ringsExplorerTx, type RingsAsset } from "@/lib/solanaRings/config";
+import { RINGS_PRIVACY_NOTE, addFeePayer, ringsAssets, ringsExplorerTx, type RingsAsset } from "@/lib/solanaRings/config";
+import { canSignOnly } from "@/lib/solanaWallet";
 import { ADD_FIRST, addAssetHref, type VaultActionId, type VaultActionInfo } from "@/lib/vaultHub";
 import { SOLANA_VAULT_ACTIONS } from "@/lib/solanaRings/vaultActions";
 import { ActionTile, BalancePane, QuickRow, type Holding } from "./VaultHome";
@@ -247,6 +248,11 @@ export function SolanaAddView() {
               : "Enter a valid amount"
             : null;
   const walletEmpty = sol.walletBalances !== null && Object.values(sol.walletBalances).every((v) => v === 0n);
+  // Who pays the network fee, by the client's rule (lib/solanaRings/client buildAddFor, which reads the SOL again just before).
+  const feePayer =
+    sol.main && sol.relay
+      ? addFeePayer({ asset, walletLamports: sol.walletBalances?.sol ?? null, relay: sol.relay, signOnly: sol.demo || canSignOnly(sol.main.wallet) })
+      : "wallet";
 
   return (
     <div className="grid items-start gap-6">
@@ -318,6 +324,10 @@ export function SolanaAddView() {
             <p className="mt-3 rounded-[16px] bg-surface px-4 py-3 text-[13.5px] leading-relaxed text-soft">
               Nothing to add yet. Send {listOr(assets.map((a) => a.symbol))} to {shortSol(sol.main?.account.address ?? "")} first.
             </p>
+          )}
+          {feePayer === "relay" && <p className="mt-3 text-center text-[12.5px] leading-relaxed text-mute">Gloam pays the network fee. The deposit shows it came through Gloam.</p>}
+          {feePayer === "needs_sol" && !walletEmpty && inWallet !== 0n && !working && (
+            <p className="mt-3 rounded-[16px] bg-surface px-4 py-3 text-[13.5px] leading-relaxed text-soft">Your wallet needs a little SOL for the network fee.</p>
           )}
         </div>
         <SolanaSteps task={working ? sol.task : null} className="mt-4" />

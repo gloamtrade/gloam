@@ -221,6 +221,51 @@ export function priorityFeeFor(microLamportsPerCu: number | null | undefined, co
   return fee > cap ? cap : fee;
 }
 
+/**
+ * The compute unit price (micro-lamports) for a version 0 transaction of
+ * `units` the relay pays for (a wallet's add, client buildAddTransaction): the
+ * fee priorityFeeFor sets, as a per-unit price rounded down, so the fee Solana
+ * charges (price times units, rounded up) never passes it or the relay's cap.
+ */
+export function relayUnitPrice(microLamportsPerCu: number | null | undefined, units: number, cap: bigint = RELAY_LIMITS.maxPriorityFeeLamports): bigint {
+  const u = BigInt(Math.max(1, Math.floor(units)));
+  return (priorityFeeFor(microLamportsPerCu, units, cap) * 1_000_000n) / u;
+}
+
+const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
+const LAMPORTS_PER_SIGNATURE = 5_000n;
+
+/**
+ * A version 0 or legacy transaction's whole fee in lamports: 5,000 a
+ * signature and its priority fee (its ComputeBudget unit price times its unit
+ * limit, rounded up; priced at 1,400,000 units when it sets no limit). Null
+ * when it can't be read or is version 1 (whose fee is in its header).
+ */
+export function feeLamportsOfWire(wire: Uint8Array): bigint | null {
+  try {
+    const compiled = getCompiledTransactionMessageDecoder().decode(getTransactionDecoder().decode(wire).messageBytes) as {
+      version: unknown;
+      header: { numSignerAccounts: number };
+      staticAccounts: readonly string[];
+      instructions: readonly { programAddressIndex: number; data?: Uint8Array }[];
+    };
+    if (compiled.version === 1) return null;
+    let units: bigint | null = null;
+    let price = 0n;
+    for (const ix of compiled.instructions) {
+      const d = ix.data;
+      if (compiled.staticAccounts[ix.programAddressIndex] !== COMPUTE_BUDGET || !d) continue;
+      const value = (bytes: Uint8Array) => bytes.reduceRight((v, b) => (v << 8n) | BigInt(b), 0n);
+      if (d[0] === 2 && d.length === 5) units = value(d.subarray(1));
+      if (d[0] === 3 && d.length === 9) price = value(d.subarray(1));
+    }
+    const priority = (price * (units ?? BigInt(RELAY_LIMITS.maxComputeUnits)) + 999_999n) / 1_000_000n;
+    return BigInt(compiled.header.numSignerAccounts) * LAMPORTS_PER_SIGNATURE + priority;
+  } catch {
+    return null;
+  }
+}
+
 /** A version 1 transaction's compute unit limit (its header config), or null. */
 export function computeUnitsOf(messageBytes: Transaction["messageBytes"] | Uint8Array): number | null {
   const compiled = getCompiledTransactionMessageDecoder().decode(messageBytes) as { version: unknown; configMask?: number; configValues?: never };

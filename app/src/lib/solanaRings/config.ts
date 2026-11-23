@@ -41,6 +41,47 @@ export function ringsUrls(origin: string): { rpc: string; spr: string; relay: st
  */
 export const RINGS_RELAY_LOW_LAMPORTS = 10_000_000;
 
+/**
+ * Solana takes a transaction's fee from its fee payer, then needs that account
+ * either empty or still rent-exempt. For a wallet (a system account with no
+ * data) rent-exempt is 890,880 lamports.
+ */
+export const RENT_EXEMPT_WALLET_LAMPORTS = 890_880n;
+
+/**
+ * What a wallet's own token add costs it in fees: one signature (5,000
+ * lamports) and the deposit's priority fee (client asVersion0: 200,000 units
+ * at 20,000 micro-lamports, 4,000 lamports). What the page goes by before the
+ * add is built; the client checks the exact fee of what it built.
+ */
+export const WALLET_ADD_FEE_LAMPORTS = 9_000n;
+
+/** Whether a wallet holding `lamports` can pay `fee` and be left empty or rent-exempt. */
+export function walletPaysFee(lamports: bigint, fee: bigint): boolean {
+  if (lamports < fee) return false;
+  const left = lamports - fee;
+  return left === 0n || left >= RENT_EXEMPT_WALLET_LAMPORTS;
+}
+
+/**
+ * Who pays the network fee when a wallet adds money privately: the wallet
+ * whenever it can (always for SOL itself: a wallet with no SOL has none to
+ * add), else Gloam's relay for a token, when the relay is on and funded and
+ * the wallet can sign without sending (the relay signs last, as fee payer).
+ * "needs_sol" when neither can. `walletLamports` null (not read): the wallet.
+ */
+export function addFeePayer(input: {
+  asset: Pick<RingsAsset, "mint">;
+  walletLamports: bigint | null;
+  fee?: bigint;
+  relay: { on: boolean; funded: boolean; relayer: string | null } | null;
+  signOnly: boolean;
+}): "wallet" | "relay" | "needs_sol" {
+  if (!input.asset.mint || input.walletLamports === null) return "wallet";
+  if (walletPaysFee(input.walletLamports, input.fee ?? WALLET_ADD_FEE_LAMPORTS)) return "wallet";
+  return input.relay?.on && input.relay.funded && input.relay.relayer && input.signOnly ? "relay" : "needs_sol";
+}
+
 /** How the site names the network: "Solana", or "Solana devnet" on a devnet build. */
 export const SOLANA_NAME = SOLANA_RINGS_NETWORK === "devnet" ? "Solana devnet" : "Solana";
 

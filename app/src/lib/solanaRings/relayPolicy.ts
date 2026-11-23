@@ -25,11 +25,24 @@
  *    counts it with registrations (ataAccounts names them).
  * Exactly two signers, the relay and the private account: every extra
  * signature is another 5,000 lamports the relay would pay.
- * Version 1 transactions only (what the SDK builds): the priority fee is a
+ * Version 1 transactions (what the SDK builds): the priority fee is a
  * config value there, capped here, and there are no compute-budget
  * instructions to inspect. The page sets that fee from Helius's recommended
  * price (lib/solanaRings/landing priorityFeeFor), 10,000 lamports at least;
  * the cap bounds what one busy moment can cost the relay.
+ *
+ * One version 0 shape, and only that one: a main wallet adding a token to its
+ * private balance when it has no SOL for the fee (client addToPrivate). Wallets
+ * sign version 0, not version 1, so the priority fee is in ComputeBudget
+ * instructions there. Allowed: the relay as fee payer (static account 0), the
+ * relay and the depositor as the only two signers (the relay's slot still
+ * empty), no address lookup tables (nothing the relay signs is hidden behind
+ * one), and exactly one deposit that passes the same rule as above, with at
+ * most one SetComputeUnitLimit (at most WALLET_DEPOSIT_MAX_UNITS) and at most
+ * one SetComputeUnitPrice, their priority fee within the same cap. Nothing
+ * else. The relay's SOL pays the base fee and that capped priority fee; the
+ * deposit moves the wallet's own tokens, so no rent and no transfer from the
+ * relay.
  */
 import {
   AccountRole,
@@ -56,6 +69,9 @@ const KNOWN_PROGRAMS = [
   "ComputeBudget111111111111111111111111111111",
 ];
 
+const COMPUTE_BUDGET_PROGRAM = "ComputeBudget111111111111111111111111111111";
+const SET_COMPUTE_UNIT_LIMIT = 2;
+const SET_COMPUTE_UNIT_PRICE = 3;
 const REGISTRY_ALLOWED = new Set([0, 1]);
 const POOL_ALLOWED = new Set([16, 17]);
 const POOL_DEPOSIT = 15;
@@ -91,6 +107,13 @@ export type RelayLimits = {
 
 export const RELAY_LIMITS: RelayLimits = { maxPriorityFeeLamports: 50_000n, maxComputeUnits: 1_400_000, maxInstructions: 4 };
 
+/**
+ * Most compute units a wallet's version 0 deposit may ask for: twice what the
+ * SDK builds a deposit with (200,000). A version 0 transaction with no
+ * SetComputeUnitLimit is priced here as if it asked for maxComputeUnits.
+ */
+export const WALLET_DEPOSIT_MAX_UNITS = 400_000;
+
 export type RelayVerdict =
   | {
       ok: true;
@@ -103,6 +126,8 @@ export type RelayVerdict =
       accounts: string[];
       /** Token accounts the transaction creates if missing (the relay pays their rent). */
       ataAccounts: string[];
+      /** A deposit's depositor (the account whose money goes in, which signs): the route counts deposits by it too. */
+      depositor?: string;
     }
   | { ok: false; reason: string };
 
@@ -122,7 +147,7 @@ type DecodedIx = { programAddress: string; accounts?: readonly { address: string
  *   SOL:  tree, depositor (signer), pool, system program, SOL interface
  *   SPL:  tree, depositor (signer), pool, token program, mint, source token account, vault
  */
-function readDeposit(ix: DecodedIx, relayer: string, mins: ReadonlyMap<string, bigint>): { ok: true } | { ok: false; reason: string } {
+function readDeposit(ix: DecodedIx, relayer: string, mins: ReadonlyMap<string, bigint>): { ok: true; depositor: string } | { ok: false; reason: string } {
   const data = ix.data ?? new Uint8Array();
   const accounts = ix.accounts ?? [];
   const bad = (why: string) => ({ ok: false as const, reason: `pool instruction not allowed: ${why}` });
@@ -144,7 +169,7 @@ function readDeposit(ix: DecodedIx, relayer: string, mins: ReadonlyMap<string, b
   const min = mins.get(mint);
   if (min === undefined) return bad("not an asset Gloam lists");
   if (amount < min) return bad("deposit too small");
-  return { ok: true };
+  return { ok: true, depositor: depositor.address };
 }
 
 /** Decide whether the relay may co-sign `wire` (a serialized transaction) as `relayer`. */
@@ -157,23 +182,12 @@ export function checkSponsoredTransaction(wire: Uint8Array, relayer: string, lim
   } catch {
     return no("not a Solana transaction");
   }
-  if (compiled.version !== 1) return no("only version 1 transactions");
+  if (compiled.version === 0) return checkWalletDeposit(tx, compiled, relayer, limits);
+  if (compiled.version !== 1) return no("only version 1 transactions, or version 0 for a wallet's own deposit");
   const statics = compiled.staticAccounts as readonly string[];
   if (statics[0] !== relayer) return no("the relay must be the fee payer");
-
-  // The relay and the private account, nobody else. Solana charges the fee payer
-  // 5,000 lamports a signature, and a version 1 transaction fits about 40 of them:
-  // signers no instruction needs would make the relay pay over its fee cap.
-  const signers = Object.keys(tx.signatures);
-  if (signers.length < 2) return no("the private account must sign too");
-  if (signers.length > 2) return no("only the private account signs with the relay");
-  for (const [who, sig] of Object.entries(tx.signatures)) {
-    if (who === relayer) {
-      if (!isEmptySignature(sig as Uint8Array | null)) return no("the relay signs last");
-    } else if (isEmptySignature(sig as Uint8Array | null)) {
-      return no("a required signature is missing");
-    }
-  }
+  const signed = checkSigners(tx.signatures, relayer);
+  if (signed) return signed;
 
   let message: ReturnType<typeof decompileTransactionMessage>;
   try {
@@ -192,6 +206,7 @@ export function checkSponsoredTransaction(wire: Uint8Array, relayer: string, lim
   let registry = false;
   let poolTransact = false;
   let deposit = false;
+  let depositor: string | undefined;
   let ata = false;
   const ataAccounts: string[] = [];
   for (const ix of ixs) {
@@ -205,6 +220,7 @@ export function checkSponsoredTransaction(wire: Uint8Array, relayer: string, lim
       const d = readDeposit(ix as DecodedIx, relayer, mins);
       if (!d.ok) return no(d.reason);
       deposit = true;
+      depositor = d.depositor;
     } else if (program === SHIELDED_POOL_PROGRAM) {
       if (tag === undefined || !POOL_ALLOWED.has(tag)) return no("pool instruction not allowed");
       poolTransact = true;
@@ -224,9 +240,110 @@ export function checkSponsoredTransaction(wire: Uint8Array, relayer: string, lim
   if (registry && poolTransact) return no("register and pay in separate transactions");
   if (deposit && ixs.length !== 1) return no("a deposit goes alone in its transaction");
 
-  const programs = new Set<string>([...KNOWN_PROGRAMS, ...(ixs as readonly { programAddress: string }[]).map((ix) => ix.programAddress)]);
-  const accounts = [...new Set(statics.filter((a) => a !== relayer && !programs.has(a) && !a.startsWith("Sysvar")))];
-  return { ok: true, kind: registry ? "register" : deposit ? "deposit" : "transact", accounts, ataAccounts };
+  const accounts = screenedAccounts(statics, ixs, relayer);
+  return { ok: true, kind: registry ? "register" : deposit ? "deposit" : "transact", accounts, ataAccounts, ...(depositor ? { depositor } : {}) };
+}
+
+/** Every account the transaction names, but the programs and the relay: what the relay screens. */
+function screenedAccounts(statics: readonly string[], ixs: readonly { programAddress: string }[], relayer: string): string[] {
+  const programs = new Set<string>([...KNOWN_PROGRAMS, ...ixs.map((ix) => ix.programAddress)]);
+  return [...new Set(statics.filter((a) => a !== relayer && !programs.has(a) && !a.startsWith("Sysvar")))];
+}
+
+/**
+ * The relay and one other signer, nobody else, the relay's slot still empty.
+ * Solana charges the fee payer 5,000 lamports a signature, and a transaction
+ * fits about 40 of them: signers no instruction needs would make the relay pay
+ * over its fee cap. Null when they are right.
+ */
+function checkSigners(signatures: Readonly<Record<string, unknown>>, relayer: string): RelayVerdict | null {
+  const signers = Object.keys(signatures);
+  if (signers.length < 2) return no("the private account must sign too");
+  if (signers.length > 2) return no("only the private account signs with the relay");
+  if (!signers.includes(relayer)) return no("the relay must be the fee payer");
+  for (const [who, sig] of Object.entries(signatures)) {
+    if (who === relayer) {
+      if (!isEmptySignature(sig as Uint8Array | null)) return no("the relay signs last");
+    } else if (isEmptySignature(sig as Uint8Array | null)) {
+      return no("a required signature is missing");
+    }
+  }
+  return null;
+}
+
+/** Little-endian unsigned integer of `bytes` (a ComputeBudget value). */
+function readLe(bytes: Uint8Array): bigint {
+  let v = 0n;
+  for (let i = bytes.length - 1; i >= 0; i--) v = (v << 8n) | BigInt(bytes[i]!);
+  return v;
+}
+
+/**
+ * The one version 0 transaction the relay pays for: a main wallet's deposit
+ * of its own token into its private balance, the relay as fee payer (see the
+ * top of this file). Everything about it is checked here; nothing falls
+ * through to the version 1 rules.
+ */
+function checkWalletDeposit(
+  tx: { signatures: Readonly<Record<string, unknown>> },
+  compiled: { staticAccounts: readonly unknown[]; addressTableLookups?: readonly unknown[] },
+  relayer: string,
+  limits: RelayLimits
+): RelayVerdict {
+  const statics = compiled.staticAccounts as readonly string[];
+  if (statics[0] !== relayer) return no("the relay must be the fee payer");
+  // Accounts loaded from a lookup table are named nowhere in the transaction itself: never signed for.
+  if ((compiled.addressTableLookups?.length ?? 0) > 0) return no("version 0: no address lookup tables");
+  const signed = checkSigners(tx.signatures, relayer);
+  if (signed) return signed;
+
+  let message: ReturnType<typeof decompileTransactionMessage>;
+  try {
+    message = decompileTransactionMessage(compiled as never);
+  } catch {
+    return no("unreadable message");
+  }
+  const ixs = message.instructions;
+  if (ixs.length === 0 || ixs.length > 3) return no("version 0: only a deposit and its compute budget");
+
+  const mins = limits.depositMins ?? relayedDepositMins();
+  let units: bigint | null = null;
+  let price: bigint | null = null;
+  let depositor: string | null = null;
+  for (const ix of ixs) {
+    const program = ix.programAddress as string;
+    const data = ix.data ?? new Uint8Array();
+    if (program === COMPUTE_BUDGET_PROGRAM) {
+      if ((ix.accounts?.length ?? 0) !== 0) return no("version 0: compute budget instruction not allowed");
+      if (data[0] === SET_COMPUTE_UNIT_LIMIT && data.length === 5) {
+        if (units !== null) return no("version 0: one compute unit limit");
+        units = readLe(data.subarray(1));
+      } else if (data[0] === SET_COMPUTE_UNIT_PRICE && data.length === 9) {
+        if (price !== null) return no("version 0: one compute unit price");
+        price = readLe(data.subarray(1));
+      } else {
+        return no("version 0: compute budget instruction not allowed");
+      }
+    } else if (program === SHIELDED_POOL_PROGRAM && (data[0] ?? -1) === POOL_DEPOSIT) {
+      if (depositor !== null) return no("version 0: one deposit");
+      const d = readDeposit(ix as DecodedIx, relayer, mins);
+      if (!d.ok) return no(d.reason);
+      depositor = d.depositor;
+    } else {
+      return no("version 0: only a deposit and its compute budget");
+    }
+  }
+  if (depositor === null) return no("version 0: only a deposit and its compute budget");
+
+  const maxUnits = BigInt(Math.min(limits.maxComputeUnits, WALLET_DEPOSIT_MAX_UNITS));
+  if (units !== null && units > maxUnits) return no("compute limit too high");
+  // What Solana charges: the unit price times the unit limit, rounded up. With no
+  // limit set, priced as the most a transaction can ask for.
+  const priced = units ?? BigInt(limits.maxComputeUnits);
+  const priorityFee = ((price ?? 0n) * priced + 999_999n) / 1_000_000n;
+  if (priorityFee > limits.maxPriorityFeeLamports) return no("priority fee too high");
+
+  return { ok: true, kind: "deposit", accounts: screenedAccounts(statics, ixs, relayer), ataAccounts: [], depositor };
 }
 
 export type { Address };
