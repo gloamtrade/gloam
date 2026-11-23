@@ -9,6 +9,8 @@
  *  - each literal <Link href="/..."> in src resolves to a page under src/app
  *  - each footer entry resolves to a page, unless it is marked `document`;
  *    a `document` entry is one Next does not route (a public file or a rewrite)
+ *  - every <table> sits in its own overflow-x-auto wrapper, so a wide one
+ *    scrolls inside itself instead of widening the page on a phone
  *
  * Reads the source only. Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-site-links.mts
  */
@@ -98,6 +100,22 @@ test("footer entries are Next pages, or marked document and served as a file", (
     } else if (!isRoute) bad.push(`${e.href} is not a Next page: mark it document`);
   }
   assert.deepEqual(bad, []);
+});
+
+// A docs table of call signatures pushed /docs/agents/commitments to 691px on a 375px phone
+// (found 23 Nov 2026): every table sits in its own horizontal scroller, never the page.
+test("every <table> sits directly in an overflow-x-auto wrapper", () => {
+  const bad: string[] = [];
+  for (const f of files(SRC)) {
+    const lines = readFileSync(f, "utf8").split("\n");
+    lines.forEach((ln, i) => {
+      if (!/<table[\s>]/.test(ln)) return;
+      let j = i - 1;
+      while (j >= 0 && lines[j]!.trim() === "") j--;
+      if (!/overflow-x-auto/.test(lines[j] ?? "")) bad.push(`${relative(process.cwd(), f)}:${i + 1}`);
+    });
+  }
+  assert.deepEqual(bad, [], `tables that can widen the page on a phone:\n  ${bad.join("\n  ")}`);
 });
 
 console.log(`\n${passed} passed`);

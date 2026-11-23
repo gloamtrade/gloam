@@ -198,26 +198,28 @@ record.leaf   // the bytes32 to put in tonight's root
         <code>allowTestnet: true</code> only while you test. Build your chain client from
         the chains you accept, not from the record&apos;s chain id.
       </p>
-      <table>
-        <thead>
-          <tr>
-            <th>Check</th>
-            <th>What it confirms</th>
-            <th>Needs</th>
-          </tr>
-        </thead>
-        <tbody>
-          {CHECKS.map((c) => (
-            <tr key={c.id}>
-              <td>
-                <code>{c.id}</code>
-              </td>
-              <td>{c.confirms}</td>
-              <td>{c.needs}</td>
+      <div className="overflow-x-auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Check</th>
+              <th>What it confirms</th>
+              <th>Needs</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {CHECKS.map((c) => (
+              <tr key={c.id}>
+                <td>
+                  <code>{c.id}</code>
+                </td>
+                <td>{c.confirms}</td>
+                <td>{c.needs}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <pre>
         <code>{`import { checkPaymentReceipt, verifyGroth16 } from "@gloamtrade/sdk";
 import receiptVkey from "./receipt_vkey.json";   // gloam.trade/circuits/final/receipt_vkey.json on mainnet
@@ -253,30 +255,32 @@ const result = await checkPaymentReceipt(record, {
         signature, the selector and the rules to enforce. Native value is 0 on
         every one.
       </p>
-      <table>
-        <thead>
-          <tr>
-            <th>Call</th>
-            <th>Selector</th>
-            <th>On</th>
-            <th>What it does</th>
-          </tr>
-        </thead>
-        <tbody>
-          {CALLS.map((c) => (
-            <tr key={c.selector}>
-              <td>
-                <code>{c.call}</code>
-              </td>
-              <td>
-                <code>{c.selector}</code>
-              </td>
-              <td>{c.on}</td>
-              <td>{c.does}</td>
+      <div className="overflow-x-auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Call</th>
+              <th>Selector</th>
+              <th>On</th>
+              <th>What it does</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {CALLS.map((c) => (
+              <tr key={c.selector}>
+                <td>
+                  <code>{c.call}</code>
+                </td>
+                <td>
+                  <code>{c.selector}</code>
+                </td>
+                <td>{c.on}</td>
+                <td>{c.does}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <p>
         A payment needs only <code>transfer</code> and <code>postMemo</code>, and{" "}
         <code>postMemo</code> is optional: an economy that already passes
