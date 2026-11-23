@@ -19,6 +19,7 @@ Add shielded balances, private payments, and selective disclosure to any app or 
 - [What you can build](#what-you-can-build)
 - [Install](#install)
 - [Networks: mainnet and testnet](#networks-mainnet-and-testnet)
+- [Solana](#solana)
 - [Quickstart: shield your first note](#quickstart-shield-your-first-note)
 - [How it works](#how-it-works)
 - [The intent model](#the-intent-model)
@@ -152,6 +153,63 @@ Elysium mainnet is live since 9 November 2026. Elysium is Kinetiq's Hyperliquid 
 - Not on Elysium yet: private swaps (`planVaultSwap` refuses with "Private swaps are not on Elysium yet").
 - Short links: Elysium mainnet's USDC is id 45 in `SHORT_LINK_WHERE`; id 46 stays reserved for its testnet until that pool is in.
 - Keys: `src/elysium.ts` ships in the npm package, so `elysiumMainnetConfig()` and `elysiumTestnetConfig()` refuse an RPC URL with an API key in it; `redactRpcUrl(url)` hides a key for display. Keyed RPCs for Elysium go in your own env.
+
+## Solana
+
+From 0.9.0 the SDK runs Gloam on Solana, through Helius Solana Privacy Rings (the permissionless Default Ring), at the subpath `@gloamtrade/sdk/solana`. It works in Node and in browsers.
+
+**What it hides, plainly:** the asset and the amount of a private payment. The two private accounts a payment moves between are visible, adding money shows the wallet it came from, and a cash out shows its destination, asset and amount. Proofs are made by Helius's prover, in an attested enclave that sees a payment's details while it proves. Solana does not hide who paid whom.
+
+```bash
+npm i @gloamtrade/sdk @heliuslabs/spr@0.9.0-alpha @solana/kit
+```
+
+```ts
+import {
+  openSolanaAccount, solanaKeypairWallet, registerSolanaAccount, solanaBalances,
+  addToSolanaPrivate, paySolanaPrivately, cashOutSolana, solanaTxStatus,
+} from "@gloamtrade/sdk/solana";
+
+// The main wallet: a keypair (a Solana CLI keypair file's array, base58, or bytes),
+// or any wallet with address, signMessage(bytes) and signTransaction(wireBytes).
+const wallet = await solanaKeypairWallet(process.env.AGENT_SOLANA_KEY!);
+
+// One message signature opens the private account. The same wallet opens the same
+// account here and in the Gloam app, on any device; nothing is stored.
+const account = await openSolanaAccount({ wallet, index: 0 });
+account.address;                                   // the private address others pay
+
+await registerSolanaAccount(account);              // once, so it can be paid; the relay pays the rent
+await solanaBalances(account);                      // { sol, usdc, usdt } in base units
+
+await addToSolanaPrivate(account, { asset: "USDC", amount: 5_000_000n });      // the main wallet pays the fee
+const paid = await paySolanaPrivately(account, { to: "<gloam private address>", asset: "USDC", amount: 1_000_000n });
+await cashOutSolana(account, { to: wallet.address, asset: "USDC", amount: 1_000_000n });
+
+// A send returns "landed", or "pending" after timeoutMs (default 120 s), never waiting forever.
+if (paid.state === "pending") await solanaTxStatus({ signature: paid.signature, blockhash: paid.blockhash });
+// -> landed | failed (nothing moved) | dropped (its blockhash expired unseen: safe to send again) | pending
+```
+
+| Call | What it does | Public on chain |
+| --- | --- | --- |
+| `openSolanaAccount({ wallet, index?, baseUrl?, store? })` | Open private account `index` from one message signature (`solanaAccountMessage`, HKDF-SHA256, the app's derivation) | Nothing |
+| `registerSolanaAccount(account)` | Publish the account in the Rings registry so it can be paid. Gloam's relay pays the rent (about 0.0016 SOL) | The private account |
+| `solanaBalances(account)` | Sync from the Rings indexer and decrypt here: `{ sol, usdc, usdt }` | Nothing |
+| `addToSolanaPrivate(account, { asset, amount })` | Deposit from the main wallet, which pays Solana's fee | The main wallet, the asset and the amount |
+| `paySolanaPrivately(account, { to, asset, amount })` | Pay another registered Gloam private account. The relay pays the fee | Both private accounts. Hidden: the asset and the amount |
+| `cashOutSolana(account, { to, asset, amount })` | Cash out to any Solana address. The relay pays the fee | The private account, the destination, the asset and the amount |
+| `solanaTxStatus` / `waitForSolanaTx` | Where a send stands, with a deadline | |
+| `solanaRelayStatus()`, `isSolanaAccountRegistered()`, `buildSolanaRegistration()`, `closeSolanaAccount()` | The relay's state, registration, the signed registration (for checks), wiping keys | |
+
+- **Assets:** SOL, USDC and USDT on mainnet (`SOLANA_ASSETS`), amounts in base units (9 decimals for SOL, 6 for the stablecoins).
+- **Endpoints:** every call goes to Gloam's endpoints at `https://www.gloam.trade/api/solana/*` (a Solana RPC and the Rings indexer and prover behind Gloam's Helius key, and Gloam's relay). `baseUrl` points elsewhere. They answer servers and gloam.trade's own pages; a page on another site gets a refusal, so in a browser app put your own server in between and pass its `baseUrl`.
+- **Fees:** the relay pays the fees of registering, paying and cashing out (and a new token account's rent on a cash out), so the private account never holds SOL. Adding money is the one transaction the main wallet pays for.
+- **Never sent twice:** a relay refusal is a `SolanaRelayError`; `maybeSent: false` means nothing went out, `maybeSent: true` means check `solanaTxStatus` (or the balance) before sending again. A send that failed or was dropped throws `SolanaTxError` and frees its funds.
+- **Balance snapshot:** pass `store` (`load()` / `save(text)`) to keep the account's sealed snapshot between runs, so a sync starts where the last one stopped. It is sealed with the account's viewing key.
+- **No dependencies at the root:** `@gloamtrade/sdk` itself exports only the facts (`solanaNetworkInfo()`, `SOLANA_PRIVACY_NOTE`, `SOLANA_PRIVACY`, `SOLANA_ASSETS`, `isSolanaAddress`, the derivation). `@heliuslabs/spr` and `@solana/kit` are optional peer dependencies, needed only for `@gloamtrade/sdk/solana`.
+
+Runnable: [`examples/solana-agent.mjs`](https://github.com/gloamtrade/gloam/tree/main/packages/sdk/examples/solana-agent.mjs).
 
 ## Quickstart: shield your first note
 
@@ -858,6 +916,7 @@ Runnable references, one for each shape a builder starts from:
 | [web-shield](https://github.com/gloamtrade/gloam/tree/main/examples/web-shield) | Browser | Shield in the browser, read the balance back from chain. |
 | [receive-and-credit](https://github.com/gloamtrade/gloam/tree/main/packages/sdk/examples/receive-and-credit.ts) | Node | Take payments by request link, read each payment's note, secure it, credit the account it names. |
 | [san-verano](https://github.com/gloamtrade/gloam/tree/main/examples/san-verano) | Node | Commerce with commitments: pay a supplier privately, sweep, prove, put the receipt leaf in a nightly root; a dry run by default. |
+| [solana-agent](https://github.com/gloamtrade/gloam/tree/main/packages/sdk/examples/solana-agent.mjs) | Node | An agent on Solana: open the private account its key owns, register it, read the balance, pay privately with `--pay`. |
 
 ![Add money privately in the browser](https://raw.githubusercontent.com/gloamtrade/gloam/main/app/public/media/readme-browser.jpg)
 

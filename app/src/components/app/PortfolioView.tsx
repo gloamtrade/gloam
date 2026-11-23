@@ -73,7 +73,7 @@ import { addAssetHref, pickAddAsset } from "@/lib/vaultHub";
 const SwapToStableButton = dynamic(() => import("./BridgeIn").then((m) => m.SwapToStableButton), { ssr: false });
 
 /* Small marks that carry the public / private duality. */
-function LockIcon({ className = "" }: { className?: string }) {
+export function LockIcon({ className = "" }: { className?: string }) {
   return (
     <svg className={className} width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
       <rect x="5" y="10.5" width="14" height="10" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
@@ -82,28 +82,28 @@ function LockIcon({ className = "" }: { className?: string }) {
   );
 }
 
-function AddIcon() {
+export function AddIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
-function SendIcon() {
+export function SendIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M7 17L17 7M9 7h8v8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
-function ReceiveIcon() {
+export function ReceiveIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M17 7L7 17M15 17H7V9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
-function CashOutIcon() {
+export function CashOutIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M12 4v10m0 0l-4-4m4 4l4-4M5 19h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -111,7 +111,7 @@ function CashOutIcon() {
   );
 }
 
-function QuickAction({
+export function QuickAction({
   href,
   label,
   short,
@@ -1054,7 +1054,7 @@ export function PortfolioView() {
  * cents quieter, and a lone token amount ("0.00387 BNB") with its symbol small
  * beside it. Anything else ("$100 + 1,000 GLOAM", "3 assets") shows as is.
  */
-function HeroFigure({ text }: { text: string }) {
+export function HeroFigure({ text }: { text: string }) {
   const usd = /^(\$[\d,]+)(\.\d+)$/.exec(text);
   if (usd) {
     return (
@@ -1077,7 +1077,7 @@ function HeroFigure({ text }: { text: string }) {
 }
 
 /** What the private balance holds, one quiet chip per asset with its own mark; three at most, then "+2". */
-function VaultChips({ rows }: { rows: { key: string; id: string | null; symbol: string; amount: string }[] }) {
+export function VaultChips({ rows }: { rows: { key: string; id: string | null; symbol: string; amount: string }[] }) {
   if (rows.length === 0) return null;
   const shown = rows.slice(0, 3);
   const more = rows.length - shown.length;
