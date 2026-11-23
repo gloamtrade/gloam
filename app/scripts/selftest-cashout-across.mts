@@ -16,6 +16,11 @@
  *  - crash safe: a part that may have gone out stops the run and is settled
  *    from the chain on resume, never sent twice; one that surely didn't land
  *    goes again; a set-aside part made before a crash is used, not made again
+ *  - a set-aside whose transfer never went out (a lost answer) waits, then is
+ *    made again from the same note once the resend window passes; the stale
+ *    one is never cashed out
+ *  - a part whose note something else spent while it waited is "moved", not
+ *    paid; an unreadable log waits
  *  - a balance spent elsewhere fails its part and the rest go
  *  - one start at a time per account and vault; Stop the rest only when no part
  *    is on its way, from the stored run, and nothing goes after it
@@ -76,7 +81,8 @@ function world(notes: LocalNote[]) {
   const runs = new Map<string, Run>();
   const spent = new Set<string>();
   const txs = new Map<string, "success" | "reverted" | null>();
-  const paidOut: { to: Address; amount: bigint; nullifier: Hex }[] = [];
+  const paidOut: { to: Address; amount: bigint; nullifier: Hex; block: bigint }[] = [];
+  let block = 100n;
   const submits: Hex[] = [];
   let splits = 0;
   let clock = 1_000_000;
@@ -86,7 +92,10 @@ function world(notes: LocalNote[]) {
     load: async (id) => (runs.has(id) ? JSON.parse(JSON.stringify(runs.get(id))) : null),
     save: async (r) => void runs.set(r.id, JSON.parse(JSON.stringify(r))),
     getNote: (id) => byId.get(id),
-    findSplitPart: (noteId, amount) => [...byId.values()].find((n) => n.sweptFrom?.id === noteId && BigInt(n.amountWei) === amount && n.status === "open"),
+    findSplitPart: (noteId, amount, skip) =>
+      [...byId.values()]
+        .filter((n) => n.sweptFrom?.id === noteId && BigInt(n.amountWei) === amount && n.status === "open" && !skip.includes(n.id))
+        .sort((a, b) => Number(!!a.sweepPending) - Number(!!b.sweepPending))[0],
     split: async (from, amount) => {
       splits++;
       const part = note(amount, { id: `co-${seq + 1}`, sweptFrom: { id: from.id, nullifier: from.nullifier! } });
@@ -109,7 +118,8 @@ function world(notes: LocalNote[]) {
           return;
         }
         spent.add(call.nullifier.toLowerCase());
-        paidOut.push({ to: call.to, amount: call.amount, nullifier: call.nullifier });
+        block++;
+        paidOut.push({ to: call.to, amount: call.amount, nullifier: call.nullifier, block });
         txs.set(h, "success");
       };
       if (how === "maybe") throw Object.assign(new Error("maybe sent"), { maybe: true });
@@ -123,6 +133,11 @@ function world(notes: LocalNote[]) {
     maybeSent: (e) => Boolean((e as { maybe?: boolean }).maybe),
     waitForTx: async (h) => txs.get(h) ?? null,
     isSpent: async (n) => spent.has(n.toLowerCase()),
+    blockNumber: async () => block,
+    payoutOf: async (nullifier, from) => {
+      const hit = paidOut.find((x) => x.nullifier.toLowerCase() === nullifier.toLowerCase() && x.block >= from);
+      return hit ? { to: hit.to, amount: hit.amount } : null;
+    },
     markSpent: (id) => {
       const n = byId.get(id);
       if (n) byId.set(id, { ...n, status: "recovered" });
@@ -145,6 +160,13 @@ function world(notes: LocalNote[]) {
     plan,
     splits: () => splits,
     tick: (ms: number) => void (clock += ms),
+    clock: () => clock,
+    /** Another send or cash out of this note, to another address, lands. */
+    spendElsewhere: (nullifier: Hex, to: Address, amount: bigint) => {
+      spent.add(nullifier.toLowerCase());
+      block++;
+      paidOut.push({ to, amount, nullifier, block });
+    },
   };
 }
 
@@ -240,7 +262,7 @@ await test("a part set aside before a crash is used, not set aside again; one st
   const run = runFor(w, $(13), [ten, four]);
   await w.store.save(run);
   // the crash came after the set-aside was made, before the run saved it
-  const part = note($(3), { id: "co-made", sweptFrom: { id: four.id, nullifier: four.nullifier! }, sweepPending: true } as Partial<LocalNote>);
+  const part = note($(3), { id: "co-made", sweptFrom: { id: four.id, nullifier: four.nullifier! }, sweepPending: true, createdAt: w.clock() } as Partial<LocalNote>);
   w.byId.set(part.id, part);
   const held = await C.runCashOutAcross(run, w.deps);
   assert.equal(held.parts[1]!.error, C.CASHOUT_WAITING, "still landing: it waits");
@@ -250,6 +272,70 @@ await test("a part set aside before a crash is used, not set aside again; one st
   assert.equal(done.status, "done");
   assert.equal(w.splits(), 0, "never set aside twice");
   assert.equal(done.parts[1]!.targetNoteId, "co-made");
+});
+
+await test("a set-aside that never went out waits, then is made again from the same note; the stale one is never cashed out", async () => {
+  const ten = note($(10)), four = note($(4));
+  const w = world([ten, four]);
+  const run = runFor(w, $(13), [ten, four]);
+  await w.store.save(run);
+  // the set-aside's answer was lost: both new notes saved as landing, nothing went out
+  const realSplit = w.deps.split;
+  let lost = true;
+  w.deps.split = async (from, amount) => {
+    if (!lost) return realSplit(from, amount);
+    lost = false;
+    const was = { id: from.id, nullifier: from.nullifier! };
+    w.byId.set("co-lost", note(amount, { id: "co-lost", sweptFrom: was, sweepPending: true, createdAt: w.clock() } as Partial<LocalNote>));
+    w.byId.set("chg-lost", note(BigInt(from.amountWei) - amount, { id: "chg-lost", sweptFrom: was, sweepPending: true, createdAt: w.clock() } as Partial<LocalNote>));
+    throw Object.assign(new Error("It may have gone out."), { maybe: true });
+  };
+  await assert.rejects(C.runCashOutAcross(run, w.deps));
+  // soon after: it may still land, so it waits, and nothing is set aside again
+  w.tick(60_000);
+  const held = await C.runCashOutAcross(run, w.deps);
+  assert.equal(held.parts[1]!.error, C.CASHOUT_WAITING);
+  assert.equal(held.parts[1]!.targetNoteId, "co-lost");
+  assert.equal(w.splits(), 0);
+  // the note it came from is spent (it landed, the sync hasn't counted it yet): still waits, even when old
+  w.spent.add(four.nullifier!.toLowerCase());
+  w.tick(C.CASHOUT_RESEND_AFTER_MS);
+  assert.equal((await C.runCashOutAcross(run, w.deps)).parts[1]!.error, C.CASHOUT_WAITING);
+  assert.equal(w.splits(), 0);
+  w.spent.delete(four.nullifier!.toLowerCase());
+  // long after with the note unspent: it never went out, so it is set aside again and the run finishes
+  const done = await C.runCashOutAcross(run, w.deps);
+  assert.equal(done.status, "done");
+  assert.deepEqual(done.parts.map((p) => p.status), ["paid", "paid"]);
+  assert.equal(w.splits(), 1, "set aside once more");
+  assert.deepEqual(done.parts[1]!.staleSetAsides, ["co-lost"]);
+  assert.notEqual(done.parts[1]!.targetNoteId, "co-lost");
+  assert.ok(!w.submits.includes(w.byId.get("co-lost")!.nullifier!), "the stale set-aside is never cashed out");
+  assert.equal(w.paidOut.reduce((s, x) => s + x.amount, 0n), $(13));
+  assert.equal(w.byId.get("co-lost")!.status, "open", "kept for the sync, which drops it once the note it came from is spent");
+});
+
+await test("a part whose note something else spent while it waited is moved, not paid; an unreadable log waits", async () => {
+  const ten = note($(10)), seven = note($(7));
+  const w = world([ten, seven]);
+  const run = runFor(w, $(17), [ten, seven]);
+  await w.store.save(run);
+  w.plan.push("land", "maybe");
+  const first = await C.runCashOutAcross(run, w.deps);
+  assert.equal(first.parts[1]!.status, "sent");
+  assert.ok(first.parts[1]!.sentBlock, "the block is saved as it goes out");
+  // the relay never sent it; the same note is cashed out elsewhere, to another wallet
+  const OTHER = "0x3333333333333333333333333333333333333333" as Address;
+  w.spendElsewhere(seven.nullifier!, OTHER, $(7));
+  // the vault's log can't be read now: it waits rather than guess
+  const unread = await C.runCashOutAcross(run, { ...w.deps, payoutOf: async () => Promise.reject(new Error("rpc down")) });
+  assert.equal(unread.parts[1]!.status, "sent");
+  assert.equal(unread.parts[1]!.error, C.CASHOUT_WAITING);
+  const done = await C.runCashOutAcross(run, w.deps);
+  assert.equal(done.status, "done");
+  assert.deepEqual(done.parts.map((p) => p.status), ["paid", "failed"]);
+  assert.equal(done.parts[1]!.error, C.CASHOUT_MOVED);
+  assert.equal(C.cashOutPaid(done), $(10), "only the $10 counts as cashed out");
 });
 
 await test("a balance spent elsewhere fails its part, the rest go", async () => {
