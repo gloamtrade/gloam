@@ -18,6 +18,7 @@ import { erc20Abi, formatEther, parseEther, zeroAddress, type Hex } from "viem";
 import { useSendTransaction, useWriteContract } from "wagmi";
 import { buildEthToGloamSwap, ethWithBuffer, quoteCall } from "@/lib/ethForGloam";
 import { useAppAccount, useDemo } from "@/lib/demo";
+import { GET_NAME_HASH } from "@/lib/nameOffer";
 import { useNetwork } from "./NetworkProvider";
 import { getNetwork } from "@/lib/networks";
 import { publicClientFor } from "@/lib/rhClient";
@@ -71,15 +72,20 @@ const GAS_RESERVE = parseEther("0.0002");
 /** ETH as a short figure: 0.002958 -> 0.003. */
 const ethShort = (wei: bigint) => Number(formatEther(wei)).toLocaleString("en-US", { maximumSignificantDigits: 2 });
 
-export function GloamNameCard({ tag }: { tag: string }) {
+/**
+ * `compact`: with no name yet, show a small "Get an @name" link that opens the
+ * form, instead of the form itself (Receive puts this above the address). The
+ * form opens on its own for a link ending in #get-name (lib/nameOffer).
+ */
+export function GloamNameCard({ tag, compact = false }: { tag: string; compact?: boolean }) {
   const demo = useDemo();
   const { isConnected } = useAppAccount();
   // signed out, the browser's names stay out of sight (the next person here isn't you)
   if (!GLOAM_NAMES_ADDRESS || demo || !isConnected) return null;
-  return <NameCard tag={tag} registry={GLOAM_NAMES_ADDRESS} />;
+  return <NameCard tag={tag} registry={GLOAM_NAMES_ADDRESS} compact={compact} />;
 }
 
-function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
+function NameCard({ tag, registry, compact }: { tag: string; registry: `0x${string}`; compact: boolean }) {
   const { address, isConnected } = useAppAccount();
   const { network, setNetworkKey } = useNetwork();
   const { writeContractAsync } = useWriteContract();
@@ -102,6 +108,23 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
   const still = Boolean(useReducedMotion());
   const [copied, setCopied] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  /** Compact: whether the name form is open (a link ending in #get-name opens it). */
+  const [formOpen, setFormOpen] = useState(!compact);
+  const nameInput = useRef<HTMLInputElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  /** Opened from a #get-name link: bring the form into view once it shows. */
+  const scrollWanted = useRef(false);
+  useEffect(() => {
+    if (!compact) return;
+    const openFromHash = () => {
+      if (window.location.hash !== GET_NAME_HASH) return;
+      scrollWanted.current = true;
+      setFormOpen(true);
+    };
+    openFromHash();
+    window.addEventListener("hashchange", openFromHash);
+    return () => window.removeEventListener("hashchange", openFromHash);
+  }, [compact]);
 
   // A private claim (lib/nameClaim): $GLOAM from the private balance in the Robinhood Chain vault.
   const rhNet = getNetwork("robinhood-mainnet");
@@ -185,6 +208,14 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
       window.clearTimeout(retry);
     };
   }, [refresh, tag, address]);
+
+  // A #get-name link: once the form is on screen, scroll to it and put the cursor in the box.
+  useEffect(() => {
+    if (!scrollWanted.current || !formOpen || !mineLoaded || mine || !cardRef.current) return;
+    scrollWanted.current = false;
+    cardRef.current.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "center" });
+    nameInput.current?.focus({ preventScroll: true });
+  }, [formOpen, mineLoaded, mine, still]);
 
   // Whether the typed name is free, and what it costs for the years picked.
   useEffect(() => {
@@ -588,6 +619,25 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
     );
   }
 
+  // compact and closed: one small line that opens the form (nothing is under way, nothing typed)
+  if (compact && !formOpen && !busy && !progress && !won && !draft) {
+    return (
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-[16px] bg-surface px-[16px] py-2.5">
+        <p className="text-[13px] text-mute">Share @yourname instead of this address.</p>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm -mr-1"
+          onClick={() => {
+            setFormOpen(true);
+            window.setTimeout(() => nameInput.current?.focus(), 0);
+          }}
+        >
+          Get an @name
+        </button>
+      </div>
+    );
+  }
+
   const short = current?.status === "free" && current.balance !== null && current.balance < current.price;
   // a private claim needs one private note that covers the price after the vault's fee
   const privateOk =
@@ -607,7 +657,7 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
   return (
     <>
       {successDialog}
-      <motion.div key="get" {...enter} className="mt-3 rounded-[16px] border border-line p-[16px]">
+      <motion.div key="get" id="get-name" ref={cardRef} {...enter} className="mt-3 scroll-mt-24 rounded-[16px] border border-line p-[16px]">
         <label htmlFor="gloam-name" className="text-[14px] text-foreground">
           Get a name
         </label>
@@ -616,6 +666,7 @@ function NameCard({ tag, registry }: { tag: string; registry: `0x${string}` }) {
         <div className="gl-inputcard mt-3 flex items-center gap-1 rounded-[14px] py-1.5 pl-3.5 pr-1.5">
           <span className="text-[15px] text-mute">@</span>
           <input
+            ref={nameInput}
             id="gloam-name"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}

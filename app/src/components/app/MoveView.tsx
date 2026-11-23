@@ -3766,6 +3766,8 @@ export function MoveView() {
                 </p>
                 {myIdentity ? (
                   <>
+                    {/* the @name first: easier to share than the address under it */}
+                    <GloamNameCard tag={myIdentity.tag} compact />
                     <div className="mt-3 rounded-[16px] border border-line p-[16px]">
                       <p className="tnum break-all text-[13px] leading-relaxed text-foreground">
                         {myIdentity.tag}
@@ -3801,7 +3803,6 @@ export function MoveView() {
                         </button>
                       </div>
                     </div>
-                    <GloamNameCard tag={myIdentity.tag} />
                     <div className="mt-3">
                       <PaymentTicketShare
                         code={myIdentity.tag}
