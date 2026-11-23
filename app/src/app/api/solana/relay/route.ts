@@ -43,7 +43,8 @@ export async function GET() {
   if (signer && url) {
     const [bal, fee] = await Promise.all([
       rpc<{ value?: number }>(url, "getBalance", [signer.address, { commitment: "confirmed" }]).catch(() => null),
-      SOLANA_RINGS_ENABLED ? recommendedPrice(url) : null,
+      // Helius serves the estimate on mainnet only (devnet: "Method not found"); devnet pays the floor
+      SOLANA_RINGS_ENABLED && SOLANA_RINGS_NETWORK === "mainnet" ? recommendedPrice(url) : null,
     ]);
     funded = (bal?.result?.value ?? 0) >= RINGS_RELAY_LOW_LAMPORTS;
     priorityMicroLamports = fee;
