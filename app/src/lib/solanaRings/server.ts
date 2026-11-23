@@ -101,12 +101,19 @@ export const RINGS_RELAY_LIMITS = {
 
 const DAY = 86_400;
 
+/**
+ * The clock the relay's limits count by: the wall clock. The counts are kept
+ * per clock minute and day, so a burst that crosses a minute is split across
+ * two windows. Self-tests hold this still for a burst; nothing else sets it.
+ */
+export const ringsRelayClock = { now: (): number => Date.now() };
+
 export type RelayRate = "ok" | "limited" | "unavailable";
 
 export async function ringsRelayRate(
   req: Request,
   kind: "rent" | "transact",
-  now = Date.now(),
+  now = ringsRelayClock.now(),
   network: RingsNetwork = SOLANA_RINGS_NETWORK
 ): Promise<RelayRate> {
   const ip = clientIp(req);
