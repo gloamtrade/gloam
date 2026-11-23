@@ -100,8 +100,8 @@ export default function LiveOnSolanaPost() {
         Gloam adds the parts that make it usable every day: a private account derived from a
         signature from your own wallet, so there is nothing new to back up; a relay that pays
         every network fee; payroll, receive links and cash out; bringing money in from other
-        chains; and the SDK and MCP for agents. It is the same Gloam you use on Robinhood Chain,
-        Base, BNB Chain, Ethereum, Tempo and Elysium.
+        chains; and the SDK and MCP for agents. It is the same Gloam you use on every other
+        network we run on.
       </p>
 
       <h2>Self-custodial</h2>
