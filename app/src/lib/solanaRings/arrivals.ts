@@ -6,32 +6,32 @@
  * Safe to retry by construction: a deposit moves what is at the address, so a
  * deposit that landed leaves nothing to deposit again, and one that didn't
  * leaves the money where it was. Nothing is stored. The relay pays only the
- * fee (relayPolicy readDeposit), so the account never needs SOL.
+ * fee (relayPolicy readDeposit), so the account never needs SOL. Sent and
+ * waited on as every relayed send is (lib/solanaRings/landing).
  *
  * buildRelayedDeposit and settleShield take everything they touch as
  * arguments, so the self-tests run them against a fake chain;
  * makeArrivalPrivate wires them to a session in the browser.
  */
-import {
-  compileTransaction,
-  decompileTransactionMessage,
-  getAddressDecoder,
-  getBase64Decoder,
-  getBase64Encoder,
-  getCompiledTransactionMessageDecoder,
-  getTransactionEncoder,
-  setTransactionMessageConfig,
-  type Address,
-  type Transaction,
-} from "@solana/kit";
+import { getAddressDecoder, getBase64Decoder, getBase64Encoder, getTransactionEncoder, type Address, type Transaction } from "@solana/kit";
 import { arrivalsFrom, readTokenAccount, type Arrival } from "./bridgeIn";
 import { ringsAssets, ringsUrls, type RingsAsset, type RingsNetwork } from "./config";
+import {
+  BLOCKHASH_CHECK_MS,
+  LANDING_MAX_MS,
+  RELAY_PRIORITY_FEE_FLOOR,
+  awaitLanding,
+  blockhashOfMessage,
+  computeUnitsOf,
+  priorityFeeFor,
+  sigStatusFrom,
+  withPriorityFee,
+  type Landing,
+} from "./landing";
 
 // Public Solana program ids (SPL Token, Token-2022), not secrets.
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"; // ggignore
 const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"; // ggignore
-/** The priority fee the relay pays on a deposit, as on every relayed transaction (its cap is 25,000). */
-export const DEPOSIT_PRIORITY_FEE = 10_000n;
 
 export type Rpc = <T>(method: string, params: unknown[]) => Promise<T>;
 
@@ -78,7 +78,8 @@ export async function readArrivals(rpc: Rpc, owner: string, network: RingsNetwor
 /**
  * The deposit of `amount` of `asset` from the private account (`depositor`,
  * which signs) into its own private balance, the relay (`feePayer`) paying
- * the fee: the SDK's deposit, version 1, with the relay's usual priority fee.
+ * the fee: the SDK's deposit, version 1, with `priorityFeeLamports` (the
+ * relay's floor unless the page read Helius's price, lib/solanaRings/landing).
  * Never creates the mint's setup account (Gloam's to do), so it stays one
  * plain deposit, the only shape the relay pays for.
  */
@@ -91,6 +92,7 @@ export async function buildRelayedDeposit(input: {
   amount: bigint;
   /** The token account the money sits in; ignored for SOL. */
   tokenAccount: Address | null;
+  priorityFeeLamports?: bigint;
 }): Promise<Transaction> {
   const { buildDepositTransaction } = await import("@heliuslabs/spr/wallet");
   if (input.asset.mint && !input.tokenAccount) throw new Error("No token account to make private.");
@@ -109,8 +111,7 @@ export async function buildRelayedDeposit(input: {
         }
       : {}),
   });
-  const message = decompileTransactionMessage(getCompiledTransactionMessageDecoder().decode(built.messageBytes) as never);
-  return compileTransaction(setTransactionMessageConfig({ priorityFeeLamports: DEPOSIT_PRIORITY_FEE }, message as never) as never) as Transaction;
+  return withPriorityFee(built, input.priorityFeeLamports ?? RELAY_PRIORITY_FEE_FLOOR);
 }
 
 /** How making it private ended. */
@@ -124,13 +125,17 @@ export type ShieldResult =
   /** Can't tell yet. The next look at the address does. */
   | { state: "unknown"; message: string };
 
+export type RelayRef = { address: Address; price: number | null };
+
 export type ShieldDeps = {
-  feePayer(): Promise<Address>;
+  /** Gloam's relay: its address (the fee payer) and Helius's fee price. */
+  relay(): Promise<RelayRef>;
   /** The signed deposit of what is there now, or null when nothing is. */
-  build(feePayer: Address): Promise<{ wire: Uint8Array; blockhash: string; amount: bigint } | null>;
-  /** Hand it to Gloam's relay: its signature, or a refusal saying whether it may have been sent. */
-  send(wire: Uint8Array): Promise<{ ok: true; signature: string } | { ok: false; message: string; maybeSent: boolean }>;
-  status(signature: string): Promise<{ state: "landed"; slot: bigint } | { state: "failed" } | { state: "pending" }>;
+  build(relay: RelayRef): Promise<{ wire: Uint8Array; blockhash: string; amount: bigint } | null>;
+  /** Hand it to Gloam's relay: its signature and the signed transaction, or a refusal saying whether it may have been sent. */
+  send(wire: Uint8Array): Promise<{ ok: true; signature: string; signed: string | null } | { ok: false; message: string; maybeSent: boolean }>;
+  /** Wait for it as every relayed send waits (lib/solanaRings/landing awaitLanding: rebroadcast, bounded, dropped only for sure). */
+  wait(sent: { signature: string; signed: string | null; blockhash: string }): Promise<Landing>;
   blockhashValid(blockhash: string): Promise<boolean>;
   /** How much of this asset is at the address now (in that token account, or SOL). */
   left(): Promise<bigint>;
@@ -138,43 +143,50 @@ export type ShieldDeps = {
   now(): number;
 };
 
-/** How long to keep checking before saying it can't tell yet: past a blockhash's life (about 90 s). */
-export const SHIELD_WAIT_MS = 150_000;
-
 const NOT_SENT = "It didn't go through, so nothing moved. Try again.";
+const TWICE = "Solana didn't take it, twice, and nothing moved. Try again in a minute.";
+const NOT_YET = "Solana hasn't said yet. If it went through, it shows in your private balance in a minute.";
 
 /**
- * Make one arrival private and follow it to an answer: landed by its
- * signature, or, once its blockhash has expired (so it can never land), by
- * whether the money is still at the address.
+ * Make one arrival private and follow it to an answer. A send Solana dropped
+ * for sure (its blockhash expired, never seen) is built and sent once more on
+ * its own, as every relayed send is. A relay answer lost with no signature is
+ * told apart by the money: once the blockhash has expired, still at the
+ * address means it never landed.
  */
 export async function settleShield(d: ShieldDeps): Promise<ShieldResult> {
-  const built = await d.build(await d.feePayer());
-  if (!built) return { state: "none" };
-  const sent = await d.send(built.wire);
-  if (!sent.ok && !sent.maybeSent) return { state: "notSent", message: sent.message };
-  const signature = sent.ok ? sent.signature : null;
-  const byChain = async (): Promise<ShieldResult | null> => {
-    if (!signature) return null;
-    const st = await d.status(signature).catch(() => null);
-    if (st?.state === "landed") return { state: "landed", signature, slot: st.slot };
-    if (st?.state === "failed") return { state: "notSent", message: "Solana refused it, so nothing moved. Try again." };
-    return null;
-  };
+  const relay = await d.relay();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const built = await d.build(relay);
+    if (!built) return { state: "none" };
+    const sent = await d.send(built.wire);
+    if (!sent.ok) {
+      if (!sent.maybeSent) return { state: "notSent", message: sent.message };
+      return byMoney(d, built);
+    }
+    const r = await d.wait({ signature: sent.signature, signed: sent.signed, blockhash: built.blockhash });
+    if (r.state === "landed") return { state: "landed", signature: sent.signature, slot: r.slot };
+    if (r.state === "failed") return { state: "notSent", message: "Solana refused it, so nothing moved. Try again." };
+    if (r.state === "unknown") return { state: "unknown", message: NOT_YET };
+    // dropped: it never landed and never can, so building and sending again is safe
+  }
+  return { state: "notSent", message: TWICE };
+}
+
+/** How long to wait on a send whose signature never came back, before saying it can't tell yet. */
+export const SHIELD_WAIT_MS = LANDING_MAX_MS;
+
+async function byMoney(d: ShieldDeps, built: { blockhash: string; amount: bigint }): Promise<ShieldResult> {
   const until = d.now() + SHIELD_WAIT_MS;
   while (d.now() < until) {
-    const known = await byChain();
-    if (known) return known;
     if (!(await d.blockhashValid(built.blockhash).catch(() => true))) {
-      const last = await byChain();
-      if (last) return last;
       const left = await d.left().catch(() => null);
       if (left === null) break;
-      return left >= built.amount ? { state: "notSent", message: NOT_SENT } : { state: "landed", signature, slot: null };
+      return left >= built.amount ? { state: "notSent", message: NOT_SENT } : { state: "landed", signature: null, slot: null };
     }
-    await d.sleep(2_000);
+    await d.sleep(BLOCKHASH_CHECK_MS);
   }
-  return { state: "unknown", message: "Solana hasn't said yet. If it went through, it shows in your private balance in a minute." };
+  return { state: "unknown", message: NOT_YET };
 }
 
 // ---------------------------------------------------------------- in the browser
@@ -182,19 +194,21 @@ export async function settleShield(d: ShieldDeps): Promise<ShieldResult> {
 /** Relay refusals that come before it sends anything (app/api/solana/relay). */
 const RELAY_NOT_SENT = new Set(["relay_off", "relay_unavailable", "relay_empty", "simulate_failed"]);
 
-async function postToRelay(wire: Uint8Array): Promise<{ ok: true; signature: string } | { ok: false; message: string; maybeSent: boolean }> {
+async function postToRelay(wire: Uint8Array): Promise<Awaited<ReturnType<ShieldDeps["send"]>>> {
   let res: Response;
   try {
     res = await fetch(ringsUrls(location.origin).relay, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ tx: getBase64Decoder().decode(wire) }),
+      // past the relay's own limit (45 seconds): a lost answer, which may come after the send
+      signal: AbortSignal.timeout(55_000),
     });
   } catch {
     return { ok: false, message: "Gloam's relay didn't answer. Check your connection.", maybeSent: true };
   }
-  const json = (await res.json().catch(() => null)) as { ok?: boolean; signature?: string; error?: { code?: string; message?: string } } | null;
-  if (json?.ok && json.signature) return { ok: true, signature: json.signature };
+  const json = (await res.json().catch(() => null)) as { ok?: boolean; signature?: string; tx?: unknown; error?: { code?: string; message?: string } } | null;
+  if (json?.ok && json.signature) return { ok: true, signature: json.signature, signed: typeof json.tx === "string" ? json.tx : null };
   const code = json?.error?.code ?? "unknown";
   return {
     ok: false,
@@ -224,45 +238,49 @@ export async function makeArrivalPrivate(
       (await readArrivals(proxyRpc, s.address, s.network)).find(
         (a) => a.assetId === arrival.assetId && (a.tokenAccount ?? null) === (arrival.tokenAccount ?? null)
       ) ?? null;
+    const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
+    const blockhashValid = async (blockhash: string) => (await proxyRpc<{ value: boolean }>("isBlockhashValid", [blockhash, { commitment: "confirmed" }])).value;
     const result = await settleShield({
-      feePayer: async () => {
+      relay: async () => {
         const st = await client.relayStatus();
         if (!st.on || !st.relayer) throw new Error("Gloam's Solana relay isn't set up yet.");
         if (!st.funded) throw new Error("Gloam's Solana relay is paused for a moment. Try again shortly.");
-        return st.relayer as Address;
+        return { address: st.relayer as Address, price: st.priorityMicroLamports };
       },
-      build: async (feePayer) => {
+      build: async (relay) => {
         const here = await now();
         if (!here) return null;
-        const tx = await buildRelayedDeposit({
+        const unsigned = await buildRelayedDeposit({
           client: s.client,
-          feePayer,
+          feePayer: relay.address,
           depositor: s.address,
           recipient: s.keypair.shieldedAddress(),
           asset,
           amount: here.amount,
           tokenAccount: (here.tokenAccount as Address | null) ?? null,
         });
+        const units = computeUnitsOf(unsigned.messageBytes);
+        const tx = units ? withPriorityFee(unsigned, priorityFeeFor(relay.price, units)) : unsigned;
         const [sigs] = await s.keypair.toSolanaSigner().signTransactions([tx as never]);
         const wire = new Uint8Array(getTransactionEncoder().encode({ ...tx, signatures: { ...tx.signatures, ...sigs } } as Transaction));
-        const blockhash = (getCompiledTransactionMessageDecoder().decode(tx.messageBytes) as { lifetimeToken?: string }).lifetimeToken ?? "";
-        return { wire, blockhash, amount: here.amount };
+        return { wire, blockhash: blockhashOfMessage(tx.messageBytes) ?? "", amount: here.amount };
       },
       send: postToRelay,
-      status: async (signature) => {
-        const st = await proxyRpc<{ value: ({ err: unknown; confirmationStatus?: string | null; slot: number } | null)[] }>("getSignatureStatuses", [
-          [signature],
-          { searchTransactionHistory: true },
-        ]);
-        const v = st.value?.[0];
-        if (!v) return { state: "pending" };
-        if (v.err) return { state: "failed" };
-        return v.confirmationStatus === "confirmed" || v.confirmationStatus === "finalized" ? { state: "landed", slot: BigInt(v.slot) } : { state: "pending" };
-      },
-      blockhashValid: async (blockhash) =>
-        (await proxyRpc<{ value: boolean }>("isBlockhashValid", [blockhash, { commitment: "confirmed" }])).value,
+      wait: (sent) =>
+        awaitLanding({
+          status: async () => {
+            const st = await proxyRpc<{ value?: unknown[] }>("getSignatureStatuses", [[sent.signature], { searchTransactionHistory: true }]);
+            if (!Array.isArray(st.value)) throw new Error("no answer");
+            return sigStatusFrom(st.value[0] as never);
+          },
+          blockhashValid: sent.blockhash ? () => blockhashValid(sent.blockhash) : null,
+          ...(sent.signed ? { rebroadcast: () => proxyRpc<string>("sendTransaction", [sent.signed, { encoding: "base64", skipPreflight: true, maxRetries: 0 }]) } : {}),
+          sleep,
+          now: () => Date.now(),
+        }),
+      blockhashValid,
       left: async () => (await now())?.amount ?? 0n,
-      sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+      sleep,
       now: () => Date.now(),
     });
     if (result.state === "landed") {

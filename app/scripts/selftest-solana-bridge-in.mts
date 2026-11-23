@@ -77,6 +77,7 @@ delete env.BRIDGE_FEE_BPS;
 const policy = await import("../src/lib/solanaRings/relayPolicy");
 const bridgeIn = await import("../src/lib/solanaRings/bridgeIn");
 const arrivals = await import("../src/lib/solanaRings/arrivals");
+const landing = await import("../src/lib/solanaRings/landing");
 const config = await import("../src/lib/solanaRings/config");
 const server = await import("../src/lib/solanaRings/server");
 const ofac = (await import("../src/lib/solanaRings/ofacSolana.json", { with: { type: "json" } })).default;
@@ -137,7 +138,10 @@ ok(v.ok && v.accounts.includes(owner.address) && v.accounts.includes(usdcAccount
 {
   const tx = await deposit();
   const cfg = (decompileTransactionMessage(getCompiledTransactionMessageDecoder().decode(tx.messageBytes) as never) as { config?: { priorityFeeLamports?: bigint } }).config;
-  ok(cfg?.priorityFeeLamports === arrivals.DEPOSIT_PRIORITY_FEE && arrivals.DEPOSIT_PRIORITY_FEE <= policy.RELAY_LIMITS.maxPriorityFeeLamports, "it pays the relay's usual priority fee, under the cap");
+  ok(cfg?.priorityFeeLamports === landing.RELAY_PRIORITY_FEE_FLOOR, "it pays the relay's floor priority fee unless Helius's price is given");
+  const priced = await deposit({ priorityFeeLamports: landing.priorityFeeFor(1_000_000, 200_000) });
+  const pricedCfg = (decompileTransactionMessage(getCompiledTransactionMessageDecoder().decode(priced.messageBytes) as never) as { config?: { priorityFeeLamports?: bigint } }).config;
+  ok(pricedCfg?.priorityFeeLamports === policy.RELAY_LIMITS.maxPriorityFeeLamports && check(await signedBy(priced, owner)).ok, "a high Helius price is capped at the relay's limit, and still passes");
   ok(getCompiledTransactionMessageDecoder().decode(tx.messageBytes).version === 1, "version 1, as the relay takes");
 }
 v = check(await signedBy(await deposit({ asset: USDT, tokenAccount: await getAssociatedTokenAddress(owner.address, USDT.mint as Address, TOKEN) }), owner));
@@ -245,6 +249,7 @@ function fakeHelius(input: RequestInfo | URL, init?: RequestInit): Promise<Respo
   }
   if (body.method === "getMultipleAccounts") return reply({ value: (body.params[0] as unknown[]).map(() => null) });
   if (body.method === "getBalance") return reply({ value: 1_000_000_000 });
+  if (body.method === "getSignatureStatuses") return reply({ value: [{ err: null, confirmationStatus: "confirmed", slot: 1 }] });
   return reply(null);
 }
 globalThis.fetch = fakeHelius as typeof fetch;
@@ -324,14 +329,32 @@ function tokenAccountBytes(mint: string, holder: string, amount: bigint, state =
 
 // ---------------------------------------------------------------- making it private, against a fake chain
 
-type Mode = "ok" | "refused" | "lost-after-send" | "lost-before-send" | "fails-on-chain" | "never-answers";
+type Mode = "ok" | "refused" | "lost-after-send" | "lost-before-send" | "fails-on-chain" | "never-answers" | "dropped-once" | "dropped-twice";
 function chain() {
-  return { atAddress: 20_000_000n, private: 0n, now: 0, blockhashExpiresAt: 0, sends: 0, landed: [] as string[], pending: null as null | { sig: string; amount: bigint; lands: boolean } };
+  return {
+    atAddress: 20_000_000n,
+    private: 0n,
+    now: 0,
+    blockhashExpiresAt: 0,
+    sends: 0,
+    rebroadcasts: 0,
+    landed: [] as string[],
+    pending: null as null | { sig: string; amount: bigint; lands: boolean },
+  };
 }
 type Chain = ReturnType<typeof chain>;
+function settle(c: Chain) {
+  if (!c.pending || !c.pending.lands || c.landed.includes(c.pending.sig)) return;
+  if (c.atAddress < c.pending.amount) return; // spent already: Solana refuses it
+  c.atAddress -= c.pending.amount;
+  c.private += c.pending.amount;
+  c.landed.push(c.pending.sig);
+}
 function deps(c: Chain, mode: Mode, opts: { landsLate?: boolean } = {}): import("../src/lib/solanaRings/arrivals").ShieldDeps {
+  const clock = { sleep: async (ms: number) => void (c.now += ms), now: () => c.now };
   return {
-    feePayer: async () => relayer.address,
+    ...clock,
+    relay: async () => ({ address: relayer.address, price: null }),
     build: async () => {
       if (c.atAddress === 0n) return null;
       c.blockhashExpiresAt = c.now + 90_000;
@@ -343,29 +366,29 @@ function deps(c: Chain, mode: Mode, opts: { landsLate?: boolean } = {}): import(
       if (mode === "lost-before-send") return { ok: false, message: "Gloam's relay didn't answer. Check your connection.", maybeSent: true };
       c.sends++;
       const sig = `sig${c.sends}`;
-      const lands = mode !== "fails-on-chain" && mode !== "never-answers";
+      const dropped = mode === "dropped-twice" || (mode === "dropped-once" && c.sends === 1);
+      const lands = mode !== "fails-on-chain" && mode !== "never-answers" && !dropped;
       c.pending = { sig, amount, lands };
       if (lands && !opts.landsLate) settle(c);
-      return mode === "lost-after-send" ? { ok: false, message: "Solana is slow to answer. Try again.", maybeSent: true } : { ok: true, signature: sig };
+      return mode === "lost-after-send" ? { ok: false, message: "Solana is slow to answer. Try again.", maybeSent: true } : { ok: true, signature: sig, signed: "c2lnbmVk" };
     },
-    status: async (sig) => {
-      if (c.pending?.sig === sig && opts.landsLate && c.now > 10_000) settle(c);
-      if (c.landed.includes(sig)) return { state: "landed", slot: 123n };
-      if (mode === "fails-on-chain" && c.pending?.sig === sig) return { state: "failed" };
-      return { state: "pending" };
-    },
+    // the same wait every relayed send uses
+    wait: (sent) =>
+      landing.awaitLanding({
+        ...clock,
+        status: async () => {
+          if (mode === "never-answers") throw new Error("no answer");
+          if (c.pending?.sig === sent.signature && opts.landsLate && c.now > 10_000) settle(c);
+          if (c.landed.includes(sent.signature)) return { seen: true, failed: false, confirmed: true, slot: 123n };
+          if (mode === "fails-on-chain" && c.pending?.sig === sent.signature) return { seen: true, failed: true, confirmed: false, slot: 1n };
+          return { seen: false };
+        },
+        blockhashValid: mode === "never-answers" ? async () => true : async () => c.now < c.blockhashExpiresAt,
+        rebroadcast: async () => void c.rebroadcasts++,
+      }),
     blockhashValid: async () => c.now < c.blockhashExpiresAt,
     left: async () => c.atAddress,
-    sleep: async (ms) => void (c.now += ms),
-    now: () => c.now,
   };
-}
-function settle(c: Chain) {
-  if (!c.pending || !c.pending.lands || c.landed.includes(c.pending.sig)) return;
-  if (c.atAddress < c.pending.amount) return; // spent already: Solana refuses it
-  c.atAddress -= c.pending.amount;
-  c.private += c.pending.amount;
-  c.landed.push(c.pending.sig);
 }
 {
   let c = chain();
@@ -392,17 +415,23 @@ function settle(c: Chain) {
 
   c = chain();
   r = await arrivals.settleShield(deps(c, "fails-on-chain"));
-  ok(r.state === "notSent" && c.atAddress === 20_000_000n && c.private === 0n, "failed on Solana: nothing moved");
+  ok(r.state === "notSent" && c.atAddress === 20_000_000n && c.private === 0n && c.sends === 1, "failed on Solana: nothing moved, not sent again on its own");
 
   c = chain();
   r = await arrivals.settleShield(deps(c, "ok", { landsLate: true }));
-  ok(r.state === "landed" && c.private === 20_000_000n, "a confirmation that comes late is waited for");
+  ok(r.state === "landed" && c.private === 20_000_000n && c.rebroadcasts > 0, "a confirmation that comes late is waited for, the same transaction sent again meanwhile");
 
   c = chain();
-  const never = deps(c, "never-answers");
-  never.blockhashValid = async () => true; // a node that keeps saying the blockhash is fine
-  r = await arrivals.settleShield(never);
-  ok(r.state === "unknown" && c.now >= arrivals.SHIELD_WAIT_MS && c.atAddress === 20_000_000n, "no answer at all: it says it can't tell yet rather than guess");
+  r = await arrivals.settleShield(deps(c, "dropped-once"));
+  ok(r.state === "landed" && r.signature === "sig2" && c.sends === 2 && c.private === 20_000_000n, "dropped for sure (expired, never seen): built and sent once more on its own, and it lands once");
+
+  c = chain();
+  r = await arrivals.settleShield(deps(c, "dropped-twice"));
+  ok(r.state === "notSent" && /twice/.test(r.message) && c.sends === 2 && c.atAddress === 20_000_000n, "dropped twice: it stops and says nothing moved");
+
+  c = chain();
+  r = await arrivals.settleShield(deps(c, "never-answers"));
+  ok(r.state === "unknown" && c.now >= landing.LANDING_MAX_MS && c.atAddress === 20_000_000n && c.sends === 1, "no answer at all: it says it can't tell yet rather than guess, and sends nothing new");
   r = await arrivals.settleShield(deps(c, "ok"));
   ok(r.state === "landed" && c.private === 20_000_000n && c.atAddress === 0n, "and the next try makes what is still there private, once");
 
