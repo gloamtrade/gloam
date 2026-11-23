@@ -23,7 +23,7 @@
  *   const wallet = await solanaKeypairWallet(secretKeyBytes);
  *   const account = await openSolanaAccount({ wallet });
  *   await registerSolanaAccount(account);                 // once, so it can be paid
- *   await solanaBalances(account);                         // { sol, usdc, usdt } in base units
+ *   await solanaBalances(account);                         // { sol, usdc, usdt, zec } in base units
  *   await addToSolanaPrivate(account, { asset: "usdc", amount: 5_000_000n });
  *   await paySolanaPrivately(account, { to, asset: "usdc", amount: 1_000_000n });
  *   await cashOutSolana(account, { to: wallet.address, asset: "usdc", amount: 1_000_000n });
@@ -500,7 +500,7 @@ export async function syncSolanaAccount(account: GloamSolanaAccount, requireSlot
   });
 }
 
-/** The private balance of each listed asset, in base units ({ sol, usdc, usdt }). Syncs first unless `sync: false`. */
+/** The private balance of each listed asset, in base units ({ sol, usdc, usdt, zec }). Syncs first unless `sync: false`. */
 export async function solanaBalances(account: GloamSolanaAccount, opts: { sync?: boolean } = {}): Promise<Record<string, bigint>> {
   if (opts.sync !== false) await syncSolanaAccount(account);
   const byMint = new Map(account._.rings.balances(true).map((b) => [b.mint as string, b.amount]));

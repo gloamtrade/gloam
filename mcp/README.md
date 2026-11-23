@@ -103,7 +103,7 @@ The server reads its environment, then `~/.gloam/agent.env` (or the file in `GLO
 | `gloam_get_spending_report` | read | Spent and left in the last 24 hours per asset, recent payments, refused attempts |
 | `gloam_retry_veya_receipts` | execute | Offered with VEYA receipts on: see where a payment's receipt stands (it is built after the payment's answer), or retry one that failed. Pays nothing |
 | `gloam_solana_info` | read | Gloam on Solana: assets, what it hides and shows, the relay, this agent's private Solana address (see [Solana](#solana)) |
-| `gloam_solana_balance` | read | The private balance on Solana (SOL, USDC, USDT) and whether the account is registered |
+| `gloam_solana_balance` | read | The private balance on Solana (SOL, USDC, USDT, ZEC) and whether the account is registered |
 | `gloam_solana_register` | execute | Make the private Solana account payable. Gloam's relay pays the rent; nothing is spent |
 | `gloam_solana_add` | execute | **Real add** from the agent's Solana wallet. Public: the wallet, the asset and the amount. Limits tool `shield` |
 | `gloam_solana_pay` | execute | **Real private payment** to another Gloam private account on Solana. Hides the asset and the amount, not the two accounts. Limits tool `pay` |
@@ -124,7 +124,8 @@ From 0.11.0 the server runs Gloam on Solana mainnet, through Helius Solana Priva
 
 - **Key:** `GLOAM_AGENT_SOLANA_KEY`, the agent's Solana keypair (a keypair file's JSON array, or its base58 text), in the environment or `~/.gloam/agent.env`. It opens the same private account the Gloam app opens for that wallet (`GLOAM_SOLANA_ACCOUNT_INDEX`, default 0). It never leaves the server and is never printed; a malformed one stops the server at start. Without it, `gloam_solana_info` still answers and the rest say how to add one.
 - **Fees:** Gloam's relay pays the fees of registering, paying and cashing out, so the private account never needs SOL. Adding money is paid by the agent's wallet.
-- **Limits:** the network is `solana-mainnet`. SOL is Solana's only; name USDC and USDT with `"network": "solana-mainnet"` (or `GLOAM_LIMIT_NETWORK=solana-mainnet`), or by mint. Adding money counts as `shield`, paying and cashing out as `pay`; a cash out to the agent's own wallet needs no recipient entry. No limits still means no spending.
+- **Assets:** SOL, USDC, USDT and ZEC. ZEC is Zcash bridged to Solana by NEAR's Omni Bridge (mint `A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS`, 8 decimals), a public token there: once it is private, the token and the amount stay hidden; the bridge itself and adding from the agent's wallet are public.
+- **Limits:** the network is `solana-mainnet`. SOL and ZEC are Solana's only; name USDC and USDT with `"network": "solana-mainnet"` (or `GLOAM_LIMIT_NETWORK=solana-mainnet`), or by mint. Adding money counts as `shield`, paying and cashing out as `pay`; a cash out to the agent's own wallet needs no recipient entry. No limits still means no spending.
 - **No endless waits:** each send comes back `landed`, or `pending` with its signature and blockhash after `timeoutMs` (default 120 s). `gloam_solana_tx_status` then says landed, failed, dropped (nothing moved, safe to resend) or pending. A relay refusal says whether anything may have been sent.
 - **First run:** `gloam_solana_register` once, so other Gloam accounts can pay the agent; `gloam_solana_add` to fund it from its wallet.
 

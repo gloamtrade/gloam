@@ -18,8 +18,8 @@
  *
  * Every tool that moves money passes the owner's spending limits first
  * (src/policy.ts): adding money is "shield", paying and cashing out are "pay",
- * on the network "solana-mainnet" (SOL, and USDC and USDT named with that
- * network). No limits configured means no spending.
+ * on the network "solana-mainnet" (SOL and ZEC, and USDC and USDT named with
+ * that network). No limits configured means no spending.
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -137,7 +137,9 @@ export function solanaAmount(amount: string, asset: SolanaAsset): bigint | null 
   return raw > 0n ? raw : null;
 }
 
-const assetArg = z.enum(["SOL", "USDC", "USDT"]).describe("SOL, USDC or USDT.");
+const assetArg = z
+  .enum(["SOL", "USDC", "USDT", "ZEC"])
+  .describe("SOL, USDC, USDT or ZEC (Zcash bridged to Solana by NEAR's Omni Bridge; private once added, the bridge and the add are public).");
 const amountArg = z.string().describe('Amount in whole units, like "2.5" (not base units).');
 const timeoutArg = z
   .number()
@@ -226,7 +228,11 @@ export function registerSolanaTools(server: McpServer, ctx: SolanaToolContext): 
         agent = "error" in a ? { configured: true, error: a.error } : { configured: true, mainWallet: a.account.mainAddress, privateAddress: a.account.address, accountIndex: a.account.index };
       }
       return text({
-        network: { key: info.key, name: info.name, assets: info.assets.map((a) => ({ symbol: a.symbol, mint: a.mint, decimals: a.decimals })) },
+        network: {
+          key: info.key,
+          name: info.name,
+          assets: info.assets.map((a) => ({ symbol: a.symbol, mint: a.mint, decimals: a.decimals, ...(a.note ? { note: a.note } : {}) })),
+        },
         privacy: SOLANA_AGENT_PRIVACY,
         hidden: SOLANA_PRIVACY.hidden,
         visible: SOLANA_PRIVACY.visible,
@@ -243,7 +249,7 @@ export function registerSolanaTools(server: McpServer, ctx: SolanaToolContext): 
           'gloam_solana_cash_out: cash out to any Solana address; destination, asset and amount are public (limits tool "pay")',
           "gloam_solana_tx_status: where a sent transaction stands (landed, failed, dropped or pending)",
         ],
-        limits: 'Spending limits name the network "solana-mainnet": SOL, or USDC and USDT with "network": "solana-mainnet" (or GLOAM_LIMIT_NETWORK=solana-mainnet).',
+        limits: 'Spending limits name the network "solana-mainnet": SOL or ZEC, or USDC and USDT with "network": "solana-mainnet" (or GLOAM_LIMIT_NETWORK=solana-mainnet).',
       });
     }
   );
@@ -253,7 +259,7 @@ export function registerSolanaTools(server: McpServer, ctx: SolanaToolContext): 
     {
       title: "Solana private balance",
       description:
-        "This agent's private balance on Solana (SOL, USDC, USDT), decrypted here from the Rings indexer, plus its private address and whether it is registered (can be paid). Needs GLOAM_AGENT_SOLANA_KEY. Read only.",
+        "This agent's private balance on Solana (SOL, USDC, USDT, ZEC), decrypted here from the Rings indexer, plus its private address and whether it is registered (can be paid). Needs GLOAM_AGENT_SOLANA_KEY. Read only.",
     },
     async () => {
       const a = await account();

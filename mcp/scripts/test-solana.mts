@@ -7,7 +7,7 @@
  *  - gloam_info and gloam_privacy_status list Solana with the honest line
  *  - GLOAM_AGENT_SOLANA_KEY parses from a keypair file's array or base58, and a
  *    bad one is refused without being echoed; no answer ever carries the key
- *  - spending limits: "solana-mainnet" names Solana's SOL, USDC and USDT;
+ *  - spending limits: "solana-mainnet" names Solana's SOL, USDC, USDT and ZEC (a bare ZEC is Solana's, in 8 decimals);
  *    without limits a Solana spend is refused; with them a payment inside the
  *    caps is paid and logged, one over them is refused before anything is
  *    built, and a recipient off the list is refused
@@ -87,7 +87,7 @@ test("the Solana tools are registered with their schemas, honest descriptions", 
   const pay = tools.find((t) => t.name === "gloam_solana_pay")!;
   assert.deepEqual(Object.keys(pay.inputSchema.properties ?? {}).sort(), ["amount", "asset", "timeoutMs", "to"]);
   assert.deepEqual((pay.inputSchema.required ?? []).sort(), ["amount", "asset", "to"]);
-  assert.deepEqual((pay.inputSchema.properties as Record<string, { enum?: string[] }>).asset!.enum, ["SOL", "USDC", "USDT"]);
+  assert.deepEqual((pay.inputSchema.properties as Record<string, { enum?: string[] }>).asset!.enum, ["SOL", "USDC", "USDT", "ZEC"]);
   const cash = tools.find((t) => t.name === "gloam_solana_cash_out")!;
   assert.deepEqual((cash.inputSchema.required ?? []).sort(), ["amount", "asset"], "cash out defaults to the main wallet");
   const add = tools.find((t) => t.name === "gloam_solana_add")!;
@@ -163,6 +163,12 @@ test("spending limits name Solana's assets on solana-mainnet", () => {
   assert.notEqual(bare.assets[0]!.chainId, real.SOLANA_MAINNET_CHAIN_ID, "a bare USDC keeps its old meaning");
   assert.throws(() => policy.resolveAgent("bot", { recipients: "any", assets: { So11111111111111111111111111111111111111112: { maxPerPayment: "1", maxPerDay: "1" } } }, "test"), /not one Gloam lists on Solana/);
   assert.equal(policy.networkName(real.SOLANA_MAINNET_CHAIN_ID), "Solana");
+  const zec = policy.resolveAgent("bot", { recipients: "any", assets: { ZEC: { maxPerPayment: "0.5", maxPerDay: "1" } } }, "test").assets[0]!;
+  assert.equal(zec.chainId, real.SOLANA_MAINNET_CHAIN_ID, "a bare ZEC names Solana's (it is only there)");
+  assert.equal(zec.address, "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS");
+  assert.equal(zec.maxPerPayment, 50_000_000n, "ZEC counts in 8 decimals");
+  const byMint = policy.resolveAgent("bot", { recipients: "any", assets: { A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS: { maxPerPayment: "1", maxPerDay: "1" } } }, "test").assets[0]!;
+  assert.equal(byMint.symbol, "ZEC", "and by its mint");
   const loaded = policy.loadPolicy({ GLOAM_LIMIT_ASSETS: "USDC,USDT", GLOAM_LIMIT_NETWORK: "solana-mainnet", GLOAM_LIMIT_MAX_PER_PAYMENT: "5", GLOAM_LIMIT_MAX_PER_DAY: "10", GLOAM_LIMIT_RECIPIENTS: "any" }, () => "");
   assert.equal(loaded.mode, "enforced");
   if (loaded.mode === "enforced") assert.ok(loaded.policy.assets.every((a) => a.chainId === real.SOLANA_MAINNET_CHAIN_ID));
@@ -187,7 +193,7 @@ test("balance with a key", async () => {
   assert.equal(bal.privateAddress, PRIVATE);
   assert.equal(bal.mainWallet, mainWallet.address);
   assert.equal(bal.registered, true);
-  assert.deepEqual(bal.balances.map((b: { symbol: string; balance: string }) => [b.symbol, b.balance]), [["SOL", "1.5"], ["USDC", "2"], ["USDT", "0"]]);
+  assert.deepEqual(bal.balances.map((b: { symbol: string; balance: string }) => [b.symbol, b.balance]), [["SOL", "1.5"], ["USDC", "2"], ["USDT", "0"], ["ZEC", "0"]]);
 });
 
 test("no limits: every Solana spend is refused before anything is built", async () => {
