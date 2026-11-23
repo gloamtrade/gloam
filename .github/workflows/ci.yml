@@ -62,7 +62,8 @@ jobs:
       # policy; money from another chain made private (the relay's deposit rule, the
       # flow and its retries against a fake chain); payroll's list checks, pacing and
       # resume against a fake chain; the public site's Solana copy and status checks,
-      # off and on. No network.
+      # off and on; a returning wallet, staying signed in and signing out, and Solana's
+      # place in the menus. No network.
       - name: App Solana self-tests
         working-directory: app
         run: |
@@ -71,6 +72,7 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-payroll.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-payroll-csv.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-site.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-opened.mts
 
       # Every token amount the app shows: two places, cut down and never rounded up,
       # "<0.01" for dust, "0.00" for zero, thousands separators, 6- and 18-decimal

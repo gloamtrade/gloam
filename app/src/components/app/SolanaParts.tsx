@@ -374,13 +374,14 @@ function WalletGrid() {
 
 /**
  * Until the private account is open: connect a Solana wallet, then sign once
- * to set it up. The same card on every Solana screen, with what Solana takes
- * beside it.
+ * to set it up, or, for a wallet that opened one here before, to open it
+ * again (nothing new is made). The same card on every Solana screen, with what
+ * Solana takes beside it.
  */
 export function SolanaGate({ lead }: { lead?: ReactNode }) {
   const sol = useSolana();
   if (!sol) return null;
-  const { relay, main } = sol;
+  const { relay, main, returning, restoring } = sol;
 
   let body: ReactNode;
   if (!relay) {
@@ -401,6 +402,22 @@ export function SolanaGate({ lead }: { lead?: ReactNode }) {
         <p className="mt-2 text-[14px] leading-relaxed text-mute">Private accounts on Solana open here soon.</p>
       </>
     );
+  } else if (restoring) {
+    // Signed in on this device: the wallet reconnects and the account reopens with no signature.
+    body = (
+      <>
+        <h2 className="t-title text-foreground">Opening your private account</h2>
+        <p className="mt-1.5 max-w-[56ch] text-[14px] leading-relaxed text-mute">You stayed signed in on this device. No signature needed.</p>
+        {sol.task ? (
+          <SolanaSteps task={sol.task} className="mt-5" />
+        ) : (
+          <p role="status" aria-live="polite" className="mt-5 flex items-center gap-2.5 rounded-[16px] bg-surface px-4 py-3.5 text-[13.5px] text-foreground">
+            <Spinner />
+            Reconnecting your wallet
+          </p>
+        )}
+      </>
+    );
   } else if (!main) {
     body = (
       <>
@@ -416,9 +433,11 @@ export function SolanaGate({ lead }: { lead?: ReactNode }) {
   } else {
     body = (
       <>
-        <h2 className="t-title text-foreground">Set up your private account</h2>
+        <h2 className="t-title text-foreground">{returning ? "Open your private account" : "Set up your private account"}</h2>
         <p className="mt-1.5 max-w-[56ch] text-[14px] leading-relaxed text-mute">
-          {main.wallet.name} signs one message. That signature opens the same private account on any device, so there is nothing to back up.
+          {returning
+            ? `${main.wallet.name} signs one message to open it. Nothing new is created.`
+            : `${main.wallet.name} signs one message. That signature opens the same private account on any device, so there is nothing to back up.`}
         </p>
         <div className="mt-5 flex items-center gap-3 rounded-[16px] border border-line py-2.5 pl-3 pr-2">
           <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-[9px] bg-white ring-1 ring-line">
@@ -440,7 +459,7 @@ export function SolanaGate({ lead }: { lead?: ReactNode }) {
         )}
         <SolanaActionButton
           kind="setup"
-          label="Sign and set up"
+          label={returning ? "Sign to open" : "Sign and set up"}
           stop={relay.funded ? null : "Paused for a moment"}
           onClick={() => void sol.setUp()}
           className="mt-5"
