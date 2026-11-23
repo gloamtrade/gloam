@@ -19,7 +19,9 @@
  *    exactly; a tag joins one partner's parts only; no tag counts each on its own
  *  - a wallet's own Multicall3 batch never matches a registration
  *  - the on-chain match settles a one-go cash out the relay bound but never
- *    counted, once; the address match still takes plain cash outs only
+ *    counted, once; a one-go cash out to a partner's own proven address counts
+ *    once, every part's amount and fee, its other parts already counted, in a dry
+ *    run too, and earns what the same parts one by one would
  *  - the register route takes an optional 32-byte tag, and nothing else new
  *
  * The partner store is the in-process one and every chain read is a fake: nothing
@@ -477,7 +479,7 @@ await test("relay: transferBatch and unshieldBatch are payments and cash outs to
 
 // ---------------------------------------------------------------- the on-chain match
 
-await test("match: a one-go cash out the relay bound but never counted is settled once; the address match still takes plain cash outs only", async () => {
+await test("match: a one-go cash out the relay bound but never counted is settled once", async () => {
   const { partner, code } = await partnerWithCode("Matched Later");
   const parts = [cashPart(5), cashPart(5)];
   const hash = await relaySend(code, oneGoCash(parts), cashLogs(parts), undefined, { after: false });
@@ -503,22 +505,76 @@ await test("match: a one-go cash out the relay bound but never counted is settle
   const t = await totals(partner.id);
   assert.equal(t.cashOuts, 1);
   near(t.publicVolumeUsd, 10, "volume");
+});
 
-  // a one-go cash out to a partner's own proven address, from no link: not a plain cash out, as before
-  const shop = await P.upsertPartner(wallet(), { name: "Proven Shop" });
+await test("match: a cash out in one go to a partner's own proven address, from no link, counts once with every part's amount and fee; its other parts are already counted", async () => {
+  const shop = await P.upsertPartner(wallet(), { name: "Proven Shop", fees: { privatePaymentCents: 5, cashoutBps: 25, depositBps: 0 } });
   const shopTo = "0x00000000000000000000000000000000000a11d1" as Address;
   await AD.setPartnerAddresses(shop.id, [{ chainId: RH.chainId, address: shopTo }], "add");
   await AD.verifyPartnerAddresses(shop.id, [{ chainId: RH.chainId, address: shopTo, signature: `0x${"aa".repeat(65)}` }], async () => true);
-  const toShop = [cashPart(1, { to: shopTo }), cashPart(1, { to: shopTo })];
+  const book = new Map([[RH.chainId, new Map([[shopTo.toLowerCase(), shop.id]])]]);
+  const toShop = [cashPart(5, { to: shopTo }), cashPart(3, { to: shopTo }), cashPart(2, { to: shopTo })];
   const h2 = land({ from: RELAYER, to: batch.MULTICALL3, input: oneGoCash(toShop).data, logs: cashLogs(toShop) });
   const l2 = chain.get(h2)!;
-  logs.splice(0, logs.length, ...toShop.map((p) => ({ txHash: h2, blockNumber: l2.block, nullifier: p.nullifier, asset: p.asset, to: p.to, amount: p.amount })));
-  const r2 = await B.runBackfill(
-    { dryRun: false, from: "deploy", book: new Map([[RH.chainId, new Map([[shopTo.toLowerCase(), shop.id]])]]), budgetMs: 60_000, chains: [RH.chainId] },
+  const logs = toShop.map((p) => ({ txHash: h2, blockNumber: l2.block, nullifier: p.nullifier, asset: p.asset, to: p.to, amount: p.amount }));
+  const run = (dryRun: boolean) =>
+    B.runBackfill(
+      { dryRun, from: "deploy", book, budgetMs: 60_000, chains: [RH.chainId] },
+      {
+        ...B.backfillDeps,
+        head: async () => l2.block,
+        unshielded: async (_net, from, to) => (l2.block >= from && l2.block <= to ? logs : []),
+        receipt: deps.receipt,
+        blockTime: deps.blockTime,
+        readCursor: async () => null,
+        writeCursor: async () => {},
+        now: () => Date.now(),
+      }
+    );
+  const fees = vaultFeeOn(usd(5)) + vaultFeeOn(usd(3)) + vaultFeeOn(usd(2));
+
+  // a dry run shows it once, the whole amount, never once per part
+  const dry = await run(true);
+  assert.deepEqual(dry.matches.map((m) => m.result), ["would_record", "already_counted", "already_counted"]);
+  assert.deepEqual(dry.matches.map((m) => m.reason), [undefined, B.COUNTED_WITH_ITS_PARTS, B.COUNTED_WITH_ITS_PARTS]);
+  assert.equal(dry.matches[0]!.amount, usd(10).toString());
+  assert.equal(dry.matches[0]!.vaultFee, fees.toString());
+  assert.deepEqual(dry.byAddress.map((a) => [a.matches, a.counted, a.byToken.USDG]), [[3, 1, "10"]]);
+  assert.equal((await totals(shop.id)).cashOuts, 0, "a dry run writes nothing");
+
+  // the real pass counts it once, the same as the dry run showed
+  const real = await run(false);
+  assert.deepEqual(real.matches.map((m) => m.result), ["recorded", "already_counted", "already_counted"]);
+  const c = await P.countedRecord(RH.chainId, h2);
+  assert.ok(c && c.partnerId === shop.id);
+  assert.equal(c.record.source, "chain");
+  assert.equal(c.record.amount, usd(10).toString());
+  assert.equal(c.record.vaultFee, fees.toString());
+  const t = await totals(shop.id);
+  assert.equal(t.cashOuts, 1);
+  near(t.publicVolumeUsd, 10, "every part's amount");
+  near(t.vaultFeeUsd, 0.05, "every part's vault fee");
+  near(t.commissionUsd, 0.025, "0.25% of the whole, as one by one would earn");
+
+  // again: nothing more
+  const again = await run(false);
+  assert.deepEqual(again.matches.map((m) => m.result), ["already_counted", "already_counted", "already_counted"]);
+  assert.deepEqual(await totals(shop.id), t);
+
+  // the same parts one by one earn the same: each its own cash out, the same volume and share
+  const apart = await P.upsertPartner(wallet(), { name: "Proven Apart", fees: { privatePaymentCents: 5, cashoutBps: 25, depositBps: 0 } });
+  const apartTo = "0x00000000000000000000000000000000000a11d2" as Address;
+  await AD.setPartnerAddresses(apart.id, [{ chainId: RH.chainId, address: apartTo }], "add");
+  await AD.verifyPartnerAddresses(apart.id, [{ chainId: RH.chainId, address: apartTo, signature: `0x${"aa".repeat(65)}` }], async () => true);
+  const one = [cashPart(5, { to: apartTo }), cashPart(3, { to: apartTo }), cashPart(2, { to: apartTo })];
+  const hs = one.map((p) => land({ from: RELAYER, to: POOL, input: unshieldInput(p), logs: cashLogs([p]) }));
+  const ones = one.map((p, i) => ({ txHash: hs[i]!, blockNumber: chain.get(hs[i]!)!.block, nullifier: p.nullifier, asset: p.asset, to: p.to, amount: p.amount }));
+  const r3 = await B.runBackfill(
+    { dryRun: false, from: "deploy", book: new Map([[RH.chainId, new Map([[apartTo.toLowerCase(), apart.id]])]]), budgetMs: 60_000, chains: [RH.chainId] },
     {
       ...B.backfillDeps,
-      head: async () => l2.block,
-      unshielded: async (_net, from, to) => (l2.block >= from && l2.block <= to ? logs : []),
+      head: async () => ones[2]!.blockNumber,
+      unshielded: async (_net, from, to) => ones.filter((l) => l.blockNumber >= from && l.blockNumber <= to),
       receipt: deps.receipt,
       blockTime: deps.blockTime,
       readCursor: async () => null,
@@ -526,8 +582,11 @@ await test("match: a one-go cash out the relay bound but never counted is settle
       now: () => Date.now(),
     }
   );
-  assert.deepEqual(r2.matches.map((m) => m.reason), ["Not a plain cash out.", "Not a plain cash out."]);
-  assert.equal((await totals(shop.id)).cashOuts, 0);
+  assert.deepEqual(r3.matches.map((m) => m.result), ["recorded", "recorded", "recorded"]);
+  const ta = await totals(apart.id);
+  near(ta.publicVolumeUsd, t.publicVolumeUsd, "volume");
+  near(ta.vaultFeeUsd, t.vaultFeeUsd, "vault fee");
+  near(ta.commissionUsd, t.commissionUsd, "share");
 });
 
 // ---------------------------------------------------------------- the register route

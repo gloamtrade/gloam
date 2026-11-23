@@ -9,8 +9,11 @@
  * RPC allows no more over a wide range), in spans each chain's RPC accepts; a
  * span the node calls too wide is halved (lib/logRange). For each cash out:
  *  - it paid a partner's proven address: the receipt is read and checked like a
- *    link's (lib/partnerVerify: one plain cash out) and the cash out is counted to
- *    that partner with the vault fee from its WithdrawFee log and the block's time.
+ *    link's (lib/partnerVerify: one plain cash out, or a cash out in one go with
+ *    every part to that address) and the cash out is counted to that partner with
+ *    the vault fee from its WithdrawFee logs and the block's time. A cash out in one
+ *    go logs once per part and counts once, on its first part, with every part's
+ *    amount and fee; its other parts are already counted.
  *    One a link counted to another partner is moved to the address's partner: an
  *    address match overrides a link. One counted with an API key stays.
  *  - it was bound to a partner's link (by the relay that sent it, or by the
@@ -247,6 +250,8 @@ export async function runBackfill(
         scan.to = head.toString();
         scan.scannedTo = (from - 1n).toString();
         const mine = opts.book.get(net.chainId) ?? new Map<string, string>();
+        // transactions this pass counted (or, in a dry run, would count) to an address
+        const counting = new Set<string>();
         const span = spanFor(net);
         for (let a = from; a <= head; a += span) {
           if (deps.now() > deadline) break;
@@ -261,7 +266,7 @@ export async function runBackfill(
             const partnerId = mine.get(log.to.toLowerCase());
             if (partnerId) {
               scan.matches++;
-              matches.push(await matchAddress(net, log, partnerId, opts.dryRun, deps));
+              matches.push(await matchAddress(net, log, partnerId, opts.dryRun, deps, counting));
             } else if (linked.has(log.txHash.toLowerCase())) {
               matches.push(await settleRegistered(net, log, opts.dryRun, deps));
             }
@@ -343,8 +348,20 @@ function baseOf(net: GloamNetwork, log: UnshieldLog, partnerId: string, via: "ch
   };
 }
 
-async function matchAddress(net: GloamNetwork, log: UnshieldLog, partnerId: string, dryRun: boolean, deps: BackfillDeps): Promise<BackfillMatch> {
+/** Why a later part of a cash out in one go is not counted on its own. */
+export const COUNTED_WITH_ITS_PARTS = "Counted once with the other parts of its transaction.";
+
+async function matchAddress(
+  net: GloamNetwork,
+  log: UnshieldLog,
+  partnerId: string,
+  dryRun: boolean,
+  deps: BackfillDeps,
+  counting: Set<string>
+): Promise<BackfillMatch> {
   const base = baseOf(net, log, partnerId, "chain");
+  // a cash out in one go logs once per part: this pass already counted it on an earlier part
+  if (counting.has(base.txHash)) return { ...base, result: "already_counted", reason: COUNTED_WITH_ITS_PARTS };
   const counted = await deps.counted(net.chainId, base.txHash);
   // counted to this partner already, or with a key (the key's partner sent it): left as it is
   if (counted && (counted.partnerId === partnerId || counted.record.source !== "link")) return { ...base, result: "already_counted" };
@@ -353,20 +370,27 @@ async function matchAddress(net: GloamNetwork, log: UnshieldLog, partnerId: stri
   if (!receipt) throw new ReceiptUnread();
   if (receipt.status !== "success") return { ...base, reason: "The transaction failed." };
   const facts = classify(net, receipt.logs);
-  // the receipt must be the one cash out the log came from, nothing packed beside it (a cash
-  // out in one go is several, counted here only when it came from a link: settleRegistered)
+  // the receipt must be the cash out the log came from, nothing packed beside it: one cash
+  // out, or a cash out in one go whose every part paid this address in this asset (the
+  // facts reader refuses parts to two wallets or in two assets)
   if (
     !facts.ok ||
     facts.kind !== "cash_out" ||
-    facts.nullifiers.length !== 1 ||
+    !facts.to ||
+    facts.to.toLowerCase() !== log.to.toLowerCase() ||
     facts.asset.toLowerCase() !== log.asset.toLowerCase() ||
-    facts.amount !== log.amount
+    !facts.nullifiers.some((n) => n.toLowerCase() === log.nullifier.toLowerCase()) ||
+    (facts.nullifiers.length === 1 && facts.amount !== log.amount)
   ) {
     return { ...base, reason: "Not a plain cash out." };
   }
   const ts = (await deps.blockTime(net, receipt.blockNumber)) * 1000;
-  const found = { ...base, vaultFee: facts.vaultFee.toString(), ts, ...(counted ? { from: counted.partnerId } : {}) };
-  if (dryRun) return { ...found, result: counted ? "would_move" : "would_record" };
+  // the whole transaction: every part's amount and vault fee, as a link's count of it would be
+  const found = { ...base, amount: facts.amount.toString(), vaultFee: facts.vaultFee.toString(), ts, ...(counted ? { from: counted.partnerId } : {}) };
+  if (dryRun) {
+    counting.add(base.txHash);
+    return { ...found, result: counted ? "would_move" : "would_record" };
+  }
   const partner = await deps.partner(partnerId);
   if (!partner) return { ...found, reason: "The partner account is gone." };
   // an address match overrides a link: take it back from the link's partner first
@@ -378,10 +402,11 @@ async function matchAddress(net: GloamNetwork, log: UnshieldLog, partnerId: stri
     network: net,
     kind: "cash_out",
     txHash: base.txHash,
-    edge: { asset: log.asset, amount: log.amount },
+    edge: { asset: facts.asset, amount: facts.amount },
     vaultFee: facts.vaultFee,
     now: ts,
   });
+  counting.add(base.txHash);
   return { ...found, result: r.recorded ? (counted ? "moved" : "recorded") : "already_counted" };
 }
 
