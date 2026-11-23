@@ -62,6 +62,7 @@ import { ActivityFeed } from "./ActivityFeed";
 import { AddressChip } from "./AddressChip";
 import { FirstPaymentCard } from "./FirstPaymentCard";
 import { NameOfferCard } from "./NameOfferCard";
+import { AllNetworksCard } from "./AllNetworksCard";
 import { RecoveryNudge } from "./RecoveryPanel";
 import { OnboardingCard } from "./OnboardingCard";
 import { PaymentNoteLine } from "./PaymentNote";
@@ -719,6 +720,9 @@ export function PortfolioView() {
           </div>
         )}
       </section>
+
+      {/* The private balance on every network, when some of it sits on another one. */}
+      <AllNetworksCard />
 
       {/* Recovery: back the private balance up, or bring it back on a new device. */}
       {onProduct && shieldLive && (

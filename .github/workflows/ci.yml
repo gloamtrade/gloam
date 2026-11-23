@@ -75,6 +75,7 @@ jobs:
         run: |
           ../mcp/node_modules/.bin/tsx scripts/selftest-account-scope.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-auto-receive.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-all-networks.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-name-offer.mts
 
       # BNB Chain (off by default): off, no pool, on, and bad values; the pruned-logs check
