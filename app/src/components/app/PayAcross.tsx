@@ -8,10 +8,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Address, Hex } from "viem";
 import { Spinner } from "@/components/ui/Spinner";
-import { cancelPayRest, isPayRun, payRunPaid, payRunProgress, payRunTotal } from "@/lib/payAcross";
+import { isPayRun, payRunPaid, payRunProgress, payRunTotal, startPayRun, stopPayRest } from "@/lib/payAcross";
 import { isPayMemoLive } from "@/lib/payMemo";
 import { runNetwork, runPayroll, type PayrollBatch } from "@/lib/payroll";
-import { loadBatches, saveBatch } from "@/lib/payrollStore";
+import { loadBatches } from "@/lib/payrollStore";
 import { relayMemo, relayTransfer, waitForTx } from "@/lib/relay/client";
 import { publicClientFor } from "@/lib/rhClient";
 import { formatAssetLabel } from "@/lib/shield";
@@ -96,9 +96,22 @@ export function usePayAcross(address: Address | undefined, network: GloamNetwork
   }, [network]);
 
   const start = useCallback(async (r: PayrollBatch) => {
-    // saved before anything is sent: a refresh finds it and finishes it
-    await saveBatch(r);
-    await go(r);
+    if (runningNow.current) return;
+    // Saved before anything is sent, so a refresh finds it and finishes it. One at a time:
+    // a payment of this account's not finished here comes back instead of a second one.
+    let begun: { run: PayrollBatch; started: boolean };
+    try {
+      begun = await startPayRun(r);
+    } catch (e) {
+      setError(walletErrorForPeople(e, "Couldn't start the payment. Try again."));
+      return;
+    }
+    if (!begun.started) {
+      setRun(begun.run);
+      setError("A payment of yours isn't finished yet. Resume it, or stop the rest, before a new one.");
+      return;
+    }
+    await go(begun.run);
   }, [go]);
 
   const resume = useCallback(async () => {
@@ -107,12 +120,18 @@ export function usePayAcross(address: Address | undefined, network: GloamNetwork
 
   const cancel = useCallback(async () => {
     if (!run || running) return;
-    const stopped = cancelPayRest(run);
+    // under the run's lock and from the stored run: never while another tab is paying it
+    let stopped: PayrollBatch | null;
+    try {
+      stopped = await stopPayRest(run);
+    } catch (e) {
+      setError(walletErrorForPeople(e, "Couldn't stop it just now. Try again."));
+      return;
+    }
     if (!stopped) {
       setError("A part is still on its way. Resume to let the chain settle it first.");
       return;
     }
-    await saveBatch(stopped);
     setRun(stopped);
     setError(null);
   }, [run, running]);

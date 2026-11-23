@@ -39,7 +39,7 @@ const { getActiveNetwork } = await import("../src/lib/networks");
 const { getAllNotes } = await import("../src/lib/noteVault");
 const { activeSpendableNotes, loadLocalNotes, saveLocalNote } = await import("../src/lib/shield");
 const { decodeNotePackage } = await import("../src/lib/notePackage");
-const { fundingPlan, loadBatches, newBatch, runPayroll, saveBatch } = await import("../src/lib/payroll");
+const { fundingPlan, loadBatches, newBatch, runPayroll, saveBatch, RUN_ELSEWHERE } = await import("../src/lib/payroll");
 const receive = await import("../src/lib/receiveTag");
 const across = await import("../src/lib/payAcross");
 type LocalNote = import("../src/lib/shield").LocalNote;
@@ -365,6 +365,116 @@ await test("stop the rest: only the parts not sent, and only when none is on its
   assert.equal(stopped.status, "done");
   assert.deepEqual(stopped.rows.map((r) => [r.status, r.error ?? ""]), [["paid", ""], ["failed", "Cancelled"]]);
   assert.equal(across.payRunPaid(stopped), 5_000n);
+});
+
+
+// ------------------------------------------------------------ from the 23 Nov bug sweep
+await test("two taps (or two tabs) at once start one payment, never two", async () => {
+  const pool = mockPool();
+  const me = payer();
+  await fund(pool, me, 10_000n, "pe-a");
+  await fund(pool, me, 10_000n, "pe-b");
+  await fund(pool, me, 7_000n, "pe-c");
+  await fund(pool, me, 4_000n, "pe-d");
+  await fund(pool, me, 10_000n, "pe-e");
+  const notes = activeSpendableNotes(loadLocalNotes(me)).filter((n) => n.id.startsWith("pe-"));
+  const plan = across.planPayFrom(15_000n, notes);
+  assert.ok(plan.ok);
+  const mk = () => across.newPayRun({ chainId: net.chainId, pool: POOL, asset: ASSET, payer: me, tag: TAG, label: "@ada", name: "ada", parts: plan.parts, noteIds: plan.noteIds });
+  const r1 = mk();
+  await new Promise((r) => setTimeout(r, 3));
+  const r2 = mk();
+  assert.notEqual(r1.id, r2.id, "two runs from one plan, as two taps made them");
+  // at the same moment: one starts, the other is refused or handed the first
+  const both = await Promise.allSettled([across.startPayRun(r1), across.startPayRun(r2)]);
+  const started = both.filter((x) => x.status === "fulfilled" && x.value.started).map((x) => (x as PromiseFulfilledResult<{ run: PayrollBatch }>).value.run);
+  assert.equal(started.length, 1, "one of the two starts");
+  for (const x of both) if (x.status === "rejected") assert.equal((x.reason as Error).message, RUN_ELSEWHERE);
+  // a tap after it is saved gets the first one back to finish, not a second payment
+  const third = await across.startPayRun(mk());
+  assert.equal(third.started, false);
+  assert.equal(third.run.id, started[0]!.id);
+  const runs = (await loadBatches(net.chainId, POOL)).filter((b) => across.isPayRun(b) && b.employer === me);
+  assert.equal(runs.length, 1, "one payment stored");
+  const sent: Transfer[] = [];
+  const done = await runPayroll(started[0]!, deps(pool, (t) => pool.land(t), sent));
+  assert.equal(done.status, "done");
+  assert.equal(across.payRunPaid(done), 15_000n, "paid once");
+  assert.equal(sent.length, plan.parts.length, "one transfer per part, no more");
+  const opened = await Promise.all(done.rows.map((r) => decodeNotePackage(r.ticket!, undefined, { tryTagDecrypt: true })));
+  assert.equal(opened.reduce((sum, p) => sum + BigInt(p.amountWei), 0n), 15_000n, "the person gets exactly 15,000");
+  // once it's done, a new payment can start
+  assert.equal((await across.startPayRun(mk())).started, true);
+});
+
+await test("Stop the rest in another tab: refused while a tab pays it, and a stored stop is never written over", async () => {
+  // tab A pays $20 as $10 + $7 + $3; tab B, opened meanwhile, shows it unfinished
+  const setup = async (prefix: string) => {
+    const pool = mockPool();
+    const me = payer();
+    await fund(pool, me, 10_000n, `${prefix}-a`);
+    await fund(pool, me, 7_000n, `${prefix}-b`);
+    await fund(pool, me, 4_000n, `${prefix}-c`);
+    const notes = activeSpendableNotes(loadLocalNotes(me)).filter((n) => n.id.startsWith(`${prefix}-`));
+    const plan = across.planPayFrom(20_000n, notes);
+    assert.ok(plan.ok);
+    const run = across.newPayRun({ chainId: net.chainId, pool: POOL, asset: ASSET, payer: me, tag: TAG, label: "@ada", parts: plan.parts, noteIds: plan.noteIds });
+    await saveBatch(run);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let proofs = 0;
+    const d = deps(pool, (t) => pool.land(t));
+    d.prove = async () => {
+      if (++proofs === 2) await gate; // tab A is proving part 2
+      return { proofBytes: "0xdeadbeef" };
+    };
+    const a = runPayroll(run, d);
+    while (proofs < 2) await new Promise((r) => setTimeout(r, 5));
+    const inB = (await loadBatches(net.chainId, POOL)).find((x) => x.id === run.id)!;
+    return { run, a, release, inB };
+  };
+
+  // the button: under the run's lock, so it's refused while tab A pays
+  {
+    const { run, a, release, inB } = await setup("pf");
+    await assert.rejects(across.stopPayRest(inB), (e: Error) => e.message === RUN_ELSEWHERE, "refused while another tab pays it");
+    release();
+    const done = await a;
+    assert.equal(done.status, "done");
+    assert.equal(across.payRunPaid(done), 20_000n, "tab A pays it all, and tab B never said it stopped");
+    const stored = (await loadBatches(net.chainId, POOL)).find((x) => x.id === run.id)!;
+    assert.deepEqual(stored.rows.map((r) => r.status), ["paid", "paid", "paid"]);
+  }
+
+  // a stop saved anyway (an older page without the lock): tab A keeps it and stops before part 3
+  {
+    const { run, a, release, inB } = await setup("pg");
+    const stopped = across.cancelPayRest(inB)!;
+    assert.ok(stopped);
+    await saveBatch(stopped);
+    release();
+    const done = await a;
+    const stored = (await loadBatches(net.chainId, POOL)).find((x) => x.id === run.id)!;
+    assert.equal(stored.status, "done");
+    assert.deepEqual(stored.rows.map((r) => r.status), ["paid", "paid", "failed"], "part 2 was on its way and lands; part 3 stays stopped");
+    assert.equal(stored.rows[2]!.error, "Cancelled");
+    assert.equal(across.payRunPaid(stored), across.payRunPaid(done), "the stored run and tab A agree on what was paid");
+    assert.equal(across.payRunPaid(stored), 17_000n, "17,000 of 20,000, never all of it after a stop");
+  }
+
+  // with no tab paying it, Stop the rest works from the stored run
+  {
+    const pool = mockPool();
+    const me = payer();
+    await fund(pool, me, 5_000n, "ph-5");
+    const run = payRun(me, [5_000n, 2_000n]);
+    await saveBatch(run);
+    await runPayroll(run, deps(pool, (t) => pool.land(t)));
+    const stale = { ...run, rows: run.rows.map((r) => ({ ...r, status: "queued" as const })) };
+    const stopped = await across.stopPayRest(stale);
+    assert.ok(stopped);
+    assert.deepEqual(stopped.rows.map((r) => r.status), ["paid", "failed"], "from the stored run, not the stale copy");
+  }
 });
 
 console.log(`\n${passed} pay-across checks passed`);

@@ -689,6 +689,16 @@ export function runPayroll(batch: PayrollBatch, deps: PayrollEngineDeps): Promis
 }
 
 /**
+ * Runs `fn` holding the lock named `id`, the same lock a run with that id is
+ * paid under: while another tab (or this one) holds it, RUN_ELSEWHERE is thrown
+ * and `fn` never runs. For changes to a stored run that must not race its payer
+ * (Stop the rest), and for one start at a time.
+ */
+export function withRunLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  return holdRun(id, fn);
+}
+
+/**
  * Why a run can't be read or resumed right now, or null. A run reads and pays
  * on its own chain only: the vaults share one address, so a read made on
  * another chain (the page switched since, or a client for it) would answer for
@@ -708,7 +718,21 @@ async function runHeld(batch: PayrollBatch, deps: PayrollEngineDeps): Promise<Pa
   // before anything is read: a resume checks its sent payments on the run's own chain
   const wrongNetwork = runNetworkProblem(batch, client);
   if (wrongNetwork) throw new Error(wrongNetwork);
+  /** The row being paid now: this copy's state of it is the truth until it settles. */
+  let current: string | null = null;
   const emit = async () => {
+    // A row the stored run has moved on (stopped with Stop the rest, or settled
+    // elsewhere) keeps its stored state: saving this copy never writes over it.
+    // The row being paid is this copy's own until it settles.
+    const stored = await loadStoredRun(batch.id).catch(() => null);
+    if (stored) {
+      const byId = new Map(stored.rows.map((r) => [r.id, r]));
+      for (const row of batch.rows) {
+        if (row.id === current) continue;
+        const s = byId.get(row.id);
+        if (s && movedOn(row, s)) takeStored(row, s);
+      }
+    }
     deps.onUpdate({ ...batch, rows: batch.rows.map((r) => ({ ...r })) });
     await saveBatch(batch);
   };
@@ -731,6 +755,7 @@ async function runHeld(batch: PayrollBatch, deps: PayrollEngineDeps): Promise<Pa
       if (now && movedOn(row, now)) takeStored(row, now);
       if (row.status === "paid" || row.status === "failed") continue;
       if (deps.shouldStop()) throw new PayrollStop();
+      current = row.id;
 
       // Resume: a payment on record landed, can never land, or may still land.
       if (row.spendNullifier) {
@@ -747,7 +772,9 @@ async function runHeld(batch: PayrollBatch, deps: PayrollEngineDeps): Promise<Pa
       }
 
       await payRow(batch, row, deps, emit);
+      current = null;
     }
+    current = null;
     batch.status = "done";
   } catch (e) {
     if (e instanceof PayrollStop) {
