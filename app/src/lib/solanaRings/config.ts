@@ -125,12 +125,15 @@ export const RINGS_ZEC_NOTE =
  * 4tB2qXKcRtDdkprU6NeovJCfLbTefeyEbnhfqh2HwpXr, made 2026-11-10).
  */
 export const ZEC_SOLANA_MINT = "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS";
+/** ZEC's decimals on Solana, and the places it shows to (screens: SolanaAccount formatSolAmount). */
+export const ZEC_DECIMALS = 8;
+export const ZEC_PLACES = 4;
 const ZEC: RingsAsset = {
   id: "zec",
   symbol: "ZEC",
   name: "Zcash (bridged)",
   mint: ZEC_SOLANA_MINT,
-  decimals: 8,
+  decimals: ZEC_DECIMALS,
   hiddenUntilReady: true,
   note: RINGS_ZEC_NOTE,
 };

@@ -30,6 +30,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useNetwork } from "./NetworkProvider";
 import { useDemo } from "@/lib/demo";
 import { displayAmount } from "@/lib/amountShort";
+import { ringsAmount } from "@/lib/solanaRings/amount";
 import { RINGS_PROXY_PATHS, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAssets, ringsBalancesFrom, type RingsAsset, type RingsNetwork } from "@/lib/solanaRings/config";
 import type { RelayStatus, RingsSession } from "@/lib/solanaRings/client";
 import type { PayrollDeps } from "@/lib/solanaRings/payroll";
@@ -149,9 +150,9 @@ export function parseSolAmount(text: string, decimals: number): bigint | null {
   return v > 0n ? v : null;
 }
 
-/** An amount in base units as shown, like every amount in the app: two places, cut down (lib/amountShort). */
+/** An amount in base units as shown (lib/solanaRings/amount: two places, ZEC up to four). */
 export function formatSolAmount(v: bigint, decimals: number): string {
-  return displayAmount(v, decimals);
+  return ringsAmount(v, decimals);
 }
 
 /** The same amount as plain text for an input (no grouping, every decimal). */
@@ -340,22 +341,33 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
     [demo, found]
   );
 
-  // The relay and which assets are set up: read once Solana is picked (the demo's are always open).
+  // The relay: read once Solana is picked (the demo's is always open).
   useEffect(() => {
     if (!on || relay || demo) return;
     let live = true;
-    // The relay first (it decides what the screen shows); which assets are set up follows.
     void lib().then(async (l) => {
       const r = await l.relayStatus();
-      if (!live) return;
-      setRelay(r);
+      if (live) setRelay(r);
+    });
+    return () => {
+      live = false;
+    };
+  }, [on, relay, demo, network]);
+
+  // Which assets are set up, in its own read: when it followed the relay in the
+  // effect above, setting the relay re-ran that effect, whose cleanup dropped
+  // this answer, so ZEC (listed only once read as set up) never showed.
+  useEffect(() => {
+    if (!on || demo) return;
+    let live = true;
+    void lib().then(async (l) => {
       const a = await l.assetsReady();
       if (live) setReady(a);
     });
     return () => {
       live = false;
     };
-  }, [on, relay, demo, network]);
+  }, [on, demo, network]);
 
   // The open account closes with the tab, or on Disconnect. Not when this
   // provider goes: the next one picks it up from `kept`.
