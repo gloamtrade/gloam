@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.1 (23 November 2026)
 
 - **ZEC on Solana.** `SOLANA_ASSETS.mainnet` lists ZEC, Zcash bridged to Solana by NEAR's Omni Bridge: mint `A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS` (`SOLANA_ZEC_MINT`), SPL Token, 8 decimals. Its Privacy Rings interface is set up on mainnet, so `addToSolanaPrivate`, `paySolanaPrivately`, `cashOutSolana` and `solanaBalances` (`zec`) take it as they take USDC. `SOLANA_ZEC_NOTE` says what stays public: the bridge itself and adding from a wallet.
 - `SolanaAsset` gains `stable` (true for USDC and USDT) and `note`.
