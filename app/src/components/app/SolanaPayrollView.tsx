@@ -1,15 +1,16 @@
 "use client";
 
 /**
- * Payroll on Solana: paste or upload a list, check every row, then pay it
- * privately through Gloam's relay, up to 15 people per transaction
+ * Payroll on Solana, laid out as EVM payroll is: what to pay in and the team
+ * on the left, this run's total, the private balance and the one action on
+ * the right. Paste or upload a list, check every row, then pay it privately
+ * through Gloam's relay, up to 15 people per transaction
  * (lib/solanaRings/payroll). A run is saved in this browser before each batch
  * is sent, so a closed tab resumes where it stopped without paying anyone
- * twice.
+ * twice. The account comes from SolanaAccount (its payroll engine).
  */
 import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
-import { ringsAssets, ringsExplorerTx, RINGS_PAYROLL_NOTE } from "@/lib/solanaRings/config";
-import type { RingsSession } from "@/lib/solanaRings/client";
+import { RINGS_PAYROLL_NOTE, ringsAssets, ringsExplorerTx } from "@/lib/solanaRings/config";
 import {
   addressesToCheck,
   checkRecipients,
@@ -26,8 +27,11 @@ import {
   type RowStatus,
 } from "@/lib/solanaRings/payroll";
 import type { PayrollStore } from "@/lib/solanaRings/payrollStore";
+import { Spinner } from "@/components/ui/Spinner";
+import { TokenLogo } from "./TokenLogo";
+import { useSolana, type SolanaPayrollEngine } from "./SolanaAccount";
+import { SolanaGate, SolanaSteps, preferredAsset, useSolanaUsd, usd } from "./SolanaParts";
 
-const lib = () => import("@/lib/solanaRings/client");
 const storeLib = () => import("@/lib/solanaRings/payrollStore");
 
 const TEMPLATE = "name,address,amount\nAda Obi,PASTE_THEIR_SOLANA_PRIVATE_ADDRESS,250\nTunde Bello,PASTE_THEIR_SOLANA_PRIVATE_ADDRESS,180";
@@ -70,8 +74,40 @@ function download(filename: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
+function UploadGlyph({ className = "h-6 w-6" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M12 15V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15v3.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function DownloadGlyph() {
+  return (
+    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Payroll on Solana: the connect card until the private account is open. */
+export function SolanaPayrollPage() {
+  const sol = useSolana();
+  if (!sol) return null;
+  if (!sol.address || !sol.payroll) return <SolanaGate />;
+  return (
+    <SolanaPayrollView
+      engine={sol.payroll}
+      balances={sol.balances ?? {}}
+      ready={sol.ready}
+      relayFunded={sol.relay?.funded !== false}
+      onBalances={sol.setBalances}
+    />
+  );
+}
+
 export function SolanaPayrollView(props: {
-  session: RingsSession;
+  engine: SolanaPayrollEngine;
   /** Private balances in base units, by asset id. */
   balances: Record<string, bigint>;
   /** Which assets are set up on chain, by asset id. */
@@ -79,25 +115,25 @@ export function SolanaPayrollView(props: {
   relayFunded: boolean;
   onBalances: (b: Record<string, bigint>) => void;
 }) {
-  const { session, balances, ready, relayFunded, onBalances } = props;
-  const assets = ringsAssets(session.network);
+  const { engine, balances, ready, relayFunded, onBalances } = props;
+  const toUsd = useSolanaUsd();
+  const assets = ringsAssets(engine.network);
   const [store, setStore] = useState<PayrollStore | null>(null);
   const [run, setRun] = useState<PayrollRun | null>(null);
   const [lastDone, setLastDone] = useState<PayrollRun | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-
-  const [assetId, setAssetId] = useState(assets[0]!.id);
+  const [assetId, setAssetId] = useState(() => preferredAsset(balances).id);
   const [text, setText] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
+  const [pasteOpen, setPasteOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-
   const [registry, setRegistry] = useState<Map<string, boolean>>(() => new Map());
   const [checkError, setCheckError] = useState<string | null>(null);
   const [checkTick, setCheckTick] = useState(0);
-
   const [running, setRunning] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
+  /** 0 reading the balance, 1 saving the run; null when not starting. */
+  const [starting, setStarting] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
   const stopRef = useRef(false);
@@ -106,8 +142,8 @@ export function SolanaPayrollView(props: {
   // This account's runs: an open one comes back to resume.
   useEffect(() => {
     let live = true;
-    void lib()
-      .then((l) => l.ringsPayrollStore(session))
+    void engine
+      .store()
       .then(async (s) => {
         const runs = await s.load();
         if (!live) return;
@@ -120,7 +156,7 @@ export function SolanaPayrollView(props: {
     return () => {
       live = false;
     };
-  }, [session]);
+  }, [engine]);
 
   // Warn before leaving mid-run (a resume would pick it up, but it stops paying).
   useEffect(() => {
@@ -136,7 +172,7 @@ export function SolanaPayrollView(props: {
   const asset = assets.find((a) => a.id === assetId)!;
   const parsed = parseSolanaPayrollCsv(text, asset);
   const pending = addressesToCheck(parsed.rows, registry);
-  const rows = pending.length ? parsed.rows : checkRecipients(parsed.rows, registry, session.address);
+  const rows = pending.length ? parsed.rows : checkRecipients(parsed.rows, registry, engine.owner);
   const summary = summarize(rows, balances[asset.id] ?? 0n);
 
   // Each new address is read once from the registry: can it be paid privately?
@@ -146,8 +182,8 @@ export function SolanaPayrollView(props: {
     let live = true;
     const t = setTimeout(() => {
       setCheckError(null);
-      void lib()
-        .then((l) => l.registeredMany(session, pendingKey.split(",")))
+      void engine
+        .registeredMany(pendingKey.split(","))
         .then((found) => {
           if (live) setRegistry((m) => new Map([...m, ...found]));
         })
@@ -157,7 +193,7 @@ export function SolanaPayrollView(props: {
       live = false;
       clearTimeout(t);
     };
-  }, [pendingKey, session, checkTick]);
+  }, [pendingKey, engine, checkTick]);
 
   const loadFile = useCallback(async (f: File | undefined) => {
     if (!f) return;
@@ -179,10 +215,10 @@ export function SolanaPayrollView(props: {
   const execute = useCallback(
     async (start: PayrollRun) => {
       if (!store) return;
-      const l = await lib();
       const { withRunLock } = await storeLib();
-      const runAsset = ringsAssets(session.network).find((a) => a.id === start.asset);
+      const runAsset = ringsAssets(engine.network).find((a) => a.id === start.asset);
       if (!runAsset) return setError("This run pays an asset Gloam no longer lists here.");
+      const deps = await engine.deps(runAsset);
       setError(null);
       stopRef.current = false;
       setStopping(false);
@@ -192,21 +228,15 @@ export function SolanaPayrollView(props: {
           const tick = () => (stopRef.current || Date.now() >= until ? done() : setTimeout(tick, 400));
           tick();
         });
-      const ok = await withRunLock(session.address, async () => {
+      const ok = await withRunLock(engine.owner, async () => {
         setRunning(true);
         try {
           // The stored copy is the truth: another tab may have paid part of it since this one loaded.
           const fresh = (await store.load()).find((r) => r.id === start.id) ?? start;
           setRun({ ...fresh });
           const done = await runPayroll(fresh, {
+            ...deps,
             save: (x) => store.save(x),
-            build: (payments) => l.buildPayments(session, runAsset, payments),
-            send: (wire) => l.sendPayments(wire),
-            release: () => l.releasePayments(session),
-            confirm: (sig) => l.confirmPayments(session, sig),
-            resolve: (f) => l.settlePayments(session, f),
-            message: (e) => l.ringsErrorMessage(e),
-            tooBig: (e) => l.paymentsTooBig(e),
             sleep,
             now: () => Date.now(),
             stopRequested: () => stopRef.current,
@@ -215,45 +245,42 @@ export function SolanaPayrollView(props: {
           setRun({ ...done, rows: [...done.rows] });
         } catch (e) {
           if (process.env.NODE_ENV !== "production") console.error("solana payroll:", e);
-          setError(l.ringsErrorMessage(e));
+          setError(await engine.message(e));
         } finally {
           setRunning(false);
           setStopping(false);
-          onBalances(l.ringsBalances(session));
+          onBalances(engine.balances());
         }
       });
       if (!ok) setError("This run is paying in another tab. Use that tab, or close it and resume here.");
     },
-    [store, session, onBalances]
+    [store, engine, onBalances]
   );
 
   async function start() {
-    if (!store || running) return;
+    if (!store || running || starting !== null) return;
     setError(null);
-    setBusy("Reading your balance");
+    setStarting(0);
     try {
-      const l = await lib();
-      await l.syncRings(session);
-      const now = l.ringsBalances(session);
+      const now = await engine.sync();
       onBalances(now);
       const fresh = summarize(rows, now[asset.id] ?? 0n);
       if (fresh.short > 0n) {
         setError(`Your private balance is ${fmt(fresh.short, asset.decimals)} ${asset.symbol} short. Add more first.`);
         return;
       }
-      const r = freshRun({ network: session.network, owner: session.address, asset: asset.id, rows });
-      setBusy("Saving the run");
+      const r = freshRun({ network: engine.network, owner: engine.owner, asset: asset.id, rows });
+      setStarting(1);
       await store.save(r);
       setRun(r);
       setText("");
       setFileName(null);
-      setBusy(null);
+      setStarting(null);
       await execute(r);
     } catch (e) {
-      const l = await lib();
-      setError(l.ringsErrorMessage(e));
+      setError(await engine.message(e));
     } finally {
-      setBusy(null);
+      setStarting(null);
     }
   }
 
@@ -278,285 +305,392 @@ export function SolanaPayrollView(props: {
 
   if (loadError) {
     return (
-      <Card title="Payroll">
+      <div className="gl-card max-sm:p-5 sm:p-6">
+        <h2 className="text-[17px] text-foreground">Payroll</h2>
         <p role="alert" className="mt-3 text-[13px] leading-relaxed text-warn">
           {loadError}
         </p>
-      </Card>
+      </div>
     );
   }
-  if (!store) return <div aria-busy="true" className="gl-card h-[320px] motion-safe:animate-pulse" />;
 
-  // A run: resume it, watch it, download it.
+  if (!store) {
+    return (
+      <div className="grid max-lg:gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-6" aria-busy="true">
+        <div className="gl-card h-[420px] motion-safe:animate-pulse" />
+        <div className="gl-card h-[320px] motion-safe:animate-pulse" />
+      </div>
+    );
+  }
+
+  // A run: watch it, resume it, download it.
   if (run) {
     const runAsset = ringsAssets(run.network).find((a) => a.id === run.asset);
     const c = runCounts(run);
     const decimals = runAsset?.decimals ?? 0;
     const symbol = runAsset?.symbol ?? "";
     const done = run.state === "done" && !runOpen(run);
+    const of = c.paid + c.toPay + c.unknown;
+    const share = of > 0 ? Math.round((c.paid / of) * 100) : 0;
     return (
-      <Card title={done ? "Payroll done" : "Payroll"}>
-        <p className="tnum mt-2 text-[14px] text-soft">
-          Paid {c.paid} of {c.paid + c.toPay + c.unknown}, {fmt(c.paidAmount, decimals)} of {fmt(c.total, decimals)} {symbol}
-          {c.skipped > 0 && <span className="text-mute">. {c.skipped} skipped</span>}
-        </p>
-        {run.error && !running && (
-          <p role="alert" className="mt-4 rounded-[16px] bg-warn-soft px-4 py-3 text-[13px] leading-relaxed text-warn">
-            {run.error}
-          </p>
-        )}
-        {run.inflight && !running && (
-          <p className="mt-4 text-[12.5px] leading-relaxed text-mute">
-            The last batch may still be landing. Resume checks it on Solana before anything else is sent.
-          </p>
-        )}
+      <div className="grid max-lg:gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-6">
+        <section className="gl-card min-w-0 max-sm:p-5 sm:p-6">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-[17px] text-foreground">{done ? "Payroll done" : "This payroll"}</h2>
+            <span className="tnum text-[13px] text-mute">{people(run.rows.length)}</span>
+          </div>
+          <RowList>
+            {run.rows.map((r, i) => (
+              <li key={i} className="flex items-start justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-[14px] text-foreground">{r.name}</p>
+                  <p className="truncate font-mono text-[12px] text-mute">{short(r.address)}</p>
+                  {r.reason && r.status !== "paid" && <p className="mt-0.5 text-[12px] leading-snug text-warn">{r.reason}</p>}
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <span className="tnum text-[14px] text-foreground">{r.status === "skipped" ? "" : `${fmt(BigInt(r.amount), decimals)} ${symbol}`}</span>
+                  <span className="flex items-center gap-1">
+                    {r.status === "paid" && r.signature && (
+                      <a
+                        href={ringsExplorerTx(r.signature, run.network)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex h-6 items-center rounded-full px-2 text-[12px] text-mute underline-offset-2 hover:text-foreground hover:underline"
+                      >
+                        View
+                      </a>
+                    )}
+                    <StatusChip status={r.status} idle={!running} />
+                  </span>
+                </div>
+              </li>
+            ))}
+          </RowList>
+        </section>
 
-        <RowList>
-          {run.rows.map((r, i) => (
-            <li key={i} className="flex items-start justify-between gap-3 py-2.5">
-              <div className="min-w-0">
-                <p className="truncate text-[14px] text-foreground">{r.name}</p>
-                <p className="truncate font-mono text-[12px] text-mute">{short(r.address)}</p>
-                {r.reason && r.status !== "paid" && <p className="mt-0.5 text-[12px] leading-snug text-warn">{r.reason}</p>}
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-1">
-                <span className="tnum text-[14px] text-foreground">
-                  {r.status === "skipped" ? "" : `${fmt(BigInt(r.amount), decimals)} ${symbol}`}
-                </span>
-                <StatusChip status={r.status} idle={!running} />
-                {r.status === "paid" && r.signature && (
-                  <a
-                    href={ringsExplorerTx(r.signature, run.network)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[12px] text-mute underline-offset-2 hover:text-foreground hover:underline"
-                  >
-                    View
-                  </a>
-                )}
-              </div>
-            </li>
-          ))}
-        </RowList>
-
-        <div className="mt-5 space-y-2">
-          {running ? (
-            <button
-              type="button"
-              className="btn btn-ghost w-full"
-              disabled={stopping}
-              onClick={() => {
-                stopRef.current = true;
-                setStopping(true);
-              }}
-            >
-              {stopping ? "Pausing after this batch" : "Pause after this batch"}
-            </button>
-          ) : !done ? (
-            <>
-              <button type="button" className="btn btn-ink btn-lg w-full" disabled={!relayFunded} onClick={() => void execute(run)}>
-                Resume
+        <aside className="min-w-0 space-y-5">
+          <section className="gl-card max-sm:p-5 sm:p-6">
+            <h2 className="text-[17px] text-foreground">This run</h2>
+            <p className="tnum mt-4 flex items-center gap-2.5 text-[34px] font-light leading-none tracking-[-0.02em] text-foreground">
+              {fmt(c.paidAmount, decimals)}
+              {runAsset && <TokenLogo id={runAsset.id} symbol={symbol} size={26} />}
+            </p>
+            <p className="tnum mt-2 text-[13.5px] text-mute">
+              Paid {c.paid} of {of}, of {fmt(c.total, decimals)} {symbol}
+              {c.skipped > 0 ? `. ${c.skipped} skipped` : ""}
+            </p>
+            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-surface-2" aria-hidden>
+              <div className="h-full rounded-full bg-foreground transition-[width] duration-500" style={{ width: `${share}%` }} />
+            </div>
+            {running && (
+              <SolanaSteps className="mt-5" task={{ kind: "pay", steps: [stopping ? "Pausing after this batch" : "Paying in batches of up to 15"], at: 0 }} />
+            )}
+            {run.error && !running && (
+              <p role="alert" className="mt-4 rounded-[16px] bg-warn-soft px-4 py-3 text-[13px] leading-relaxed text-warn">
+                {run.error}
+              </p>
+            )}
+            {run.inflight && !running && (
+              <p className="mt-4 text-[12.5px] leading-relaxed text-mute">The last batch may still be landing. Resume checks it on Solana before anything else is sent.</p>
+            )}
+            <div className="mt-5 space-y-2">
+              {running ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-block"
+                  disabled={stopping}
+                  onClick={() => {
+                    stopRef.current = true;
+                    setStopping(true);
+                  }}
+                >
+                  {stopping ? "Pausing after this batch" : "Pause after this batch"}
+                </button>
+              ) : !done ? (
+                <>
+                  <button type="button" className="btn btn-ink btn-lg btn-block" disabled={!relayFunded} onClick={() => void execute(run)}>
+                    Resume
+                  </button>
+                  {!relayFunded && <p className="text-[12.5px] text-warn">Private payments on Solana are paused for a moment. Try again later.</p>}
+                </>
+              ) : null}
+              <button type="button" className="btn btn-ghost btn-block" onClick={() => exportRun(run)}>
+                Download results
               </button>
-              {!relayFunded && <p className="text-[12.5px] text-warn">Private payments on Solana are paused for a moment. Try again later.</p>}
-            </>
-          ) : null}
-          <button type="button" className="btn btn-ghost w-full" onClick={() => exportRun(run)}>
-            Download results
-          </button>
-          {done && (
-            <button
-              type="button"
-              className="btn btn-quiet w-full"
-              onClick={() => {
-                setLastDone(run);
-                setRun(null);
-              }}
-            >
-              New run
-            </button>
-          )}
-          {!running && !done && !run.inflight && (
-            <button
-              type="button"
-              className={`btn btn-quiet w-full ${closing ? "text-warn" : ""}`}
-              onClick={() => (closing ? void close(run) : setClosing(true))}
-            >
-              {closing ? `Close it. ${people(c.toPay)} won't be paid` : "Close this run"}
-            </button>
-          )}
-        </div>
-        {running && (
-          <p aria-live="polite" className="mt-4 rounded-[16px] bg-sealed-soft px-4 py-3 text-[13px] text-foreground">
-            Paying in batches of up to 15. Keep this tab open.
-          </p>
-        )}
-        <Status error={error} />
-      </Card>
+              {done && (
+                <button
+                  type="button"
+                  className="btn btn-quiet btn-block"
+                  onClick={() => {
+                    setLastDone(run);
+                    setRun(null);
+                  }}
+                >
+                  New run
+                </button>
+              )}
+              {!running && !done && !run.inflight && (
+                <button type="button" className={`btn btn-quiet btn-block ${closing ? "text-warn" : ""}`} onClick={() => (closing ? void close(run) : setClosing(true))}>
+                  {closing ? `Close it. ${people(c.toPay)} won't be paid` : "Close this run"}
+                </button>
+              )}
+            </div>
+            <Status error={error} />
+          </section>
+        </aside>
+      </div>
     );
   }
 
   // A new run.
   const setUp = ready[asset.id] !== false;
-  const can = setUp && relayFunded && !pending.length && !checkError && summary.ready > 0 && summary.short === 0n && !busy && !parsed.error;
+  const can = setUp && relayFunded && !pending.length && !checkError && summary.ready > 0 && summary.short === 0n && starting === null && !parsed.error;
+  const have = balances[asset.id] ?? 0n;
+  const use = have > 0n ? Math.min(100, Number((summary.total * 100n) / have)) : summary.total > 0n ? 100 : 0;
+  const totalUsd = summary.total > 0n ? toUsd(asset.id, summary.total) : null;
+  const showList = Boolean(text) || pasteOpen;
+
   return (
-    <Card title="Payroll">
-      <p className="mt-2 text-[14px] leading-relaxed text-soft">Pay up to {PAYROLL_MAX_ROWS} people privately from one list.</p>
-
-      <div className="mt-5 flex flex-wrap gap-2">
-        {assets.map((a) => (
-          <button
-            key={a.id}
-            type="button"
-            className={`gl-chip min-h-10 ${a.id === assetId ? "border-foreground! text-foreground!" : ""}`}
-            onClick={() => setAssetId(a.id)}
-          >
-            {a.symbol}
-          </button>
-        ))}
-      </div>
-      {!setUp && <p className="mt-2 text-[12.5px] text-warn">{asset.symbol} is not set up on Gloam yet.</p>}
-
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-        className={`mt-5 rounded-[16px] border border-dashed p-3 transition-colors ${dragging ? "border-foreground bg-surface" : "border-line-strong"}`}
-      >
-        <label htmlFor="sol-payroll-list" className="text-[13px] text-mute">
-          {fileName ? fileName : "Paste a list or drop a CSV: name, address, amount"}
-        </label>
-        <textarea
-          id="sol-payroll-list"
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            setFileName(null);
-          }}
-          rows={5}
-          spellCheck={false}
-          wrap="off"
-          placeholder={TEMPLATE}
-          className="gl-input tnum mt-2 h-auto resize-y overflow-x-auto whitespace-pre py-3 font-mono text-[12.5px] leading-[1.7]"
-        />
-        <div className="mt-2 flex flex-wrap gap-2">
-          <button type="button" className="btn btn-ghost btn-sm h-10" onClick={() => fileRef.current?.click()}>
-            Choose a CSV
-          </button>
-          {text && (
-            <button
-              type="button"
-              className="btn btn-quiet btn-sm h-10"
-              onClick={() => {
-                setText("");
-                setFileName(null);
-              }}
-            >
-              Clear
-            </button>
-          )}
-        </div>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".csv,text/csv,text/plain"
-          className="hidden"
-          onChange={(e) => {
-            void loadFile(e.target.files?.[0]);
-            e.target.value = "";
-          }}
-        />
-      </div>
-      {parsed.error && (
-        <p role="alert" className="mt-3 text-[13px] leading-relaxed text-warn">
-          {parsed.error}
-        </p>
-      )}
-
-      {rows.length > 0 && (
-        <>
-          <RowList>
-            {rows.map((r) => {
-              const waiting = !r.error && pending.includes(r.address);
+    <div className="grid max-lg:gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-6">
+      <div className="min-w-0 space-y-5">
+        <section className="gl-card max-sm:p-5 sm:p-6">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-[17px] text-foreground">Pay in</h2>
+            <p className="text-[13px] text-mute max-sm:hidden">Comes out of your private balance</p>
+          </div>
+          <div className="mt-4 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] max-sm:-mx-5 max-sm:px-5 sm:flex-wrap [&::-webkit-scrollbar]:hidden" role="radiogroup" aria-label="Currency">
+            {assets.map((a) => {
+              const selected = a.id === assetId;
+              const b = balances[a.id] ?? 0n;
               return (
-                <li key={r.line} className="flex items-start justify-between gap-3 py-2.5">
-                  <div className="min-w-0">
-                    <p className="truncate text-[14px] text-foreground">{r.name}</p>
-                    <p className="truncate font-mono text-[12px] text-mute">{r.address ? short(r.address) : `Line ${r.line}`}</p>
-                    {r.error && <p className="mt-0.5 text-[12px] leading-snug text-warn">{r.error}</p>}
-                    {!r.error && r.note && <p className="mt-0.5 text-[12px] leading-snug text-mute">{r.note}</p>}
-                  </div>
-                  <div className="flex shrink-0 flex-col items-end gap-1">
-                    <span className="tnum text-[14px] text-foreground">
-                      {r.amount !== null ? `${fmt(r.amount, asset.decimals)} ${asset.symbol}` : r.amountInput}
+                <button
+                  key={a.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => setAssetId(a.id)}
+                  className={`flex h-14 shrink-0 items-center gap-3 rounded-full border pl-2 pr-5 text-left transition-[border-color,box-shadow,background-color] duration-200 ${
+                    selected ? "border-foreground bg-panel shadow-card" : "border-line bg-panel hover:border-line-strong hover:bg-surface"
+                  }`}
+                >
+                  <TokenLogo id={a.id} symbol={a.symbol} size={38} />
+                  <span className="min-w-0">
+                    <span className="block text-[14px] font-medium leading-tight text-foreground">{a.symbol}</span>
+                    <span className="tnum mt-0.5 block text-[12px] leading-tight text-mute">
+                      {ready[a.id] === false ? "Not set up yet" : b > 0n ? `${fmt(b, a.decimals)} private` : "No private balance"}
                     </span>
-                    {r.error ? <StatusChip status="skipped" /> : waiting ? <StatusChip status="checking" /> : null}
-                  </div>
-                </li>
+                  </span>
+                </button>
               );
             })}
-          </RowList>
+          </div>
+        </section>
 
-          <dl className="mt-4 space-y-1.5 text-[14px]">
-            <Line k="People" v={`${summary.ready}${summary.skipped ? `, ${summary.skipped} skipped` : ""}`} />
-            <Line k="Total" v={`${fmt(summary.total, asset.decimals)} ${asset.symbol}`} />
-            <Line k="Private balance" v={`${fmt(balances[asset.id] ?? 0n, asset.decimals)} ${asset.symbol}`} />
-          </dl>
-          {summary.short > 0n && (
-            <p className="mt-3 text-[13px] leading-relaxed text-warn">
-              Your private balance is {fmt(summary.short, asset.decimals)} {asset.symbol} short. Add more first.
+        <section className="gl-card max-sm:p-5 sm:p-6">
+          <div className="mb-4 flex items-baseline justify-between gap-3">
+            <h2 className="text-[17px] text-foreground">Your team</h2>
+            <button type="button" onClick={() => download("gloam-solana-payroll-template.csv", TEMPLATE)} className="btn btn-quiet btn-sm -mr-3 text-mute hover:text-foreground">
+              <DownloadGlyph />
+              Template
+            </button>
+          </div>
+
+          {showList ? (
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+              className={`rounded-[16px] border border-dashed p-3 transition-colors ${dragging ? "border-foreground bg-surface" : "border-line-strong bg-surface/50"}`}
+            >
+              <label htmlFor="sol-payroll-list" className="text-[13px] text-mute">
+                {fileName ? fileName : "Paste a list or drop a CSV: name, address, amount"}
+              </label>
+              <textarea
+                id="sol-payroll-list"
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  setFileName(null);
+                }}
+                rows={5}
+                spellCheck={false}
+                wrap="off"
+                placeholder={TEMPLATE}
+                className="gl-input tnum mt-2 h-auto resize-y overflow-x-auto whitespace-pre py-3 font-mono text-[12.5px] leading-[1.7]"
+              />
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" className="btn btn-ghost btn-sm h-10" onClick={() => fileRef.current?.click()}>
+                  Choose a file
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-quiet btn-sm h-10"
+                  onClick={() => {
+                    setText("");
+                    setFileName(null);
+                    setPasteOpen(false);
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+              className={`flex flex-col items-center justify-center rounded-[16px] border border-dashed px-5 text-center transition-colors duration-200 max-sm:py-10 sm:py-12 ${
+                dragging ? "border-foreground bg-surface" : "border-line-strong bg-surface/50"
+              }`}
+            >
+              <UploadGlyph className="h-6 w-6 text-foreground" />
+              <p className="mt-3 text-[17px] text-foreground">{dragging ? "Drop it here" : "Drop your team’s CSV"}</p>
+              <p className="mt-1.5 max-w-[42ch] text-[13.5px] leading-relaxed text-mute">
+                One line per person, up to {PAYROLL_MAX_ROWS}. Each one needs a Gloam private address on Solana.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5" aria-label="Columns">
+                {["name", "address", "amount"].map((c) => (
+                  <span key={c} className="inline-flex h-7 items-center rounded-full bg-panel px-3 text-[12px] text-soft shadow-card">
+                    {c}
+                  </span>
+                ))}
+              </div>
+              <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+                <button type="button" onClick={() => fileRef.current?.click()} className="btn btn-ink btn-sm h-10">
+                  Choose a file
+                </button>
+                <button type="button" onClick={() => setPasteOpen(true)} className="btn btn-quiet btn-sm h-10" aria-expanded={pasteOpen}>
+                  Paste a list
+                </button>
+              </div>
+            </div>
+          )}
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv,text/plain"
+            className="hidden"
+            onChange={(e) => {
+              void loadFile(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+          {parsed.error && (
+            <p role="alert" className="mt-3 text-[13px] leading-relaxed text-warn">
+              {parsed.error}
             </p>
+          )}
+
+          {rows.length > 0 && (
+            <RowList>
+              {rows.map((r) => {
+                const waiting = !r.error && pending.includes(r.address);
+                return (
+                  <li key={r.line} className="flex items-start justify-between gap-3 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-[14px] text-foreground">{r.name}</p>
+                      <p className="truncate font-mono text-[12px] text-mute">{r.address ? short(r.address) : `Line ${r.line}`}</p>
+                      {r.error && <p className="mt-0.5 text-[12px] leading-snug text-warn">{r.error}</p>}
+                      {!r.error && r.note && <p className="mt-0.5 text-[12px] leading-snug text-mute">{r.note}</p>}
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <span className="tnum text-[14px] text-foreground">{r.amount !== null ? `${fmt(r.amount, asset.decimals)} ${asset.symbol}` : r.amountInput}</span>
+                      {r.error ? <StatusChip status="skipped" /> : waiting ? <StatusChip status="checking" /> : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </RowList>
           )}
           {checkError && (
             <p className="mt-3 text-[13px] text-warn">
               {checkError}{" "}
-              <button type="button" className="underline underline-offset-2" onClick={() => setCheckTick((n) => n + 1)}>
+              <button type="button" className="inline-flex min-h-10 items-center underline underline-offset-2" onClick={() => setCheckTick((n) => n + 1)}>
                 Try again
               </button>
             </p>
           )}
-        </>
-      )}
+        </section>
+      </div>
 
-      <p className="mt-4 text-[12.5px] leading-relaxed text-mute">{RINGS_PAYROLL_NOTE}</p>
-      {!relayFunded && <p className="mt-3 text-[12.5px] leading-relaxed text-warn">Private payments on Solana are paused for a moment. Try again later.</p>}
-
-      <button type="button" className="btn btn-ink btn-lg mt-5 w-full" disabled={!can} onClick={() => void start()}>
-        {busy ?? (pending.length ? "Checking addresses" : summary.ready ? `Pay ${people(summary.ready)}` : "Pay")}
-      </button>
-      <Status error={error} />
-
-      {lastDone && (
-        <button type="button" className="btn btn-quiet btn-sm mt-3 h-10 w-full text-mute" onClick={() => exportRun(lastDone)}>
-          Download your last run&apos;s results
-        </button>
-      )}
-    </Card>
-  );
-}
-
-function Card({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="gl-card p-5 sm:p-7">
-      <h2 className="t-title">{title}</h2>
-      {children}
+      <aside className="min-w-0 space-y-5">
+        <section className="gl-card max-sm:p-5 sm:p-6">
+          <h2 className="text-[17px] text-foreground">This run</h2>
+          <p className="tnum mt-4 flex items-center gap-2.5 text-[34px] font-light leading-none tracking-[-0.02em] text-foreground">
+            {fmt(summary.total, asset.decimals)}
+            <TokenLogo id={asset.id} symbol={asset.symbol} size={26} />
+          </p>
+          <p className="tnum mt-2 text-[13.5px] text-mute">
+            {summary.ready > 0
+              ? `${people(summary.ready)}${summary.skipped ? `, ${summary.skipped} skipped` : ""}${totalUsd != null ? `, about ${usd(totalUsd)}` : ""}`
+              : "Add your team to see the total"}
+          </p>
+          <div className="mt-5 rounded-[16px] bg-surface p-4">
+            <div className="flex items-baseline justify-between gap-3 text-[13.5px]">
+              <span className="text-mute">Private balance</span>
+              <span className="tnum text-foreground">
+                {fmt(have, asset.decimals)} {asset.symbol}
+              </span>
+            </div>
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-2" aria-hidden>
+              <div className={`h-full rounded-full ${summary.short > 0n ? "bg-warn" : "bg-foreground"}`} style={{ width: `${use}%` }} />
+            </div>
+            <p className={`mt-3 text-[12.5px] leading-relaxed ${summary.short > 0n ? "text-warn" : "text-mute"}`}>
+              {summary.short > 0n
+                ? `${fmt(summary.short, asset.decimals)} ${asset.symbol} short. Add more first.`
+                : "Payments come out of your private balance."}
+            </p>
+          </div>
+          <p className="mt-4 text-[12.5px] leading-relaxed text-mute">{RINGS_PAYROLL_NOTE}</p>
+          {!setUp && <p className="mt-3 text-[12.5px] text-warn">{asset.symbol} is not set up on Gloam yet.</p>}
+          {!relayFunded && <p className="mt-3 text-[12.5px] leading-relaxed text-warn">Private payments on Solana are paused for a moment. Try again later.</p>}
+          <button
+            type="button"
+            className="btn btn-ink btn-lg btn-block mt-5"
+            aria-busy={starting !== null || pending.length > 0 || undefined}
+            disabled={!can && starting === null && !pending.length}
+            onClick={() => can && void start()}
+          >
+            {starting !== null ? (
+              <>
+                <Spinner />
+                {starting === 0 ? "Reading your private balance" : "Saving the run"}
+              </>
+            ) : pending.length ? (
+              <>
+                <Spinner />
+                Checking addresses
+              </>
+            ) : summary.ready ? (
+              `Pay ${people(summary.ready)} privately`
+            ) : (
+              "Pay privately"
+            )}
+          </button>
+          {starting !== null && (
+            <SolanaSteps className="mt-4" task={{ kind: "pay", steps: ["Reading your private balance", "Saving the run", "Paying in batches of up to 15"], at: starting }} />
+          )}
+          <Status error={error} />
+          {lastDone && (
+            <button type="button" className="btn btn-quiet btn-sm mt-3 h-10 w-full text-mute" onClick={() => exportRun(lastDone)}>
+              Download your last run&apos;s results
+            </button>
+          )}
+        </section>
+      </aside>
     </div>
   );
 }
 
 function RowList({ children }: { children: ReactNode }) {
-  return <ul className="mt-4 max-h-[420px] divide-y divide-line overflow-y-auto overscroll-contain border-y border-line pr-2">{children}</ul>;
-}
-
-function Line({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-mute">{k}</dt>
-      <dd className="tnum text-foreground">{v}</dd>
-    </div>
-  );
+  return <ul className="mt-4 max-h-[460px] divide-y divide-line overflow-y-auto overscroll-contain border-y border-line pr-2">{children}</ul>;
 }
 
 /** `idle`: the run isn't running here, so a row left in flight shows as that, without a spinner. */
@@ -570,9 +704,7 @@ function StatusChip({ status, idle = false }: { status: RowStatus; idle?: boolea
         : "bg-surface text-soft";
   return (
     <span className={`inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium ${tone}`}>
-      {busy && (
-        <span aria-hidden className="inline-block h-3 w-3 animate-spin rounded-full border-[1.5px] border-current border-t-transparent opacity-70 motion-reduce:animate-none" />
-      )}
+      {busy && <Spinner className="h-3 w-3" />}
       {BUSY.has(status) && idle ? "In flight" : STATUS_LABEL[status]}
     </span>
   );
@@ -586,4 +718,3 @@ function Status({ error }: { error: string | null }) {
     </p>
   );
 }
-

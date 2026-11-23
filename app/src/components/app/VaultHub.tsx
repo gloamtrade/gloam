@@ -19,6 +19,8 @@ import {
   type VaultActionId,
   type VaultActionInfo,
 } from "@/lib/vaultHub";
+import { SOLANA_VAULT_ACTIONS, missingOnSolana } from "@/lib/solanaRings/vaultActions";
+import { SolanaVaultHome, SolanaVaultPanel } from "./SolanaVault";
 
 /**
  * The Vault: one place for every private money move. With no action in the
@@ -82,7 +84,7 @@ const AgentTopUpsView = dynamic(() => import("./AgentTopUpsView").then((m) => m.
 export function VaultHub() {
   const router = useRouter();
   const sp = useSearchParams();
-  const { network, networkKey, setNetworkKey, settled } = useNetwork();
+  const { network, networkKey, setNetworkKey, settled, solana } = useNetwork();
   const { address } = useAppAccount();
   // The views read the saved network and wallet, which only exist in the
   // browser: render them once hydrated (this suspends apart from the network
@@ -91,10 +93,13 @@ export function VaultHub() {
 
   // Tokenized stocks only trade on Robinhood Chain testnet and swaps only where a
   // vault swap router is deployed, so those actions drop out elsewhere.
-  const actions = vaultActionsFor({
-    swap: vaultSwapRouter(network.chainId) !== null && swapOpenTo(address),
-    stocks: Boolean(network.stocks),
-  });
+  // On Solana, Solana's own four (lib/solanaRings/vaultActions).
+  const actions = solana
+    ? SOLANA_VAULT_ACTIONS
+    : vaultActionsFor({
+        swap: vaultSwapRouter(network.chainId) !== null && swapOpenTo(address),
+        stocks: Boolean(network.stocks),
+      });
 
   // A claim link's fragment (#claim=…) opens Receive; Pay reads and clears it.
   const [hash, setHash] = useState("");
@@ -133,6 +138,14 @@ export function VaultHub() {
   }, [settled, swapLinkTo, switchedFor, hash, networkKey, setNetworkKey]);
   const switching = Boolean(swapLinkTo && swapLinkTo !== networkKey && switchedFor !== hash);
 
+  // A claim link, a payment request or a link that names its network is for an
+  // EVM network: on Solana it moves back there (the network it names, or the
+  // last one), so the link opens as it always did.
+  const evmLink = solana && (hash.startsWith("#claim=") || mode === "pay" || Boolean(sp.get("net")));
+  useEffect(() => {
+    if (evmLink) setNetworkKey(networkKey);
+  }, [evmLink, networkKey, setNetworkKey]);
+
   function select(id: VaultActionId) {
     if (id === action || !actions.some((a) => a.id === id)) return;
     setHash("");
@@ -149,6 +162,18 @@ export function VaultHub() {
       </div>
     ) : (
       <HomeSkeleton />
+    );
+  }
+
+  if (solana && !evmLink) {
+    if (!current) return <SolanaVaultHome missing={missingOnSolana(tab)} />;
+    return (
+      <div className="space-y-6">
+        <ActionRow actions={actions} current={current.id} onSelect={select} />
+        <div id="vault-panel" role="tabpanel" aria-labelledby={`vault-tab-${current.id}`} className="min-w-0">
+          <SolanaVaultPanel id={current.id} onReceive={() => select("receive")} />
+        </div>
+      </div>
     );
   }
 

@@ -36,7 +36,7 @@ import { TokenLogo } from "./TokenLogo";
 import { WalletMenu } from "./WalletMenu";
 import { TempoFaucetButton } from "./TempoFaucetButton";
 
-type Holding = { id: string; symbol: string; logoId: string; text: string; amount: number; dollar: boolean };
+export type Holding = { id: string; symbol: string; logoId: string; text: string; amount: number; dollar: boolean };
 
 const SHOWN = 3;
 
@@ -332,7 +332,8 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
   );
 }
 
-function BalancePane({
+/** One side of "Your money on …": the private balance (sealed) or the wallet. Solana's overview uses it too. */
+export function BalancePane({
   sealed,
   title,
   badge,
@@ -407,7 +408,7 @@ function BalancePane({
  * shown but quiet; the list below says why. From a tablet up the list is near
  * the top already, so this row is not drawn (globals.css .vault-quickrow).
  */
-function QuickRow({
+export function QuickRow({
   actions,
   blockedFor,
 }: {
@@ -449,7 +450,7 @@ function QuickRow({
   );
 }
 
-function ActionTile({
+export function ActionTile({
   action,
   blocked,
   compact = false,
