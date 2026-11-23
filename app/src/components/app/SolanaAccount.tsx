@@ -65,6 +65,8 @@ type SolanaCtx = {
   main: Main | null;
   /** The private account's address, once it is open. */
   address: string | null;
+  /** The open private account (none in the demo): money that arrived at its address is made private from it (SolanaBridgeIn). */
+  session: RingsSession | null;
   /** Private balances in base units by asset id, once read. */
   balances: Record<string, bigint> | null;
   /** The main wallet's public balances by asset id, once read. */
@@ -509,6 +511,7 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
       ready: demo ? DEMO_READY : ready,
       main,
       address,
+      session: demo ? null : session,
       balances: address ? balances : null,
       walletBalances: main ? walletBalances : null,
       task,
@@ -524,7 +527,7 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
       setBalances,
       payroll,
     }),
-    [on, demo, network, wallets, relay, ready, main, address, balances, walletBalances, task, error, connect, setUp, disconnect, refresh, add, pay, cashOut, setBalances, payroll]
+    [on, demo, network, wallets, relay, ready, main, address, session, balances, walletBalances, task, error, connect, setUp, disconnect, refresh, add, pay, cashOut, setBalances, payroll]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -20,6 +20,7 @@ import { TokenLogo } from "./TokenLogo";
 import { AddIcon, CashOutIcon, HeroFigure, LockIcon, QuickAction, ReceiveIcon, SendIcon, VaultChips } from "./PortfolioView";
 import { formatSolAmount, useSolana } from "./SolanaAccount";
 import { SolanaError, SolanaGate, useSolanaUsd, usd } from "./SolanaParts";
+import { SolanaNotPrivateYet } from "./SolanaVault";
 
 type Row = { id: string; symbol: string; name: string; raw: bigint; decimals: number; text: string; value: number | null };
 
@@ -77,6 +78,7 @@ export function SolanaPortfolioView() {
 
   return (
     <div className="space-y-5">
+      <SolanaNotPrivateYet />
       <section className="gl-card relative overflow-hidden">
         <SealedField tone="soft" />
         <div className="relative z-[1] max-sm:p-6 sm:p-8 lg:p-10">

@@ -14,7 +14,7 @@
  */
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { RINGS_PRIVACY_NOTE, ringsAssets, ringsExplorerTx, type RingsAsset } from "@/lib/solanaRings/config";
 import { ADD_FIRST, addAssetHref, type VaultActionId, type VaultActionInfo } from "@/lib/vaultHub";
 import { SOLANA_VAULT_ACTIONS } from "@/lib/solanaRings/vaultActions";
@@ -35,6 +35,8 @@ import {
   usd,
 } from "./SolanaParts";
 import { formatSolAmount, parseSolAmount, shortSol, useSolana } from "./SolanaAccount";
+import { SolanaArrivals, SolanaBridgeIn } from "./SolanaBridgeIn";
+import { solanaBridgeVisible } from "@/lib/solanaRings/bridgeIn";
 
 function holdings(b: Record<string, bigint> | null, toUsd: (id: string, v: bigint) => number | null): Holding[] {
   if (!b) return [];
@@ -100,6 +102,7 @@ export function SolanaVaultHome({ missing }: { missing?: string | null }) {
       )}
       <QuickRow actions={SOLANA_VAULT_ACTIONS} blockedFor={blockedFor} />
 
+      <SolanaNotPrivateYet />
       {!address ? (
         <SolanaGate />
       ) : (
@@ -324,39 +327,39 @@ export function SolanaAddView() {
   );
 }
 
+/** After money that arrived went private (SolanaBridgeIn): the private balance as the account holds it now. */
+function useShowPrivate(): () => void {
+  const sol = useSolana();
+  const session = sol?.session ?? null;
+  const setBalances = sol?.setBalances;
+  return useCallback(() => {
+    if (session && setBalances) void import("@/lib/solanaRings/client").then((l) => setBalances(l.ringsBalances(session)));
+  }, [session, setBalances]);
+}
+
 /**
- * Add privately's "from another chain" slot, where EVM's Add shows its bridge
- * card. The cross-chain flow into Solana is being built apart; until it lands
- * this stays hidden (NEXT_PUBLIC_SOLANA_BRIDGE_IN off). With the flag on and
- * no `onOpen` wired yet, the card shows with its button off.
+ * Add privately's "from another chain" card, where EVM's Add shows its bridge
+ * card: money from another chain into the private balance on Solana
+ * (SolanaBridgeIn). Hidden unless NEXT_PUBLIC_SOLANA_BRIDGE_IN is on
+ * (lib/solanaRings/bridgeIn solanaBridgeVisible), and in the demo.
  */
-export function SolanaFromAnotherChain({ onOpen }: { onOpen?: () => void }) {
-  if (process.env.NEXT_PUBLIC_SOLANA_BRIDGE_IN !== "1") return null;
-  const chains = [1, 8453, 4663, 56, 42161];
-  return (
-    <section className="gl-card p-5" aria-labelledby="sol-bridge-title">
-      <p id="sol-bridge-title" className="text-[13px] text-mute">
-        Money on another chain?
-      </p>
-      <div className="mt-3 flex items-center">
-        {chains.map((id, i) => (
-          // eslint-disable-next-line @next/next/no-img-element -- the chain marks the bridge list uses
-          <img
-            key={id}
-            src={`/brand/chains/${id}.png`}
-            alt=""
-            width={28}
-            height={28}
-            className={`h-7 w-7 rounded-full ring-2 ring-panel ${i > 0 ? "-ml-2" : ""}`}
-          />
-        ))}
-      </div>
-      <p className="mt-3 text-[14px] leading-relaxed text-foreground">Bring money over from another chain into your private balance on Solana.</p>
-      <button type="button" disabled={!onOpen} onClick={onOpen} className="btn btn-ghost btn-sm mt-4">
-        From another chain
-      </button>
-    </section>
-  );
+export function SolanaFromAnotherChain() {
+  const sol = useSolana();
+  const onPrivate = useShowPrivate();
+  if (!sol?.session || !solanaBridgeVisible(sol.network)) return null;
+  return <SolanaBridgeIn session={sol.session} ready={sol.ready} relayFunded={sol.relay?.funded !== false} onPrivate={onPrivate} />;
+}
+
+/**
+ * Money at the private account's own address that isn't private yet, with
+ * Make it private (SolanaArrivals). Shown wherever the balance is: the Vault
+ * and Portfolio. Nothing when there is none.
+ */
+export function SolanaNotPrivateYet() {
+  const sol = useSolana();
+  const onPrivate = useShowPrivate();
+  if (!sol?.session) return null;
+  return <SolanaArrivals session={sol.session} onPrivate={onPrivate} />;
 }
 
 // ---------------------------------------------------------------- Pay privately and Cash out
