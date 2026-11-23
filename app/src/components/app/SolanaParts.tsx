@@ -8,7 +8,7 @@
  */
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { RINGS_PRIVACY_NOTE, SOLANA_RINGS_NETWORK, ringsAssets, type RingsAsset } from "@/lib/solanaRings/config";
+import { RINGS_PRIVACY_NOTE, SOLANA_RINGS_NETWORK, ringsAssets, ringsUsd, shownAssets, type RingsAsset } from "@/lib/solanaRings/config";
 import { useEthPrice } from "@/hooks/useLiveMarkets";
 import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
@@ -21,24 +21,28 @@ import { isGloamAccount } from "@/lib/turnkeySolana";
 /** "Solana mainnet" or "Solana devnet". */
 export const SOLANA_NET_LABEL = SOLANA_RINGS_NETWORK === "devnet" ? "devnet" : "mainnet";
 
-/** USD for an amount of a Solana asset: USDC and USDT at a dollar, SOL at its price; null when unknown. */
+/** USD for an amount of a Solana asset: USDC and USDT at a dollar, SOL and ZEC at their price; null when unknown. */
 export function useSolanaUsd(): (assetId: string, amount: bigint) => number | null {
-  const { solUsd } = useEthPrice();
+  const { solUsd, zecUsd } = useEthPrice();
   return (assetId, amount) => {
     const a = ringsAssets().find((x) => x.id === assetId);
-    if (!a) return null;
-    const units = Number(amount) / 10 ** a.decimals;
-    if (a.id === "usdc" || a.id === "usdt") return units;
-    if (a.id === "sol") return solUsd != null ? units * solUsd : null;
-    return null;
+    return a ? ringsUsd(a, amount, { solUsd, zecUsd }) : null;
   };
 }
 
-/** The asset a payment starts on: a stablecoin with a balance first, then SOL, then the first listed. */
-export function preferredAsset(balances: Record<string, bigint> | null): RingsAsset {
-  const assets = ringsAssets();
+/**
+ * The listed assets this screen shows (config shownAssets): ZEC only once
+ * client assetsReady read it as set up, or while some of it is in `held`.
+ */
+export function useShownAssets(held?: Record<string, bigint> | null): readonly RingsAsset[] {
+  const sol = useSolana();
+  return shownAssets(sol?.ready ?? {}, SOLANA_RINGS_NETWORK, held);
+}
+
+/** The asset a payment starts on: a stablecoin with a balance first, then any other held, then the first listed. */
+export function preferredAsset(balances: Record<string, bigint> | null, assets: readonly RingsAsset[] = ringsAssets()): RingsAsset {
   const held = (id: string) => (balances?.[id] ?? 0n) > 0n;
-  return assets.find((a) => a.id !== "sol" && held(a.id)) ?? assets.find((a) => held(a.id)) ?? assets[0]!;
+  return assets.find((a) => a.stable && held(a.id)) ?? assets.find((a) => held(a.id)) ?? assets[0]!;
 }
 
 /** "$1,234.56". */
@@ -169,12 +173,16 @@ export function SolanaAssetSelect({
   onChange,
   label,
   disabled,
+  assets,
 }: {
   value: string;
   onChange: (id: string) => void;
   label: string;
   disabled?: boolean;
+  /** The assets to offer; the ones this screen shows by default (useShownAssets). */
+  assets?: readonly RingsAsset[];
 }) {
+  const shown = useShownAssets();
   return (
     <Select
       variant="pill"
@@ -184,7 +192,7 @@ export function SolanaAssetSelect({
       value={value}
       disabled={disabled}
       onChange={onChange}
-      options={ringsAssets().map((a) => ({
+      options={(assets ?? shown).map((a) => ({
         value: a.id,
         label: a.symbol,
         description: a.name,
@@ -207,6 +215,7 @@ export function SolanaAmountCard({
   spendable,
   asset,
   onAsset,
+  assets,
   amount,
   onAmount,
   problem,
@@ -221,6 +230,8 @@ export function SolanaAmountCard({
   spendable?: bigint | null;
   asset: RingsAsset;
   onAsset: (id: string) => void;
+  /** The assets the dropdown offers (useShownAssets by default). */
+  assets?: readonly RingsAsset[];
   amount: string;
   onAmount: (v: string) => void;
   problem: string | null;
@@ -251,7 +262,7 @@ export function SolanaAmountCard({
           onChange={(e) => onAmount(e.target.value)}
           className="tnum min-w-0 flex-1 bg-transparent text-[40px] font-light leading-[1.15] tracking-[-0.02em] text-foreground outline-none! placeholder:text-faint sm:text-[46px]"
         />
-        <SolanaAssetSelect value={asset.id} onChange={onAsset} label={`Asset, ${label.toLowerCase()}`} disabled={disabled} />
+        <SolanaAssetSelect value={asset.id} onChange={onAsset} label={`Asset, ${label.toLowerCase()}`} disabled={disabled} assets={assets} />
       </div>
       <p className={`tnum mt-1 min-h-5 text-[13px] ${problem ? "text-danger" : "text-mute"}`} role={problem ? "alert" : undefined}>
         {problem ?? (value != null ? `≈ ${usd(value)}` : " ")}
@@ -319,13 +330,14 @@ function HowItWorks({ at }: { at: number }) {
 /** What Solana takes, with each mark, and the plain note of what stays private. */
 export function SolanaAssetsCard({ className = "" }: { className?: string }) {
   const sol = useSolana();
+  const assets = useShownAssets();
   return (
     <aside className={`gl-card p-5 sm:p-6 ${className}`} aria-labelledby="sol-assets-title">
       <h2 id="sol-assets-title" className="text-[15px] text-foreground">
         On Solana
       </h2>
       <ul className="mt-4 space-y-3">
-        {ringsAssets().map((a) => (
+        {assets.map((a) => (
           <li key={a.id} className="flex items-center gap-3">
             <TokenLogo id={a.id} symbol={a.symbol} size={32} />
             <span className="min-w-0 flex-1">

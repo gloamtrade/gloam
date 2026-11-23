@@ -180,7 +180,7 @@ const account = await openSolanaAccount({ wallet, index: 0 });
 account.address;                                   // the private address others pay
 
 await registerSolanaAccount(account);              // once, so it can be paid; the relay pays the rent
-await solanaBalances(account);                      // { sol, usdc, usdt } in base units
+await solanaBalances(account);                      // { sol, usdc, usdt, zec } in base units
 
 await addToSolanaPrivate(account, { asset: "USDC", amount: 5_000_000n });      // the main wallet pays the fee
 const paid = await paySolanaPrivately(account, { to: "<gloam private address>", asset: "USDC", amount: 1_000_000n });
@@ -195,14 +195,15 @@ if (paid.state === "pending") await solanaTxStatus({ signature: paid.signature, 
 | --- | --- | --- |
 | `openSolanaAccount({ wallet, index?, baseUrl?, store? })` | Open private account `index` from one message signature (`solanaAccountMessage`, HKDF-SHA256, the app's derivation) | Nothing |
 | `registerSolanaAccount(account)` | Publish the account in the Rings registry so it can be paid. Gloam's relay pays the rent (about 0.0016 SOL) | The private account |
-| `solanaBalances(account)` | Sync from the Rings indexer and decrypt here: `{ sol, usdc, usdt }` | Nothing |
+| `solanaBalances(account)` | Sync from the Rings indexer and decrypt here: `{ sol, usdc, usdt, zec }` | Nothing |
 | `addToSolanaPrivate(account, { asset, amount })` | Deposit from the main wallet, which pays Solana's fee | The main wallet, the asset and the amount |
 | `paySolanaPrivately(account, { to, asset, amount })` | Pay another registered Gloam private account. The relay pays the fee | Both private accounts. Hidden: the asset and the amount |
 | `cashOutSolana(account, { to, asset, amount })` | Cash out to any Solana address. The relay pays the fee | The private account, the destination, the asset and the amount |
 | `solanaTxStatus` / `waitForSolanaTx` | Where a send stands, with a deadline | |
 | `solanaRelayStatus()`, `isSolanaAccountRegistered()`, `buildSolanaRegistration()`, `closeSolanaAccount()` | The relay's state, registration, the signed registration (for checks), wiping keys | |
 
-- **Assets:** SOL, USDC and USDT on mainnet (`SOLANA_ASSETS`), amounts in base units (9 decimals for SOL, 6 for the stablecoins).
+- **Assets:** SOL, USDC, USDT and ZEC on mainnet (`SOLANA_ASSETS`), amounts in base units (9 decimals for SOL, 6 for the stablecoins, 8 for ZEC).
+- **ZEC** is Zcash bridged to Solana by NEAR's Omni Bridge (mint `A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS`, `SOLANA_ZEC_MINT`), a public SPL token there. Once it is private on Gloam, the token and the amount stay hidden like any Solana asset. The bridge itself and adding from a wallet are public.
 - **Endpoints:** every call goes to Gloam's endpoints at `https://www.gloam.trade/api/solana/*` (a Solana RPC and the Rings indexer and prover behind Gloam's Helius key, and Gloam's relay). `baseUrl` points elsewhere. They answer servers and gloam.trade's own pages; a page on another site gets a refusal, so in a browser app put your own server in between and pass its `baseUrl`.
 - **Fees:** the relay pays the fees of registering, paying and cashing out (and a new token account's rent on a cash out), so the private account never holds SOL. Adding money is the one transaction the main wallet pays for.
 - **Never sent twice:** a relay refusal is a `SolanaRelayError`; `maybeSent: false` means nothing went out, `maybeSent: true` means check `solanaTxStatus` (or the balance) before sending again. A send that failed or was dropped throws `SolanaTxError` and frees its funds.

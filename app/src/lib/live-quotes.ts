@@ -224,7 +224,7 @@ export async function loadLiveMarkets() {
  * here left ETH, HYPE or BNB out of every dollar total ("no dollar price").
  * Null only when all three have nothing. Never another coin's price.
  */
-const BINANCE_PAIR: Record<string, string> = { ethereum: "ETHUSDT", hyperliquid: "HYPEUSDT", binancecoin: "BNBUSDT", solana: "SOLUSDT" };
+const BINANCE_PAIR: Record<string, string> = { ethereum: "ETHUSDT", hyperliquid: "HYPEUSDT", binancecoin: "BNBUSDT", solana: "SOLUSDT", zcash: "ZECUSDT" };
 const LAST_GOOD_MS = 60 * 60_000;
 const lastGood = new Map<string, { mark: number; at: number }>();
 
@@ -274,6 +274,14 @@ export async function loadBnbUsd(): Promise<number | null> {
 /** SOL in USD: Solana's coin, for the Solana portfolio. Null when unknown. */
 export async function loadSolUsd(): Promise<number | null> {
   return coinUsd("solana");
+}
+
+/**
+ * ZEC in USD: Zcash's price, which ZEC bridged to Solana (lib/solanaRings/config)
+ * is shown at, as the Zcash that NEAR's Omni Bridge moved over. Null when unknown.
+ */
+export async function loadZecUsd(): Promise<number | null> {
+  return coinUsd("zcash");
 }
 
 /** ETH in USD, for the portfolio's dollar figures. */

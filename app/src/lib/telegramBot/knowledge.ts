@@ -458,6 +458,9 @@ export function solanaFacts(): string | null {
   return [
     `${SOLANA_NAME.toUpperCase()} (Gloam on Solana; it is not one of the vault mainnets above and works differently)`,
     `- Gloam is live on ${SOLANA_NAME}, at gloam.trade/app/solana (Solana in the app's menu). It runs through Helius Privacy Rings, not the Gloam vault. Assets: ${joinNames(ringsAssets().map((a) => a.symbol))}. Add, pay privately, payroll and cash out work there.`,
+    ...ringsAssets()
+      .filter((a) => a.note)
+      .map((a) => `- ${a.symbol} (mint ${a.mint}): ${a.note}`),
     `- ${RINGS_PRIVACY_NOTE} Adding money also shows the token and the amount, and a cash out shows the address it goes to, the token and the amount. Never say or suggest that Gloam on Solana hides who paid whom, the sender or the recipient.`,
     "- A person's Solana private account is its own key, opened by a signature from their main Solana wallet, so the same wallet reopens the same account on any device. Gloam's relay pays the Solana fees, so the private account never needs SOL of its own.",
     `- ${RINGS_PAYROLL_NOTE}`,

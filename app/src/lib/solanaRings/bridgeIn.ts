@@ -4,8 +4,8 @@
  * self-tests; nothing here touches the network.
  *
  * The path, in one step for the person:
- *  1. Relay delivers to the private account's own Solana address (SOL, USDC or
- *     USDT), paid from an EVM wallet (it signs an approve and a deposit on its
+ *  1. Relay delivers to the private account's own Solana address (SOL, USDC,
+ *     USDT or ZEC), paid from an EVM wallet (it signs an approve and a deposit on its
  *     chain) or sent to a one-time deposit address from any wallet or exchange.
  *  2. The private account deposits what arrived into its private balance, with
  *     Gloam's relay as fee payer (lib/solanaRings/arrivals). The relay policy
@@ -28,7 +28,10 @@
  * supported") gave a deposit address into Solana USDC, and Base, Arbitrum,
  * Ethereum, BNB Chain, Robinhood Chain, Tempo and Tron into USDT and SOL; a
  * wallet on Base got its [approve, deposit] into USDC. 20 USDC from Base landed
- * about 19.84 USDC.
+ * about 19.84 USDC. ZEC (the Omni Bridge mint, config ZEC_SOLANA_MINT), quoted
+ * the same way on 2026-11-23: Base USDC (deposit address and wallet), Base ETH,
+ * Ethereum USDC and BNB Chain USDT all delivered it; 20 USDC from Base quoted
+ * about 0.0227 ZEC.
  */
 import { BRIDGE_CHAINS, BRIDGE_MAX_USD, BRIDGE_MIN_USD, validRefundAddress, type BridgeAppFee, type BridgeChain, type BridgeChainKind, type BridgeStage, type BridgeToken } from "../bridge";
 import { displayAmountNumber, typedAmount } from "../amountShort";
@@ -58,10 +61,25 @@ export function relayCurrency(asset: RingsAsset): string {
   return asset.mint ?? RINGS_SOL_MINT;
 }
 
-/** The assets money can land as, stablecoins first: the listed ones Relay delivers. Mainnet's, since Relay only delivers there. */
+/**
+ * The assets money can land as, stablecoins first: the listed ones Relay
+ * delivers. Mainnet's, since Relay only delivers there. A screen shows ZEC
+ * among them only once it is set up (config shownAssets).
+ */
 export function landingAssets(network: RingsNetwork = "mainnet"): readonly RingsAsset[] {
-  const order = ["usdc", "usdt", "sol"];
+  const order = ["usdc", "usdt", "sol", "zec"];
   return order.map((id) => ringsAssets(network).find((a) => a.id === id)).filter((a): a is RingsAsset => Boolean(a));
+}
+
+/** The landing assets a screen offers, given client assetsReady: ZEC only once it is read as set up (config shownAssets). */
+export function shownLandingAssets(ready: Readonly<Record<string, boolean>>, network: RingsNetwork = "mainnet"): readonly RingsAsset[] {
+  return landingAssets(network).filter((a) => !a.hiddenUntilReady || ready[a.id] === true);
+}
+
+/** "USDC, USDT or SOL": the assets in a list, said as a choice. */
+export function orNames(assets: readonly Pick<RingsAsset, "symbol">[]): string {
+  const s = assets.map((a) => a.symbol);
+  return s.length <= 1 ? (s[0] ?? "") : `${s.slice(0, -1).join(", ")} or ${s[s.length - 1]}`;
 }
 
 /** What a token lands as by default: USDT stays USDT, everything else becomes USDC. */

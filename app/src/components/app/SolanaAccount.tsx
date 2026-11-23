@@ -243,15 +243,20 @@ const DEMO_ICON = `data:image/svg+xml;utf8,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#1d1f23"/><path d="M9 20.5c1.6-6 4.6-9 7-9s5.4 3 7 9" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>'
 )}`;
 
+/** The demo's pretend private balances: 4.25 SOL, 1,250 USDC, 300 USDT, 0.5 ZEC. */
+const DEMO_PRIVATE: Record<string, bigint> = { sol: 4_250_000_000n, usdc: 1_250_000_000n, usdt: 300_000_000n, zec: 50_000_000n };
+/** And its wallet's: 2.1 SOL, 480 USDC. */
+const DEMO_WALLET: Record<string, bigint> = { sol: 2_100_000_000n, usdc: 480_000_000n };
+
 function demoBalances(network: RingsNetwork): Record<string, bigint> {
   const out: Record<string, bigint> = {};
-  for (const a of ringsAssets(network)) out[a.id] = a.id === "sol" ? 4_250_000_000n : a.id === "usdc" ? 1_250_000_000n : 300_000_000n;
+  for (const a of ringsAssets(network)) out[a.id] = DEMO_PRIVATE[a.id] ?? 0n;
   return out;
 }
 
 function demoWalletBalances(network: RingsNetwork): Record<string, bigint> {
   const out: Record<string, bigint> = {};
-  for (const a of ringsAssets(network)) out[a.id] = a.id === "sol" ? 2_100_000_000n : a.id === "usdc" ? 480_000_000n : 0n;
+  for (const a of ringsAssets(network)) out[a.id] = DEMO_WALLET[a.id] ?? 0n;
   return out;
 }
 

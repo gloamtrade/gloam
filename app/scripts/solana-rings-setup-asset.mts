@@ -5,8 +5,9 @@
  * Anyone may create it (the protocol config says so); whoever signs pays the
  * rent, once, for everyone.
  *
- * Read on 2026-11-22: USDC and USDT are already set up on mainnet, and Circle's
- * devnet USDC on devnet. This script is for the next token.
+ * Read on 2026-11-23: USDC, USDT and ZEC (the Omni Bridge mint, set up by
+ * someone else on 2026-11-10 for about 0.0024 SOL) are already set up on
+ * mainnet, and Circle's devnet USDC on devnet. This script is for the next token.
  *
  * It reads the chain, prints the exact rent (from a simulation of the
  * transaction), and only sends with --send. It never writes a key anywhere:

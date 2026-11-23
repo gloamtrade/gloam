@@ -10,7 +10,7 @@
  * twice. The account comes from SolanaAccount (its payroll engine).
  */
 import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
-import { RINGS_PAYROLL_NOTE, ringsAssets, ringsExplorerTx } from "@/lib/solanaRings/config";
+import { RINGS_PAYROLL_NOTE, ringsAssets, ringsExplorerTx, shownAssets } from "@/lib/solanaRings/config";
 import {
   addressesToCheck,
   checkRecipients,
@@ -117,12 +117,13 @@ export function SolanaPayrollView(props: {
 }) {
   const { engine, balances, ready, relayFunded, onBalances } = props;
   const toUsd = useSolanaUsd();
-  const assets = ringsAssets(engine.network);
+  // ZEC shows once it is set up (config shownAssets), or while some is held privately
+  const assets = shownAssets(ready, engine.network, balances);
   const [store, setStore] = useState<PayrollStore | null>(null);
   const [run, setRun] = useState<PayrollRun | null>(null);
   const [lastDone, setLastDone] = useState<PayrollRun | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [assetId, setAssetId] = useState(() => preferredAsset(balances).id);
+  const [assetId, setAssetId] = useState(() => preferredAsset(balances, assets).id);
   const [text, setText] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -169,7 +170,7 @@ export function SolanaPayrollView(props: {
     return () => window.removeEventListener("beforeunload", warn);
   }, [running]);
 
-  const asset = assets.find((a) => a.id === assetId)!;
+  const asset = assets.find((a) => a.id === assetId) ?? assets[0]!;
   const parsed = parseSolanaPayrollCsv(text, asset);
   const pending = addressesToCheck(parsed.rows, registry);
   const rows = pending.length ? parsed.rows : checkRecipients(parsed.rows, registry, engine.owner);

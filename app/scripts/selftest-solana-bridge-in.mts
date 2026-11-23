@@ -104,6 +104,7 @@ const recipient = priv.shieldedAddress();
 const assets = config.ringsAssets("mainnet");
 const USDC = assets.find((a) => a.id === "usdc")!;
 const USDT = assets.find((a) => a.id === "usdt")!;
+const ZEC = assets.find((a) => a.id === "zec")!;
 const SOL = assets.find((a) => a.id === "sol")!;
 const TOKEN = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" as Address; // ggignore
 const usdcAccount = await getAssociatedTokenAddress(owner.address, USDC.mint as Address, TOKEN);
@@ -149,6 +150,12 @@ ok(v.ok && v.accounts.includes(owner.address) && v.accounts.includes(usdcAccount
 }
 v = check(await signedBy(await deposit({ asset: USDT, tokenAccount: await getAssociatedTokenAddress(owner.address, USDT.mint as Address, TOKEN) }), owner));
 ok(v.ok && v.kind === "deposit", "USDT passes too");
+v = check(await signedBy(await deposit({ asset: ZEC, amount: 2_271_865n, tokenAccount: await getAssociatedTokenAddress(owner.address, ZEC.mint as Address, TOKEN) }), owner));
+ok(v.ok && v.kind === "deposit", "ZEC (bridged, 8 decimals) passes too");
+await (async () => {
+  const r = check(await signedBy(await deposit({ asset: ZEC, amount: policy.RELAYED_DEPOSIT_MIN.zec! - 1n, tokenAccount: await getAssociatedTokenAddress(owner.address, ZEC.mint as Address, TOKEN) }), owner));
+  ok(!r.ok, "ZEC under its floor (0.001 ZEC) is refused");
+})();
 v = check(await signedBy(await deposit({ asset: SOL, amount: 270_400_917n, tokenAccount: null }), owner));
 ok(v.ok && v.kind === "deposit", "a SOL deposit passes");
 v = check(await signedBy(await deposit({ asset: SOL, amount: policy.RELAYED_DEPOSIT_MIN.sol!, tokenAccount: null }), owner));
@@ -349,11 +356,16 @@ function tokenAccountBytes(mint: string, holder: string, amount: bigint, state =
         { account: "A2", mint: USDT.mint!, amount: 99_999n },
         { account: "A3", mint: USDT.mint!, amount: 5_000_000n, frozen: true },
         { account: "A4", mint: "So11111111111111111111111111111111111111112", amount: 10n ** 12n },
+        { account: "A5", mint: ZEC.mint!, amount: 2_271_865n },
+        { account: "A6", mint: ZEC.mint!, amount: 99_999n },
       ],
     },
     "mainnet"
   );
-  ok(list.length === 1 && list[0]!.assetId === "usdc" && list[0]!.tokenAccount === "A1", "only listed assets over the floor, not frozen, count as waiting");
+  ok(
+    list.length === 2 && list[0]!.assetId === "usdc" && list[0]!.tokenAccount === "A1" && list[1]!.assetId === "zec" && list[1]!.tokenAccount === "A5",
+    "only listed assets over the floor, not frozen, count as waiting (ZEC from 0.001)"
+  );
   ok(bridgeIn.arrivalsFrom({ lamports: 270_400_917n, tokens: [] }, "mainnet")[0]?.amount === 270_400_917n, "SOL counts whole: all of it goes private");
   // readArrivals over a fake RPC: only token accounts this owner holds
   const fakeRpc: import("../src/lib/solanaRings/arrivals").Rpc = async <T,>(method: string): Promise<T> => {
@@ -578,7 +590,10 @@ ok(!/\u2014/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /public/.test(bridgeIn
 {
   const ids = bridgeIn.solanaBridgeSources().map((c) => c.id);
   ok(!ids.includes(792703809) && !ids.includes(81457) && ids.includes(8453) && ids.includes(728126428) && ids.includes(8253038), "sources: every bridge chain but Solana itself and Blast (Relay refused it)");
-  ok(bridgeIn.landingAssets().map((a) => a.id).join() === "usdc,usdt,sol", "it lands as SOL, USDC or USDT");
+  ok(bridgeIn.landingAssets().map((a) => a.id).join() === "usdc,usdt,sol,zec", "it lands as SOL, USDC, USDT or ZEC");
+  ok(bridgeIn.shownLandingAssets({}).map((a) => a.id).join() === "usdc,usdt,sol", "a screen offers ZEC to land as only once it is read as set up");
+  ok(bridgeIn.shownLandingAssets({ zec: false }).map((a) => a.id).join() === "usdc,usdt,sol" && bridgeIn.shownLandingAssets({ zec: true }).map((a) => a.id).join() === "usdc,usdt,sol,zec", "set up, it is offered; not set up, it isn't");
+  ok(bridgeIn.orNames(bridgeIn.shownLandingAssets({ zec: true })) === "USDC, USDT, SOL or ZEC" && bridgeIn.orNames([USDC]) === "USDC", "the choice said in words");
   ok(bridgeIn.defaultLanding({ symbol: "USDT0" }) === "usdt" && bridgeIn.defaultLanding({ symbol: "ETH" }) === "usdc" && bridgeIn.defaultLanding({ symbol: "USDT" }, { usdt: false }) === "usdc", "USDT stays USDT, the rest lands as USDC, never on an asset not set up");
   ok(bridgeIn.relayCurrency(SOL) === "11111111111111111111111111111111" && bridgeIn.relayCurrency(USDC) === USDC.mint, "Relay's names for SOL and a mint");
   ok(
@@ -831,6 +846,15 @@ ok(!/\u2014/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /public/.test(bridgeIn
 
   res = await post({ ...base, asset: "sol" });
   ok(res.status === 200 && (asked as unknown as Record<string, unknown>).destinationCurrency === "11111111111111111111111111111111", "SOL lands as SOL");
+  res = await post({ ...base, asset: "zec" });
+  json = (await res.json()) as typeof json;
+  ok(
+    res.status === 200 && (asked as unknown as Record<string, unknown>).destinationCurrency === ZEC.mint && json.data?.receive.assetId === "zec" && json.data.receive.decimals === 8,
+    "ZEC lands as the Omni Bridge mint, in 8 decimals"
+  );
+  res = await post({ ...base, asset: "bonk" });
+  json = (await res.json()) as typeof json;
+  ok(res.status === 400 && /SOL or ZEC|USDT, SOL or ZEC/.test(json.error?.message ?? ""), "an asset it can't land as is refused, naming the ones it can");
 
   relayReply = (b) => ({ ...addressReply(b), details: { ...addressReply(b).details, currencyOut: { amount: "19842157", currency: { chainId: 8453, address: b.destinationCurrency } } } });
   res = await post(base);

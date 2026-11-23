@@ -41,7 +41,15 @@ ok(typeof root.solanaAccountMessage === "function" && typeof root.solanaNetworkI
 ok(root.solanaAccountSeed === sol.solanaAccountSeed, "the subpath re-exports the same derivation");
 const info = sol.solanaNetworkInfo();
 ok(info.key === "solana-mainnet" && info.chainId === 792703809 && info.name === "Solana", "mainnet info");
-ok(info.assets.map((a) => a.symbol).join(",") === "SOL,USDC,USDT", "SOL, USDC and USDT on mainnet");
+ok(info.assets.map((a) => a.symbol).join(",") === "SOL,USDC,USDT,ZEC", "SOL, USDC, USDT and ZEC on mainnet");
+{
+  const zec = sol.solanaAsset("ZEC");
+  ok(zec?.mint === "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS" && zec.mint === sol.SOLANA_ZEC_MINT && zec.decimals === 8 && zec.id === "zec", "ZEC: the Omni Bridge mint, 8 decimals");
+  ok(!zec.stable && sol.solanaAsset("USDC")?.stable === true && sol.solanaAsset("USDT")?.stable === true && !sol.solanaAsset("SOL")?.stable, "USDC and USDT are the stablecoins; SOL and ZEC are not");
+  ok(zec.note === sol.SOLANA_ZEC_NOTE && /token and the amount stay hidden/.test(zec.note) && /bridge itself and adding from a wallet are public/.test(zec.note), "ZEC's note says what stays hidden and what is public");
+  ok(sol.solanaAsset("A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS")?.id === "zec" && sol.solanaAsset("zec", "devnet") === null, "ZEC by mint, on mainnet only");
+  ok(!/—|happy to/i.test(sol.SOLANA_ZEC_NOTE), "no em dashes or banned phrases in it");
+}
 ok(info.endpoints.relay === "https://www.gloam.trade/api/solana/relay" && info.endpoints.spr === "https://www.gloam.trade/api/solana/spr", "Gloam's public endpoints");
 ok(sol.solanaEndpoints("https://example.test/").rpc === "https://example.test/api/solana/rpc", "a configurable base URL");
 assert.throws(() => sol.solanaEndpoints("ftp://x"));

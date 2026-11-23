@@ -32,28 +32,47 @@ export const GLOAM_SOLANA_BASE_URL = "https://www.gloam.trade";
 export const SOLANA_MAINNET_CHAIN_ID = 792703809;
 
 export interface SolanaAsset {
-  /** "sol", "usdc", "usdt": the key balances come back under. */
-  id: "sol" | "usdc" | "usdt";
+  /** "sol", "usdc", "usdt", "zec": the key balances come back under. */
+  id: "sol" | "usdc" | "usdt" | "zec";
   symbol: string;
   name: string;
   /** The SPL mint, or null for SOL itself. */
   mint: string | null;
   decimals: number;
+  /** A dollar stablecoin (USDC, USDT). SOL and ZEC are not. */
+  stable?: boolean;
+  /** One plain line on what the token is, where it matters (bridged ZEC). */
+  note?: string;
 }
 
 const SOL: SolanaAsset = { id: "sol", symbol: "SOL", name: "Solana", mint: null, decimals: 9 };
 
-/** What Gloam lists on Solana. Read on chain 2026-11-22: USDC and USDT are set up in the mainnet pool. */
+/** What bridged ZEC is on Solana, and what stays public around it. */
+export const SOLANA_ZEC_NOTE =
+  "ZEC on Solana is Zcash brought over by NEAR's Omni Bridge, a public token there. Once it is private on Gloam, the token and the amount stay hidden. The bridge itself and adding from a wallet are public.";
+
+/**
+ * Zcash on Solana: NEAR Omni Bridge's wrapped ZEC (zec.omft.near on NEAR),
+ * the mint Jupiter verifies and Kamino's ZEC market lends. SPL Token, 8
+ * decimals, no freeze authority; the Omni Bridge mints and burns it.
+ */
+export const SOLANA_ZEC_MINT = "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS";
+
+/**
+ * What Gloam lists on Solana. Read on chain 2026-11-23: USDC, USDT and ZEC are
+ * set up in the mainnet pool (each mint's Privacy Rings SPL interface exists).
+ */
 export const SOLANA_ASSETS: Record<SolanaNetworkKey, readonly SolanaAsset[]> = {
   mainnet: [
     SOL,
-    { id: "usdc", symbol: "USDC", name: "USD Coin", mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6 },
-    { id: "usdt", symbol: "USDT", name: "Tether USD", mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", decimals: 6 },
+    { id: "usdc", symbol: "USDC", name: "USD Coin", mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6, stable: true },
+    { id: "usdt", symbol: "USDT", name: "Tether USD", mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", decimals: 6, stable: true },
+    { id: "zec", symbol: "ZEC", name: "Zcash (bridged)", mint: SOLANA_ZEC_MINT, decimals: 8, note: SOLANA_ZEC_NOTE },
   ],
   devnet: [
     SOL,
     // Circle's devnet USDC (faucet.circle.com)
-    { id: "usdc", symbol: "USDC", name: "USD Coin", mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", decimals: 6 },
+    { id: "usdc", symbol: "USDC", name: "USD Coin", mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", decimals: 6, stable: true },
   ],
 };
 

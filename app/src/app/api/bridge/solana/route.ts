@@ -21,6 +21,7 @@ import {
   RELAY_SOLANA_CHAIN_ID,
   SOLANA_BRIDGE_IN_ENABLED,
   landingAssets,
+  orNames,
   relayCurrency,
   relayRefusal,
   solanaBridgeSources,
@@ -57,7 +58,7 @@ function isSolanaAddress(v: string): boolean {
 
 /**
  * A Relay order that delivers to a private account on Solana (lib/solanaRings/bridgeIn):
- * { chainId, symbol, asset: "usdc" | "usdt" | "sol", amount, recipient, sender? , refundTo? }.
+ * { chainId, symbol, asset: "usdc" | "usdt" | "sol" | "zec", amount, recipient, sender? , refundTo? }.
  *
  * `recipient` is the private account's own address; the app makes what lands
  * there private itself (lib/solanaRings/arrivals). `amount` is what is sent
@@ -97,7 +98,7 @@ export async function POST(req: Request) {
   const token = chain && typeof body.symbol === "string" ? bridgeToken(chain, body.symbol) : null;
   if (!chain || !token || !bridgeChain(chain.id)) return fail(400, "Pick where the money is coming from.");
   const asset = landingAssets().find((a) => a.id === body.asset);
-  if (!asset) return fail(400, "Pick what it lands as: SOL, USDC or USDT.");
+  if (!asset) return fail(400, `Pick what it lands as: ${orNames(landingAssets())}.`);
 
   const recipient = typeof body.recipient === "string" ? body.recipient.trim() : "";
   if (!isSolanaAddress(recipient)) return fail(400, "Open your private account on Solana first.");

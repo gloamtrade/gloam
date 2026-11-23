@@ -120,7 +120,7 @@ const ADDRESS_KEYS = [
   "recipient",
   "to",
 ];
-const AMOUNT_KEYS = ["amount", "pay", "salary", "usd", "usdc", "sol", "value", "total"];
+const AMOUNT_KEYS = ["amount", "pay", "salary", "usd", "usdc", "sol", "zec", "value", "total"];
 
 const headerKey = (h: string) => h.toLowerCase().replace(/\s+/g, " ").trim();
 const findCol = (header: string[], keys: string[]) => header.findIndex((h) => keys.includes(headerKey(h)));
@@ -295,7 +295,7 @@ export type PayrollRun = {
   network: RingsNetwork;
   /** The paying private account. */
   owner: string;
-  /** RingsAsset id ("sol", "usdc"). */
+  /** RingsAsset id ("sol", "usdc", "zec"). */
   asset: string;
   createdAt: number;
   rows: RunRow[];

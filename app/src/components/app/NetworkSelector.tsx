@@ -18,14 +18,15 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { MAINNET_ENABLED, isNetworkWritable, shownNetworks, solanaSlot } from "@/lib/networks";
-import { SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAssets } from "@/lib/solanaRings/config";
+import { SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, shownAssets } from "@/lib/solanaRings/config";
 import { useNetwork } from "./NetworkProvider";
+import { useSolana } from "./SolanaAccount";
 import { TokenLogo } from "./TokenLogo";
 import type { GloamNetwork } from "@/lib/networks";
 
-/** "SOL, USDC and USDT": what Gloam takes on Solana here. */
-function solanaAssetLine(): string {
-  const s = ringsAssets().map((a) => a.symbol);
+/** "SOL, USDC and USDT": what Gloam takes on Solana here (ZEC once it is read as set up, config shownAssets). */
+function solanaAssetLine(ready: Readonly<Record<string, boolean>>): string {
+  const s = shownAssets(ready).map((a) => a.symbol);
   return s.length <= 1 ? (s[0] ?? "") : `${s.slice(0, -1).join(", ")} and ${s[s.length - 1]}`;
 }
 
@@ -59,6 +60,7 @@ function assetLine(n: GloamNetwork): string {
 
 export function NetworkSelector() {
   const { network, setNetworkKey, settled, solana, selectSolana } = useNetwork();
+  const solReady = useSolana()?.ready ?? {};
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -185,7 +187,7 @@ export function NetworkSelector() {
                       <TokenLogo id="solana" symbol="Solana" size={30} network />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[14px] font-medium leading-tight text-foreground">Solana</span>
-                        <span className="mt-0.5 block truncate text-[12px] leading-tight text-mute">{solanaAssetLine()}</span>
+                        <span className="mt-0.5 block truncate text-[12px] leading-tight text-mute">{solanaAssetLine(solReady)}</span>
                       </span>
                       {solana && (
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden className="shrink-0 text-foreground">

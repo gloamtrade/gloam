@@ -244,14 +244,15 @@ export const KNOWN_ASSETS: KnownAsset[] = [
   // each with the decimals the SDK read on chain. Last, so a bare "USDT" or "USDC" keeps naming the
   // one it named before; name the network (bnb-mainnet) for BNB Chain's, and a limit then counts in 18 decimals.
   ...bnbKnownAssets(),
-  // Solana mainnet (gloam_solana_* tools): SOL, USDC and USDT by mint. Last, so a bare "USDC" or "USDT"
-  // keeps naming the one it named before; name the network (solana-mainnet) for Solana's. "SOL" is only here.
+  // Solana mainnet (gloam_solana_* tools): SOL, USDC, USDT and ZEC by mint. Last, so a bare "USDC" or "USDT"
+  // keeps naming the one it named before; name the network (solana-mainnet) for Solana's. "SOL" and "ZEC"
+  // (Zcash bridged by NEAR's Omni Bridge, 8 decimals, not a stablecoin) are only here.
   ...SOLANA_ASSETS.mainnet.map((a) => ({
     symbol: a.symbol,
     chainId: SOLANA_MAINNET_CHAIN_ID,
     address: (a.mint ?? SOLANA_RINGS_SOL_MINT) as Address,
     decimals: a.decimals,
-    stable: a.id !== "sol",
+    stable: a.stable === true,
   })),
 ];
 

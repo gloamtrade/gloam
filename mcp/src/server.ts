@@ -508,7 +508,7 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
           })),
           {
             key: "solana-mainnet",
-            network: "Solana mainnet, through Helius Solana Privacy Rings (gloam_solana_* tools; SOL, USDC, USDT)",
+            network: "Solana mainnet, through Helius Solana Privacy Rings (gloam_solana_* tools; SOL, USDC, USDT, ZEC)",
             privacy: SOLANA_AGENT_PRIVACY,
           },
         ],

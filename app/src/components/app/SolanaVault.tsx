@@ -31,6 +31,7 @@ import {
   SolanaSteps,
   amountProblem,
   preferredAsset,
+  useShownAssets,
   useSolanaUsd,
   usd,
 } from "./SolanaParts";
@@ -48,7 +49,7 @@ function holdings(b: Record<string, bigint> | null, toUsd: (id: string, v: bigin
       logoId: a.id,
       text: formatSolAmount(b[a.id]!, a.decimals),
       amount: toUsd(a.id, b[a.id]!) ?? 0,
-      dollar: a.id !== "sol",
+      dollar: Boolean(a.stable),
     }))
     .sort((x, y) => y.amount - x.amount);
 }
@@ -63,6 +64,7 @@ function listOr(items: string[]): string {
 export function SolanaVaultHome({ missing }: { missing?: string | null }) {
   const sol = useSolana();
   const toUsd = useSolanaUsd();
+  const shown = useShownAssets();
   if (!sol) return null;
   const { address, balances, walletBalances } = sol;
   const privateRows = holdings(balances, toUsd);
@@ -71,7 +73,7 @@ export function SolanaVaultHome({ missing }: { missing?: string | null }) {
   const hasPrivate = privateRows.length > 0;
   const blockedFor = (a: VaultActionInfo) => (known && !hasPrivate && (a.id === "pay" || a.id === "cashout") ? ADD_FIRST : null);
   const firstWallet = walletRows[0];
-  const symbols = listOr(ringsAssets().map((a) => a.symbol));
+  const symbols = listOr(shown.map((a) => a.symbol));
 
   const next: { text: string; action: React.ReactNode } = hasPrivate
     ? {
@@ -216,10 +218,11 @@ function RelayPaused() {
 export function SolanaAddView() {
   const sol = useSolana()!;
   const sp = useSearchParams();
-  const assets = ringsAssets();
+  // ZEC shows once it is read as set up (useShownAssets); ?asset=zec waits for that read
+  const assets = useShownAssets();
   const [assetId, setAssetId] = useState(() => {
     const want = sp.get("asset");
-    return assets.some((a) => a.id === want) ? want! : assets[0]!.id;
+    return ringsAssets().some((a) => a.id === want) ? want! : assets[0]!.id;
   });
   const [amount, setAmount] = useState("");
   const { show, modal } = useSuccess();
@@ -258,6 +261,7 @@ export function SolanaAddView() {
             balance={inWallet}
             spendable={spendable}
             asset={asset}
+            assets={assets}
             onAsset={(id) => {
               setAssetId(id);
               setAmount("");
@@ -318,7 +322,8 @@ export function SolanaAddView() {
         <SolanaSteps task={working ? sol.task : null} className="mt-4" />
         <SolanaError kind="add" className="mt-4" />
 
-        <p className="mt-4 text-center text-[12.5px] text-mute">Adding shows your wallet, the token and the amount on Solana.</p>
+        {asset.note && <p className="mt-4 text-center text-[12.5px] leading-relaxed text-mute">{asset.note}</p>}
+        <p className={`${asset.note ? "mt-1.5" : "mt-4"} text-center text-[12.5px] text-mute`}>Adding shows your wallet, the token and the amount on Solana.</p>
       </section>
 
       <SolanaFromAnotherChain />
@@ -367,10 +372,10 @@ export function SolanaNotPrivateYet() {
 function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onReceive: () => void }) {
   const sol = useSolana()!;
   const toUsd = useSolanaUsd();
-  const assets = ringsAssets();
+  const assets = useShownAssets(sol.balances);
   const own = sol.main?.account.address ?? "";
-  const firstHeld = sol.balances ? preferredAsset(sol.balances) : null;
-  const [assetId, setAssetId] = useState(preferredAsset(sol.balances).id);
+  const firstHeld = sol.balances ? preferredAsset(sol.balances, assets) : null;
+  const [assetId, setAssetId] = useState(preferredAsset(sol.balances, assets).id);
   const [amount, setAmount] = useState("");
   const [to, setTo] = useState(kind === "cashout" ? own : "");
   const { show, modal } = useSuccess();
@@ -461,6 +466,7 @@ function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onRecei
               balanceLabel="Private balance"
               balance={have}
               asset={asset}
+              assets={assets}
               onAsset={(id) => {
                 setAssetId(id);
                 setAmount("");
@@ -517,6 +523,7 @@ function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onRecei
 function SolanaReceiveView() {
   const sol = useSolana()!;
   const address = sol.address!;
+  const assets = useShownAssets(sol.balances);
   const [copied, setCopied] = useState(false);
   const [qr, setQr] = useState<string | null>(null);
   useEffect(() => {
@@ -585,7 +592,7 @@ function SolanaReceiveView() {
           </div>
           <p className="mt-2 text-[13.5px] leading-relaxed text-mute">Payments to your private address land in your balance on their own.</p>
           <ul className="mt-4 divide-y divide-line border-y border-line">
-            {ringsAssets().map((a) => (
+            {assets.map((a) => (
               <li key={a.id} className="flex min-h-[56px] items-center justify-between gap-3 py-2.5">
                 <span className="flex min-w-0 items-center gap-3">
                   <TokenLogo id={a.id} symbol={a.symbol} size={28} />
