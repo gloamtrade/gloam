@@ -3983,6 +3983,8 @@ export function MoveView() {
                           <Spinner />
                           <span className="truncate">Opening the payment…</span>
                         </>
+                      ) : !importText.trim() ? (
+                        "Paste a link or code to claim"
                       ) : (
                         "Claim and secure"
                       )}
