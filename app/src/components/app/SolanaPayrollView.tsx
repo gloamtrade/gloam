@@ -686,6 +686,10 @@ export function SolanaPayrollView(props: {
               "Pay privately"
             )}
           </button>
+          {/* why it is greyed out, in the words EVM Payroll uses */}
+          {rows.length === 0 && starting === null && (
+            <p className="mt-2.5 text-center text-[12.5px] text-mute">Add your team first, from a CSV or a pasted list.</p>
+          )}
           {starting !== null && (
             <SolanaSteps className="mt-4" task={{ kind: "pay", steps: ["Reading your private balance", "Saving the run", "Paying in batches of up to 15"], at: starting }} />
           )}
