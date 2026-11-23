@@ -27,7 +27,9 @@ const refuse = (status: number, code: string, message: string) =>
 const RELAY_LOW_LAMPORTS = 10_000_000;
 
 export async function GET() {
-  const signer = SOLANA_RINGS_ENABLED ? await relayerSigner() : null;
+  // The address is public (it is the fee payer on every transaction it sponsors), so
+  // it is named even while Solana is off, to fund the relay before switching it on.
+  const signer = await relayerSigner();
   const url = heliusRpcUrl();
   let funded = false;
   if (signer && url) {
@@ -39,7 +41,7 @@ export async function GET() {
     }
   }
   return NextResponse.json(
-    { ok: true, on: Boolean(signer && url), funded, relayer: signer?.address ?? null, network: SOLANA_RINGS_NETWORK },
+    { ok: true, on: Boolean(SOLANA_RINGS_ENABLED && signer && url), funded, relayer: signer?.address ?? null, network: SOLANA_RINGS_NETWORK },
     { headers: NO_STORE }
   );
 }
