@@ -207,7 +207,8 @@ export function SolanaPortfolioView() {
               </ul>
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line py-3 max-sm:px-5 sm:px-6">
                 <p className="text-[13px] text-mute">Pay from it privately, or cash out to any Solana address.</p>
-                <div className="flex gap-1">
+                {/* quiet links: their words line up with the text above and the Pay buttons' edge, not their padding */}
+                <div className="-mx-4 flex gap-1">
                   <IntentLink href="/app/vault?tab=move" className="btn btn-quiet btn-sm h-10">
                     Pay privately
                   </IntentLink>

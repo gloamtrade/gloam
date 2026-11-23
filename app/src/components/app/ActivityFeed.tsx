@@ -48,7 +48,7 @@ function Chevron({ dir }: { dir: "left" | "right" }) {
 
 function Header() {
   return (
-    <div className="flex shrink-0 items-start justify-between gap-3 px-5 pb-3 pt-5">
+    <div className="flex shrink-0 items-start justify-between gap-3 max-sm:px-5 sm:px-6 pb-3 pt-5">
       <div>
         <h2 className="text-[17px] text-foreground">Public activity</h2>
         <p className="mt-0.5 text-[13px] text-mute">What the explorer shows about you</p>
@@ -88,7 +88,7 @@ export function ActivityFeed() {
     return (
       <div className="gl-card overflow-hidden">
         <Header />
-        <p className="border-t border-line px-5 py-6 text-[13.5px] leading-relaxed text-mute">
+        <p className="border-t border-line max-sm:px-5 sm:px-6 py-6 text-[13.5px] leading-relaxed text-mute">
           Connect a wallet to see what the public can see. Private payments never show up here.
         </p>
       </div>
@@ -101,12 +101,12 @@ export function ActivityFeed() {
 
       {view === "reading" && (
         <div className="border-t border-line">
-          <p role="status" aria-live="polite" className="tnum px-5 pt-3 text-[12.5px] text-mute">
+          <p role="status" aria-live="polite" className="tnum max-sm:px-5 sm:px-6 pt-3 text-[12.5px] text-mute">
             Reading {network.label}...{pct}
           </p>
           <ul aria-hidden>
             {[0, 1, 2].map((i) => (
-              <li key={i} className="flex min-h-[60px] items-center gap-3 px-5">
+              <li key={i} className="flex min-h-[60px] items-center gap-3 max-sm:px-5 sm:px-6">
                 <span className="h-9 w-9 shrink-0 animate-pulse rounded-full bg-surface" />
                 <span className="flex-1 space-y-2">
                   <span className="block h-3 w-32 animate-pulse rounded-full bg-surface" />
@@ -118,7 +118,7 @@ export function ActivityFeed() {
         </div>
       )}
       {view === "error" && (
-        <div className="border-t border-line px-5 py-6">
+        <div className="border-t border-line max-sm:px-5 sm:px-6 py-6">
           <p className="text-[13.5px] text-mute">
             Could not read your history{scope || network.paymentsPool ? ` from ${network.label}` : ""}. Try again in a moment.
           </p>
@@ -130,7 +130,7 @@ export function ActivityFeed() {
         </div>
       )}
       {(view === "empty" || view === "empty-window") && (
-        <div className="border-t border-line px-5 py-6">
+        <div className="border-t border-line max-sm:px-5 sm:px-6 py-6">
           <p className="text-[14px] text-foreground">
             {view === "empty-window" ? `No public transfers in ${lastDays}` : "Nothing public yet"}
           </p>
@@ -183,7 +183,7 @@ export function ActivityFeed() {
                     href={network.explorerTx(tx.hash)}
                     target="_blank"
                     rel="noreferrer"
-                    className="group flex min-h-[60px] items-center gap-3 px-5 py-2.5 transition-colors hover:bg-surface/60"
+                    className="group flex min-h-[60px] items-center gap-3 max-sm:px-5 sm:px-6 py-2.5 transition-colors hover:bg-surface/60"
                   >
                     <DirIcon kind={isVault ? "vault" : out ? "out" : "in"} />
                     <div className="min-w-0 flex-1">
@@ -202,7 +202,7 @@ export function ActivityFeed() {
           </ul>
 
           {scope && (scope.reading || scope.stalled || !scope.complete) && (
-            <div className="flex min-h-[48px] shrink-0 items-center justify-between gap-3 border-t border-line px-5 py-1.5">
+            <div className="flex min-h-[48px] shrink-0 items-center justify-between gap-3 border-t border-line max-sm:px-5 sm:px-6 py-1.5">
               <p role="status" aria-live="polite" className="tnum text-[12.5px] text-mute">
                 {scope.stalled
                   ? "Some blocks could not be read"
