@@ -9,7 +9,8 @@ import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 
 const groups: {
   title: string;
-  links: { href: string; label: string; external?: boolean }[];
+  /** document: a page outside the Next router (a static file or a rewrite to one): a plain link, never prefetched. */
+  links: { href: string; label: string; external?: boolean; document?: boolean }[];
 }[] = [
   {
     title: "Product",
@@ -48,7 +49,8 @@ const groups: {
       { href: "/transparency", label: "Transparency" },
       { href: "/stats", label: "Stats" },
       { href: "/brand", label: "Brand" },
-      { href: "/pitch", label: "Pitch" },
+      // public/pitch/index.html through a rewrite: Link's prefetch of it 404'd on every page
+      { href: "/pitch", label: "Pitch", document: true },
     ],
   },
 ];
@@ -157,6 +159,10 @@ export function Footer() {
                             rel="noreferrer"
                             className="gl-tap text-[14.5px] text-soft transition-colors hover:text-foreground"
                           >
+                            {l.label}
+                          </a>
+                        ) : l.document ? (
+                          <a href={l.href} className="gl-tap text-[14.5px] text-soft transition-colors hover:text-foreground">
                             {l.label}
                           </a>
                         ) : l.href.startsWith("/app") ? (
