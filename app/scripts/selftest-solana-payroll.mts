@@ -605,10 +605,18 @@ eq(ringsExplorerTx("abc", "mainnet"), "https://solscan.io/tx/abc", "mainnet expl
   // the real cipher: its own key from the viewing secret, bound to the account
   const secret = Uint8Array.from({ length: 32 }, (_, i) => i * 3 + 1);
   const c1 = await S.runCipher(secret, OWNER);
-  const big = "x".repeat(300_000);
+  // The marker has a space and a "|", which sealed text (base64 and dots) never holds, so
+  // finding it there can only mean the plaintext leaked. Random base64 is no good for this:
+  // it holds "xxxx" by chance in about 2% of runs.
+  const MARK = "in the clear | ";
+  const big = MARK.repeat(20_000);
   const sealedBig = await c1.seal(big);
   eq(await c1.open(sealedBig), big, "a large list seals and opens");
-  ok(sealedBig.startsWith("gsp1.") && !sealedBig.includes("xxxx"), "sealed, nothing in the clear");
+  const [, ivB64, bodyB64] = sealedBig.split(".");
+  const body = Buffer.from(bodyB64!, "base64");
+  ok(sealedBig.startsWith("gsp1.") && !sealedBig.includes(MARK), "sealed, nothing in the clear");
+  // nor merely base64'd: the decoded body is the plaintext plus a 16-byte tag, with no run of it
+  ok(Buffer.from(ivB64!, "base64").length === 12 && body.length === big.length + 16 && !body.includes(Buffer.from(MARK)), "the body is ciphertext, not the plaintext encoded");
   ok((await c1.seal("same")) !== (await c1.seal("same")), "a fresh nonce each time");
   await assert.rejects((await S.runCipher(secret, addr(5))).open(await c1.seal("hi")), "another account's address can't open it");
   await assert.rejects((await S.runCipher(Uint8Array.from(secret, (b) => b ^ 1), OWNER)).open(await c1.seal("hi")), "another secret can't open it");
