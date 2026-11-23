@@ -246,6 +246,8 @@ export function CashOutAcrossPanel({ across, networkKey }: { across: CashOutAcro
   const paid = formatAssetLabel(cashOutPaid(run), run.asset);
   const cancelled = p.done && run.parts.some((x) => x.error === CASHOUT_CANCELLED);
   const sent = run.parts.filter((x) => x.status === "paid" && x.txHash);
+  // parts sent together wait on the chain together
+  const onTheirWay = run.parts.filter((x) => x.status === "sent").length;
 
   return (
     <div role="status" aria-live="polite" className="rounded-[16px] border border-line bg-surface px-4 py-3.5 text-[13.5px] leading-relaxed">
@@ -282,7 +284,7 @@ export function CashOutAcrossPanel({ across, networkKey }: { across: CashOutAcro
           </p>
           <p className="tnum mt-0.5 text-mute">
             {p.paid} of {p.parts} cashed out
-            {running && status ? `. ${status}` : p.waiting ? ". One is waiting for the network to confirm it." : "."}
+            {running && status ? `. ${status}` : p.waiting ? (onTheirWay === 1 ? ". One is waiting for the network to confirm it." : `. ${onTheirWay} are waiting for the network to confirm them.`) : "."}
           </p>
           {error && !running && <p className="mt-1 text-warn">{error}</p>}
           {!running && (
