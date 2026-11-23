@@ -71,7 +71,7 @@ import { AmountProblem } from "./AmountProblem";
 import { SuccessReceipt } from "./SuccessModal";
 import { ChainLogo, CostWarning, PoweredByRelay, SourceBalance, TokenMark, feeRows, fmtMoney, stableMax } from "./BridgeIn";
 import { WalletConnectSheet } from "./WalletConnectSheet";
-import { displayAmount, displayAmountNumber, displayAmountText, typedAmount } from "@/lib/amountShort";
+import { displayAmountNumber, displayAmountText, typedAmount } from "@/lib/amountShort";
 
 type KV = { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };
 
