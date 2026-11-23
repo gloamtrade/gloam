@@ -32,6 +32,7 @@ import { walletDeclined } from "@/lib/walletErrors";
 import { embeddedAvailability, onEmbeddedAvailability, openEmbeddedSheet, signOutEmbedded } from "@/lib/turnkeyBridge";
 import { forgetClaim } from "@/lib/claimLinkStore";
 import { useNetwork } from "./NetworkProvider";
+import { SolanaWalletMenu } from "./SolanaWalletMenu";
 // Reads the kit's state from lib/turnkeyBridge; the kit itself loads only when needed (TurnkeyKitGate).
 import { TurnkeyHeaderSignIn } from "./TurnkeyHeaderSignIn";
 
@@ -68,7 +69,16 @@ function walletChainName(id: number): string {
   return ORIGIN_CHAINS.find((c) => c.id === id)?.name ?? `chain ${id}`;
 }
 
+/**
+ * The wallet control. While Solana is the network picked it is Solana's
+ * (SolanaWalletMenu): the EVM wallet stays connected underneath, untouched.
+ */
 export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
+  const { solana } = useNetwork();
+  return solana ? <SolanaWalletMenu variant={variant} /> : <EvmWalletMenu variant={variant} />;
+}
+
+function EvmWalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
   const { address, isConnected, isConnecting, chainId, demo, connector } =
     useAppAccount();
   const { connect, connectors, isPending, error, variables, reset } = useConnect();
