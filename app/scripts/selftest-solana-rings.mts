@@ -9,7 +9,8 @@
  *    the key never comes back;
  *  - the relay policy (/api/solana/relay): only Privacy Rings registrations and
  *    transacts the private account signed, the relay as fee payer, the fee
- *    capped; never a deposit, a transfer of the relay's SOL, or another program;
+ *    capped; never a malformed deposit (a private account's own deposit is in
+ *    selftest-solana-bridge-in), a transfer of the relay's SOL, or another program;
  *  - the relay's key parsing and limits, and the Solana OFAC screen;
  *  - landing a send (lib/solanaRings/landing) on a fake clock: the same signed
  *    transaction sent again until it is confirmed, "dropped" said only after
@@ -357,7 +358,7 @@ const refuse = async (what: string, w: Uint8Array | Promise<Uint8Array>, reason?
   const r = check(await w);
   ok(!r.ok && (!reason || reason.test(r.reason)), `refused: ${what}${r.ok ? "" : ` (${r.reason})`}`);
 };
-await refuse("a deposit (the relay's SOL into a private balance)", wire({ instructions: [deposit] }), /pool instruction/);
+await refuse("a malformed deposit", wire({ instructions: [deposit] }), /pool instruction/);
 await refuse(
   "a System transfer",
   wire({ instructions: [ixFor("11111111111111111111111111111111", [2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0], [owner], [stranger.address])] }),
