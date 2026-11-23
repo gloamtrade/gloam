@@ -10,7 +10,8 @@
  *  - the relay policy (/api/solana/relay): only Privacy Rings registrations and
  *    transacts the private account signed, the relay as fee payer, the fee
  *    capped; never a malformed deposit (a private account's own deposit is in
- *    selftest-solana-bridge-in), a transfer of the relay's SOL, or another program;
+ *    selftest-solana-bridge-in, a wallet's version 0 deposit in
+ *    selftest-solana-relay-add), a transfer of the relay's SOL, or another program;
  *  - the relay's key parsing and limits, and the Solana OFAC screen;
  *  - landing a send (lib/solanaRings/landing) on a fake clock: the same signed
  *    transaction sent again until it is confirmed, "dropped" said only after
@@ -378,7 +379,8 @@ await refuse("another program", wire({ instructions: [ixFor("MemoSq4gqABAXKb96qn
 await refuse("a registry key update (tag 2)", wire({ instructions: [ixFor(relay.USER_REGISTRY_PROGRAM, [2], [owner])] }), /registry instruction/);
 await refuse("a pool admin instruction (createSplInterface)", wire({ instructions: [ixFor(POOL, [7], [owner])] }), /pool instruction/);
 await refuse("another fee payer", wire({ feePayer: stranger.address, instructions: [transact] }), /fee payer/);
-await refuse("a version 0 transaction", wire({ version: 0, instructions: [transact] }), /version 1/);
+// Version 0 is only ever a wallet's own deposit (selftest-solana-relay-add): a payment in it is refused.
+await refuse("a version 0 transaction that isn't a wallet's deposit", wire({ version: 0, instructions: [transact] }), /version 0: only a deposit/);
 await refuse("without the private account's signature", wire({ instructions: [transact], ownerSigns: false }), /signature is missing/);
 await refuse("already signed by the relay", wire({ instructions: [transact], relayerSigns: true }), /signs last/);
 await refuse("only the relay signing", wire({ instructions: [ixFor(POOL, [16], [])] }), /must sign too/);
