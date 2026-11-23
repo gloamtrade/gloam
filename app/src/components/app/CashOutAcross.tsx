@@ -8,7 +8,7 @@
  */
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Address, Hex } from "viem";
+import { parseAbiItem, type Address, type Hex } from "viem";
 import { Spinner } from "@/components/ui/Spinner";
 import {
   CASHOUT_CANCELLED,
@@ -23,12 +23,15 @@ import {
 import { loadCashOutRun, loadCashOutRuns, saveCashOutRun } from "@/lib/cashOutAcrossStore";
 import { proveCashOut, type CashOutCall } from "@/lib/cashOutProof";
 import { freshPath, splitForCashOut, splitMaybeSent, type TransferArgs } from "@/lib/cashOutSplit";
+import { getLogsSafe } from "@/lib/logRange";
 import { getAllNotes } from "@/lib/noteVault";
 import { relayUnshield, waitForTx } from "@/lib/relay/client";
 import { publicClientFor } from "@/lib/rhClient";
 import { formatAssetLabel, shieldPoolAbi, updateLocalNote } from "@/lib/shield";
 import { walletErrorForPeople } from "@/lib/walletErrors";
 import type { GloamNetwork } from "@/lib/networks";
+
+const UNSHIELDED = parseAbiItem("event Unshielded(bytes32 indexed nullifier, address indexed asset, address indexed to, uint256 amount)");
 
 export type CashOutAcross = {
   run: CashOutAcrossRun | null;
@@ -94,8 +97,11 @@ export function useCashOutAcross(
           load: loadCashOutRun,
           save: saveCashOutRun,
           getNote: (id) => getAllNotes().find((n) => n.id === id),
-          findSplitPart: (noteId, amount) =>
-            getAllNotes().find((n) => n.sweptFrom?.id === noteId && BigInt(n.amountWei) === amount && n.status === "open"),
+          findSplitPart: (noteId, amount, skip) =>
+            getAllNotes()
+              .filter((n) => n.sweptFrom?.id === noteId && BigInt(n.amountWei) === amount && n.status === "open" && !skip.includes(n.id))
+              // one that landed first
+              .sort((a, b) => Number(!!a.sweepPending) - Number(!!b.sweepPending))[0],
           split: (note, amount) =>
             (async () => {
               const at = await freshPath(note.commitment, network);
@@ -124,6 +130,18 @@ export function useCashOutAcross(
           waitForTx: (h) => waitForTx(h, undefined, client),
           isSpent: async (nullifier) =>
             (await client.readContract({ address: r.pool, abi: shieldPoolAbi, functionName: "isSpent", args: [nullifier] })) as boolean,
+          blockNumber: () => client.getBlockNumber(),
+          payoutOf: async (nullifier, from) => {
+            const head = await client.getBlockNumber();
+            if (head < from) return null;
+            const logs = await getLogsSafe(
+              (a, b) => client.getLogs({ address: r.pool, event: UNSHIELDED, args: { nullifier }, fromBlock: a, toBlock: b }),
+              from,
+              head
+            );
+            const hit = logs[0]?.args;
+            return hit?.to && hit.amount != null ? { to: hit.to, amount: hit.amount } : null;
+          },
           markSpent: (noteId, hash) => {
             updateLocalNote(noteId, { status: "recovered", txHash: hash });
           },

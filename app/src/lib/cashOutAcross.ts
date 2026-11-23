@@ -63,6 +63,14 @@ export type CashOutPart = {
   nullifier?: Hex;
   txHash?: Hex;
   sentAt?: number;
+  /** The chain's block just before it was sent, so its payout can be found in the vault's log later. */
+  sentBlock?: string;
+  /**
+   * Notes set aside for this part whose transfer never went out. They stay
+   * saved (the sync drops them once the note they came from is spent) and are
+   * never cashed out.
+   */
+  staleSetAsides?: string[];
   status: CashOutPartStatus;
   error?: string;
 };
@@ -163,8 +171,8 @@ export type CashOutAcrossDeps = {
   save: (run: CashOutAcrossRun) => Promise<void>;
   /** A note in this browser's balance, by id. */
   getNote: (id: string) => LocalNote | undefined;
-  /** The note an earlier split of `noteId` set aside for `amount`, if one was made. */
-  findSplitPart: (noteId: string, amount: bigint) => LocalNote | undefined;
+  /** The note an earlier split of `noteId` set aside for `amount`, if one was made (none of `skip`). */
+  findSplitPart: (noteId: string, amount: bigint, skip: string[]) => LocalNote | undefined;
   /** Set `amount` of `note` aside in its own note (lib/cashOutSplit splitForCashOut), landed. */
   split: (note: LocalNote, amount: bigint) => Promise<LocalNote>;
   /** A cash out of all of `note` to `to`. */
@@ -175,6 +183,13 @@ export type CashOutAcrossDeps = {
   maybeSent: (e: unknown) => boolean;
   waitForTx: (hash: Hex) => Promise<"success" | "reverted" | null>;
   isSpent: (nullifier: Hex) => Promise<boolean>;
+  /** The chain's latest block, saved with each part as it goes out. */
+  blockNumber?: () => Promise<bigint>;
+  /**
+   * The cash out that spent `nullifier`, from the vault's log from block `from`
+   * on: where it went and how much (before the fee), or null when no cash out did.
+   */
+  payoutOf?: (nullifier: Hex, from: bigint) => Promise<{ to: Address; amount: bigint } | null>;
   /** The note left the balance (paid out). */
   markSpent: (noteId: string, hash: Hex) => void;
   onUpdate?: (run: CashOutAcrossRun) => void;
@@ -187,19 +202,59 @@ function copy(run: CashOutAcrossRun): CashOutAcrossRun {
 }
 
 /**
- * What became of a part handed out before: "paid" when its note is spent,
- * "unsent" when it surely didn't land and its note is unspent (safe to send
- * again: the vault refuses a spent nullifier anyway), "waiting" otherwise.
+ * Who spent a part's note, once the chain shows it spent: this cash out
+ * ("paid": the vault paid this part's amount to the run's wallet), something
+ * else ("moved": another send or cash out of the same note), or "unknown" when
+ * the vault's log can't be read now. The proof binds the wallet and the
+ * amount, so a copy of this part's own send still counts as paid.
  */
-async function settleSent(part: CashOutPart, deps: CashOutAcrossDeps, now: number): Promise<"paid" | "unsent" | "waiting"> {
+async function spentBy(part: CashOutPart, to: Address, deps: CashOutAcrossDeps): Promise<"paid" | "moved" | "unknown"> {
+  // a run saved before parts kept their block: counted as before
+  if (!part.nullifier || !deps.payoutOf || part.sentBlock == null) return "paid";
+  let from: bigint;
+  try {
+    from = BigInt(part.sentBlock);
+  } catch {
+    return "paid";
+  }
+  const out = await deps.payoutOf(part.nullifier, from).catch(() => undefined);
+  if (out === undefined) return "unknown";
+  return out && out.to.toLowerCase() === to.toLowerCase() && out.amount === BigInt(part.amount) ? "paid" : "moved";
+}
+
+/**
+ * What became of a part handed out before: "paid" when this cash out spent
+ * its note, "moved" when something else did, "unsent" when it surely didn't
+ * land and its note is unspent (safe to send again: the vault refuses a spent
+ * nullifier anyway), "waiting" otherwise.
+ */
+async function settleSent(part: CashOutPart, to: Address, deps: CashOutAcrossDeps, now: number): Promise<"paid" | "moved" | "unsent" | "waiting"> {
   if (!part.nullifier) return "unsent";
-  if (await deps.isSpent(part.nullifier)) return "paid";
   if (part.txHash) {
     const outcome = await deps.waitForTx(part.txHash).catch(() => null);
+    // this part's own send landed: its note is spent by it
     if (outcome === "success") return (await deps.isSpent(part.nullifier)) ? "paid" : "waiting";
-    if (outcome === "reverted") return (await deps.isSpent(part.nullifier)) ? "paid" : "unsent";
+    if (outcome === "reverted" && !(await deps.isSpent(part.nullifier))) return "unsent";
+  }
+  if (await deps.isSpent(part.nullifier)) {
+    const by = await spentBy(part, to, deps);
+    return by === "unknown" ? "waiting" : by;
   }
   return part.sentAt != null && now - part.sentAt > CASHOUT_RESEND_AFTER_MS ? "unsent" : "waiting";
+}
+
+/**
+ * A note set aside for a part that is still landing: "waiting" while its
+ * transfer may still go out or has gone out and the sync hasn't counted it
+ * yet, "again" when the note it came from is still unspent long after (the
+ * transfer never went out, so the part is set aside again from that same
+ * note; only one of the two can ever land, since both spend it).
+ */
+async function setAsideState(note: LocalNote, deps: CashOutAcrossDeps, now: number): Promise<"waiting" | "again"> {
+  const from = note.sweptFrom?.nullifier;
+  if (!from) return "waiting";
+  if (await deps.isSpent(from)) return "waiting";
+  return now - (note.createdAt ?? now) > CASHOUT_RESEND_AFTER_MS ? "again" : "waiting";
 }
 
 /**
@@ -226,11 +281,18 @@ export function runCashOutAcross(run: Pick<CashOutAcrossRun, "id">, deps: CashOu
 
       // 1. A part handed out before: the chain settles it first, so it never goes twice.
       if (part.status === "sent") {
-        const settled = await settleSent(part, deps, now());
+        const settled = await settleSent(part, r.to, deps, now());
         if (settled === "paid") {
           part.status = "paid";
           delete part.error;
           if (part.targetNoteId && part.txHash) deps.markSpent(part.targetNoteId, part.txHash);
+          await save();
+          continue;
+        }
+        if (settled === "moved") {
+          // spent, but not by this cash out: nothing of it reached the wallet
+          part.status = "failed";
+          part.error = CASHOUT_MOVED;
           await save();
           continue;
         }
@@ -247,26 +309,33 @@ export function runCashOutAcross(run: Pick<CashOutAcrossRun, "id">, deps: CashOu
       // 2. The note to cash out: the whole note, or the part set aside from it.
       let target = part.targetNoteId ? deps.getNote(part.targetNoteId) : undefined;
       if (!part.whole && !target) {
-        const earlier = deps.findSplitPart(part.noteId, BigInt(part.amount));
-        if (earlier?.sweepPending) {
-          // set aside already, still landing: the sync settles it, then resume
-          part.targetNoteId = earlier.id;
+        target = deps.findSplitPart(part.noteId, BigInt(part.amount), part.staleSetAsides ?? []);
+        if (target) {
+          part.targetNoteId = target.id;
+          await save();
+        }
+      }
+      if (!part.whole && target?.sweepPending) {
+        // set aside before, still landing: wait for the sync, unless that transfer surely never went out
+        if ((await setAsideState(target, deps, now())) === "waiting") {
           part.error = CASHOUT_WAITING;
           await save();
           return r;
         }
-        if (earlier) {
-          target = earlier;
-        } else {
-          const from = deps.getNote(part.noteId);
-          if (!from || from.status !== "open") {
-            part.status = "failed";
-            part.error = CASHOUT_MOVED;
-            await save();
-            continue;
-          }
-          target = await deps.split(from, BigInt(part.amount));
+        part.staleSetAsides = [...(part.staleSetAsides ?? []), target.id];
+        delete part.targetNoteId;
+        target = undefined;
+        await save();
+      }
+      if (!part.whole && !target) {
+        const from = deps.getNote(part.noteId);
+        if (!from || from.status !== "open") {
+          part.status = "failed";
+          part.error = CASHOUT_MOVED;
+          await save();
+          continue;
         }
+        target = await deps.split(from, BigInt(part.amount));
         part.targetNoteId = target.id;
         part.status = "ready";
         delete part.error;
@@ -285,16 +354,27 @@ export function runCashOutAcross(run: Pick<CashOutAcrossRun, "id">, deps: CashOu
         throw new Error("The cash out didn't match what was set up, so nothing was sent.");
       }
       if (await deps.isSpent(call.nullifier)) {
-        // spent elsewhere (another tab or device) before this run sent it
-        part.status = "failed";
-        part.error = CASHOUT_MOVED;
+        // spent before this send: by an earlier send of this part that landed late, or elsewhere
+        // (another tab or device)
+        const by = part.nullifier === call.nullifier ? await spentBy(part, r.to, deps) : "moved";
+        if (by === "unknown") {
+          part.error = CASHOUT_WAITING;
+          await save();
+          return r;
+        }
+        part.status = by === "paid" ? "paid" : "failed";
+        if (by === "paid") delete part.error;
+        else part.error = CASHOUT_MOVED;
         await save();
         continue;
       }
+      const block = deps.blockNumber ? await deps.blockNumber().catch(() => null) : null;
       part.nullifier = call.nullifier;
       part.targetNoteId = target.id;
       part.status = "sent";
       part.sentAt = now();
+      if (block != null) part.sentBlock = block.toString();
+      else delete part.sentBlock;
       delete part.error;
       await save();
 
@@ -332,7 +412,19 @@ export function runCashOutAcross(run: Pick<CashOutAcrossRun, "id">, deps: CashOu
         return r;
       }
       if (outcome === "reverted") {
-        // reverted, yet the note is spent: an earlier send of it landed
+        // reverted, yet the note is spent: an earlier send of it landed, or something else spent it
+        const by = await spentBy(part, r.to, deps);
+        if (by === "unknown") {
+          part.error = CASHOUT_WAITING;
+          await save();
+          return r;
+        }
+        if (by === "moved") {
+          part.status = "failed";
+          part.error = CASHOUT_MOVED;
+          await save();
+          continue;
+        }
         part.status = "paid";
         deps.markSpent(target.id, hash);
         await save();
