@@ -235,8 +235,10 @@ export function AgentTopUpsView() {
     : amount !== null && token
       ? topUpAmountProblem(amount, assetDecimals(token.address))
       : null;
+  // Not while a series is being set up: it spends the balance it came from, so mid-run there is
+  // none left that covers it, and "nothing to set aside" would show under the progress.
   const shortOf =
-    totals && token && covering.length === 0 && !amountProblem
+    !busy && totals && token && covering.length === 0 && !amountProblem
       ? largest > 0n
         ? `A series comes out of one balance, and your largest is ${formatAssetLabel(largest, token.address)}.`
         : `Nothing to set aside in ${token.symbol} yet. Add some privately first.`
