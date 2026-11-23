@@ -62,6 +62,10 @@ import {
   loadBatches,
   newBatch,
   parsePayrollCsv,
+  applyPayrollNames,
+  payrollNamesToLookUp,
+  NAME_PENDING,
+  type PayrollNameAnswer,
   runNetwork,
   runPayroll,
   saveBatch,
@@ -71,6 +75,7 @@ import {
   type PayrollRowStatus,
 } from "@/lib/payroll";
 import { holdsPendingPayment } from "@/lib/payrollStore";
+import { lookupGloamName } from "@/hooks/useGloamName";
 import { walletErrorForPeople } from "@/lib/walletErrors";
 import {
   cadenceLabel,
@@ -407,7 +412,45 @@ export function PayrollView() {
   );
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const parsed = useMemo(() => parsePayrollCsv(csv, asset), [csv, asset]);
+  const rawParsed = useMemo(() => parsePayrollCsv(csv, asset), [csv, asset]);
+  // "@ada" in the address column: each name is looked up once, on Robinhood Chain's registry
+  const [nameAnswers, setNameAnswers] = useState<ReadonlyMap<string, PayrollNameAnswer>>(() => new Map());
+  const namesToLookUp = useMemo(() => payrollNamesToLookUp(rawParsed.rows, nameAnswers).join(","), [rawParsed.rows, nameAnswers]);
+  useEffect(() => {
+    if (!namesToLookUp) return;
+    let stale = false;
+    const names = namesToLookUp.split(",");
+    void Promise.all(
+      names.map(async (n): Promise<[string, PayrollNameAnswer]> => {
+        const record = await lookupGloamName(n);
+        return [n, record === "failed" ? "failed" : record ? { tag: record.tag } : "none"];
+      })
+    ).then((found) => {
+      if (stale) return;
+      setNameAnswers((prev) => {
+        const next = new Map(prev);
+        for (const [n, a] of found) next.set(n, a);
+        return next;
+      });
+    });
+    return () => {
+      stale = true;
+    };
+  }, [namesToLookUp]);
+  const parsed = useMemo(
+    () => ({ ...rawParsed, rows: applyPayrollNames(rawParsed.rows, nameAnswers) }),
+    [rawParsed, nameAnswers]
+  );
+  /** Look the names up again: a failed read, or a name bought since. */
+  const retryNames = () =>
+    setNameAnswers((prev) => {
+      const next = new Map(prev);
+      for (const [n, a] of prev) if (a === "failed" || a === "none") next.delete(n);
+      return next;
+    });
+  const nameRetry = parsed.rows.some((r) => r.payName && r.error && r.error !== NAME_PENDING);
+  /** A name still being looked up: the run waits, so no one on the list is skipped by accident. */
+  const namesPending = parsed.rows.some((r) => r.error === NAME_PENDING);
   const validRows = useMemo(() => parsed.rows.filter((r) => !r.error), [parsed.rows]);
   const badCount = parsed.rows.length - validRows.length;
   const total = draftTotal(parsed.rows);
@@ -553,6 +596,8 @@ export function PayrollView() {
       ? "Payroll is not available on this network."
       : validRows.length === 0
         ? null
+        : namesPending
+          ? "Looking up the @names in your list…"
         : loaded && wrongAsset
           ? `${loaded.name} pays in ${loadedSymbol}. Switch back to ${loadedSymbol} to run it.`
           : loaded && capOver > 0n
@@ -1254,7 +1299,7 @@ export function PayrollView() {
                       {dragging ? "Drop it here" : "Drop your team’s CSV"}
                     </p>
                     <p className="mt-1.5 max-w-[42ch] text-[13.5px] leading-relaxed text-mute">
-                      One line per person. Leave the address blank and they get a claim link instead.
+                      One line per person. Put their Gloam address or @name, or leave it blank and they get a claim link instead.
                     </p>
                     <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5" aria-label="Columns">
                       {["name", "gloam_address", "amount"].map((c) => (
@@ -1343,6 +1388,11 @@ export function PayrollView() {
                 <Icon name="alert" className="mt-0.5 h-4 w-4 shrink-0" /> {parsed.error}
               </p>
             )}
+            {nameRetry && (
+              <button type="button" className="btn btn-ghost btn-sm mt-4" onClick={retryNames}>
+                Look the names up again
+              </button>
+            )}
           </section>
 
           {/* pay list, with the "who sees what" switch */}
@@ -1421,7 +1471,9 @@ export function PayrollView() {
                                   ? "Sent by Gloam. No name, no amount."
                                   : "No name, no amount."
                                 : r.kind === "gloam"
-                                  ? `Gloam address ${short(r.recipient)}`
+                                  ? r.payName
+                                    ? `@${r.payName}, Gloam address ${short(r.recipient)}`
+                                    : `Gloam address ${short(r.recipient)}`
                                   : "Claim link, you share it after the run"}
                           </p>
                           {!pub && !r.error && r.note && (

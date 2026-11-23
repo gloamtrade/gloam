@@ -41,6 +41,7 @@ import type { PayrollNote } from "@/lib/proofs";
 import { readAmountText } from "@/lib/amountText";
 import { walletErrorForPeople } from "@/lib/walletErrors";
 import { encryptTicketForTag, isReceiveTag, isValidReceiveTag } from "@/lib/receiveTag";
+import { nameFromPayInput } from "@/lib/gloamNames";
 import { ticketToMemoBytes } from "@/lib/payMemo";
 import { cleanPaymentNote } from "@/lib/paymentNote";
 import { keepPaidCodes, loadStoredRun, saveBatch } from "@/lib/payrollStore";
@@ -84,6 +85,8 @@ export type PayrollRow = {
   /** Gloam address (gloamr1…) or "" for a claim link */
   recipient: string;
   kind: PayeeKind;
+  /** The Gloam name the list gave ("ada" for "@ada"); `recipient` is the address it held when the run was made. */
+  payName?: string;
   /** raw units of the batch asset */
   amount: string;
   /** Private note sealed into their payment, e.g. "September salary". */
@@ -140,8 +143,44 @@ export type DraftRow = {
   amount: bigint | null;
   /** From the optional note column, cleaned ("" when none). */
   note?: string;
+  /**
+   * A Gloam name in the address column ("@ada" is "ada"). The row pays the
+   * Gloam address the name holds, looked up before the run (applyPayrollNames);
+   * until then the row waits with NAME_PENDING.
+   */
+  payName?: string;
   error: string | null;
 };
+
+/** The row error while its Gloam name is still being looked up. */
+export const NAME_PENDING = "Looking up this name…";
+
+/** What looking up one Gloam name gave: the Gloam address it pays, nobody, or a failed read. */
+export type PayrollNameAnswer = { tag: string } | "none" | "failed";
+
+/** Every Gloam name the rows still need looked up, each once. */
+export function payrollNamesToLookUp(rows: DraftRow[], known: ReadonlyMap<string, PayrollNameAnswer>): string[] {
+  const out = new Set<string>();
+  for (const r of rows) if (r.payName && r.error === NAME_PENDING && !known.has(r.payName)) out.add(r.payName);
+  return [...out];
+}
+
+/**
+ * Rows with each Gloam name swapped for the address it pays. A name nobody
+ * holds, or one the registry couldn't be read for, becomes that row's error;
+ * a name not looked up yet keeps NAME_PENDING, so the row can't be paid.
+ */
+export function applyPayrollNames(rows: DraftRow[], answers: ReadonlyMap<string, PayrollNameAnswer>): DraftRow[] {
+  return rows.map((r) => {
+    if (!r.payName || r.error !== NAME_PENDING) return r;
+    const a = answers.get(r.payName);
+    if (!a) return r;
+    if (a === "none") return { ...r, error: `No one holds @${r.payName}. Check the name, or use their Gloam address.` };
+    if (a === "failed") return { ...r, error: `Couldn't look up @${r.payName} just now. Try again in a moment.` };
+    if (!isValidReceiveTag(a.tag)) return { ...r, error: `@${r.payName} doesn't point to a working Gloam address.` };
+    return { ...r, recipient: a.tag, error: null };
+  });
+}
 
 // ------------------------------------------------------------------ CSV
 
@@ -211,7 +250,7 @@ function splitCsvLine(line: string, delimiter: CsvDelimiter): string[] | null {
 }
 
 const NAME_KEYS = ["name", "payee", "employee", "person", "contractor", "full name"];
-const RECIPIENT_KEYS = ["gloam_address", "gloam address", "gloam", "address", "recipient", "to", "wallet"];
+const RECIPIENT_KEYS = ["gloam_address", "gloam address", "gloam_name", "gloam name", "gloam", "address", "recipient", "to", "wallet"];
 const AMOUNT_KEYS = ["amount", "pay", "salary", "usd", "value", "total"];
 const NOTE_KEYS = ["note", "notes", "memo", "reference", "ref", "description"];
 
@@ -276,15 +315,22 @@ export function parsePayrollCsv(text: string, asset: Address): { rows: DraftRow[
         : null;
     let error: string | null = unreadable;
     let kind: PayeeKind = "link";
+    let payName: string | undefined;
     if (!error && recipient) {
       if (isValidReceiveTag(recipient)) {
         kind = "gloam";
+      } else if (nameFromPayInput(recipient)) {
+        // a Gloam name: paid like a Gloam address once it is looked up
+        kind = "gloam";
+        payName = nameFromPayInput(recipient)!;
+      } else if (recipient.startsWith("@")) {
+        error = "That isn't a Gloam name: 3 to 20 letters, numbers or underscores after the @.";
       } else if (isReceiveTag(recipient)) {
         error = "That Gloam address is incomplete or mistyped. Copy it again from their Receive page.";
       } else if (/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
         error = "That is a public wallet, paying it would show the amount. Use their Gloam address, or leave it blank for a claim link.";
       } else {
-        error = "Not a Gloam address (they start with gloamr1). Leave it blank to send a claim link.";
+        error = "Not a Gloam address or name (they start with gloamr1 or @). Leave it blank to send a claim link.";
       }
     }
     // the same reader as every amount field: "1,25" or "-1" is a row error, never 125 or 1
@@ -295,7 +341,19 @@ export function parsePayrollCsv(text: string, asset: Address): { rows: DraftRow[
     } else if (!error && (amount === null || amount <= 0n)) {
       error = "Enter an amount above zero.";
     }
-    return { line: i, name, recipient: kind === "gloam" ? recipient : "", kind, amountInput, amount, note, error };
+    // a name waits for its lookup; until then the row can't be paid
+    if (!error && payName) error = NAME_PENDING;
+    return {
+      line: i,
+      name,
+      recipient: kind === "gloam" && !payName ? recipient : "",
+      kind,
+      amountInput,
+      amount,
+      note,
+      ...(payName ? { payName } : {}),
+      error,
+    };
   });
   return { rows, error: null };
 }
@@ -423,6 +481,7 @@ export function newBatch(args: {
         name: r.name,
         recipient: r.recipient,
         kind: r.kind,
+        ...(r.payName ? { payName: r.payName } : {}),
         amount: r.amount!.toString(),
         ...(r.note ? { note: r.note } : {}),
         status: "queued" as const,

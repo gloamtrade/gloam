@@ -24,7 +24,13 @@ import assert from "node:assert/strict";
 import "./browser-shim.mjs";
 import { parseUnits, type Address } from "viem";
 
-const { parsePayrollCsv, fundingPlan, PAYROLL_TEMPLATE, exportResultsCsv, claimLink } = await import("../src/lib/payroll");
+const { parsePayrollCsv, fundingPlan, PAYROLL_TEMPLATE, exportResultsCsv, claimLink, applyPayrollNames, payrollNamesToLookUp, NAME_PENDING, newBatch } = await import("../src/lib/payroll");
+// a real Gloam address (a P-256 public key), for the name checks
+const PAYROLL_TAG = await (async () => {
+  const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
+  return `gloamr1.${Buffer.from(spki).toString("base64url")}`;
+})();
 const { assetDecimals, formatAssetAmountExact } = await import("../src/lib/shield");
 
 let passed = 0;
@@ -215,6 +221,51 @@ test("the results file never writes a name as a formula, and keeps the claim lin
     assert.equal(row[5], claimLink("https://gloam.trade", "robinhood-mainnet", tickets[i]!), `row ${i}: the claim link is untouched`);
   });
   assert.ok(lines[0]!.endsWith(`"'=HYPERLINK(1)"`) || lines[0]!.endsWith(`'=HYPERLINK(1)`), "the note column too");
+});
+
+// ------------------------------------------------------------------ Gloam names in the address column
+test("an @name is paid like a Gloam address once it is looked up", () => {
+  const TAG = PAYROLL_TAG;
+  const { rows } = parsePayrollCsv(
+    ["name,gloam_address,amount", "Ada,@Ada_Obi,10", "Bo,@bob,5", "Cy,@cyd,abc", "Di,@nobody,1", "Ed,@eddie,2", "Fe,@x,1", "Gi,@ada_obi,3"].join("\n"),
+    ASSET,
+  );
+  assert.equal(rows[0]!.payName, "ada_obi", "lowercased, without the @");
+  assert.equal(rows[0]!.kind, "gloam");
+  assert.equal(rows[0]!.recipient, "", "no address until it is looked up");
+  assert.equal(rows[0]!.error, NAME_PENDING, "waits for its lookup, so it can't be paid yet");
+  assert.notEqual(rows[2]!.error, NAME_PENDING, "a bad amount still shows as the row's problem");
+  assert.ok(rows[5]!.error && rows[5]!.error.includes("isn't a Gloam name"), "@x is too short to be a name");
+  assert.deepEqual(payrollNamesToLookUp(rows, new Map()), ["ada_obi", "bob", "nobody", "eddie"], "each name once");
+
+  const answers = new Map<string, "none" | "failed" | { tag: string }>([
+    ["ada_obi", { tag: TAG }],
+    ["bob", { tag: TAG }],
+    ["nobody", "none"],
+    ["eddie", "failed"],
+  ]);
+  const done = applyPayrollNames(rows, answers);
+  assert.equal(done[0]!.recipient, TAG, "the address the name holds");
+  assert.equal(done[0]!.error, null);
+  assert.equal(done[6]!.recipient, TAG, "the same name twice pays the same address");
+  assert.ok(done[3]!.error!.startsWith("No one holds @nobody"), "a name nobody holds is that row's error");
+  assert.ok(done[4]!.error!.startsWith("Couldn't look up @eddie"), "a failed read says so, and isn't paid");
+  assert.equal(applyPayrollNames(rows, new Map())[0]!.error, NAME_PENDING, "unanswered stays pending");
+  assert.equal(applyPayrollNames(rows, new Map([["ada_obi", { tag: "gloamr1.nope" }]]))[0]!.error, "@ada_obi doesn't point to a working Gloam address.");
+  assert.deepEqual(payrollNamesToLookUp(rows, answers), [], "nothing left to look up");
+
+  const batch = newBatch({ title: "t", chainId: 1, pool: ASSET, asset: ASSET, employer: ASSET, relay: true, rows: done } as never);
+  const ada = batch.rows.find((r) => r.name === "Ada")!;
+  assert.equal(ada.recipient, TAG);
+  assert.equal(ada.payName, "ada_obi", "the run keeps the name it was paid by");
+  assert.ok(!batch.rows.some((r) => r.name === "Di" || r.name === "Ed"), "rows with a name problem are not in the run");
+});
+
+test("an 0x or a plain word still isn't a Gloam address", () => {
+  const { rows } = parsePayrollCsv(["name,gloam_address,amount", "Ada,ada,1", "Bo,0x1111111111111111111111111111111111111111,1"].join("\n"), ASSET);
+  assert.ok(rows[0]!.error!.includes("Gloam address or name"));
+  assert.ok(rows[1]!.error!.includes("public wallet"));
+  assert.equal(rows[0]!.payName, undefined);
 });
 
 console.log(`\n${passed} payroll list checks passed`);
