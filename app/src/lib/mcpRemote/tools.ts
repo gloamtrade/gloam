@@ -468,7 +468,7 @@ function solanaView(origin: string) {
     network: SOLANA_RINGS_NETWORK,
     how: "Helius Privacy Rings (the open Default Ring), with Gloam's account layer on top. There is no Gloam vault on Solana.",
     privacy: RINGS_PRIVACY_NOTE,
-    assets: ringsAssets().map((a) => ({ symbol: a.symbol, mint: a.mint, decimals: a.decimals })),
+    assets: ringsAssets().map((a) => ({ symbol: a.symbol, mint: a.mint, decimals: a.decimals, ...(a.note ? { note: a.note } : {}) })),
     prover: "Proofs are made by Helius's prover, in an attested enclave.",
     fees: "Gloam's relay pays the Solana network fees, so a private account never needs SOL of its own.",
     app: `${origin}/app/solana`,

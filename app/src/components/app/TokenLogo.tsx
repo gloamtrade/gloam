@@ -45,7 +45,7 @@ const PNG_LOGO_IDS = new Set([
 ]);
 
 /** Round marks (a full disc): shown as a circle with no plate, so no white corners. */
-const DISC_LOGO_IDS = new Set(["usdg", "usdce", "usdc", "eurc", "usdt", "pyusd", "eth", "weth", "avgo", "mstr", "sbux", "usde", "u", "cbbtc", "bdx", "bnb", "sol"]);
+const DISC_LOGO_IDS = new Set(["usdg", "usdce", "usdc", "eurc", "usdt", "pyusd", "eth", "weth", "avgo", "mstr", "sbux", "usde", "u", "cbbtc", "bdx", "bnb", "sol", "zec"]);
 
 /**
  * White marks on a clear ground. On the usual white plate they vanish and leave
@@ -85,6 +85,9 @@ const SPECIAL_LOGOS: Record<string, string> = {
   elysium: "/brand/networks/elysium.png",
   // SOL, Solana's coin: Solana's three bars on a black disc (the Solana brand kit's mark)
   sol: "/brand/tokens/sol.svg",
+  // ZEC (bridged to Solana): the official Zcash full-colour icon from github.com/zcash/logos
+  // (zcash-logos-icons-2018/icons/full-color), its viewBox cropped to the disc
+  zec: "/brand/tokens/zec.svg",
   // HYPE, Elysium's gas coin
   hype: "/brand/tokens/hype.png",
   // BNB, BNB Chain's gas coin (the mark the bridge list already uses)

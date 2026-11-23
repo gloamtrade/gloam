@@ -12,6 +12,8 @@ type ApiResponse = {
   bnbUsd?: number | null;
   /** SOL in USD (only while Solana is on). */
   solUsd?: number | null;
+  /** ZEC in USD, for ZEC bridged to Solana (only while Solana is on). */
+  zecUsd?: number | null;
   meta?: {
     liveCount: number;
     total: number;
@@ -25,9 +27,10 @@ type ApiResponse = {
  * seconds. Kept 15 minutes; after that an empty read shows as unknown again.
  */
 const KEEP_PRICE_MS = 15 * 60_000;
-const lastPrice: Partial<Record<"ethUsd" | "hypeUsd" | "bnbUsd" | "solUsd", { usd: number; at: number }>> = {};
+type PriceKey = "ethUsd" | "hypeUsd" | "bnbUsd" | "solUsd" | "zecUsd";
+const lastPrice: Partial<Record<PriceKey, { usd: number; at: number }>> = {};
 
-function steady(key: "ethUsd" | "hypeUsd" | "bnbUsd" | "solUsd", v: number | null | undefined): number | null {
+function steady(key: PriceKey, v: number | null | undefined): number | null {
   const now = Date.now();
   if (typeof v === "number" && Number.isFinite(v) && v > 0) {
     lastPrice[key] = { usd: v, at: now };
@@ -48,6 +51,7 @@ async function fetchMarkets(): Promise<ApiResponse> {
     hypeUsd: steady("hypeUsd", body.hypeUsd),
     bnbUsd: steady("bnbUsd", body.bnbUsd),
     solUsd: steady("solUsd", body.solUsd),
+    zecUsd: steady("zecUsd", body.zecUsd),
   };
 }
 
@@ -77,6 +81,7 @@ export function useEthPrice() {
     hypeUsd: q.data?.hypeUsd ?? null,
     bnbUsd: q.data?.bnbUsd ?? null,
     solUsd: q.data?.solUsd ?? null,
+    zecUsd: q.data?.zecUsd ?? null,
     isLoading: q.isLoading,
   };
 }

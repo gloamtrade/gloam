@@ -50,32 +50,101 @@ export type RingsAsset = {
   decimals: number;
   /** SPL Token unless said otherwise. */
   tokenProgram?: "token" | "token-2022";
+  /** A dollar stablecoin: worth a dollar a unit. Anything else is priced at its coin's market price (ringsUsd). */
+  stable?: boolean;
+  /**
+   * Listed on a screen only once its ring interface is read on chain (client
+   * assetsReady says true), never as "not set up yet" (shownAssets). Money
+   * already held in it always shows.
+   */
+  hiddenUntilReady?: boolean;
+  /** One plain line on what this token is, where it matters (Add, the docs). */
+  note?: string;
 };
 
 const SOL: RingsAsset = { id: "sol", symbol: "SOL", name: "Solana", mint: null, decimals: 9 };
 
 /**
+ * What bridged ZEC is on Solana, said plainly: the token and the amount stay
+ * hidden once it is private here; the bridge and an add from a wallet do not.
+ */
+export const RINGS_ZEC_NOTE =
+  "ZEC on Solana is Zcash brought over by NEAR's Omni Bridge, a public token there. Once it is private here, the token and the amount stay hidden. The bridge itself and adding from your wallet are public.";
+
+/**
+ * Zcash on Solana: NEAR Omni Bridge's wrapped ZEC (zec.omft.near on NEAR),
+ * the mint Jupiter verifies and Kamino's ZEC market lends. SPL Token (no
+ * Token-2022 extensions), 8 decimals, no freeze authority; the mint authority
+ * is the Omni Bridge program's authority PDA. Read on 2026-11-23: the NEAR
+ * bridge contract (omni.bridge.near get_bridged_token) maps zec.omft.near to
+ * this mint, and its ring interface is set up on mainnet (registry
+ * 4tB2qXKcRtDdkprU6NeovJCfLbTefeyEbnhfqh2HwpXr, made 2026-11-10).
+ */
+export const ZEC_SOLANA_MINT = "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS";
+const ZEC: RingsAsset = {
+  id: "zec",
+  symbol: "ZEC",
+  name: "Zcash (bridged)",
+  mint: ZEC_SOLANA_MINT,
+  decimals: 8,
+  hiddenUntilReady: true,
+  note: RINGS_ZEC_NOTE,
+};
+
+/**
  * What Add lists. An SPL token works once its one-time setup account (the
  * pool's SPL interface for that mint) exists on chain; the app reads that and
- * says "not set up yet" until then (client assetsReady). Read on 2026-11-22:
- * USDC and USDT are set up on mainnet, Circle's USDC on devnet. Another token:
- * scripts/solana-rings-setup-asset.mts.
+ * says "not set up yet" until then (client assetsReady), or, for a token marked
+ * hiddenUntilReady, leaves it off the screen until then. Read on 2026-11-23:
+ * USDC, USDT and ZEC are set up on mainnet, Circle's USDC on devnet. Another
+ * token: scripts/solana-rings-setup-asset.mts.
  */
 export const RINGS_ASSETS: Record<RingsNetwork, readonly RingsAsset[]> = {
   mainnet: [
     SOL,
-    { id: "usdc", symbol: "USDC", name: "USD Coin", mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6 },
-    { id: "usdt", symbol: "USDT", name: "Tether USD", mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", decimals: 6 },
+    { id: "usdc", symbol: "USDC", name: "USD Coin", mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6, stable: true },
+    { id: "usdt", symbol: "USDT", name: "Tether USD", mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", decimals: 6, stable: true },
+    ZEC,
   ],
   devnet: [
     SOL,
     // Circle's devnet USDC (faucet.circle.com)
-    { id: "usdc", symbol: "USDC", name: "USD Coin", mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", decimals: 6 },
+    { id: "usdc", symbol: "USDC", name: "USD Coin", mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", decimals: 6, stable: true },
   ],
 };
 
+/** Every listed asset, set up or not: for reading balances, lookups and the relay's rules. Screens list shownAssets. */
 export function ringsAssets(network: RingsNetwork = SOLANA_RINGS_NETWORK): readonly RingsAsset[] {
   return RINGS_ASSETS[network];
+}
+
+/**
+ * The listed assets a screen shows, given what client assetsReady read: all of
+ * them, but one marked hiddenUntilReady only once it is read as set up, or
+ * when `held` (a balance by asset id) has some of it. Before the read comes
+ * back (`ready` empty) such a token stays off the screen.
+ */
+export function shownAssets(
+  ready: Readonly<Record<string, boolean>>,
+  network: RingsNetwork = SOLANA_RINGS_NETWORK,
+  held?: Readonly<Record<string, bigint>> | null
+): readonly RingsAsset[] {
+  return ringsAssets(network).filter((a) => !a.hiddenUntilReady || ready[a.id] === true || (held?.[a.id] ?? 0n) > 0n);
+}
+
+/** The coin prices a Solana asset's dollar value needs (lib/live-quotes, through /api/markets). */
+export type RingsPrices = { solUsd: number | null; zecUsd: number | null };
+
+/**
+ * The dollar value of `amount` (base units) of `asset`: a stablecoin at a
+ * dollar, SOL and ZEC at their market price (bridged ZEC at Zcash's); null
+ * when the price is unknown or the asset has none.
+ */
+export function ringsUsd(asset: Pick<RingsAsset, "id" | "decimals" | "stable">, amount: bigint, prices: RingsPrices): number | null {
+  const units = Number(amount) / 10 ** asset.decimals;
+  if (asset.stable) return units;
+  const price = asset.id === "sol" ? prices.solUsd : asset.id === "zec" ? prices.zecUsd : null;
+  return price != null && Number.isFinite(price) && price > 0 ? units * price : null;
 }
 
 /**

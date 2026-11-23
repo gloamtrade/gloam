@@ -17,7 +17,7 @@
  *    depositor is the signing private account and the relay is named nowhere in
  *    the instruction, so the relay's SOL can only pay the fee: a deposit
  *    creates no account and pays no rent. One deposit of one listed asset (SOL,
- *    USDC, USDT), no memo, at least RELAYED_DEPOSIT_MIN of it, so the relay
+ *    USDC, USDT, ZEC), no memo, at least RELAYED_DEPOSIT_MIN of it, so the relay
  *    never pays to put dust into the pool. Counted as a payment by the route.
  *  - associated token account: CreateIdempotent (1) only, alongside a pool
  *    transact (the cash-out recipient's token account). When that account does
@@ -63,10 +63,10 @@ const TOKEN_PROGRAMS = new Set(["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "
 
 /**
  * The least of each listed asset a relayed deposit may move, in base units:
- * 0.001 SOL, 0.10 USDC or USDT. Below it the relay doesn't pay (a bridge
- * delivers at least about a dollar).
+ * 0.001 SOL, 0.10 USDC or USDT, 0.001 ZEC. Below it the relay doesn't pay (a
+ * bridge delivers at least about a dollar).
  */
-export const RELAYED_DEPOSIT_MIN: Readonly<Record<string, bigint>> = { sol: 1_000_000n, usdc: 100_000n, usdt: 100_000n };
+export const RELAYED_DEPOSIT_MIN: Readonly<Record<string, bigint>> = { sol: 1_000_000n, usdc: 100_000n, usdt: 100_000n, zec: 100_000n };
 
 /** Mint (the system program's address for SOL) to the least a relayed deposit of it may move, for `network`'s listed assets. */
 export function relayedDepositMins(network: RingsNetwork = SOLANA_RINGS_NETWORK): ReadonlyMap<string, bigint> {

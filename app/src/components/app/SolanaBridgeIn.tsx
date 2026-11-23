@@ -28,14 +28,15 @@ import {
   bridgeButton,
   defaultLanding,
   flowReducer,
-  landingAssets,
   loadRefunds,
+  orNames,
   loadTracked,
   payRoute,
   refundKey,
   refundPlace,
   saveRefund,
   saveTracked,
+  shownLandingAssets,
   solanaBridgeSources,
   trackPhase,
   trackedFrom,
@@ -431,8 +432,8 @@ export function SolanaBridgeIn({
               Bring money over from {sources.length} chains, or straight from an exchange.
             </p>
             <p className="mt-1.5 text-[12.5px] leading-relaxed text-mute">
-              It lands in your private account on Solana and goes private by itself, as USDC, USDT or SOL. Your Solana wallet
-              never appears.
+              It lands in your private account on Solana and goes private by itself, as {orNames(shownLandingAssets(ready))}. Your
+              Solana wallet never appears.
             </p>
             <button type="button" onClick={() => setOpen(true)} className="btn btn-ghost btn-sm mt-4">
               {flow.kind === "landed" ? "See what arrived" : "Bring money over"}
@@ -1041,7 +1042,7 @@ function BridgeSheet({
                 <div>
                   <p className="text-[13px] text-mute">To your private balance on Solana, as</p>
                   <div role="radiogroup" aria-label="Lands as" className="mt-1.5 flex flex-wrap gap-2">
-                    {landingAssets().map((a) => {
+                    {shownLandingAssets(ready).map((a) => {
                       const off = ready[a.id] === false;
                       return (
                         <button

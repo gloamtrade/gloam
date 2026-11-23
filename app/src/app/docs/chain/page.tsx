@@ -1069,6 +1069,7 @@ export default function DocsNetworksPage() {
               .map((a) => (
                 <li key={a.id}>
                   <strong>{a.symbol} mint</strong>, <code>{a.mint}</code>
+                  {a.note ? <>. {a.note}</> : null}
                 </li>
               ))}
             <li>

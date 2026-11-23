@@ -8,7 +8,7 @@
  * open, the connect and set-up card (SolanaGate).
  */
 import { IntentLink } from "@/components/IntentLink";
-import { RINGS_PRIVACY_NOTE, ringsAssets } from "@/lib/solanaRings/config";
+import { RINGS_PRIVACY_NOTE, type RingsAsset } from "@/lib/solanaRings/config";
 import { addAssetHref } from "@/lib/vaultHub";
 import { useHideAmounts } from "@/lib/hideAmounts";
 import { SealedField } from "@/components/ui/SealedField";
@@ -19,13 +19,13 @@ import { AddressChip } from "./AddressChip";
 import { TokenLogo } from "./TokenLogo";
 import { AddIcon, CashOutIcon, HeroFigure, LockIcon, QuickAction, ReceiveIcon, SendIcon, VaultChips } from "./PortfolioView";
 import { formatSolAmount, useSolana } from "./SolanaAccount";
-import { SolanaError, SolanaGate, useSolanaUsd, usd } from "./SolanaParts";
+import { SolanaError, SolanaGate, useShownAssets, useSolanaUsd, usd } from "./SolanaParts";
 import { SolanaNotPrivateYet } from "./SolanaVault";
 
 type Row = { id: string; symbol: string; name: string; raw: bigint; decimals: number; text: string; value: number | null };
 
-function rowsOf(b: Record<string, bigint> | null, toUsd: (id: string, v: bigint) => number | null): Row[] {
-  return ringsAssets().map((a) => {
+function rowsOf(assets: readonly RingsAsset[], b: Record<string, bigint> | null, toUsd: (id: string, v: bigint) => number | null): Row[] {
+  return assets.map((a) => {
     const raw = b?.[a.id] ?? 0n;
     return { id: a.id, symbol: a.symbol, name: a.name, raw, decimals: a.decimals, text: formatSolAmount(raw, a.decimals), value: toUsd(a.id, raw) };
   });
@@ -54,11 +54,14 @@ export function SolanaPortfolioView() {
   const sol = useSolana();
   const toUsd = useSolanaUsd();
   const [hidden] = useHideAmounts();
+  // ZEC shows once it is set up (useShownAssets); a private balance in it always shows
+  const privateAssets = useShownAssets(sol?.balances);
+  const walletAssets = useShownAssets();
   if (!sol) return null;
   if (!sol.address) return <SolanaGate />;
 
-  const privateRows = rowsOf(sol.balances, toUsd);
-  const walletRows = rowsOf(sol.walletBalances, toUsd);
+  const privateRows = rowsOf(privateAssets, sol.balances, toUsd);
+  const walletRows = rowsOf(walletAssets, sol.walletBalances, toUsd);
   const held = privateRows.filter((r) => r.raw > 0n);
   const privateSum = total(privateRows);
   const walletSum = total(walletRows);
