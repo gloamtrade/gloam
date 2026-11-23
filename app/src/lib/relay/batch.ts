@@ -15,8 +15,9 @@
  *
  * Multicall3 has the same address and the same code on every network the relay
  * serves: Robinhood Chain, Tempo, Base, Ethereum, BNB Chain and Elysium, and
- * their testnets (code hash read on each, 23 November 2026). A network missing from BATCH_CHAIN_IDS sends
- * its parts one by one, as before.
+ * their testnets (code hash read on each, 23 November 2026). It sends in one go
+ * on all of them but the ones with a public mempool (FRONT_RUN_CHAIN_IDS). A
+ * network missing from BATCH_CHAIN_IDS sends its parts one by one, as before.
  *
  * Shared by the relay (lib/relay/server) and the app (lib/relay/client): no
  * server code here.
@@ -28,7 +29,24 @@ export const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11" as const 
 export const MULTICALL3_CODEHASH = "0xd5c15df687b16f2ff992fc8d767b4216323184a2bbc6ee2f9c398c318e770891" as const;
 
 /** Where Multicall3 is deployed with that code (read 23 November 2026): the mainnets, then their testnets. */
-export const BATCH_CHAIN_IDS: ReadonlySet<number> = new Set([4663, 4217, 8453, 1, 56, 99901, 46630, 42431, 84532, 11155111, 99801]);
+export const MULTICALL3_CHAIN_IDS: readonly number[] = [4663, 4217, 8453, 1, 56, 99901, 46630, 42431, 84532, 11155111, 99801];
+
+/**
+ * Networks with a public mempool, where anyone reads a pending batch's calldata and
+ * can outbid it: Ethereum, its Sepolia testnet and BNB Chain. A griefer copies the
+ * last part's proof and sends that one spend to the vault first (anyone may, and it
+ * pays the person as proven); the batch then runs every other part and reverts on
+ * the spent one, so the relay pays for nearly every part and nothing of it lands.
+ * There the parts go one by one: a send that loses a race reverts early and cheap.
+ *
+ * Base and Elysium are in PUBLIC_MEMPOOL_CHAINS (lib/partnerCode) for another
+ * reason, a pending block readable before its time; their sequencer takes sends in
+ * the order they come, so nobody can get one in ahead of a batch there.
+ */
+export const FRONT_RUN_CHAIN_IDS: readonly number[] = [1, 11155111, 56];
+
+/** Where payments and cash outs in parts go as one transaction: Multicall3 is there, and nobody can get ahead of it. */
+export const BATCH_CHAIN_IDS: ReadonlySet<number> = new Set(MULTICALL3_CHAIN_IDS.filter((id) => !FRONT_RUN_CHAIN_IDS.includes(id)));
 
 /** A batch carries this many parts at least (one part is an ordinary transfer) and at most PAY_MAX_PARTS. */
 export const BATCH_MIN_PARTS = 2;

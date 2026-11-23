@@ -15,6 +15,9 @@
  *  - through the route, rate limits count each part
  *  - only on a network with the canonical Multicall3: outside BATCH_CHAIN_IDS, or with
  *    other code at its address, a batch is refused as batch_network, nothing sent
+ *  - never where the mempool is public (Ethereum, Sepolia, BNB Chain): a part copied
+ *    and sent ahead would make the relay pay for the rest in a revert, so a payment or
+ *    a cash out in one go is refused there as batch_network, before any read or lock
  *
  * A cash out in one go (relayUnshieldBatch, action "unshieldBatch"):
  *  - the calls are only the vault's unshield, one per part, on this network's vault, not
@@ -415,6 +418,36 @@ await test("cash out in one go, refused with nothing sent and no lock: parts, va
   assert.equal(sentRaw.length, before, "nothing went out");
   assert.equal(methods.length, 0, "and nothing was read from the chain");
   assert.ok(await free(a.nullifier), "no lock left behind");
+});
+
+await test("Ethereum, Sepolia and BNB Chain have a public mempool: a payment or a cash out in one go is refused there as batch_network, nothing read, sent or locked", async () => {
+  const { PUBLIC_MEMPOOL_CHAINS } = await import("../src/lib/partnerCode");
+  assert.deepEqual([...batch.FRONT_RUN_CHAIN_IDS].sort((a, b) => a - b), [1, 56, 11155111]);
+  for (const id of batch.FRONT_RUN_CHAIN_IDS) assert.ok(PUBLIC_MEMPOOL_CHAINS.includes(id), `${id} is a public-mempool chain for links too`);
+  const freeOn = async (chainId: number, nul: Hex) => {
+    const lock = await takeInflight(inflightKey(chainId, nul), 5);
+    if (lock) await lock.release();
+    return lock !== null;
+  };
+  for (const key of ["ethereum-mainnet", "ethereum", "bnb-mainnet"] as const) {
+    const there = getNetwork(key);
+    assert.ok(batch.MULTICALL3_CHAIN_IDS.includes(there.chainId), `${key}: Multicall3 is there`);
+    assert.equal(batch.batchesOn(there.chainId), false, `${key}: its parts go one by one`);
+    const parts = [part(true), part()];
+    const cashParts = [cash(), cash()];
+    methods.length = 0;
+    const before = sentRaw.length;
+    await assert.rejects(server.relayTransferBatch(there, { parts }), isRelayError("batch_network", 400), `${key}: a payment in one go`);
+    await assert.rejects(server.relayUnshieldBatch(there, cashBody(cashParts, { pool: there.pool ?? POOL })), isRelayError("batch_network", 400), `${key}: a cash out in one go`);
+    assert.equal(methods.length, 0, `${key}: no chain call`);
+    assert.equal(sentRaw.length, before, `${key}: nothing sent`);
+    for (const p of [...parts, ...cashParts]) assert.ok(await freeOn(there.chainId, p.nullifier), `${key}: no lock taken`);
+  }
+  // everywhere else Multicall3 is, the parts still go in one
+  for (const id of batch.MULTICALL3_CHAIN_IDS) assert.equal(batch.batchesOn(id), !batch.FRONT_RUN_CHAIN_IDS.includes(id), `chain ${id}`);
+  for (const key of ["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "elysium-mainnet", "robinhood", "tempo", "base", "elysium"] as const) {
+    assert.equal(batch.batchesOn(getNetwork(key).chainId), true, `${key} sends in one go`);
+  }
 });
 
 await test("a cash out in one go to a swap's escrow is refused, as a single cash out is", async () => {

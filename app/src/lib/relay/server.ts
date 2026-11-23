@@ -1599,8 +1599,10 @@ export const BATCH_NETWORK_MESSAGE = "Sending in one go isn't open on this netwo
 /**
  * Refuses a batch on a network outside BATCH_CHAIN_IDS (lib/relay/batch), before anything
  * else: where nothing lives at MULTICALL3, a call to it succeeds and does nothing, so the
- * relay would pay gas for calls that never reach the vault. Refused as batch_network:
- * nothing is sent, and the app sends the parts one by one.
+ * relay would pay gas for calls that never reach the vault; and where the mempool is
+ * public (FRONT_RUN_CHAIN_IDS), one copied part sent ahead of the batch would make the
+ * relay pay for all the others in a revert. Refused as batch_network: nothing is sent,
+ * and the app sends the parts one by one.
  */
 function assertBatchNetwork(net: Pick<GloamNetwork, "chainId">): void {
   if (!batchesOn(net.chainId)) throw new RelayError(BATCH_NETWORK_MESSAGE, 400, "batch_network");
