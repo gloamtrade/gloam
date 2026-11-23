@@ -152,6 +152,7 @@ import {
 import { cashOutPrivacyWarnings, depositWallets } from "@/lib/cashOutPrivacy";
 import { CashOutPercentChips, CashOutWarnings } from "./CashOutPrivacy";
 import { BalancePicker } from "./BalancePicker";
+import { heldBalance, payCardShows, withHeld } from "@/lib/heldBalance";
 import { PayAcrossPanel, usePayAcross } from "./PayAcross";
 import { CashOutAcrossPanel, useCashOutAcross } from "./CashOutAcross";
 import { cashOutAcrossEligible, cashOutAcrossReceived, newCashOutRun, planCashOutFrom } from "@/lib/cashOutAcross";
@@ -347,6 +348,11 @@ export function MoveView() {
   const [planRun, setPlanRun] = useState<PieceProgress[] | null>(null);
   /** The note a private cash out started from: the form stays on it while the run spends it. */
   const [runNote, setRunNote] = useState<LocalNote | null>(null);
+  /**
+   * The note a payment or cash out started from. The form stays on it until the result closes,
+   * even once the balance list drops it (lib/heldBalance), so it never falls back to the empty state.
+   */
+  const [flowNote, setFlowNote] = useState<LocalNote | null>(null);
   /** The piece being scheduled again from its notice. */
   const [leftoverBusy, setLeftoverBusy] = useState<string | null>(null);
   const [sendAmount, setSendAmount] = useState(
@@ -1074,8 +1080,19 @@ export function MoveView() {
     return (covering ?? bySize[bySize.length - 1]).id;
   }, [suggestion, notes]);
 
+  // A payment or cash out from its start until its result closes: proving, in the wallet, on its
+  // way, confirming, the heads-up after it, and the success dialog. The balance it spends stays
+  // picked the whole time, even after the list drops it (spent, its change not landed yet).
+  const inFlow = busy || isPending || confirming || (showSuccess && Boolean(txHash));
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the flow is over: the next one holds its own balance
+    if (!inFlow) setFlowNote(null);
+  }, [inFlow]);
+  const heldNote = runNote ?? heldBalance(notes, flowNote, inFlow);
+  const pickable = withHeld(notes, heldNote);
+
   const selected =
-    runNote ??
+    heldNote ??
     notes.find((n) => n.id === selectedId) ??
     notes.find((n) => n.id === requestNoteId) ??
     notes.find((n) => n.id === suggestNoteId) ??
@@ -1466,6 +1483,7 @@ export function MoveView() {
     // the last payment's claim code (kept under Sent links) is not this cash out's success
     setShareBlob(null);
     setMemoPosted(false);
+    setFlowNote(selected);
     reset();
     setRelayHash(undefined);
     handledHash.current = null;
@@ -1894,6 +1912,7 @@ export function MoveView() {
     }
     setShareBlob(null);
     setBusy(true);
+    setFlowNote(selected);
     reset();
     setRelayHash(undefined);
     handledHash.current = null;
@@ -2699,7 +2718,8 @@ export function MoveView() {
     : null;
   const requestHint = ((): { text: string; addHref?: string } | null => {
     const asset = request?.asset;
-    if (!asset || !shieldLive) return null;
+    // mid-payment the list can drop the balance being spent: no "you have none" while it goes out
+    if (!asset || !shieldLive || inFlow) return null;
     if (!requestNoteId) {
       return {
         text: `You have no private ${asset.symbol} on ${network.label} yet. Add some, then open this link again.`,
@@ -2837,6 +2857,15 @@ export function MoveView() {
     );
   };
 
+  // A cash out just scheduled: said under the form, and in place of it once the whole balance is waiting to go out.
+  const scheduledLine = scheduledNotice ? (
+    <div className="rounded-[16px] bg-sealed-soft px-4 py-3.5 text-[13px] leading-relaxed text-foreground">
+      {scheduledNotice.count && scheduledNotice.count > 1 && scheduledNotice.until
+        ? `${scheduledNotice.count} pieces, ${scheduledNotice.label} in all, scheduled to go out between ${aboutTime(scheduledNotice.at)} and ${aboutTime(scheduledNotice.until).replace(/^about /, "")}. You can close Gloam: the relay sends each one then.`
+        : `Cash out of ${scheduledNotice.label} scheduled for ${aboutTime(scheduledNotice.at)}. You can close Gloam: the relay sends it then.`}
+    </div>
+  ) : null;
+
   const connectPrompt = (action: string) => (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-[16px] bg-surface px-4 py-3">
       <p className="text-[14px] text-mute">
@@ -2965,14 +2994,15 @@ export function MoveView() {
             </div>
           )}
 
-          {shieldLive && notes.length > 0 && mode !== "receive" ? (
+          {shieldLive && payCardShows(notes.length, heldNote) === "form" && mode !== "receive" ? (
             <>
               <section className="mt-6">
                 <BalancePicker
                   label={mode === "cashout" ? "Cash out from" : "Pay from"}
                   value={selected?.id ?? null}
                   onChange={setSelectedId}
-                  options={notes.map((n) => {
+                  disabled={Boolean(heldNote)}
+                  options={pickable.map((n) => {
                     const exposed = isUnsecuredClaim(n);
                     const kind = exposed
                       ? "Claimed, not secured yet"
@@ -3884,13 +3914,7 @@ export function MoveView() {
                     </p>
                   )}
 
-                  {scheduledNotice && (
-                    <div className="rounded-[16px] bg-sealed-soft px-4 py-3.5 text-[13px] leading-relaxed text-foreground">
-                      {scheduledNotice.count && scheduledNotice.count > 1 && scheduledNotice.until
-                        ? `${scheduledNotice.count} pieces, ${scheduledNotice.label} in all, scheduled to go out between ${aboutTime(scheduledNotice.at)} and ${aboutTime(scheduledNotice.until).replace(/^about /, "")}. You can close Gloam: the relay sends each one then.`
-                        : `Cash out of ${scheduledNotice.label} scheduled for ${aboutTime(scheduledNotice.at)}. You can close Gloam: the relay sends it then.`}
-                    </div>
-                  )}
+                  {scheduledLine}
 
                   <ScheduledCashOuts rows={scheduledRows} liveFeeBps={liveFeeBps} gasHigh={gasHigh} onCancel={cancelScheduled} />
                 </div>
@@ -3898,10 +3922,22 @@ export function MoveView() {
             </>
           ) : mode !== "receive" ? (
             <>
-            {/* The whole balance can be waiting to go out: its rows, and Cancel, still show. */}
-            {mode === "cashout" && scheduledRows.length > 0 && (
-              <div className="mt-6">
+            {/* The whole balance can be waiting to go out: what was just scheduled, its rows, and Cancel, still show. */}
+            {mode === "cashout" && (scheduledLine || scheduledRows.length > 0) && (
+              <div className="mt-6 space-y-4">
+                {scheduledLine}
                 <ScheduledCashOuts rows={scheduledRows} liveFeeBps={liveFeeBps} gasHigh={gasHigh} onCancel={cancelScheduled} />
+              </div>
+            )}
+            {/* A payment that spent the whole balance: its claim code stays on screen, as it does under the form. */}
+            {mode === "send" && shareBlob && mustSaveCode && (
+              <div className="mt-6">
+                <PaymentTicketShare
+                  code={shareBlob}
+                  amountLabel={shareAmountLabel}
+                  locked={shareLocked}
+                  onSaved={() => setSavedCode(shareBlob)}
+                />
               </div>
             )}
             <div className="mt-6 rounded-[16px] bg-surface px-5 py-9 text-center">
