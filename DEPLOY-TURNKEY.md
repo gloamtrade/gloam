@@ -52,11 +52,14 @@ wallet made before 23 November 2026 has no Solana account, so the app adds one t
 same wallet (`createWalletAccounts`, Turnkey's first Solana path) the first time that
 person picks Solana. The account shows on the page as the Solana wallet "Gloam account",
 connects by itself when Solana is picked (a browser wallet can still be picked instead),
-and signs with Turnkey's raw Ed25519 signing (`sign_raw_payload`, no hash), stamped by
-the session like every other request. No dashboard setting changes. Its signature opens
-the person's private account on Solana, and Turnkey keeps that signature like every
-other, so Gloam's Turnkey account could read it: the app and `/privacy` say so before
-anyone signs, and point to a Solana wallet held by the person as the way to avoid it.
+and signs transactions only, with Turnkey's raw Ed25519 signing (`sign_raw_payload`, no
+hash), stamped by the session like every other request. It has no message signing: the
+person's private account on Solana never comes from a Turnkey signature (Turnkey keeps
+those, and Gloam's Turnkey account can read them). It opens from a secret Turnkey never
+sees (`lib/solanaRings/gloamRoot`): the WebAuthn PRF output of the passkey the person
+signs in with, or, for an email sign-in, a backup code made in the browser and shown once
+(kept sealed in the browser, `lib/solanaRings/gloamCodes`, and in a passkey-keyed recovery
+backup). No dashboard setting changes.
 
 ### Continue with Google (optional)
 

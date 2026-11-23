@@ -263,13 +263,16 @@ export default function PrivacyPage() {
       )}
       {EMBEDDED_WALLETS && SOLANA_RINGS_ENABLED && (
         <p>
-          A Gloam wallet also has a Solana account, in the same Turnkey wallet.
-          If you use it to open a private account on Solana, that private
-          account comes from its signature of a fixed message. Turnkey makes and
-          keeps that signature, so Turnkey, and anyone with access to
-          Gloam&apos;s Turnkey account, could open that private account. A
-          Solana wallet you hold yourself avoids that. The app says so before
-          you sign.
+          A Gloam wallet also has a Solana account, in the same Turnkey wallet,
+          which signs your Solana transactions. Your private account on Solana
+          does not come from its signatures: it opens with your passkey (a key
+          your passkey makes on your device) or, if you sign in with an email,
+          with a backup code made in your browser and shown to you once.
+          Neither Turnkey nor our servers receive either. The backup code is
+          kept in your browser, sealed like your private balance, and in your
+          recovery backup only when that backup uses a passkey. Without your
+          passkey, the code or this browser, the private account can&apos;t be
+          opened, by you or by us.
         </p>
       )}
       <h2>9. Tester applications and contest entries</h2>
