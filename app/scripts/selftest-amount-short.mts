@@ -156,7 +156,7 @@ test("the fee and You get lines show two places; Max and the claim code's share 
   assert.match(move, /const maxEth = selected\s*\?\s*formatUnits\(BigInt\(selected\.amountWei\), assetDecimals\(selected\.asset\)\)/);
   assert.match(move, /onMax=\{\(\) => setSendAmount\(maxEth\)\}/);
   assert.match(move, /fee: \$\{formatAssetLabel\(cashOutFee, selected\.asset\)\}/);
-  assert.match(move, /\{formatAssetAmount\(cashOutAmount - outFee, selected\.asset\)\}/);
+  assert.match(move, /\{formatAssetAmount\(cashOutAcrossPlan\?\.ok \? acrossReceived : cashOutAmount - outFee, selected\.asset\)\}/);
   assert.match(move, /exact: `\$\{formatAssetAmountExact\(w\.paymentNote\.amountWei, w\.paymentNote\.asset\)\} \$\{assetLabel\(w\.paymentNote\.asset\)\}`/);
   assert.match(move, /shareLabel=\{shareAmountLabel\?\.exact\}/);
 });
@@ -213,8 +213,8 @@ test("MoveView: the field shows real text, its placeholder is a muted 0, and emp
   // nothing reads an empty field as the whole balance any more
   assert.ok(!/cashOutInput\.trim\(\) === ""/.test(move));
   assert.ok(!/setCashOutInput\(""\)/.test(move));
-  // the button waits for an amount
-  assert.match(move, /cashOutFeeUnknown \|\|\s*\n\s*cashOutAmountInvalid \|\|/);
+  // the button waits for an amount (or a typed amount over this balance the others cover: cash out across)
+  assert.match(move, /cashOutFeeUnknown \|\|\s*\n\s*cashAcross\.running \|\|\s*\n\s*\(cashOutAmountInvalid && !cashOutAcrossPlan\?\.ok\) \|\|/);
   assert.match(move, /cashOutRead\.empty\s*\n\s*\? CASH_OUT_EMPTY_HELP/);
 });
 
