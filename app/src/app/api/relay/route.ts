@@ -2,6 +2,7 @@ import { NextResponse, after } from "next/server";
 import { logSafe } from "@/lib/logSafe";
 import { clientIp } from "@/lib/mcpRemote/rateLimit";
 import { afterRelaySend, bindRelaySpend, relayFlowOf, unbindRelaySpend, type BoundSpend } from "@/lib/partnerAttribution";
+import { isLinkCodeShape } from "@/lib/partnerCode";
 import { BATCH_MAX_PARTS } from "@/lib/relay/batch";
 import {
   RelayError,
@@ -41,7 +42,7 @@ export async function GET() {
  * payment in parts, sent as one transaction (lib/relay/batch). "unshieldBatch" takes
  * { pool, feeBps, parts: [{ proof, root, nullifier, asset, to, amount }] }: a cash out
  * across balances, every part's unshield to one wallet in one transaction. Each part of
- * either counts against the rate limits as the send it replaces. Neither carries a partner code.
+ * either counts against the rate limits as the send it replaces.
  * Returns { ok: true, hash } as soon as the transaction is sent; the client
  * waits for the receipt itself. A transfer also returns `memoTicket` for its
  * payment (commitments[0]), null when the relay has no memo secret: sent back
@@ -49,14 +50,16 @@ export async function GET() {
  * Also action "gas-station" with { wallet, step }: a fresh wallet's gas station
  * (lib/relay/gasStation), off unless switched on.
  *
- * A send opened from a partner's link may carry { partnerCode }. Nothing about
- * the send changes. Once the relay's checks, dry run and holds have passed, just
- * before the transaction goes out, the code is bound to that exact payment (one
- * store write, started then and never waited on); a request the relay refuses
- * binds nothing, and one that then surely didn't go out is taken back. Once the
- * send is out, the code is bound to the transaction's hash, and the transaction is
- * counted when it lands, after the response (lib/partnerAttribution). None of
- * this ever fails or delays a send.
+ * A send opened from a partner's link may carry { partnerCode }, and a payment or
+ * cash out in parts { partnerPayment } too: the app's random tag, the same on every
+ * part, so the parts count as one payment (transfer, unshield, transferBatch,
+ * unshieldBatch). Nothing about the send changes. Once the relay's checks, dry run
+ * and holds have passed, just before the transaction goes out, the code is bound to
+ * that exact payment (one store write, started then and never waited on); a
+ * request the relay refuses binds nothing, and one that then surely didn't go out
+ * is taken back. Once the send is out, the code is bound to the transaction's
+ * hash, and the transaction is counted when it lands, after the response
+ * (lib/partnerAttribution). None of this ever fails or delays a send.
  */
 export async function POST(req: Request) {
   try {
@@ -65,6 +68,7 @@ export async function POST(req: Request) {
     // a link's code is read now, bound just before the send goes out, counted after it (lib/partnerAttribution)
     const takenAt = Date.now();
     const partnerCode = body.partnerCode;
+    const partnerPayment = body.partnerPayment;
     const net = networkForChain(body.chainId);
     const requester = clientIp(req);
     await checkRateLimit(requester);
@@ -83,34 +87,41 @@ export async function POST(req: Request) {
     const hooks: SendHooks = flow
       ? {
           beforeBroadcast: (tx) => {
-            const b = bindRelaySpend({ net, tx, code: partnerCode, flow, at: Date.now() }).catch(() => null);
+            const b = bindRelaySpend({ net, tx, code: partnerCode, flow, at: Date.now(), payment: partnerPayment }).catch(() => null);
             bound = b;
             // the send surely didn't go out: take the binding back
             return () => void b.then(unbindRelaySpend);
           },
         }
       : {};
+    // once sent: the link's code is bound to the transaction and counted when it lands, after the reply
+    const countLater = (sent: `0x${string}`) => {
+      if (!flow || !isLinkCodeShape(partnerCode)) return;
+      try {
+        after(() => afterRelaySend({ net, hash: sent, code: partnerCode, flow, at: takenAt, bound, payment: partnerPayment }));
+      } catch (e) {
+        // never the send's business
+        console.error("gloam_partner_after_send", logSafe(e));
+      }
+    };
 
     let hash: `0x${string}`;
     switch (body.action) {
       case "transfer": {
         hash = await relayTransfer(net, body, requester, hooks);
-        if (partnerCode !== undefined) {
-          const sent = hash;
-          after(() => afterRelaySend({ net, hash: sent, code: partnerCode, flow: relayFlowOf(body), at: takenAt, bound }));
-        }
+        countLater(hash);
         // relayTransfer checked commitments[0] is a bytes32
         const payment = (body.commitments as string[])[0]!;
         return NextResponse.json({ ok: true, hash, memoTicket: memoTicket(net.chainId, payment) });
       }
       case "transferBatch":
-        hash = await relayTransferBatch(net, body, requester);
+        hash = await relayTransferBatch(net, body, requester, hooks);
         break;
       case "unshield":
         hash = await relayUnshield(net, body, requester, hooks);
         break;
       case "unshieldBatch":
-        hash = await relayUnshieldBatch(net, body, requester);
+        hash = await relayUnshieldBatch(net, body, requester, hooks);
         break;
       case "gas-station":
         hash = await relayGasStation(net, body, requester);
@@ -130,10 +141,8 @@ export async function POST(req: Request) {
       default:
         throw new RelayError("Unknown action.");
     }
-    if (partnerCode !== undefined && (body.action === "unshield" || body.action === "swap")) {
-      const sent = hash;
-      after(() => afterRelaySend({ net, hash: sent, code: partnerCode, flow: relayFlowOf(body), at: takenAt, bound }));
-    }
+    // a payment, cash out or swap from a link (flow is null for everything else)
+    countLater(hash);
     return NextResponse.json({ ok: true, hash });
   } catch (e) {
     if (e instanceof RelayError) {

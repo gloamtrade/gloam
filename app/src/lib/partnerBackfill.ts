@@ -353,8 +353,15 @@ async function matchAddress(net: GloamNetwork, log: UnshieldLog, partnerId: stri
   if (!receipt) throw new ReceiptUnread();
   if (receipt.status !== "success") return { ...base, reason: "The transaction failed." };
   const facts = classify(net, receipt.logs);
-  // the receipt must be the one cash out the log came from, nothing packed beside it
-  if (!facts.ok || facts.kind !== "cash_out" || facts.asset.toLowerCase() !== log.asset.toLowerCase() || facts.amount !== log.amount) {
+  // the receipt must be the one cash out the log came from, nothing packed beside it (a cash
+  // out in one go is several, counted here only when it came from a link: settleRegistered)
+  if (
+    !facts.ok ||
+    facts.kind !== "cash_out" ||
+    facts.nullifiers.length !== 1 ||
+    facts.asset.toLowerCase() !== log.asset.toLowerCase() ||
+    facts.amount !== log.amount
+  ) {
     return { ...base, reason: "Not a plain cash out." };
   }
   const ts = (await deps.blockTime(net, receipt.blockNumber)) * 1000;

@@ -18,6 +18,8 @@
  *       transaction is counted once it lands.
  *    A cash out sent later keeps its code with its job, and the run binds it to the
  *    transaction it sends for that job (afterScheduledSend).
+ *    A payment or cash out in one go (lib/relay/batch: every part in one Multicall3
+ *    call) is bound the same way, as one payment: its identity is every part's.
  *    A transaction the relay itself sent counts to the payment binding of its exact
  *    call made before its block's second, else to its hash binding, else to nobody;
  *    never to a wallet registration. A count asked for before the relay's binding
@@ -47,18 +49,29 @@
  * nothing. A cash out that pays a partner's own proven address (lib/partnerAddresses)
  * is that partner's, matched on chain, whatever link it came from.
  *
+ * Payments in parts (lib/payAcross, lib/cashOutAcross) count as one payment. Sent in
+ * one go they are one transaction, so one count, with every part's amount and vault
+ * fee added up (lib/partnerVerify). Sent part by part, each part carries the same
+ * random payment tag with the code (`payment`, made by the app for that payment): the
+ * first of its transactions counted is the payment, and every other is counted as a
+ * later part of it (lib/partners ActivityRecord part), adding its own amount and fees
+ * but never another payment or another flat fee. The tag only ever joins parts, so
+ * it can lower a count, never raise one; it is kept with the bindings and in one
+ * short-lived key per payment, never with a record.
+ *
  * Kept: what the chain shows and nothing more (lib/partners ActivityRecord). Never
  * the payer's wallet, the address a cash out paid, a note, the caller's IP or
  * anything else. No partner and no third party is called. Nothing here ever holds
  * up a send: failures are logged and dropped.
  */
-import { decodeFunctionData, encodeAbiParameters, isAddress, keccak256, parseAbiParameters, type Hex } from "viem";
+import { decodeFunctionData, encodeAbiParameters, isAddress, keccak256, parseAbiParameters, toFunctionSelector, type Hex } from "viem";
 import { ApiError } from "./partnersApi";
 import { attributedTo, claimTransaction, getPartner, recordActivity, type ActivityRecord } from "./partners";
 import { resolveLinkCode } from "./partnerLinks";
 import { isBytes32, isLinkCodeShape, linkBindHash, linkNullifierHash, proofBindValue, PUBLIC_MEMPOOL_CHAINS } from "./partnerCode";
+import { BATCH_MAX_PARTS, BATCH_MIN_PARTS, batchesOn, MULTICALL3, multicall3Abi } from "./relay/batch";
 import { classifyVaultTx, kindFitsFlow, LINK_FLOWS, type LinkFlow, type ReceiptLog, type VaultTxFacts } from "./partnerVerify";
-import { jsonOf, k, kv, kv1 } from "./partnersKv";
+import { jsonOf, k, kv, kv1, type KvCommand } from "./partnersKv";
 import { addressOwner } from "./partnerAddresses";
 import { networkForChain, relayerAccounts, relayPoolAbi, relayPublicClient } from "./relay/server";
 import { EVERY_SWAP_ROUTER, swapRoutersOn, vaultSwapAbi, vaultSwapV3Abi } from "./vaultSwap";
@@ -76,6 +89,8 @@ export const RELAY_PENDING_TTL_SEC = 3600;
 export const JOB_CODE_TTL_SEC = 100 * 86_400;
 /** A transaction can be counted to a link this long after it lands. */
 export const ATTRIBUTION_WINDOW_SEC = 7 * 86_400;
+/** A payment in parts keeps which transaction counted it this long: its parts land together, and each can be counted for a week. */
+export const PAYMENT_PARTS_TTL_SEC = 14 * 86_400;
 
 /** The claim a transaction gets when two codes registered it: it counts for nobody. */
 const NOBODY = { id: "conflict" };
@@ -88,9 +103,23 @@ export type Registration = {
   at: number;
   /** linkBindHash of the value only the spender had when it sent. */
   bind: Hex;
+  /** The payment in parts this spend is a part of (the app's random tag), if it is one. */
+  payment?: Hex;
 };
 
-export type RelayBinding = { partnerId: string; code: string; flow: LinkFlow; at: number };
+export type RelayBinding = {
+  partnerId: string;
+  code: string;
+  flow: LinkFlow;
+  at: number;
+  /** The payment in parts this send is (a part of), if it is one (the app's random tag). */
+  payment?: Hex;
+};
+
+/** A payment tag as sent (32 bytes), lowercase; undefined for anything else, so a bad one just counts as no tag. */
+export function paymentTagOf(raw: unknown): Hex | undefined {
+  return isBytes32(raw) ? (raw.toLowerCase() as Hex) : undefined;
+}
 
 /** The relay's signing accounts: a transaction from one of these is counted from relay bindings only. */
 export function relaySigners(): string[] {
@@ -105,38 +134,99 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 type SpendTuple = { root: Hex; nullifier: Hex; asset: Hex; amount: bigint };
 type NoteTuple = { commitment: Hex; asset: Hex; amount: bigint };
 
+/** A spend's identity (spendIdOf): `nullifiers` names every note it spends, `nullifier` the first. */
+export type SpendId = { id: Hex; nullifier: Hex; nullifiers: readonly Hex[] };
+
+/** One transfer or cash out on the vault, as its identity names it (spendIdOf); null for any other call. */
+function vaultSpendIdOf(chain: bigint, pool: Hex, input: Hex): { id: Hex; nullifier: Hex; fn: "transfer" | "unshield" } | null {
+  const call = decodeFunctionData({ abi: relayPoolAbi, data: input });
+  if (call.functionName === "transfer") {
+    const [, root, nullifier, out] = call.args as readonly [Hex, Hex, Hex, readonly [Hex, Hex]];
+    const id = keccak256(
+      encodeAbiParameters(parseAbiParameters("string, uint256, address, bytes32, bytes32, bytes32, bytes32"), ["transfer", chain, pool, root, nullifier, out[0], out[1]])
+    );
+    return { id, nullifier, fn: "transfer" };
+  }
+  if (call.functionName === "unshield") {
+    const [, root, nullifier, asset, recipient, amount] = call.args as readonly [Hex, Hex, Hex, Hex, Hex, bigint];
+    const id = keccak256(
+      encodeAbiParameters(parseAbiParameters("string, uint256, address, bytes32, bytes32, address, address, uint256"), ["unshield", chain, pool, root, nullifier, asset, recipient, amount])
+    );
+    return { id, nullifier, fn: "unshield" };
+  }
+  return null;
+}
+
+const POST_MEMO_SELECTOR = toFunctionSelector("postMemo(bytes32,bytes)");
+
+/**
+ * A payment or cash out in one go (lib/relay/batch), as the relay sends it: one
+ * aggregate3 call to Multicall3 whose calls are BATCH_MIN_PARTS to BATCH_MAX_PARTS
+ * of this vault's transfers (each may have its payment message to this network's
+ * memo board after it) or of its cash outs, never both, none allowed to fail. Its
+ * identity is its parts' own identities, in order, each as if sent alone; a
+ * message is no part of what was paid. Null for any other call, and on a network
+ * where the relay doesn't send in one go.
+ */
+function batchSpendIdOf(net: GloamNetwork, input: Hex): SpendId | null {
+  if (!batchesOn(net.chainId)) return null;
+  const call = decodeFunctionData({ abi: multicall3Abi, data: input });
+  if (call.functionName !== "aggregate3") return null;
+  const pool = net.pool!.toLowerCase() as Hex;
+  const board = net.payMemo?.address.toLowerCase() ?? null;
+  const chain = BigInt(net.chainId);
+  const parts: { id: Hex; nullifier: Hex; fn: "transfer" | "unshield" }[] = [];
+  let messages = 0;
+  for (const c of call.args[0]) {
+    if (c.allowFailure !== false) return null;
+    const target = c.target.toLowerCase();
+    if (target === pool) {
+      const part = vaultSpendIdOf(chain, pool, c.callData);
+      if (!part) return null;
+      parts.push(part);
+    } else if (board && target === board && c.callData.slice(0, 10).toLowerCase() === POST_MEMO_SELECTOR) {
+      messages++;
+    } else {
+      return null;
+    }
+  }
+  if (parts.length < BATCH_MIN_PARTS || parts.length > BATCH_MAX_PARTS) return null;
+  const fn = parts[0]!.fn;
+  // one kind of spend; a message only with payments
+  if (parts.some((p) => p.fn !== fn) || (messages > 0 && fn !== "transfer")) return null;
+  const id = keccak256(
+    encodeAbiParameters(parseAbiParameters("string, uint256, address, address, string, bytes32[]"), [
+      "batch",
+      chain,
+      MULTICALL3,
+      pool,
+      fn,
+      parts.map((p) => p.id),
+    ])
+  );
+  return { id, nullifier: parts[0]!.nullifier, nullifiers: parts.map((p) => p.nullifier) };
+}
+
 /**
  * A payment's identity, for a relay binding: the chain, the contract called, and
  * the call's public inputs with every proof left out. A transfer: root, nullifier
  * and both new commitments. A cash out: root, nullifier, asset, recipient and
  * amount. A swap: the spend (root, nullifier, asset, amount), the new and refund
  * notes (commitment, asset, amount), the route, and on newer routers the exit key
- * and deadline. Another valid proof of the same payment has the same identity; a
- * different spend of the same note does not. Null for any other call.
+ * and deadline. A payment or cash out in one go: every part's identity, in order
+ * (batchSpendIdOf). Another valid proof of the same payment has the same identity;
+ * a different spend of the same note does not. Null for any other call.
  */
-export function spendIdOf(net: GloamNetwork, tx: { to: string | null; input: Hex }): { id: Hex; nullifier: Hex } | null {
+export function spendIdOf(net: GloamNetwork, tx: { to: string | null; input: Hex }): SpendId | null {
   if (!tx.to || !net.pool) return null;
   const to = tx.to.toLowerCase() as Hex;
   const chain = BigInt(net.chainId);
   try {
     if (to === net.pool.toLowerCase()) {
-      const call = decodeFunctionData({ abi: relayPoolAbi, data: tx.input });
-      if (call.functionName === "transfer") {
-        const [, root, nullifier, out] = call.args as readonly [Hex, Hex, Hex, readonly [Hex, Hex]];
-        const id = keccak256(
-          encodeAbiParameters(parseAbiParameters("string, uint256, address, bytes32, bytes32, bytes32, bytes32"), ["transfer", chain, to, root, nullifier, out[0], out[1]])
-        );
-        return { id, nullifier };
-      }
-      if (call.functionName === "unshield") {
-        const [, root, nullifier, asset, recipient, amount] = call.args as readonly [Hex, Hex, Hex, Hex, Hex, bigint];
-        const id = keccak256(
-          encodeAbiParameters(parseAbiParameters("string, uint256, address, bytes32, bytes32, address, address, uint256"), ["unshield", chain, to, root, nullifier, asset, recipient, amount])
-        );
-        return { id, nullifier };
-      }
-      return null;
+      const one = vaultSpendIdOf(chain, to, tx.input);
+      return one ? { id: one.id, nullifier: one.nullifier, nullifiers: [one.nullifier] } : null;
     }
+    if (to === MULTICALL3.toLowerCase()) return batchSpendIdOf(net, tx.input);
     if (!swapRoutersOn(net.chainId).some((r) => r.address.toLowerCase() === to)) return null;
     for (const abi of [vaultSwapAbi, vaultSwapV3Abi] as const) {
       let args: readonly unknown[];
@@ -154,7 +244,7 @@ export function spendIdOf(net: GloamNetwork, tx: { to: string | null; input: Hex
           ["swap", chain, to, sp.root, sp.nullifier, sp.asset, sp.amount, d.commitment, d.asset, d.amount, r.commitment, r.asset, r.amount, route, exitKey ?? ZERO_ADDRESS, deadline ?? 0n]
         )
       );
-      return { id, nullifier: sp.nullifier };
+      return { id, nullifier: sp.nullifier, nullifiers: [sp.nullifier] };
     }
   } catch {
     /* not a call we know */
@@ -162,8 +252,8 @@ export function spendIdOf(net: GloamNetwork, tx: { to: string | null; input: Hex
   return null;
 }
 
-/** A payment binding this relay request made, so it can be kept once sent or taken back if the send didn't go out. */
-export type BoundSpend = { key: string; seen: string; value: string; wrote: boolean };
+/** A payment binding this relay request made, so it can be kept once sent or taken back if the send didn't go out. `seen`: one key per note it spends. */
+export type BoundSpend = { key: string; seen: string[]; value: string; wrote: boolean };
 
 /**
  * Called by the relay route from the relay's beforeBroadcast hook, with the call
@@ -173,20 +263,35 @@ export type BoundSpend = { key: string; seen: string; value: string; wrote: bool
  * afterRelaySend keeps it as long as the hash binding, and if the send surely
  * didn't go out, unbindRelaySpend takes it back. Only a transaction the relay
  * itself sends is ever counted from it (settleLinkTx). Not kept on chains whose
- * public mempool shows a pending transaction's calldata.
+ * public mempool shows a pending transaction's calldata. `payment`: the app's tag
+ * when this send is (a part of) a payment in parts.
  */
-export async function bindRelaySpend(args: { net: GloamNetwork; tx: { to: string; data: Hex }; code: unknown; flow: LinkFlow; at: number }): Promise<BoundSpend | null> {
+export async function bindRelaySpend(args: {
+  net: GloamNetwork;
+  tx: { to: string; data: Hex };
+  code: unknown;
+  flow: LinkFlow;
+  at: number;
+  payment?: unknown;
+}): Promise<BoundSpend | null> {
   if (!isLinkCodeShape(args.code) || PUBLIC_MEMPOOL_CHAINS.includes(args.net.chainId)) return null;
   const spend = spendIdOf(args.net, { to: args.tx.to, input: args.tx.data });
   if (!spend) return null;
   const resolved = await resolveLinkCode(args.code, args.at);
   if (!resolved) return null;
   const key = spendKey(args.net.chainId, spend.id);
-  const seen = spendSeenKey(args.net.chainId, spend.nullifier);
-  const value = JSON.stringify({ partnerId: resolved.partner.id, code: resolved.code.code, flow: args.flow, at: args.at } satisfies RelayBinding);
+  const seen = spend.nullifiers.map((n) => spendSeenKey(args.net.chainId, n));
+  const payment = paymentTagOf(args.payment);
+  const value = JSON.stringify({
+    partnerId: resolved.partner.id,
+    code: resolved.code.code,
+    flow: args.flow,
+    at: args.at,
+    ...(payment ? { payment } : {}),
+  } satisfies RelayBinding);
   const [set] = await kv([
     ["SET", key, value, "NX", "EX", RELAY_PENDING_TTL_SEC],
-    ["SET", seen, "1", "NX", "EX", RELAY_PENDING_TTL_SEC],
+    ...seen.map((s): KvCommand => ["SET", s, "1", "NX", "EX", RELAY_PENDING_TTL_SEC]),
   ]);
   return { key, seen, value, wrote: set === "OK" };
 }
@@ -202,14 +307,29 @@ export async function unbindRelaySpend(b: BoundSpend | null): Promise<void> {
 }
 
 function isRelayBinding(b: RelayBinding | null): b is RelayBinding {
-  return !!b && typeof b.partnerId === "string" && typeof b.code === "string" && typeof b.at === "number" && LINK_FLOWS.includes(b.flow);
+  return (
+    !!b &&
+    typeof b.partnerId === "string" &&
+    typeof b.code === "string" &&
+    typeof b.at === "number" &&
+    LINK_FLOWS.includes(b.flow) &&
+    (b.payment === undefined || isBytes32(b.payment))
+  );
 }
 
-/** The binding of this exact payment made before `beforeMs`, if any. */
-async function paymentBinding(net: GloamNetwork, t: { to: string | null; input: Hex }, nullifier: Hex, beforeMs: number): Promise<RelayBinding | null> {
+/** The same notes spent, whatever the order. */
+function sameSpends(a: readonly Hex[], b: readonly Hex[]): boolean {
+  if (a.length !== b.length) return false;
+  const x = a.map((n) => n.toLowerCase()).sort();
+  const y = b.map((n) => n.toLowerCase()).sort();
+  return x.every((n, i) => n === y[i]);
+}
+
+/** The binding of this exact payment made before `beforeMs`, if any: the call must spend exactly the notes the vault logged. */
+async function paymentBinding(net: GloamNetwork, t: { to: string | null; input: Hex }, nullifiers: readonly Hex[], beforeMs: number): Promise<RelayBinding | null> {
   if (PUBLIC_MEMPOOL_CHAINS.includes(net.chainId)) return null;
   const spend = spendIdOf(net, t);
-  if (!spend || spend.nullifier.toLowerCase() !== nullifier.toLowerCase()) return null;
+  if (!spend || !sameSpends(spend.nullifiers, nullifiers)) return null;
   const b = jsonOf<RelayBinding>(await kv1(["GET", spendKey(net.chainId, spend.id)]));
   return isRelayBinding(b) && b.at < beforeMs ? b : null;
 }
@@ -226,6 +346,8 @@ export async function registerLink(args: {
   code: string;
   flow: LinkFlow;
   at?: number;
+  /** The payment in parts this spend is a part of (the app's random tag). */
+  payment?: Hex;
 }): Promise<{ registered: boolean; reason?: "code_not_live" | "public_mempool" | "relay_only" }> {
   const at = args.at ?? Date.now();
   if (PUBLIC_MEMPOOL_CHAINS.includes(args.chainId)) return { registered: false, reason: "public_mempool" };
@@ -234,7 +356,15 @@ export async function registerLink(args: {
   const resolved = await resolveLinkCode(args.code, at);
   if (!resolved) return { registered: false, reason: "code_not_live" };
   const key = k("reg", args.chainId, args.nullifierHash.toLowerCase());
-  const reg: Registration = { partnerId: resolved.partner.id, code: resolved.code.code, flow: args.flow, at, bind: args.bindHash.toLowerCase() as Hex };
+  const payment = paymentTagOf(args.payment);
+  const reg: Registration = {
+    partnerId: resolved.partner.id,
+    code: resolved.code.code,
+    flow: args.flow,
+    at,
+    bind: args.bindHash.toLowerCase() as Hex,
+    ...(payment ? { payment } : {}),
+  };
   await kv([
     ["HSETNX", key, `${reg.code}|${reg.bind}`, JSON.stringify(reg)],
     ["EXPIRE", key, REGISTRATION_TTL_SEC],
@@ -253,10 +383,11 @@ export async function registrationsOf(chainId: number, nullifier: Hex): Promise<
 }
 
 /** The relay binds a link's code to the transaction it sent. Authoritative for that transaction. */
-export async function bindRelayTx(args: { chainId: number; txHash: Hex; code: string; flow: LinkFlow; at: number }): Promise<boolean> {
+export async function bindRelayTx(args: { chainId: number; txHash: Hex; code: string; flow: LinkFlow; at: number; payment?: unknown }): Promise<boolean> {
   const resolved = await resolveLinkCode(args.code, args.at);
   if (!resolved) return false;
-  const b: RelayBinding = { partnerId: resolved.partner.id, code: resolved.code.code, flow: args.flow, at: args.at };
+  const payment = paymentTagOf(args.payment);
+  const b: RelayBinding = { partnerId: resolved.partner.id, code: resolved.code.code, flow: args.flow, at: args.at, ...(payment ? { payment } : {}) };
   await kv1(["SET", k("relaytx", args.chainId, args.txHash.toLowerCase()), JSON.stringify(b), "EX", RELAY_BINDING_TTL_SEC]);
   return true;
 }
@@ -317,12 +448,12 @@ export function readSettleInput(body: Record<string, unknown>): SettleInput {
   return { chainId: body.chainId, txHash: body.txHash.toLowerCase() as Hex };
 }
 
-export type RegisterInput = { chainId: number; nullifierHash: Hex; bindHash: Hex; code: string; flow: LinkFlow };
+export type RegisterInput = { chainId: number; nullifierHash: Hex; bindHash: Hex; code: string; flow: LinkFlow; payment?: Hex };
 
-/** The registration request's body, to the letter, or a 400. */
+/** The registration request's body, to the letter, or a 400. `payment` (a part of a payment in parts) may be left out. */
 export function readRegisterInput(body: Record<string, unknown>): RegisterInput {
-  if (Object.keys(body).some((key) => !["chainId", "nullifierHash", "bindHash", "code", "flow"].includes(key))) {
-    throw new ApiError(400, "bad_request", "Send only { chainId, nullifierHash, bindHash, code, flow }.");
+  if (Object.keys(body).some((key) => !["chainId", "nullifierHash", "bindHash", "code", "flow", "payment"].includes(key))) {
+    throw new ApiError(400, "bad_request", "Send only { chainId, nullifierHash, bindHash, code, flow, payment? }.");
   }
   if (typeof body.chainId !== "number" || !Number.isSafeInteger(body.chainId) || body.chainId <= 0) {
     throw new ApiError(400, "bad_chain", "chainId must be a chain id number.");
@@ -333,12 +464,14 @@ export function readRegisterInput(body: Record<string, unknown>): RegisterInput 
   if (typeof body.flow !== "string" || !LINK_FLOWS.includes(body.flow as LinkFlow)) {
     throw new ApiError(400, "bad_flow", 'flow must be "pay" or "swap".');
   }
+  if (body.payment !== undefined && !isBytes32(body.payment)) throw new ApiError(400, "bad_hash", "payment must be 32 bytes.");
   return {
     chainId: body.chainId,
     nullifierHash: body.nullifierHash.toLowerCase() as Hex,
     bindHash: body.bindHash.toLowerCase() as Hex,
     code: body.code,
     flow: body.flow as LinkFlow,
+    ...(body.payment !== undefined ? { payment: (body.payment as Hex).toLowerCase() as Hex } : {}),
   };
 }
 
@@ -358,9 +491,11 @@ export function classify(net: GloamNetwork, logs: readonly ReceiptLog[]): VaultT
  * The value a wallet send's registration has to name, read from the transaction:
  * a private payment's new note commitment (from its log), a cash out's proof (from
  * the call, made straight to the vault). null when it can't be read: then a wallet
- * registration can't match.
+ * registration can't match. Never for several spends in one transaction: the app
+ * sends those through the relay only, and a registration names one spend.
  */
 function bindOf(net: GloamNetwork, t: { to: string | null; input: Hex }, facts: Extract<VaultTxFacts, { ok: true }>): Hex | null {
+  if (facts.nullifiers.length !== 1) return null;
   if (facts.kind === "private_payment") return linkBindHash(facts.paymentCommitment);
   if (facts.kind !== "cash_out") return null;
   if (!t.to || t.to.toLowerCase() !== net.pool!.toLowerCase()) return null;
@@ -400,13 +535,13 @@ export async function settleLinkTx(
 
   const t = await deps.tx(net, input.txHash);
   if (!t) throw new ApiError(502, "rpc", "Could not read the transaction. Try again.");
-  let bound: { partnerId: string; code: string; flow: LinkFlow; by: "relay" | "wallet" } | null = null;
+  let bound: { partnerId: string; code: string; flow: LinkFlow; payment?: Hex; by: "relay" | "wallet" } | null = null;
   if (deps.relaySigners().includes(t.from.toLowerCase())) {
     // 1. Sent by the relay: its own bindings only, never a wallet registration. The binding of this
     // exact payment (its public inputs) made before its block's second wins; the binding of this very
     // transaction's hash only when there is none. So a reverted link payment that someone resends with
     // another code stays with the first link, and a different spend of the same note is never taken.
-    const relay = (await paymentBinding(net, t, facts.nullifier, ts * 1000)) ?? (await relayBindingOf(net.chainId, input.txHash));
+    const relay = (await paymentBinding(net, t, facts.nullifiers, ts * 1000)) ?? (await relayBindingOf(net.chainId, input.txHash));
     if (relay) bound = { ...relay, by: "relay" };
   } else if (!PUBLIC_MEMPOOL_CHAINS.includes(net.chainId)) {
     // 2. From a wallet: registrations of this spend that name the value only its spender had, made
@@ -433,6 +568,9 @@ export async function settleLinkTx(
   const ownerPartner = owner ? await getPartner(owner) : null;
   const partner = ownerPartner ?? (await getPartner(bound.partnerId));
   if (!partner) throw new ApiError(404, "not_registered", "The partner behind that link is gone.");
+  // part of a payment in parts: counted as the payment once, every other part adds only its amount and fees
+  const tag = paymentTagOf(bound.payment);
+  const part = tag ? await laterPart(net.chainId, partner.id, tag, input.txHash) : false;
   const r = await deps.record({
     partner,
     keyId: null,
@@ -446,14 +584,32 @@ export async function settleLinkTx(
     vaultFee: facts.kind === "private_payment" ? 0n : facts.vaultFee,
     // the day it landed, which for a cash out sent later is not the day it was reported
     now: ts * 1000,
+    ...(part ? { part: true } : {}),
   });
   if (!r.recorded) throw new ApiError(409, "already_attributed", "That transaction is already counted.");
   return { kind: facts.kind, record: r.record };
 }
 
+/**
+ * Whether this transaction is a later part of a payment in parts already counted. The
+ * first of the payment's transactions to be counted holds its place (by its hash, so
+ * two counts of that same transaction at once both see it as the payment, and the
+ * claim keeps one); every other transaction of it is a later part. Per partner and chain.
+ */
+async function laterPart(chainId: number, partnerId: string, payment: Hex, txHash: Hex): Promise<boolean> {
+  const key = k("linkpay", chainId, partnerId, payment.toLowerCase());
+  const tx = txHash.toLowerCase();
+  const [, held] = await kv([
+    ["SET", key, tx, "NX", "EX", PAYMENT_PARTS_TTL_SEC],
+    ["GET", key],
+  ]);
+  return typeof held === "string" && held !== tx;
+}
+
 /** The flow a relay action belongs to; null for anything a link doesn't count (a memo, a refund, an exit). */
 export function relayFlowOf(body: Record<string, unknown>): LinkFlow | null {
-  if (body.action === "transfer" || body.action === "unshield") return "pay";
+  // a payment or a cash out in one go is a payment or a cash out (lib/relay/batch)
+  if (body.action === "transfer" || body.action === "unshield" || body.action === "transferBatch" || body.action === "unshieldBatch") return "pay";
   if (body.action === "swap" && body.unshieldTx === undefined) return "swap";
   return null;
 }
@@ -476,19 +632,18 @@ export async function afterRelaySend(args: {
   at: number;
   /** The payment binding started just before the send (bindRelaySpend), finished here first and kept as long as the hash binding. */
   bound?: Promise<BoundSpend | null>;
+  /** The app's tag when this send is (a part of) a payment in parts. */
+  payment?: unknown;
   wait?: (net: GloamNetwork, hash: Hex) => Promise<void>;
   deps?: AttributionDeps;
 }): Promise<void> {
   try {
     const spend = (await args.bound?.catch(() => null)) ?? null;
     if (!args.flow || !isLinkCodeShape(args.code)) return;
-    if (!(await bindRelayTx({ chainId: args.net.chainId, txHash: args.hash, code: args.code, flow: args.flow, at: args.at }))) return;
+    if (!(await bindRelayTx({ chainId: args.net.chainId, txHash: args.hash, code: args.code, flow: args.flow, at: args.at, payment: args.payment }))) return;
     // the send is out: its payment binding is no longer pending
     if (spend) {
-      await kv([
-        ["EXPIRE", spend.key, RELAY_BINDING_TTL_SEC],
-        ["EXPIRE", spend.seen, RELAY_BINDING_TTL_SEC],
-      ]);
+      await kv([["EXPIRE", spend.key, RELAY_BINDING_TTL_SEC], ...spend.seen.map((s): KvCommand => ["EXPIRE", s, RELAY_BINDING_TTL_SEC])]);
     }
     const wait =
       args.wait ??

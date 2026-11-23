@@ -15,9 +15,11 @@ const PER_IP_PER_HOUR = 60;
 const PER_CODE_IP_PER_MIN = 10;
 
 /**
- * POST { chainId, nullifierHash, bindHash, code, flow: "pay" }: before a wallet
- * sends a payment or a cash out opened from a partner's link, the app registers
- * the spend under the link's code (lib/partnerAttribution). nullifierHash names
+ * POST { chainId, nullifierHash, bindHash, code, flow: "pay", payment? }: before a
+ * wallet sends a payment or a cash out opened from a partner's link, the app
+ * registers the spend under the link's code (lib/partnerAttribution). `payment`, on
+ * each part of a cash out in parts, is the app's random tag for the whole cash out,
+ * so its parts count as one (32 bytes; left out otherwise). nullifierHash names
  * the spend without revealing it; bindHash names a value only the spender has when
  * it sends (the payment's new note commitment, or the cash out's proof), so knowing
  * a nullifier ahead of time is not enough. The transaction counts only when it
