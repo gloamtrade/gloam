@@ -19,7 +19,10 @@
  *    A cash out sent later keeps its code with its job, and the run binds it to the
  *    transaction it sends for that job (afterScheduledSend).
  *    A payment or cash out in one go (lib/relay/batch: every part in one Multicall3
- *    call) is bound the same way, as one payment: its identity is every part's.
+ *    call) is bound the same way, as one payment: its identity is every part's. Each
+ *    part's own identity is bound with it too, and a batch counts to the earliest of
+ *    its own binding and its parts', so a part of a reverted batch resent alone, or a
+ *    reverted payment resent inside a new batch, stays with the first link.
  *    A transaction the relay itself sent counts to the payment binding of its exact
  *    call made before its block's second, else to its hash binding, else to nobody;
  *    never to a wallet registration. A count asked for before the relay's binding
@@ -134,8 +137,11 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 type SpendTuple = { root: Hex; nullifier: Hex; asset: Hex; amount: bigint };
 type NoteTuple = { commitment: Hex; asset: Hex; amount: bigint };
 
-/** A spend's identity (spendIdOf): `nullifiers` names every note it spends, `nullifier` the first. */
-export type SpendId = { id: Hex; nullifier: Hex; nullifiers: readonly Hex[] };
+/**
+ * A spend's identity (spendIdOf): `nullifiers` names every note it spends, `nullifier` the first.
+ * A payment or cash out in one go also names `parts`: each part's own identity, as if sent alone.
+ */
+export type SpendId = { id: Hex; nullifier: Hex; nullifiers: readonly Hex[]; parts?: readonly Hex[] };
 
 /** One transfer or cash out on the vault, as its identity names it (spendIdOf); null for any other call. */
 function vaultSpendIdOf(chain: bigint, pool: Hex, input: Hex): { id: Hex; nullifier: Hex; fn: "transfer" | "unshield" } | null {
@@ -204,7 +210,7 @@ function batchSpendIdOf(net: GloamNetwork, input: Hex): SpendId | null {
       parts.map((p) => p.id),
     ])
   );
-  return { id, nullifier: parts[0]!.nullifier, nullifiers: parts.map((p) => p.nullifier) };
+  return { id, nullifier: parts[0]!.nullifier, nullifiers: parts.map((p) => p.nullifier), parts: parts.map((p) => p.id) };
 }
 
 /**
@@ -252,8 +258,12 @@ export function spendIdOf(net: GloamNetwork, tx: { to: string | null; input: Hex
   return null;
 }
 
-/** A payment binding this relay request made, so it can be kept once sent or taken back if the send didn't go out. `seen`: one key per note it spends. */
-export type BoundSpend = { key: string; seen: string[]; value: string; wrote: boolean };
+/**
+ * A payment binding this relay request made, so it can be kept once sent or taken back if the
+ * send didn't go out. `seen`: one key per note it spends. `parts`: for a payment or cash out in
+ * one go, each part's own binding, and whether this request wrote it.
+ */
+export type BoundSpend = { key: string; seen: string[]; value: string; wrote: boolean; parts?: { key: string; wrote: boolean }[] };
 
 /**
  * Called by the relay route from the relay's beforeBroadcast hook, with the call
@@ -265,6 +275,10 @@ export type BoundSpend = { key: string; seen: string[]; value: string; wrote: bo
  * itself sends is ever counted from it (settleLinkTx). Not kept on chains whose
  * public mempool shows a pending transaction's calldata. `payment`: the app's tag
  * when this send is (a part of) a payment in parts.
+ *
+ * A payment or cash out in one go also binds each part's own identity, first binding
+ * standing as ever: if the batch reverts, its parts' proofs are public, and one of them
+ * relayed again alone with another code would otherwise be a payment nobody bound.
  */
 export async function bindRelaySpend(args: {
   net: GloamNetwork;
@@ -289,18 +303,29 @@ export async function bindRelaySpend(args: {
     at: args.at,
     ...(payment ? { payment } : {}),
   } satisfies RelayBinding);
-  const [set] = await kv([
+  const partKeys = (spend.parts ?? []).map((id) => spendKey(args.net.chainId, id));
+  const [set, ...rest] = await kv([
     ["SET", key, value, "NX", "EX", RELAY_PENDING_TTL_SEC],
+    ...partKeys.map((p): KvCommand => ["SET", p, value, "NX", "EX", RELAY_PENDING_TTL_SEC]),
     ...seen.map((s): KvCommand => ["SET", s, "1", "NX", "EX", RELAY_PENDING_TTL_SEC]),
   ]);
-  return { key, seen, value, wrote: set === "OK" };
+  return {
+    key,
+    seen,
+    value,
+    wrote: set === "OK",
+    ...(partKeys.length ? { parts: partKeys.map((p, i) => ({ key: p, wrote: rest[i] === "OK" })) } : {}),
+  };
 }
 
-/** Takes back a payment binding this request made, when its send surely didn't go out. Never throws. */
+/** Takes back a payment binding this request made (and its parts' it wrote), when its send surely didn't go out. Never throws. */
 export async function unbindRelaySpend(b: BoundSpend | null): Promise<void> {
   try {
-    if (!b?.wrote) return;
-    if ((await kv1(["GET", b.key])) === b.value) await kv1(["DEL", b.key]);
+    if (!b) return;
+    const mine = [...(b.wrote ? [b.key] : []), ...(b.parts ?? []).filter((p) => p.wrote).map((p) => p.key)];
+    for (const key of mine) {
+      if ((await kv1(["GET", key])) === b.value) await kv1(["DEL", key]);
+    }
   } catch (e) {
     console.error("gloam_partner_unbind", logSafe(e));
   }
@@ -325,13 +350,28 @@ function sameSpends(a: readonly Hex[], b: readonly Hex[]): boolean {
   return x.every((n, i) => n === y[i]);
 }
 
-/** The binding of this exact payment made before `beforeMs`, if any: the call must spend exactly the notes the vault logged. */
+/**
+ * The binding of this exact payment made before `beforeMs`, if any: the call must spend exactly
+ * the notes the vault logged. For a payment or cash out in one go, the earliest of its own
+ * binding and each part's: a part bound first, sent alone before and reverted, keeps its link
+ * when someone puts it in a new batch (a fresh identity) with another code.
+ */
 async function paymentBinding(net: GloamNetwork, t: { to: string | null; input: Hex }, nullifiers: readonly Hex[], beforeMs: number): Promise<RelayBinding | null> {
   if (PUBLIC_MEMPOOL_CHAINS.includes(net.chainId)) return null;
   const spend = spendIdOf(net, t);
   if (!spend || !sameSpends(spend.nullifiers, nullifiers)) return null;
-  const b = jsonOf<RelayBinding>(await kv1(["GET", spendKey(net.chainId, spend.id)]));
-  return isRelayBinding(b) && b.at < beforeMs ? b : null;
+  const raw = await kv([spend.id, ...(spend.parts ?? [])].map((id): KvCommand => ["GET", spendKey(net.chainId, id)]));
+  let first: { b: RelayBinding; own: boolean } | null = null;
+  for (const r of raw) {
+    const b = jsonOf<RelayBinding>(r);
+    if (!isRelayBinding(b) || b.at >= beforeMs) continue;
+    // a part bound by the batch's own request holds the very same value as the batch
+    const own = r === raw[0];
+    // the earliest; in the same millisecond, a part binding another send made beats the
+    // batch's own, since the batch's request found that part already taken
+    if (!first || b.at < first.b.at || (b.at === first.b.at && first.own && !own)) first = { b, own };
+  }
+  return first?.b ?? null;
 }
 
 /**
@@ -643,7 +683,11 @@ export async function afterRelaySend(args: {
     if (!(await bindRelayTx({ chainId: args.net.chainId, txHash: args.hash, code: args.code, flow: args.flow, at: args.at, payment: args.payment }))) return;
     // the send is out: its payment binding is no longer pending
     if (spend) {
-      await kv([["EXPIRE", spend.key, RELAY_BINDING_TTL_SEC], ...spend.seen.map((s): KvCommand => ["EXPIRE", s, RELAY_BINDING_TTL_SEC])]);
+      await kv([
+        ["EXPIRE", spend.key, RELAY_BINDING_TTL_SEC],
+        ...(spend.parts ?? []).map((p): KvCommand => ["EXPIRE", p.key, RELAY_BINDING_TTL_SEC]),
+        ...spend.seen.map((s): KvCommand => ["EXPIRE", s, RELAY_BINDING_TTL_SEC]),
+      ]);
     }
     const wait =
       args.wait ??
