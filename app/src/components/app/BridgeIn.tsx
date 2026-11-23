@@ -40,6 +40,7 @@ import { connectSolana, paySolana, useSolanaWallets, type SolanaAccount, type So
 import { track } from "@/lib/track";
 import type { TrackEvent } from "@/lib/trackEvents";
 import { failedBeforeSend, solanaDeclined, solanaSurelyNotSent, surelyNotSent, walletDeclined, walletErrorText } from "@/lib/walletErrors";
+import { payRelayTxs, wagmiPayActions } from "@/lib/relayWalletPay";
 import { SealedField } from "@/components/ui/SealedField";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useNetwork } from "./NetworkProvider";
@@ -914,80 +915,21 @@ function BridgeSheet({
       return;
     }
     const at = quote === r.quote ? r.at : Date.now();
-    const txs = quote.evmTxs ?? [];
-    let hash: Hex | null = null;
-    let approved = false;
-    // Set once the last transaction (the deposit) is handed to the wallet.
-    let paying = false;
-    try {
-      for (let i = 0; i < txs.length; i++) {
-        const tx = txs[i]!;
-        const last = i === txs.length - 1;
-        const chainId = tx.chainId as GloamChainId;
-        setWallet({
-          kind: "review",
-          quote,
-          at,
-          signing: true,
-          error: null,
-          progress: txs.length > 1 ? (last ? "Now confirm the bridge in your wallet…" : "Approve in your wallet first (1 of 2)…") : null,
-        });
-        if (getAccount(config).chainId !== tx.chainId) {
-          if (tx.chainId !== network.chainId) switchedAway.current = true;
-          await switchChain(config, { chainId });
-        }
-        paying = last;
-        const sent = await sendTransaction(config, { to: tx.to as Address, data: tx.data as Hex, value: BigInt(tx.value), chainId });
-        if (last) {
-          hash = sent;
-        } else {
-          // wagmi throws on a reverted receipt, with a reason decoded from raw bytes: read it plainly then
-          const rec = await waitForTransactionReceipt(config, { hash: sent, chainId }).catch(async (e) => {
-            const plain = await getTransactionReceipt(config, { hash: sent, chainId }).catch(() => null);
-            if (plain) return plain;
-            throw e;
-          });
-          if (rec.status !== "success") throw new Error("The approval didn't go through.");
-          // Some wallets (OKX among them) let the approval be edited down. A bridge
-          // above what was approved fails in the wallet's own check, so stop here and
-          // say so instead of handing over a deposit that cannot go through.
-          if (tx.data.slice(0, 10).toLowerCase() === "0x095ea7b3") {
-            const spender = `0x${tx.data.slice(34, 74)}` as Address;
-            const needed = BigInt(`0x${tx.data.slice(74, 138)}`);
-            const allowed = await readContract(config, { address: tx.to as Address, abi: erc20Abi, functionName: "allowance", args: [getAccount(config).address as Address, spender], chainId }).catch(() => null);
-            if (allowed !== null && allowed < needed) {
-              throw new Error(`Your wallet approved less than this payment needs (${formatUnits(allowed, token.decimals)} of ${quote.send.amount} ${quote.send.symbol}). Try again and approve the amount shown, without editing it.`);
-            }
-          }
-          approved = true;
-          // Some wallets check the deposit against a node that hasn't seen the approval yet
-          // and call it a failed contract call: give the chain a few seconds first.
-          setWallet({ kind: "review", quote, at, signing: true, error: null, progress: "Approval done. Getting the bridge ready…" });
-          await new Promise((res) => window.setTimeout(res, 4000));
-        }
+    // The same path as the bridge into a private account on Solana (lib/relayWalletPay).
+    const paid = await payRelayTxs(
+      quote.evmTxs ?? [],
+      { amount: quote.send.amount, symbol: quote.send.symbol, chain: quote.send.chain, decimals: token.decimals },
+      wagmiPayActions(config),
+      (progress) => setWallet({ kind: "review", quote, at, signing: true, error: null, progress }),
+      (chainId) => {
+        if (chainId !== network.chainId) switchedAway.current = true;
       }
-    } catch (err) {
-      // Before the deposit, or a clear no from the wallet: nothing went out. A
-      // timeout or lost reply on the deposit may come after the wallet sent it:
-      // follow the order then, Relay says whether it arrived.
-      if (!paying || surelyNotSent(err)) {
-        setWallet({
-          kind: "review",
-          quote,
-          at,
-          signing: false,
-          progress: null,
-          error: walletDeclined(err)
-            ? approved
-              ? "You cancelled the bridge. Nothing moved; the approval can be used next time."
-              : "You cancelled it in your wallet. Nothing moved."
-            : failedBeforeSend(err) && /chain/i.test(walletErrorText(err))
-              ? `Switch your wallet to ${quote.send.chain} to bridge from there.`
-              : walletErrorText(err) || "It didn't send. Try again.",
-        });
-        return;
-      }
+    );
+    if (!paid.sent) {
+      setWallet({ kind: "review", quote, at, signing: false, progress: null, error: paid.error });
+      return;
     }
+    const hash = paid.hash;
     setStatus(null);
     setWallet({ kind: "sent", quote, hash, unsure: !hash });
     once(`wallet-sent:${quote.requestId}`, "bridge_wallet_sent", { source: quote.send.chain, token: quote.send.symbol });
@@ -2135,7 +2077,7 @@ function trimAmount(text: string): string {
 }
 
 /** Max for a stablecoin sent to a deposit address: all of it, up to the bridge's limit. */
-function stableMax(value: bigint, decimals: number): string {
+export function stableMax(value: bigint, decimals: number): string {
   const cap = parseUnits(String(BRIDGE_MAX_USD), decimals);
   return trimAmount(formatUnits(value > cap ? cap : value, decimals));
 }
