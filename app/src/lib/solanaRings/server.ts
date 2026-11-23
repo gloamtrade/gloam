@@ -85,7 +85,9 @@ export async function ringsProxyRate(req: Request, calls: number, now = Date.now
  * The relay's limits. "rent" is a registration (about 0.0016 SOL of rent) or a
  * cash out that creates the recipient's token account (about 0.002 SOL), so it
  * is held tighter than a payment. Worst case at these limits the relay spends
- * about 0.2 SOL a day on fees and 1.1 SOL on rent.
+ * about 0.3 SOL a day on fees (each transaction at most 10,000 lamports of
+ * base fee and the 50,000 lamport priority fee cap; rebroadcasts cost nothing
+ * more, a transaction pays once) and 1.1 SOL on rent.
  *
  * On mainnet the daily counts fail closed: without the shared count (Redis)
  * the relay pays nothing and says it is unavailable, never "too many". On
