@@ -35,6 +35,7 @@ import {
   activeSpendableNotes,
   assetDecimals,
   formatAssetAmount,
+  formatAssetAmountExact,
   gasFor,
   shieldPoolAbi,
   SIGNED_OUT_BALANCE_MESSAGE,
@@ -1578,7 +1579,8 @@ export function PayrollView() {
                       ? "Payments come out of your private balance."
                       : plan.shortfall === 0n
                         ? "Covers this run."
-                        : `${formatAssetAmount(plan.shortfall, asset)} ${token.symbol} short. Add it as one deposit.`}
+                        : // a deposit to make, so every unit: two places cut down reads less than the run needs (0.019 ETH read "0.01")
+                          `${formatAssetAmountExact(plan.shortfall, asset)} ${token.symbol} short. Add it as one deposit.`}
                   </p>
                 </>
               )}
@@ -1607,7 +1609,7 @@ export function PayrollView() {
             <div className="mt-5">
               {validRows.length > 0 && plan.shortfall > 0n && isConnected ? (
                 <Link href="/app/vault?tab=shield" className="btn btn-ink btn-lg btn-block">
-                  Add {formatAssetAmount(plan.shortfall, asset)} {token.symbol} privately
+                  Add {formatAssetAmountExact(plan.shortfall, asset)} {token.symbol} privately
                 </Link>
               ) : (
                 <button type="button" disabled={!canRun || starting} onClick={() => void startRun()} className="btn btn-ink btn-lg btn-block">
