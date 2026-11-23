@@ -201,7 +201,7 @@ const bodyHtml = (md: string) => render.blocksToEmailHtml(render.parseMarkdown(m
   ok(e.html.includes("#2E7D53") && e.html.includes("Gloam update, 22 November 2026"), "the green label with the day");
   ok(e.html.includes('content="light dark"') && e.html.includes("prefers-color-scheme:dark"), "dark mode colours for mail apps that use them");
   ok(e.html.includes("background:#FFFFFF"), "the card is white");
-  ok(e.html.includes("You asked for Gloam updates"), "the footer says why");
+  ok(e.html.includes("You get Gloam updates because you signed up on gloam.trade or entered a Gloam contest."), "the footer says why");
   ok(e.html.includes(`href="${render.UNSUBSCRIBE_MARK}"`) && e.html.includes('href="https://www.gloam.trade/updates/2026-11-22-private-payroll-is-live"'), "unsubscribe and web links in the footer");
   ok(e.html.includes(">First paragraph is the preview line."), "the preheader is the first line");
   ok(e.text.startsWith("Private payroll is live\n\nFirst paragraph is the preview line.\n\n- one\n"), "plain text: subject, then body");
@@ -482,7 +482,7 @@ resetMemoryKv();
   const mem = g.__gloamPartnersMem!;
   const k = `${list.UPDATES_PREFIX}mail:${update.id}`;
   const recNow = JSON.parse(String(mem.get(k)!.v)) as { html: string };
-  recNow.html = recNow.html.replace("You asked for Gloam updates", "You asked for updates from Gloam");
+  recNow.html = recNow.html.replace("You get Gloam updates", "You get updates from Gloam");
   mem.set(k, { v: JSON.stringify(recNow) } as never);
   const p = await sendAll(update.id, opts(fake));
   eq([p.done, p.sent, p.unknown], [true, 20, 100], "Resend's 409 marks the batch unknown; the rest are sent");
