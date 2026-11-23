@@ -31,6 +31,18 @@ export const AUTHOR = {
 
 export const POSTS: Post[] = [
   {
+    slug: "live-on-solana",
+    title: "Gloam is live on Solana",
+    short: "Live on Solana",
+    summary:
+      "Private payments on Solana for people, teams and agents, built on Helius Privacy Rings.",
+    date: "2026-11-23",
+    dateLabel: "November 23, 2026",
+    kind: "Announcement",
+    minutes: 3,
+    cover: "mainnet",
+  },
+  {
     slug: "build-with-gloam-at-the-near-hackathon",
     title: "Come build with Gloam at the NEAR hackathon",
     short: "Build at the NEAR hackathon",
