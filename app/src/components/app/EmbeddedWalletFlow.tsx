@@ -40,6 +40,7 @@ import { relayFor, relayPreferred } from "@/lib/relay/client";
 import { autoRestoreSyncing } from "@/lib/autoRestore";
 import { useAutoRestoreStatus } from "@/hooks/useAutoRestoreStatus";
 import { subscribeToUpdates } from "@/lib/updatesClient";
+import { NEW_WALLET_ACCOUNTS } from "@/lib/turnkeySolana";
 import { useNetwork } from "./NetworkProvider";
 import { useShownAccount } from "./AccountScope";
 import { Spinner } from "@/components/ui/Spinner";
@@ -219,7 +220,8 @@ function Sheet({ signedIn }: { signedIn: boolean }) {
         setList("read");
         return;
       }
-      await createWallet({ walletName: walletNameFor(name), accounts: ["ADDRESS_FORMAT_ETHEREUM"] });
+      // The Ethereum account it always had, and its Solana account (lib/turnkeySolana), in one wallet.
+      await createWallet({ walletName: walletNameFor(name), accounts: NEW_WALLET_ACCOUNTS.map((a) => ({ ...a })) });
       await refresh.current().catch(() => []);
       setJustCreated(true);
       setFunding(true);

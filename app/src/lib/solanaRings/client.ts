@@ -14,6 +14,12 @@
  *  - Registering, paying and cashing out: the private account signs, and
  *    Gloam's relay (/api/solana/relay) adds its signature as fee payer and
  *    sends. The private account never holds SOL.
+ *  - Every send is waited on here, never by the SDK's confirmTransaction (a
+ *    count of timers and fetches with no deadline, which can wait forever): the
+ *    page reads its status, sends the same signed transaction again until it is
+ *    confirmed, and once its blockhash has expired unseen it was dropped for
+ *    good, so it is built and sent once more (lib/solanaRings/landing). Each
+ *    step is told to the page through onStep.
  *  - The private balance is decrypted here, on this device, and kept between
  *    visits as a snapshot sealed with the account's viewing key.
  */
@@ -25,7 +31,9 @@ import {
   getAddressEncoder,
   getBase58Decoder,
   getBase64Decoder,
+  getBase64Encoder,
   getCompiledTransactionMessageDecoder,
+  getTransactionDecoder,
   getTransactionEncoder,
   partiallySignTransactionMessageWithSigners,
   pipe,
@@ -38,34 +46,91 @@ import {
 } from "@solana/kit";
 import type { LocalKeys, ShieldedKeypair, Wallet } from "@heliuslabs/spr";
 import type { SprClient } from "@heliuslabs/spr/client";
-import { accountMessage, deriveAccount, isPlainSignature } from "./account";
+import { accountFromSeed, accountMessage, deriveAccount, isPlainSignature } from "./account";
+import { SNAPSHOT_PREFIX } from "./opened";
 import { ringsAssets, ringsBalancesFrom, ringsUrls, SOLANA_RINGS_NETWORK, walletChain, type RingsAsset, type RingsNetwork } from "./config";
+import {
+  awaitLanding,
+  blockhashOfMessage,
+  blockhashOfWire,
+  computeUnitsOf,
+  landWithOneResend,
+  priorityFeeFor,
+  REGISTER_COMPUTE_UNITS,
+  RELAY_PRIORITY_FEE_FLOOR,
+  signatureOfWire,
+  sigStatusFrom,
+  withPriorityFee,
+  type Landing,
+  type LandingDeps,
+} from "./landing";
 import { signOrSendSolana, signSolanaMessage, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
 
 const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111" as Address;
 // Public Solana program ids (SPL Token, Token-2022), not secrets.
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" as Address; // ggignore
 const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" as Address; // ggignore
-/** What the relay pays as priority fee on each transaction (its cap is 25,000). */
-const RELAYED_PRIORITY_FEE = 10_000n;
 /** Compute unit price on a deposit the main wallet pays for, micro-lamports. */
 const DEPOSIT_CU_PRICE = 20_000n;
+/** A wallet that sends a deposit itself: extra wait after its blockhash expired before calling it dropped. */
+const WALLET_SENT_GRACE_MS = 15_000;
 
-export type RelayStatus = { on: boolean; funded: boolean; relayer: string | null; network: RingsNetwork };
+export type RelayStatus = {
+  on: boolean;
+  funded: boolean;
+  relayer: string | null;
+  network: RingsNetwork;
+  /** Helius's recommended priority fee price (micro-lamports per compute unit), or null. */
+  priorityMicroLamports: number | null;
+};
 
-/** Whether Gloam's relay is set up, and its fee-payer address. */
+/** Whether Gloam's relay is set up, its fee-payer address, and the fee price to build with. */
 export async function relayStatus(): Promise<RelayStatus> {
   try {
-    const res = await fetch(ringsUrls(location.origin).relay, { cache: "no-store" });
+    const res = await fetch(ringsUrls(location.origin).relay, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
     const json = (await res.json()) as Partial<RelayStatus>;
+    const price = json.priorityMicroLamports;
     return {
       on: Boolean(json.on && json.relayer),
       funded: Boolean(json.funded),
       relayer: json.relayer ?? null,
       network: json.network ?? SOLANA_RINGS_NETWORK,
+      priorityMicroLamports: typeof price === "number" && Number.isFinite(price) && price >= 0 ? price : null,
     };
   } catch {
-    return { on: false, funded: false, relayer: null, network: SOLANA_RINGS_NETWORK };
+    return { on: false, funded: false, relayer: null, network: SOLANA_RINGS_NETWORK, priorityMicroLamports: null };
+  }
+}
+
+/** A step of a send, for the page to show while it waits. */
+export type RingsStep = "sending" | "waiting" | "resending" | "confirm_again" | "checking";
+
+export type StepOptions = {
+  /** Called at each step of a send, with plain words for it. */
+  onStep?: (step: RingsStep, label: string) => void;
+};
+
+/** Plain words for each step (the page adds "Keep this tab open"). */
+export function ringsStepLabel(step: RingsStep, walletName = "your wallet"): string {
+  switch (step) {
+    case "sending":
+      return "Sending to Solana";
+    case "waiting":
+      return "Waiting for Solana to confirm";
+    case "resending":
+      return "Solana dropped it. Sending it again";
+    case "confirm_again":
+      return `It didn't reach Solana. Confirm it again in ${walletName}`;
+    case "checking":
+      return "Checking on Solana whether it went through";
+  }
+}
+
+function tell(opts: StepOptions | undefined, step: RingsStep, walletName?: string): void {
+  try {
+    opts?.onStep?.(step, ringsStepLabel(step, walletName));
+  } catch {
+    // a page's handler never stops a send
   }
 }
 
@@ -84,7 +149,8 @@ export function ringsClient(network: RingsNetwork = SOLANA_RINGS_NETWORK): Promi
         proverUrl: urls.spr,
         proverTee: SignedTeePolicy.forNetwork(network),
         commitment: "confirmed",
-        priorityFeeLamports: RELAYED_PRIORITY_FEE,
+        // the floor: what the relay pays is set per transaction before it is signed (withRelayFee)
+        priorityFeeLamports: RELAY_PRIORITY_FEE_FLOOR,
       });
     })();
     c.catch(() => clients.delete(network));
@@ -93,12 +159,13 @@ export function ringsClient(network: RingsNetwork = SOLANA_RINGS_NETWORK): Promi
   return c;
 }
 
-/** One call to Gloam's Solana RPC proxy. */
+/** One call to Gloam's Solana RPC proxy. Never waits more than 15 seconds. */
 async function proxyRpc<T>(method: string, params: unknown[]): Promise<T> {
   const res = await fetch(ringsUrls(location.origin).rpc, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    signal: AbortSignal.timeout(15_000),
   });
   const json = (await res.json().catch(() => null)) as { result?: T; error?: { message?: string } } | null;
   if (!json || json.error || json.result === undefined) throw new Error("Solana is slow to answer. Try again.");
@@ -118,7 +185,7 @@ export type RingsSession = {
   client: SprClient;
 };
 
-const storeKey = (network: RingsNetwork, owner: string) => `gloam:solana-rings:v1:${network}:${owner}`;
+const storeKey = (network: RingsNetwork, owner: string) => `${SNAPSHOT_PREFIX}${network}:${owner}`;
 
 function snapshotStore(network: RingsNetwork, owner: string) {
   const key = storeKey(network, owner);
@@ -143,16 +210,17 @@ function snapshotStore(network: RingsNetwork, owner: string) {
 /**
  * Open private account `index` of the connected main wallet: one signature,
  * nothing stored but the sealed balance snapshot. The same wallet reopens the
- * same account on any device.
+ * same account on any device. `onSeed` sees the account's seed before it is
+ * wiped, for a caller that keeps it sealed on this device (lib/solanaRings/keep).
  */
 export async function openRingsAccount(input: {
   wallet: SolanaWallet;
   account: SolanaAccount;
   index?: number;
   network?: RingsNetwork;
+  onSeed?: (seed: Uint8Array) => void;
 }): Promise<RingsSession> {
   const index = input.index ?? 0;
-  const network = input.network ?? SOLANA_RINGS_NETWORK;
   const message = accountMessage(index);
   const signature = await signSolanaMessage(input.wallet, input.account, message);
   try {
@@ -160,24 +228,44 @@ export async function openRingsAccount(input: {
     if (!(await isPlainSignature(publicKey, message, signature))) {
       throw new Error(`${input.wallet.name} signs messages in a way that can't open a private account. Try another wallet.`);
     }
-    const keypair = await deriveAccount(signature, index);
-    const [client, spr] = await Promise.all([ringsClient(network), import("@heliuslabs/spr")]);
-    const address = keypair.toSolanaSigner().address;
-    const keys = spr.LocalKeys.fromKeypair(keypair, client.proofService);
-    const store = snapshotStore(network, address);
-    let saved: Wallet | undefined;
-    try {
-      saved = await spr.loadPersistedWallet({ store, cipher: spr.walletSnapshotCipher(keypair) });
-    } catch {
-      saved = undefined; // a snapshot this account can't open: start over
-    }
-    const wallet = saved ?? new spr.Wallet({ identity: keypair.shieldedAddress() });
-    const session: RingsSession = { network, index, main: { wallet: input.wallet, account: input.account }, address, keypair, keys, wallet, client };
-    await knowAssets(session);
-    return session;
+    const keypair = await deriveAccount(signature, index, input.onSeed);
+    return await sessionFor(input, index, keypair);
   } finally {
     signature.fill(0);
   }
+}
+
+/** Open private account `index` again from its kept seed (lib/solanaRings/keep): no signature. */
+export async function reopenRingsAccount(input: {
+  wallet: SolanaWallet;
+  account: SolanaAccount;
+  index: number;
+  network?: RingsNetwork;
+  seed: Uint8Array;
+}): Promise<RingsSession> {
+  return sessionFor(input, input.index, await accountFromSeed(input.seed));
+}
+
+async function sessionFor(
+  input: { wallet: SolanaWallet; account: SolanaAccount; network?: RingsNetwork },
+  index: number,
+  keypair: ShieldedKeypair
+): Promise<RingsSession> {
+  const network = input.network ?? SOLANA_RINGS_NETWORK;
+  const [client, spr] = await Promise.all([ringsClient(network), import("@heliuslabs/spr")]);
+  const address = keypair.toSolanaSigner().address;
+  const keys = spr.LocalKeys.fromKeypair(keypair, client.proofService);
+  const store = snapshotStore(network, address);
+  let saved: Wallet | undefined;
+  try {
+    saved = await spr.loadPersistedWallet({ store, cipher: spr.walletSnapshotCipher(keypair) });
+  } catch {
+    saved = undefined; // a snapshot this account can't open: start over
+  }
+  const wallet = saved ?? new spr.Wallet({ identity: keypair.shieldedAddress() });
+  const session: RingsSession = { network, index, main: { wallet: input.wallet, account: input.account }, address, keypair, keys, wallet, client };
+  await knowAssets(session);
+  return session;
 }
 
 /** Forget the keys in memory. The account reopens with the same signature. */
@@ -254,9 +342,10 @@ export async function isRegistered(s: RingsSession, owner: string = s.address): 
 
 const encodeTx = (tx: Transaction) => new Uint8Array(getTransactionEncoder().encode(tx));
 const b64 = (bytes: Uint8Array) => getBase64Decoder().decode(bytes);
+const fromB64 = (text: string) => new Uint8Array(getBase64Encoder().encode(text));
 
 /** Add the private account's signature to `tx`, the relay's slot left empty. */
-async function ownerSigned(s: RingsSession, tx: Transaction): Promise<Uint8Array> {
+export async function ownerSigned(s: RingsSession, tx: Transaction): Promise<Uint8Array> {
   const [sigs] = await s.keypair.toSolanaSigner().signTransactions([tx as never]);
   return encodeTx({ ...tx, signatures: { ...tx.signatures, ...sigs } } as Transaction);
 }
@@ -281,44 +370,115 @@ export class RingsRelayError extends Error {
   }
 }
 
-/** Hand a transaction the private account signed to Gloam's relay. Returns its signature. */
-async function relay(wire: Uint8Array): Promise<string> {
+/** What the relay sent: its signature, and the signed transaction to send again while it waits. */
+export type Sent = { signature: string; signed: string | null };
+
+/** The signed transactions the relay handed back, by signature, so a later confirm can rebroadcast them. */
+const signedBySignature = new Map<string, string>();
+
+function remember(sent: Sent): void {
+  if (!sent.signed) return;
+  signedBySignature.delete(sent.signature);
+  signedBySignature.set(sent.signature, sent.signed);
+  while (signedBySignature.size > 32) signedBySignature.delete(signedBySignature.keys().next().value!);
+}
+
+/** Hand a transaction the private account signed to Gloam's relay. */
+export async function relay(wire: Uint8Array): Promise<Sent> {
   let res: Response;
   try {
     res = await fetch(ringsUrls(location.origin).relay, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ tx: b64(wire) }),
+      // past the relay's own limit (45 seconds): a lost answer, which may come after the send
+      signal: AbortSignal.timeout(55_000),
     });
   } catch {
     throw new RingsRelayError("Gloam's relay didn't answer. Check your connection.", 0, "network", true);
   }
-  const json = (await res.json().catch(() => null)) as { ok?: boolean; signature?: string; error?: { code?: string; message?: string } } | null;
+  const json = (await res.json().catch(() => null)) as { ok?: boolean; signature?: string; tx?: unknown; error?: { code?: string; message?: string } } | null;
   if (!json?.ok || !json.signature) {
     const code = json?.error?.code ?? "unknown";
     // 4xx and the 5xx codes above are refused before the send; any other 5xx (or a reply that isn't the relay's) may come after it.
     const maybeSent = res.ok || (res.status >= 500 && !RELAY_NOT_SENT.has(code));
     throw new RingsRelayError(json?.error?.message ?? "Gloam's relay didn't take it. Try again.", res.status, code, maybeSent);
   }
-  return json.signature;
+  const sent: Sent = { signature: json.signature, signed: typeof json.tx === "string" ? json.tx : null };
+  remember(sent);
+  return sent;
 }
 
-async function landed(s: RingsSession, signature: string): Promise<bigint> {
-  return s.client.confirmTransaction(signature as never);
-}
-
-async function relayer(): Promise<Address> {
-  const st = await relayStatus();
-  if (!st.on || !st.relayer) throw new Error("Gloam's Solana relay isn't set up yet.");
-  return st.relayer as Address;
+/** A sleep that ends early when the tab is shown again, so a wait picks up at once after it was in the background. */
+function wakeableSleep(ms: number): Promise<void> {
+  return new Promise((done) => {
+    const doc = typeof document === "undefined" ? null : document;
+    const finish = () => {
+      clearTimeout(timer);
+      doc?.removeEventListener("visibilitychange", onShow);
+      done();
+    };
+    const onShow = () => {
+      if (doc?.visibilityState === "visible") finish();
+    };
+    const timer = setTimeout(finish, ms);
+    doc?.addEventListener("visibilitychange", onShow);
+  });
 }
 
 /**
- * The registration transaction (version 1, `payer` paying the record's rent),
- * signed by the private account. Null when it is already registered with these
- * keys; rejects when it is registered with other keys.
+ * How the page waits on one sent transaction: its status through Gloam's
+ * proxy, its blockhash when known, and the signed transaction sent again
+ * while it is unconfirmed when the page holds it.
  */
-export async function buildRegistration(s: RingsSession, payer: Address): Promise<Uint8Array | null> {
+function landingDeps(signature: string, blockhash: string | null, signed: string | null): LandingDeps {
+  return {
+    status: async () => {
+      const st = await proxyRpc<{ value?: unknown[] }>("getSignatureStatuses", [[signature], { searchTransactionHistory: true }]);
+      if (!Array.isArray(st.value)) throw new Error("no answer");
+      return sigStatusFrom(st.value[0] as never);
+    },
+    blockhashValid: blockhash ? async () => (await proxyRpc<{ value: boolean }>("isBlockhashValid", [blockhash, { commitment: "confirmed" }])).value : null,
+    ...(signed ? { rebroadcast: () => proxyRpc<string>("sendTransaction", [signed, { encoding: "base64", skipPreflight: true, maxRetries: 0 }]) } : {}),
+    sleep: wakeableSleep,
+    now: () => Date.now(),
+  };
+}
+
+/** Wait on something the relay sent: landed, failed, dropped for good, or unknown when the chain didn't answer in time. */
+export function waitForSent(sent: Sent, blockhash: string | null): Promise<Landing> {
+  return awaitLanding(landingDeps(sent.signature, blockhash ?? (sent.signed ? blockhashOfWire(fromB64(sent.signed)) : null), sent.signed));
+}
+
+type RelayInfo = { address: Address; price: number | null };
+
+async function relayInfo(): Promise<RelayInfo> {
+  const st = await relayStatus();
+  if (!st.on || !st.relayer) throw new Error("Gloam's Solana relay isn't set up yet.");
+  return { address: st.relayer as Address, price: st.priorityMicroLamports };
+}
+
+/**
+ * `tx` (built by the SDK, not signed yet) with the priority fee the relay
+ * pays set from Helius's recommended price. Built as it was if that can't be
+ * read: then it carries the floor the SDK client was made with.
+ */
+export function withRelayFee<T extends Transaction>(tx: T, price: number | null): T {
+  try {
+    const units = computeUnitsOf(tx.messageBytes);
+    return units ? withPriorityFee(tx, priorityFeeFor(price, units)) : tx;
+  } catch {
+    return tx;
+  }
+}
+
+/**
+ * The registration transaction (version 1, `payer` paying the record's rent
+ * and `priorityFeeLamports`), signed by the private account. Null when it is
+ * already registered with these keys; rejects when it is registered with
+ * other keys.
+ */
+export async function buildRegistration(s: RingsSession, payer: Address, priorityFeeLamports: bigint = RELAY_PRIORITY_FEE_FLOOR): Promise<Uint8Array | null> {
   const [w, ix, spr] = await Promise.all([import("@heliuslabs/spr/wallet"), import("@heliuslabs/spr/instructions"), import("@heliuslabs/spr")]);
   const existing = await w.fetchUserRecord({ rpc: s.client, owner: s.address });
   if (existing) {
@@ -342,20 +502,54 @@ export async function buildRegistration(s: RingsSession, payer: Address): Promis
     (m) => setTransactionMessageFeePayer(payer, m),
     (m) => setTransactionMessageLifetimeUsingBlockhash(lifetime as never, m),
     // as the SDK compiles: version 1 counts loaded account data against this, and the default is too small
-    (m) => setTransactionMessageConfig({ computeUnitLimit: 200_000, priorityFeeLamports: RELAYED_PRIORITY_FEE, loadedAccountsDataSizeLimit: 64 * 1024 * 1024 }, m),
+    (m) => setTransactionMessageConfig({ computeUnitLimit: REGISTER_COMPUTE_UNITS, priorityFeeLamports, loadedAccountsDataSizeLimit: 64 * 1024 * 1024 }, m),
     (m) => appendTransactionMessageInstructions(instructions as Instruction[], m),
   );
   return encodeTx((await partiallySignTransactionMessageWithSigners(message as never)) as Transaction);
 }
 
+export const SETUP_DIDNT_LAND = "Solana didn't take your setup, twice. Nothing changed. Try again in a minute.";
+export const SETUP_NOT_CONFIRMED = "Solana hasn't confirmed your setup yet. Try again in a minute.";
+
 /**
  * Publish the private account in the registry, so it can be paid privately by
  * its address. The relay pays the record's rent. Nothing to do when it is
- * already registered with these keys.
+ * already registered with these keys. A registration Solana dropped (or that
+ * failed there) is built and sent once more: the registry is read first, so
+ * it can never be made twice.
  */
-export async function ensureRegistered(s: RingsSession): Promise<void> {
-  const wire = await buildRegistration(s, await relayer());
-  if (wire) await landed(s, await relay(wire));
+export async function ensureRegistered(s: RingsSession, opts: StepOptions = {}): Promise<void> {
+  const r = await landWithOneResend<{ wire: Uint8Array; blockhash: string | null }>({
+    build: async () => {
+      const relay = await relayInfo();
+      const wire = await buildRegistration(s, relay.address, priorityFeeFor(relay.price, REGISTER_COMPUTE_UNITS));
+      return wire ? { wire, blockhash: blockhashOfWire(wire) } : null;
+    },
+    sendAndWait: async ({ wire, blockhash }) => {
+      tell(opts, "sending");
+      let sent: Sent | null = null;
+      try {
+        sent = await relay(wire);
+      } catch (e) {
+        if (!(e instanceof RingsRelayError) || !e.maybeSent) throw e;
+      }
+      tell(opts, "waiting");
+      // Without the relay's answer there is no signature to read: the registry record is the evidence.
+      const out = sent
+        ? await waitForSent(sent, blockhash)
+        : await awaitLanding({
+            ...landingDeps("", blockhash, null),
+            status: async () => ((await isRegistered(s)) ? { seen: true, failed: false, confirmed: true, slot: 0n } : { seen: false }),
+          });
+      // failed: nothing changed, and the next build reads the registry first, so it goes again like a drop
+      return out.state === "failed" ? { state: "dropped" } : out;
+    },
+    onResend: () => tell(opts, "resending"),
+    recheck: true,
+  });
+  if (r.state === "done" || r.state === "landed") return;
+  if (r.state === "unknown") throw new Error(SETUP_NOT_CONFIRMED);
+  throw new Error(SETUP_DIDNT_LAND);
 }
 
 function u32le(n: number): Uint8Array {
@@ -429,21 +623,50 @@ export async function buildAddTransaction(s: RingsSession, asset: RingsAsset, am
   return asVersion0(s, built, main);
 }
 
+export const ADD_FAILED = "That didn't go through on Solana, and nothing moved. Try again.";
+export const ADD_NOT_CONFIRMED = "Solana hasn't confirmed it yet. Check your balance in a minute before you add again.";
+export const ADD_DIDNT_LAND = "Solana didn't take it, twice, and nothing moved. Try again in a minute.";
+
 /**
  * Add money: the main wallet deposits `amount` of `asset` into the private
- * account. Public on chain: the main wallet, the asset and the amount.
+ * account. Public on chain: the main wallet, the asset and the amount. One
+ * Solana dropped (its blockhash expired, never seen) is built again and the
+ * wallet asked once more; it could never land, so nothing is added twice.
  */
-export async function addToPrivate(s: RingsSession, asset: RingsAsset, amount: bigint): Promise<string> {
-  const wire = await buildAddTransaction(s, asset, amount);
-  const out = await signOrSendSolana(s.main.wallet, s.main.account, wire, walletChain(s.network));
-  const signature =
-    "sent" in out ? getBase58Decoder().decode(out.sent) : await proxyRpc<string>("sendTransaction", [b64(out.signed), { encoding: "base64" }]);
-  const slot = await landed(s, signature);
-  await syncRings(s, slot);
-  return signature;
+export async function addToPrivate(s: RingsSession, asset: RingsAsset, amount: bigint, opts: StepOptions = {}): Promise<string> {
+  let signature = "";
+  const r = await landWithOneResend<Uint8Array>({
+    build: () => buildAddTransaction(s, asset, amount),
+    sendAndWait: async (wire) => {
+      const out = await signOrSendSolana(s.main.wallet, s.main.account, wire, walletChain(s.network));
+      let deps: LandingDeps;
+      if ("sent" in out) {
+        // The wallet sent it: the page can't send it again, and waits a little past the blockhash it was built with.
+        signature = getBase58Decoder().decode(out.sent);
+        deps = { ...landingDeps(signature, blockhashOfWire(wire), null), graceMs: WALLET_SENT_GRACE_MS };
+      } else {
+        const signedTx = getTransactionDecoder().decode(out.signed);
+        signature = signatureOfWire(out.signed) ?? "";
+        if (!signature) throw new Error(`${s.main.wallet.name} didn't sign it.`);
+        const signed = b64(out.signed);
+        await proxyRpc<string>("sendTransaction", [signed, { encoding: "base64" }]);
+        deps = landingDeps(signature, blockhashOfMessage(signedTx.messageBytes), signed);
+      }
+      tell(opts, "waiting");
+      return awaitLanding(deps);
+    },
+    onResend: () => tell(opts, "confirm_again", s.main.wallet.name),
+  });
+  if (r.state === "landed") {
+    await syncRings(s, r.slot);
+    return signature;
+  }
+  if (r.state === "failed") throw new Error(ADD_FAILED);
+  if (r.state === "unknown") throw new Error(ADD_NOT_CONFIRMED);
+  throw new Error(ADD_DIDNT_LAND);
 }
 
-export type SendOptions = {
+export type SendOptions = StepOptions & {
   /** Called while it waits on Solana to learn whether a payment went through (up to about two minutes). */
   onChecking?: () => void;
 };
@@ -459,19 +682,28 @@ async function relayed(s: RingsSession, build: (feePayer: Address) => Promise<Tr
   const pending = pendingStore({ key: pendingKey(s.network, s.address), cipher: await accountCipher(s, PENDING_DOMAIN) });
   return sendGuarded({
     build: async () => {
-      const feePayer = await relayer();
+      const relay = await relayInfo();
       await syncRings(s);
       const unspent = s.wallet.utxos().filter((u) => !u.spent);
-      return checkedBuild(s, unspent, await build(feePayer));
+      return checkedBuild(s, unspent, withRelayFee(await build(relay.address), relay.price));
     },
-    send: (wire) => relay(wire),
+    send: async (wire) => {
+      tell(opts, "sending");
+      const sent = await relay(wire);
+      tell(opts, "waiting");
+      return sent.signature;
+    },
     release: () => reloadWallet(s),
     confirm: (sig) => confirmPayments(s, sig),
     resolve: (p) => settlePayments(s, p),
     pending,
-    sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+    sleep: wakeableSleep,
     now: () => Date.now(),
-    ...(opts.onChecking ? { onChecking: opts.onChecking } : {}),
+    onChecking: () => {
+      opts.onChecking?.();
+      tell(opts, "checking");
+    },
+    onResend: () => tell(opts, "resending"),
   });
 }
 
@@ -612,7 +844,7 @@ export async function buildPayments(
   asset: RingsAsset,
   payments: readonly { address: string; amount: bigint }[]
 ): Promise<{ wire: Uint8Array; nullifiers: string[]; blockhash: string }> {
-  const feePayer = await relayer();
+  const relay = await relayInfo();
   await syncRings(s);
   const { buildMultiTransferTransaction } = await import("@heliuslabs/spr/wallet");
   const unspent = s.wallet.utxos().filter((u) => !u.spent);
@@ -620,16 +852,16 @@ export async function buildPayments(
     client: s.client,
     wallet: s.wallet,
     keys: s.keys,
-    feePayer,
+    feePayer: relay.address,
     payments: payments.map((p) => ({ recipient: p.address as Address, amount: p.amount })),
     ...(asset.mint ? { asset: asset.mint as Address } : {}),
   });
-  return checkedBuild(s, unspent, tx);
+  return checkedBuild(s, unspent, withRelayFee(tx, relay.price));
 }
 
 /** Send what buildPayments built through Gloam's relay. Rejects with RingsRelayError. */
-export function sendPayments(wire: Uint8Array): Promise<string> {
-  return relay(wire);
+export async function sendPayments(wire: Uint8Array): Promise<string> {
+  return (await relay(wire)).signature;
 }
 
 /** After a refusal that sent nothing: free the notes buildPayments set aside. */
@@ -637,10 +869,16 @@ export function releasePayments(s: RingsSession): Promise<void> {
   return reloadWallet(s);
 }
 
-/** Wait for a sent payment to land, then read it back. */
+/**
+ * Wait for a sent payment to land (sending it again while it waits), then
+ * read it back. Rejects when it failed, was dropped, or the chain didn't
+ * answer in time: the caller then settles it on chain (settlePayments).
+ */
 export async function confirmPayments(s: RingsSession, signature: string): Promise<void> {
-  const slot = await landed(s, signature);
-  await syncRings(s, slot);
+  const signed = signedBySignature.get(signature) ?? null;
+  const r = await waitForSent({ signature, signed }, null);
+  if (r.state !== "landed") throw new Error(`Solana: ${r.state}`);
+  await syncRings(s, r.slot);
 }
 
 const fromHex = (h: string) => Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16));

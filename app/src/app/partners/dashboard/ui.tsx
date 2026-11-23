@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { formatUnits } from "viem";
+import { displayAmount, displayAmountText } from "@/lib/amountShort";
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const int = new Intl.NumberFormat("en-US");
@@ -16,18 +16,19 @@ export function fmtInt(n: number | null | undefined): string {
   return int.format(n ?? 0);
 }
 
-/** Smallest units as a short decimal: "250", "0.625", "<0.0001". */
+/** Smallest units as a token amount, two places, cut down (lib/amountShort): "250.00", "0.62", "<0.01". */
 export function fmtUnits(raw: string | null, decimals: number | null): string {
   if (raw == null || decimals == null) return "";
-  let v: number;
   try {
-    v = Number(formatUnits(BigInt(raw), decimals));
+    return displayAmount(BigInt(raw), decimals);
   } catch {
     return "";
   }
-  if (v === 0) return "0";
-  if (v > 0 && v < 0.0001) return "<0.0001";
-  return v.toLocaleString("en-US", { maximumFractionDigits: v < 1 ? 6 : 4 });
+}
+
+/** A token amount as decimal text, two places, cut down: "1,250.62". */
+export function fmtTokenText(v: string): string {
+  return displayAmountText(v);
 }
 
 const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });

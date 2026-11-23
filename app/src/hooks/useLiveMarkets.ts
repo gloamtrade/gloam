@@ -10,6 +10,8 @@ type ApiResponse = {
   hypeUsd?: number | null;
   /** BNB in USD, BNB Chain's gas coin (only while BNB Chain is on). */
   bnbUsd?: number | null;
+  /** SOL in USD (only while Solana is on). */
+  solUsd?: number | null;
   meta?: {
     liveCount: number;
     total: number;
@@ -23,9 +25,9 @@ type ApiResponse = {
  * seconds. Kept 15 minutes; after that an empty read shows as unknown again.
  */
 const KEEP_PRICE_MS = 15 * 60_000;
-const lastPrice: Partial<Record<"ethUsd" | "hypeUsd" | "bnbUsd", { usd: number; at: number }>> = {};
+const lastPrice: Partial<Record<"ethUsd" | "hypeUsd" | "bnbUsd" | "solUsd", { usd: number; at: number }>> = {};
 
-function steady(key: "ethUsd" | "hypeUsd" | "bnbUsd", v: number | null | undefined): number | null {
+function steady(key: "ethUsd" | "hypeUsd" | "bnbUsd" | "solUsd", v: number | null | undefined): number | null {
   const now = Date.now();
   if (typeof v === "number" && Number.isFinite(v) && v > 0) {
     lastPrice[key] = { usd: v, at: now };
@@ -45,6 +47,7 @@ async function fetchMarkets(): Promise<ApiResponse> {
     ethUsd: steady("ethUsd", body.ethUsd),
     hypeUsd: steady("hypeUsd", body.hypeUsd),
     bnbUsd: steady("bnbUsd", body.bnbUsd),
+    solUsd: steady("solUsd", body.solUsd),
   };
 }
 
@@ -73,6 +76,7 @@ export function useEthPrice() {
     ethUsd: q.data?.ethUsd ?? null,
     hypeUsd: q.data?.hypeUsd ?? null,
     bnbUsd: q.data?.bnbUsd ?? null,
+    solUsd: q.data?.solUsd ?? null,
     isLoading: q.isLoading,
   };
 }

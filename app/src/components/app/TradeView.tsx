@@ -12,6 +12,7 @@ import {
 } from "wagmi";
 import { formatUnits, isAddress } from "viem";
 import { formatEth, shortAddress } from "@/lib/chain";
+import { displayAmount, displayAmountNumber } from "@/lib/amountShort";
 import { useNetwork } from "./NetworkProvider";
 import { safeParseEther, safeParseUnits } from "@/lib/amount";
 import { AmountProblem } from "./AmountProblem";
@@ -463,9 +464,8 @@ export function TradeView() {
     });
   }
 
-  const tokenBalFmt =
-    tokenBal !== undefined ? formatUnits(tokenBal, 18) : "0";
-  const ethBalFmt = ethBal ? formatEth(ethBal.value) : "0";
+  const tokenBalFmt = displayAmount(tokenBal ?? 0n, 18);
+  const ethBalFmt = formatEth(ethBal?.value ?? 0n);
 
   if (!isFetched && markets.length === 0) {
     return (
@@ -917,16 +917,10 @@ export function TradeView() {
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[12px] text-mute">
                     <span className="tnum">
                       {inputMode === "usd"
-                        ? `≈ ${
-                            tokenAmt > 0
-                              ? tokenAmt.toLocaleString(undefined, {
-                                  maximumFractionDigits: 4,
-                                })
-                              : "0"
-                          } ${market.symbol}`
+                        ? `≈ ${displayAmountNumber(tokenAmt > 0 ? tokenAmt : 0)} ${market.symbol}`
                         : `≈ ${usdAmt > 0 ? formatUsd(usdAmt) : "$0"}`}
                       {side === "buy" && buyEthIn > 0n && (
-                        <span> · {formatEth(buyEthIn, 5)} ETH</span>
+                        <span> · {formatEth(buyEthIn)} ETH</span>
                       )}
                     </span>
                     {isConnected && hasToken && (
@@ -970,8 +964,8 @@ export function TradeView() {
                       <dt className="text-mute">You get (quote)</dt>
                       <dd className="tnum font-medium text-foreground">
                         {side === "buy"
-                          ? `${Number(formatUnits(quoteOut, 18)).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${market.symbol}`
-                          : `${formatEth(quoteOut, 5)} ETH`}
+                          ? `${displayAmount(quoteOut, 18)} ${market.symbol}`
+                          : `${formatEth(quoteOut)} ETH`}
                       </dd>
                     </div>
                   )}
@@ -982,12 +976,7 @@ export function TradeView() {
                       {hasToken && (
                         <>
                           <span className="text-faint"> · </span>
-                          {tokenBal !== undefined
-                            ? Number(tokenBalFmt).toLocaleString(undefined, {
-                                maximumFractionDigits: 4,
-                              })
-                            : "0"}{" "}
-                          {market.symbol}
+                          {tokenBalFmt} {market.symbol}
                         </>
                       )}
                     </dd>

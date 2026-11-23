@@ -48,12 +48,13 @@ const LOGS: FakeLog[] = [
 let calls = 0;
 const client = {
   getBlockNumber: async () => START + 70_000n,
-  getLogs: async (q: { address: Address | Address[]; event: { name: string }; args?: Record<string, unknown>; fromBlock: bigint; toBlock: bigint }) => {
+  getLogs: async (q: { address: Address | Address[]; event?: { name: string }; events?: { name: string }[]; args?: Record<string, unknown>; fromBlock: bigint; toBlock: bigint }) => {
     calls++;
     const addrs = (Array.isArray(q.address) ? q.address : [q.address]).map(lc);
-    return LOGS.filter(
+    const names = q.events ? q.events.map((e) => e.name) : [q.event!.name];
+    return LOGS.map((l) => ({ ...l, eventName: l.event })).filter(
       (l) =>
-        l.event === q.event.name &&
+        names.includes(l.event) &&
         addrs.includes(lc(l.address)) &&
         l.blockNumber >= q.fromBlock &&
         l.blockNumber <= q.toBlock &&

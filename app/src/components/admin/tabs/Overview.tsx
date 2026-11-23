@@ -9,7 +9,7 @@ import { ActivityFeed, ChainCards, VolumeChart, type VolumeDay } from "../AdminC
 import { MetricCard } from "../cards";
 import { DayBars, StemChart, TickDonut, topSegments } from "../charts";
 import { MAINNET_DAY, adminName, flowPricing, useAdminResource, weekChange, type Env, type Tab } from "../data";
-import { fmtDay, fmtUsd, fmtUsdBig, fmtUsdShort, fmtWhen, n } from "../format";
+import { fmtAmount, fmtDay, fmtUsd, fmtUsdBig, fmtUsdShort, fmtWhen, n } from "../format";
 import { countPoints, dayPoints } from "../series";
 import { sideRevenueDays, type Side } from "../side";
 import { BridgeStream, ProductStream, VaultStream } from "../streams";
@@ -445,7 +445,7 @@ export function OverviewTab({ side, go }: { side: Side; go: Go }) {
         <DataTable
           headers={["Network", "Asset", "Held now", "USD", "Deposited", "Cashed out"]}
           rows={nets.flatMap((m) =>
-            m.assets.map((a) => [nameOf(m), a.symbol, a.held ?? "Unknown", fmtUsd(a.heldUsd), `${a.deposited} (${a.depositCount})`, `${a.cashedOut} (${a.cashoutCount})`])
+            m.assets.map((a) => [nameOf(m), a.symbol, a.held == null ? "Unknown" : fmtAmount(a.held), fmtUsd(a.heldUsd), `${fmtAmount(a.deposited)} (${a.depositCount})`, `${fmtAmount(a.cashedOut)} (${a.cashoutCount})`])
           )}
           empty="Nothing held or moved yet"
           dense

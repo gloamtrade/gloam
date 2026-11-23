@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatUnits, type Address } from "viem";
+import { type Address } from "viem";
+import { displayAmount } from "@/lib/amountShort";
 import { isNoLimit } from "@gloamtrade/sdk";
 import { contractDirectory, type DirectoryEntry } from "@/lib/contractDirectory";
 import { publicClientFor } from "@/lib/rhClient";
@@ -69,9 +70,9 @@ async function readLimits(e: DirectoryEntry): Promise<Row[]> {
   return assets.map((a, i) => ({ ...a, limit: limits[i] ?? null })).filter(shown);
 }
 
+/** A token amount, two places, cut down (lib/amountShort). */
 function amount(v: bigint, decimals: number): string {
-  const n = Number(formatUnits(v, decimals));
-  return n.toLocaleString("en-US", { maximumFractionDigits: n < 1 ? 6 : 2 });
+  return displayAmount(v, decimals);
 }
 
 function limitText(r: Row): { text: string; open: boolean } {

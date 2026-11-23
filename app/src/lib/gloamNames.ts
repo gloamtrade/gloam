@@ -7,7 +7,8 @@
  * treasury. Every read goes through Robinhood Chain mainnet's own RPC list,
  * whichever network the app is on. Nothing here moves money.
  */
-import { formatUnits, getAddress, isAddress, zeroAddress, type Address, type Hex } from "viem";
+import { getAddress, isAddress, zeroAddress, type Address, type Hex } from "viem";
+import { displayAmount } from "./amountShort";
 import { scopedKey } from "./accountSlot";
 import { receiveTagFromPoint } from "./receiveTag";
 
@@ -243,10 +244,9 @@ export function nameExpired(record: Pick<NameRecord, "expires">, nowSeconds = Da
   return nowSeconds > record.expires;
 }
 
-/** "5", "2.5", "1,200" (whole $GLOAM, up to 2 decimals). */
+/** "5.00", "2.50", "1,200.00": $GLOAM on screen, two places, cut down (lib/amountShort displayAmount). */
 export function gloamAmount(wei: bigint): string {
-  const n = Number(formatUnits(wei, 18));
-  return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return displayAmount(wei, 18);
 }
 
 /** "12 March 2027" for an expiry in unix seconds. */

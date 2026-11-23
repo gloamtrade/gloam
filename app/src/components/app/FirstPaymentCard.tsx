@@ -12,7 +12,7 @@ import {
   parseFirstPay,
   subscribeFirstPay,
 } from "@/lib/firstPayment";
-import { formatRequestAmount } from "@/lib/amountText";
+import { displayAmountText } from "@/lib/amountShort";
 import { track } from "@/lib/track";
 
 const serverSnapshot = () => "";
@@ -41,7 +41,7 @@ export function FirstPaymentCard({
   if (state.dismissed || hasPaidPrivately(state, all)) return null;
 
   const label = suggestion
-    ? `Send ${formatRequestAmount(suggestion.amount)} ${suggestion.symbol} privately`
+    ? `Send ${displayAmountText(suggestion.amount)} ${suggestion.symbol} privately`
     : "Pay privately";
 
   return (

@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState } from "react";
 import { encodeProof, proveBalance } from "@/lib/proofs";
-import { assetLabel, formatAssetAmount, type LocalNote } from "@/lib/shield";
+import { assetLabel, formatAssetAmount, formatAssetAmountExact, type LocalNote } from "@/lib/shield";
 import {
   AssetMark,
   ExpiryPicker,
@@ -126,7 +126,8 @@ export function ExactBalance({ notes }: { notes: LocalNote[] }) {
           token={done.token}
           headline={
             <>
-              Exactly {formatAssetAmount(done.amount, done.asset)}{" "}
+              {/* what the proof states, so every unit: the rest of the app shows two places */}
+              Exactly {formatAssetAmountExact(done.amount, done.asset)}{" "}
               <span className="text-mute">{assetLabel(done.asset)}</span>
             </>
           }
@@ -235,7 +236,8 @@ function BalanceAside({
       <ShowsPanel
         shows={[
           { label: "Asset", value: note ? assetLabel(note.asset) : unset },
-          { label: "Amount", value: note ? `${formatAssetAmount(note.amountWei, note.asset)} ${assetLabel(note.asset)}` : unset },
+          // what the proof states, so every unit
+          { label: "Amount", value: note ? `${formatAssetAmountExact(note.amountWei, note.asset)} ${assetLabel(note.asset)}` : unset },
           { label: "Who it is for", value: verifier.trim() || unset },
           { label: "Good until", value: longDate(until * 1000) },
         ]}

@@ -23,6 +23,7 @@ import {
 } from "@/lib/mainnet";
 import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET } from "@/lib/elysium";
 import { BNB, BNB_LIVE_SINCE } from "@/lib/bnb";
+import { RINGS_PAYROLL_NOTE, RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED, ringsAssets } from "@/lib/solanaRings/config";
 import { VAULT_SWAP_V2_ROUTER, swapV3Live } from "@/lib/vaultSwap";
 import { voteFacts } from "@/lib/vote/glim";
 import {
@@ -448,6 +449,25 @@ export function bnbFacts(): string | null {
 }
 
 /**
+ * What Glim knows about Gloam on Solana, only while it is on
+ * (NEXT_PUBLIC_SOLANA_RINGS_ENABLED, lib/solanaRings/config). Off, Glim says
+ * nothing about it: no "coming", no date, no plan. On Solana a payment hides
+ * the token and the amount only, so Glim must never say it hides who paid whom.
+ */
+export function solanaFacts(): string | null {
+  if (!SOLANA_RINGS_ENABLED) return null;
+  return [
+    `${SOLANA_NAME.toUpperCase()} (Gloam on Solana; it is not one of the vault mainnets above and works differently)`,
+    `- Gloam is live on ${SOLANA_NAME}, at gloam.trade/app/solana (Solana in the app's menu). It runs through Helius Privacy Rings, not the Gloam vault. Assets: ${joinNames(ringsAssets().map((a) => a.symbol))}. Add, pay privately, payroll and cash out work there.`,
+    `- ${RINGS_PRIVACY_NOTE} Adding money also shows the token and the amount, and a cash out shows the address it goes to, the token and the amount. Never say or suggest that Gloam on Solana hides who paid whom, the sender or the recipient.`,
+    "- A person's Solana private account is its own key, opened by a signature from their main Solana wallet, so the same wallet reopens the same account on any device. Gloam's relay pays the Solana fees, so the private account never needs SOL of its own.",
+    `- ${RINGS_PAYROLL_NOTE}`,
+    "- On Solana the proof is made by Helius's prover in an attested enclave, not on the person's device. Proof of funds or payment, private swaps and claim links are not on Solana, and the SDK and the MCP servers do not cover it. Never say or suggest a partnership with Helius or Solana.",
+    "- Bringing money over from a Solana wallet into a vault on another chain (the bridge) is a different thing and works as before.",
+  ].join("\n");
+}
+
+/**
  * Elysium testnet (99801), only while NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED is on
  * and its pool is in (lib/elysium.ts). Null otherwise.
  */
@@ -705,6 +725,7 @@ export function knowledgeBlock(): string {
   const sepolia = ethereumSepoliaFacts();
   const elysium = elysiumFacts();
   const bnb = bnbFacts();
+  const solana = solanaFacts();
   const block = [
     about().trim(),
     ...(base ? [base] : []),
@@ -712,6 +733,7 @@ export function knowledgeBlock(): string {
     ...(sepolia ? [sepolia] : []),
     ...(elysium ? [elysium] : []),
     ...(bnb ? [bnb] : []),
+    ...(solana ? [solana] : []),
     TOKEN.trim(),
     ...[voteFacts()].filter((v): v is string => v !== null),
     CRYPTO_TALK.trim(),

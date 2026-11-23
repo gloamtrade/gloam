@@ -2,15 +2,16 @@
  * Self-test: short amounts in the balance pickers and success dialogs, the
  * Cash out amount field, and paying your own Gloam address.
  *
- *  - lib/amountShort: a stablecoin to cents, anything else to 4 places, always
- *    cut down, never rounded up (1,223.109888 USDC reads 1,223.10, and
- *    1,223.999999 reads 1,223.99, never 1,224.00), whatever the decimals (USDT
- *    and USDC have 18 on BNB Chain). Dust reads "<0.01", never "0".
- *  - lib/shield formatAssetShort on BNB Chain (18-decimal stablecoins, BNB, BDX)
- *    and on Robinhood Chain (USDG, 6 decimals): decided by the token, not its decimals.
- *  - The pickers ("Pay from", "Cash out from") show the short amount with the
- *    network under it; the success dialogs use the short format; the exact
- *    places (the amount field, Max, the fee and You get lines) do not.
+ *  - lib/amountShort: every token to two places, always cut down, never rounded
+ *    up (1,223.109888 USDC reads 1,223.10, and 1,223.999999 reads 1,223.99,
+ *    never 1,224.00), whatever the decimals (USDT and USDC have 18 on BNB
+ *    Chain). Dust reads "<0.01", never "0". (selftest-amount-display covers the
+ *    formatter itself.)
+ *  - lib/shield formatAssetAmount on BNB Chain (18-decimal stablecoins, BNB, BDX)
+ *    and on Robinhood Chain (USDG, 6 decimals): two places for each.
+ *  - The pickers ("Pay from", "Cash out from") show two places with the
+ *    network under it; the success dialogs, the fee and You get lines too; the
+ *    exact places (the amount field, Max) keep every unit.
  *  - lib/cashOutAmount: Cash out opens with the whole balance written in, to the
  *    last unit; an empty field is no amount and never the whole balance.
  *  - Paying your own Gloam address: allowed, with one quiet line under To.
@@ -32,8 +33,8 @@ globalThis.fetch = (async (url: unknown) => {
   throw new Error(`selftest-amount-short: no network calls allowed (${String(url)})`);
 }) as typeof fetch;
 
-const { amountDown, shortAmount, stableTextDown } = await import("../src/lib/amountShort");
-const { formatAssetShort, formatAssetShortLabel, formatAssetAmountExact, isStableAsset } = await import("../src/lib/shield");
+const { amountDown, displayAmount, displayAmountText, typedAmount } = await import("../src/lib/amountShort");
+const { formatAssetAmount, formatAssetLabel, formatAssetAmountExact, isStableAsset } = await import("../src/lib/shield");
 const nets = await import("../src/lib/networks");
 const { CASH_OUT_EMPTY_HELP, readCashOutAmount, wholeBalanceText } = await import("../src/lib/cashOutAmount");
 const { OWN_GLOAM_ADDRESS_NOTE, isOwnGloamAddress } = await import("../src/lib/payRecipient");
@@ -55,23 +56,23 @@ const NATIVE = "0x0000000000000000000000000000000000000000";
 
 // ------------------------------------------------------------- lib/amountShort
 
-test("a stablecoin shows cents, cut down: 1,223.109888 reads 1,223.10 in 6 or 18 decimals", () => {
-  assert.equal(shortAmount(1_223_109_888n, 6, true), "1,223.10");
-  assert.equal(shortAmount(1_223_109_888n * 10n ** 12n + 123n, 18, true), "1,223.10");
-  assert.equal(shortAmount(1_202_290_000n, 6, true), "1,202.29");
-  assert.equal(shortAmount(5_000_000n, 6, true), "5.00");
-  assert.equal(shortAmount(25_000_000_000_000n, 6, true), "25,000,000.00");
+test("every token shows two places, cut down: 1,223.109888 reads 1,223.10 in 6 or 18 decimals", () => {
+  assert.equal(displayAmount(1_223_109_888n, 6), "1,223.10");
+  assert.equal(displayAmount(1_223_109_888n * 10n ** 12n + 123n, 18), "1,223.10");
+  assert.equal(displayAmount(1_202_290_000n, 6), "1,202.29");
+  assert.equal(displayAmount(5_000_000n, 6), "5.00");
+  assert.equal(displayAmount(25_000_000_000_000n, 6), "25,000,000.00");
 });
 
 test("never rounded up: a shown balance is never more than is held", () => {
-  assert.equal(shortAmount(1_223_999_999n, 6, true), "1,223.99");
-  assert.equal(shortAmount(999_999_999_999_999_999n, 18, true), "0.99");
-  assert.equal(amountDown(1_999_999n, 6, 4), "1.9999");
+  assert.equal(displayAmount(1_223_999_999n, 6), "1,223.99");
+  assert.equal(displayAmount(999_999_999_999_999_999n, 18), "0.99");
+  assert.equal(amountDown(1_999_999n, 6, 4), "1.9999", "amountDown still cuts to any places asked");
   // whatever the amount, the shown number read back is at most the amount
   for (const raw of [1n, 9_999n, 1_005_000n, 123_456_789n, 10n ** 18n - 1n, 7n * 10n ** 17n + 3n]) {
-    for (const [dec, stable] of [[6, true], [18, true], [18, false], [9, false]] as const) {
+    for (const dec of [6, 18, 9]) {
       if (raw > 10n ** BigInt(dec + 8)) continue;
-      const shown = shortAmount(raw, dec, stable);
+      const shown = displayAmount(raw, dec);
       if (shown.startsWith("<")) continue;
       const [w, f = ""] = shown.replace(/,/g, "").split(".");
       const back = BigInt(w!) * 10n ** BigInt(dec) + (f ? BigInt(f.padEnd(dec, "0").slice(0, dec)) : 0n);
@@ -80,46 +81,46 @@ test("never rounded up: a shown balance is never more than is held", () => {
   }
 });
 
-test("dust reads as under a cent (or 0.0001), never as 0; zero reads 0", () => {
-  assert.equal(shortAmount(4_000n, 6, true), "<0.01");
-  assert.equal(shortAmount(4n * 10n ** 15n, 18, true), "<0.01");
-  assert.equal(shortAmount(1n, 18, false), "<0.0001");
-  assert.equal(shortAmount(0n, 6, true), "0.00");
-  assert.equal(shortAmount(0n, 18, false), "0");
+test("dust reads as under a cent, never as 0; zero reads 0.00", () => {
+  assert.equal(displayAmount(4_000n, 6), "<0.01");
+  assert.equal(displayAmount(4n * 10n ** 15n, 18), "<0.01");
+  assert.equal(displayAmount(1n, 18), "<0.01");
+  assert.equal(displayAmount(0n, 6), "0.00");
+  assert.equal(displayAmount(0n, 18), "0.00");
 });
 
-test("anything else to 4 places, trailing zeros dropped", () => {
-  assert.equal(shortAmount(3_868_049_052_992_449n, 18, false), "0.0038");
-  assert.equal(shortAmount(12n * E18, 18, false), "12");
-  assert.equal(shortAmount(1_250_000_500_000_000_000_000_000n, 18, false), "1,250,000.5");
-  assert.equal(shortAmount(123_456_789_123n, 9, false), "123.4567");
+test("a coin or token that is not a stablecoin shows two places too", () => {
+  assert.equal(displayAmount(3_868_049_052_992_449n, 18), "<0.01");
+  assert.equal(displayAmount(12n * E18, 18), "12.00");
+  assert.equal(displayAmount(1_250_000_500_000_000_000_000_000n, 18), "1,250,000.50");
+  assert.equal(displayAmount(123_456_789_123n, 9), "123.45");
 });
 
-test("a Relay amount as text is cut to cents the same way", () => {
-  assert.equal(stableTextDown("9.9005400052586123"), "9.90");
-  assert.equal(stableTextDown("9.999999"), "9.99");
-  assert.equal(stableTextDown("1234.5"), "1,234.50");
-  assert.equal(stableTextDown("not a number"), "not a number");
+test("a Relay amount as text is cut to two places the same way", () => {
+  assert.equal(displayAmountText("9.9005400052586123"), "9.90");
+  assert.equal(displayAmountText("9.999999"), "9.99");
+  assert.equal(displayAmountText("1234.5"), "1,234.50");
+  assert.equal(displayAmountText("not a number"), "not a number");
 });
 
 // ------------------------------------------------------------- lib/shield, by token
 
-test("BNB Chain: USDT and USDC (18 decimals) show cents; BNB and BDX show 4 places", () => {
+test("BNB Chain: USDT and USDC (18 decimals), BNB and BDX all show two places", () => {
   nets.setShownNetworkKey("bnb-mainnet");
   assert.ok(isStableAsset(USDT_BNB) && isStableAsset(USDC_BNB.toLowerCase()));
   assert.ok(!isStableAsset(NATIVE) && !isStableAsset(BDX_BNB));
-  assert.equal(formatAssetShortLabel(1_223_109_888_000_000_000_001n * 1000n, USDC_BNB), "1,223,109.88 USDC");
-  assert.equal(formatAssetShortLabel(1_223_109_888n * 10n ** 12n, USDT_BNB), "1,223.10 USDT");
-  assert.equal(formatAssetShortLabel(3_868_049_052_992_449n, NATIVE), "0.0038 BNB");
-  assert.equal(formatAssetShortLabel(1_234_567_891_234n, BDX_BNB), "1,234.5678 BDX");
+  assert.equal(formatAssetLabel(1_223_109_888_000_000_000_001n * 1000n, USDC_BNB), "1,223,109.88 USDC");
+  assert.equal(formatAssetLabel(1_223_109_888n * 10n ** 12n, USDT_BNB), "1,223.10 USDT");
+  assert.equal(formatAssetLabel(3_868_049_052_992_449n, NATIVE), "<0.01 BNB");
+  assert.equal(formatAssetLabel(1_234_567_891_234n, BDX_BNB), "1,234.56 BDX");
   // the exact formatter keeps every unit, for the places that must
   assert.equal(formatAssetAmountExact(1_223_109_888_000_000_000_001n, USDC_BNB), "1,223.109888000000000001");
 });
 
-test("Robinhood Chain: USDG (6 decimals) shows cents too", () => {
+test("Robinhood Chain: USDG (6 decimals) shows two places too", () => {
   nets.setShownNetworkKey("robinhood-mainnet");
-  assert.equal(formatAssetShortLabel(1_202_290_000n, USDG_RH), "1,202.29 USDG");
-  assert.equal(formatAssetShort("1223109888", USDG_RH), "1,223.10");
+  assert.equal(formatAssetLabel(1_202_290_000n, USDG_RH), "1,202.29 USDG");
+  assert.equal(formatAssetAmount("1223109888", USDG_RH), "1,223.10");
 });
 
 // ------------------------------------------------------------- where it shows, and where it doesn't
@@ -130,32 +131,34 @@ const shield = src("../src/components/app/ShieldView.tsx");
 const swap = src("../src/components/app/VaultSwapView.tsx");
 const send = src("../src/components/app/SendView.tsx");
 
-test("the pickers show the short amount, with the network under it in the smaller muted line", () => {
+test("the pickers show two places, with the network under it in the smaller muted line", () => {
   const options = move.slice(move.indexOf("<BalancePicker"), move.indexOf("</section>", move.indexOf("<BalancePicker")));
-  assert.match(options, /formatAssetShort\(n\.amountWei, n\.asset\)/);
+  assert.match(options, /formatAssetAmount\(n\.amountWei, n\.asset\)/);
   assert.match(options, /network: network\.label,/);
-  assert.ok(!/formatAssetAmount\(n\.amountWei/.test(options), "the picker no longer shows 6 places");
+  assert.ok(!/formatUnits\(/.test(options), "the picker never shows raw units");
   assert.match(picker, /network\?: string;/);
   assert.match(picker, /<span className="block truncate text-\[12px\] text-mute">\s*\{o\.network\}/);
   // a warning colours its own part, never the network
   assert.match(picker, /<span className=\{o\.warn \? "text-warn" : undefined\}>\{o\.sub\}<\/span>/);
 });
 
-test("success dialogs show the short amount", () => {
-  assert.match(shield, /setSentLabel\(`\$\{shortAmount\(value, decimals, selectedToken\?\.kind === "stablecoin"\)\} \$\{symbol\}`\)/);
+test("success dialogs show two places", () => {
+  assert.match(shield, /setSentLabel\(`\$\{displayAmount\(value, decimals\)\} \$\{symbol\}`\)/);
   assert.ok(!/frac\.slice\(0, 6\)/.test(shield), "the old 6-place receipt cut is gone");
-  assert.match(move, /amount: formatAssetShortLabel\(w\.paymentNote\.amountWei, w\.paymentNote\.asset\)/);
-  assert.match(move, /amountLabel: formatAssetShortLabel\(w\.paymentNote\.amountWei, w\.paymentNote\.asset\)/);
-  assert.match(swap, /\$\{formatAssetShortLabel\(receipt\.receiveAmount, receipt\.receive\)\} is in your private balance\./);
-  assert.match(swap, /const paid = formatAssetShort\(payAmount, pay\);/);
-  assert.match(send, /setSentAmount\(shortAmount\(value, token\?\.decimals \?\? 18, token\?\.kind === "stablecoin"\)\);/);
+  assert.match(move, /amount: formatAssetLabel\(w\.paymentNote\.amountWei, w\.paymentNote\.asset\)/);
+  assert.match(move, /shown: formatAssetLabel\(w\.paymentNote\.amountWei, w\.paymentNote\.asset\)/);
+  assert.match(swap, /\$\{formatAssetLabel\(receipt\.receiveAmount, receipt\.receive\)\} is in your private balance\./);
+  assert.match(swap, /const paid = formatAssetAmount\(payAmount, pay\);/);
+  assert.match(send, /setSentAmount\(displayAmount\(value, decimals\)\);/);
 });
 
-test("the exact places stay exact: Max, the fee and You get lines", () => {
+test("the fee and You get lines show two places; Max and the claim code's share text keep every unit", () => {
   assert.match(move, /const maxEth = selected\s*\?\s*formatUnits\(BigInt\(selected\.amountWei\), assetDecimals\(selected\.asset\)\)/);
   assert.match(move, /onMax=\{\(\) => setSendAmount\(maxEth\)\}/);
   assert.match(move, /fee: \$\{formatAssetLabel\(cashOutFee, selected\.asset\)\}/);
   assert.match(move, /\{formatAssetAmount\(cashOutAmount - outFee, selected\.asset\)\}/);
+  assert.match(move, /exact: `\$\{formatAssetAmountExact\(w\.paymentNote\.amountWei, w\.paymentNote\.asset\)\} \$\{assetLabel\(w\.paymentNote\.asset\)\}`/);
+  assert.match(move, /shareLabel=\{shareAmountLabel\?\.exact\}/);
 });
 
 // ------------------------------------------------------------- the Cash out amount field
@@ -235,6 +238,40 @@ test("To is your own Gloam address: allowed, one quiet line, no warning", () => 
   assert.ok(!/text-warn|text-danger|role="alert"/.test(line), "no warning colour");
   // nothing in the send path stops it
   assert.equal((move.match(/payingSelf/g) ?? []).length, 2, "declared once, drawn once: never a gate");
+});
+
+// ------------------------------------------------------------- the amount as typed, said back
+
+test("typedAmount says back what was typed, every decimal: 0.001 reads 0.001, never <0.01", () => {
+  assert.equal(typedAmount("0.001"), "0.001");
+  assert.equal(typedAmount(" 0.000001 "), "0.000001");
+  assert.equal(typedAmount("1250.123456"), "1,250.123456");
+  assert.equal(typedAmount("1,250.5"), "1,250.5");
+  assert.equal(typedAmount("25"), "25");
+  assert.equal(typedAmount("007"), "7");
+  assert.equal(typedAmount(".5"), "0.5");
+  assert.equal(typedAmount("5."), "5");
+  assert.equal(typedAmount("abc"), "abc");
+  assert.equal(displayAmountText("0.001"), "<0.01", "two places stays for balances and quotes");
+});
+
+test("buttons and review lines that repeat the amount field use the typed amount", () => {
+  const bridge = src("../src/components/app/BridgeIn.tsx");
+  const sol = src("../src/components/app/SolanaBridgeIn.tsx");
+  const send = src("../src/components/app/SendView.tsx");
+  const shield = src("../src/components/app/ShieldView.tsx");
+  const request = src("../src/components/app/PaymentRequest.tsx");
+  assert.match(bridge, /`Bridge \$\{typedAmount\(amount\)\} \$\{token\.symbol\} from your wallet`/);
+  assert.match(bridge, /typedAmount\(wallet\.quote\.send\.amount\)/);
+  assert.match(bridge, /typedAmount\(q\.receive\.amount\)/, "private review: what lands is what was typed");
+  assert.match(sol, /typedAmount\(flow\.quote\.send\.amount\)/);
+  assert.equal((send.match(/typedAmount\(amount\)/g) ?? []).length, 3, "Sending, Amount and Confirm send");
+  assert.ok(!/displayAmountText\(amount\)/.test(send));
+  assert.match(shield, /amtNum > 0 \? typedAmount\(amount\)/);
+  assert.match(request, /typedAmount\(r\.value\)/);
+  assert.match(request, /typedAmount\(request\.amount\)/);
+  const lib = src("../src/lib/solanaRings/bridgeIn.ts");
+  assert.match(lib, /`Bridge \$\{typedAmount\(text\)\} \$\{s\.symbol\} from your wallet`/);
 });
 
 // ------------------------------------------------------------- copy

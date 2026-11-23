@@ -203,7 +203,7 @@ if (MODE === "on") {
   ok(bnb.BNB_ENABLED && bnb.BNB?.chainId === CHAIN_ID && bnb.BNB_LIVE_SINCE === "21 November 2026", "on: BNB Chain is on");
   ok(nets.NETWORK_KEYS.includes("bnb-mainnet") && nets.isShownNetworkKey("bnb-mainnet"), "on: a network key, shown with the mainnets");
   const mainnets = nets.NETWORK_KEYS.filter((k) => !nets.getNetwork(k).testnet);
-  ok(mainnets[mainnets.length - 1] === "bnb-mainnet", "on: listed after the other mainnets");
+  ok(mainnets.indexOf("bnb-mainnet") === mainnets.indexOf("base-mainnet") + 1, "on: listed right after Base (Robinhood Chain, Base, then BNB Chain)");
   ok(e.pool === POOL && e.deployBlock === 134_300_000n, "on: its pool and block");
   ok(e.explorerTx("0xab") === "https://bscscan.com/tx/0xab", "on: BscScan links");
   ok(nets.isNetworkWritable(e), "on: writable");

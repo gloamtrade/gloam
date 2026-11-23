@@ -18,11 +18,19 @@
  *  - Anything else (a lost answer, a confirmation that timed out) is settled
  *    on chain first: by signature, else by whether its notes were spent. The
  *    notes are freed only once its blockhash has expired with them unspent.
+ *  - A payment settled as dropped (its blockhash expired, its notes unspent)
+ *    could never land, so it is built and sent once more on its own. A second
+ *    drop is said plainly.
+ *  - The settling never waits forever: past SETTLE_MAX_MS it stops, keeps the
+ *    payment stored as pending (so the next one settles it first) and says so.
  *  - A payment still pending from before (a tab closed mid-payment) is
  *    settled before the next one is built. If it went through, the next one
  *    is refused once, so the same payment isn't made again by hand.
  */
 import { INFLIGHT_POLL_MS, isRelayRefusal, type Built, type InflightResult } from "./payroll";
+
+/** Longest a payment is settled on chain before it stops and says it can't tell yet (a blockhash lasts about a minute). */
+export const SETTLE_MAX_MS = 4 * 60_000;
 
 export type Pending = {
   nullifiers: string[];
@@ -55,6 +63,8 @@ export type SendDeps = {
   now(): number;
   /** Called while it waits to learn whether a payment went through. */
   onChecking?(): void;
+  /** Called when a dropped payment is built and sent once more. */
+  onResend?(): void;
 };
 
 export const LAST_PAYMENT_LANDED = "Your last payment on Solana went through after all. Check your balance before you pay again.";
@@ -62,11 +72,15 @@ export const NOT_SENT = "That payment didn't go through, and nothing moved. Try 
 export const FAILED_ON_CHAIN = "That payment failed on Solana, and nothing moved. Try again.";
 export const NOT_SURE = "Couldn't tell whether your last payment went through. Check your balance before you try again.";
 export const NOT_SAVED = "This browser couldn't save the payment before sending it, so it wasn't sent. Free some space and try again.";
+export const STILL_CHECKING = "Solana hasn't said yet whether your payment went through. Try again in a minute: Gloam checks it before sending anything.";
 
-async function settle(deps: SendDeps, p: Pending): Promise<InflightResult> {
+/** Settled on chain, or "timeout" once SETTLE_MAX_MS passed with it still pending. */
+async function settle(deps: SendDeps, p: Pending): Promise<Exclude<InflightResult, { state: "pending" }> | { state: "timeout" }> {
+  const start = deps.now();
   for (;;) {
     const r = await deps.resolve(p);
     if (r.state !== "pending") return r;
+    if (deps.now() - start >= SETTLE_MAX_MS) return { state: "timeout" };
     deps.onChecking?.();
     await deps.sleep(INFLIGHT_POLL_MS);
   }
@@ -83,12 +97,29 @@ export async function sendGuarded(deps: SendDeps): Promise<string> {
   if (earlier) {
     deps.onChecking?.();
     const r = await settle(deps, earlier);
+    if (r.state === "timeout") throw new Error(STILL_CHECKING); // still stored: the next try settles it first
     await deps.pending.clear();
     if (r.state === "landed") throw new Error(LAST_PAYMENT_LANDED);
     if (r.state === "unknown") throw new Error(NOT_SURE);
     // failed or dropped: it never moved anything, so this one can go
   }
 
+  // 2 and 3, once more if Solana dropped the first.
+  for (let attempt = 0; ; attempt++) {
+    if (attempt) deps.onResend?.();
+    const r = await sendOnce(deps);
+    if (r.state === "landed") return r.signature;
+    if (r.state === "timeout") throw new Error(STILL_CHECKING); // still stored: the next try settles it first
+    await deps.pending.clear();
+    if (r.state === "failed") throw new Error(FAILED_ON_CHAIN);
+    if (r.state === "unknown") throw new Error(NOT_SURE);
+    // dropped: it never landed and never can, and its notes are free again
+    if (attempt === 1) throw new Error(NOT_SENT);
+  }
+}
+
+/** Build, store as pending, send and confirm one payment; settled on chain when the confirm can't say. */
+async function sendOnce(deps: SendDeps): Promise<{ state: "landed"; signature: string } | Exclude<InflightResult, { state: "landed" | "pending" }> | { state: "timeout" }> {
   // 2. Stored as pending before it is sent.
   const built = await deps.build();
   const p: Pending = { nullifiers: built.nullifiers, blockhash: built.blockhash, at: deps.now() };
@@ -115,19 +146,19 @@ export async function sendGuarded(deps: SendDeps): Promise<string> {
     try {
       await deps.confirm(signature);
       await deps.pending.clear();
-      return signature;
+      return { state: "landed", signature };
     } catch {
-      // timed out or failed: the chain says which, below
+      // failed, dropped or not answered in time: the chain says which, below
     }
   }
 
   deps.onChecking?.();
   const r = await settle(deps, signature ? { ...p, signature } : p);
-  await deps.pending.clear();
-  if (r.state === "landed") return r.signature ?? signature ?? "";
-  if (r.state === "failed") throw new Error(FAILED_ON_CHAIN);
-  if (r.state === "dropped") throw new Error(NOT_SENT);
-  throw new Error(NOT_SURE);
+  if (r.state === "landed") {
+    await deps.pending.clear();
+    return { state: "landed", signature: r.signature ?? signature ?? "" };
+  }
+  return r;
 }
 
 function isPending(v: unknown): v is Pending {

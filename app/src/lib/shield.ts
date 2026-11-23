@@ -8,7 +8,7 @@ import { knownTokens } from "./tokens";
 import { getActiveNetwork, type GloamNetwork } from "./networks";
 import { makeBoundNote } from "./note";
 import { readAmountText } from "./amountText";
-import { shortAmount } from "./amountShort";
+import { displayAmount } from "./amountShort";
 import { dataKeyLocked, getAllNotes, noteOwnerProblem, setAllNotes, syncFromDisk, unlockNoteVault } from "./noteVault";
 import { accountScopeOn, boundAccount, SIGNED_OUT_MESSAGE } from "./accountSlot";
 import { readDemo } from "./demoFlag";
@@ -509,28 +509,28 @@ export function assetDecimals(asset: string): number {
   return t?.decimals ?? 18;
 }
 
-/** Human amount for a raw note value, using the asset's real decimals (PathUSD 6, ETH 18). */
-export function formatAssetAmount(raw: bigint | string, asset: string, maxFrac = 6): string {
+/**
+ * A raw note value on screen, in the asset's real decimals (PathUSD 6, ETH 18):
+ * two places, cut down, through lib/amountShort displayAmount ("7.86",
+ * "1,200.00", "0.00", "<0.01"). For what is shown only; the amount field, Max,
+ * what is sent, copied or exported keep every unit (formatAssetAmountExact).
+ */
+export function formatAssetAmount(raw: bigint | string, asset: string): string {
   let v: bigint;
   try {
     v = typeof raw === "bigint" ? raw : BigInt(raw || "0");
   } catch {
     return String(raw);
   }
-  if (v === 0n) return "0";
-  const n = Number(formatUnits(v, assetDecimals(asset)));
-  if (!Number.isFinite(n)) return formatUnits(v, assetDecimals(asset));
-  const floor = 1 / 10 ** Math.min(maxFrac, 4);
-  if (n > 0 && n < floor) return `<${floor}`;
-  return n.toLocaleString("en-US", { maximumFractionDigits: maxFrac });
+  return displayAmount(v, assetDecimals(asset));
 }
 
 /**
- * Decimal places for a total or a balance in a summary (payroll runs, caps,
- * schedules): cents for a stablecoin, whatever its decimals (USDT and USDC
- * have 18 on BNB Chain, 6 elsewhere), 6 places for anything else with more
- * than 6 decimals, such as ETH, where 0.01 is already a real amount (0.004 ETH
- * read "<0.01"). Decided by what the token is, never by its decimals alone.
+ * The step a payroll deposit to add is rounded up to: cents for a stablecoin,
+ * whatever its decimals (USDT and USDC have 18 on BNB Chain, 6 elsewhere), 6
+ * places for anything else with more than 6 decimals, such as ETH, where 0.01
+ * is already a real amount. Decided by what the token is, never by its decimals
+ * alone. Not for display: every shown amount has two places (formatAssetAmount).
  */
 export function summaryDecimals(asset: string): number {
   if (isNativeAsset(asset)) return 6;
@@ -558,7 +558,7 @@ export function formatAssetAmountExact(raw: bigint | string, asset: string, minF
   return digits ? `${grouped}.${digits}` : grouped;
 }
 
-/** "12.5 PathUSD" style label for a raw amount. */
+/** "12.50 PathUSD": formatAssetAmount with the token's symbol, for what is shown. */
 export function formatAssetLabel(raw: bigint | string, asset: string): string {
   return `${formatAssetAmount(raw, asset)} ${assetLabel(asset)}`;
 }
@@ -567,27 +567,6 @@ export function formatAssetLabel(raw: bigint | string, asset: string): string {
 export function isStableAsset(asset: string): boolean {
   if (isNativeAsset(asset)) return false;
   return knownForActive().find((x) => x.address.toLowerCase() === asset.toLowerCase())?.kind === "stablecoin";
-}
-
-/**
- * A balance at a glance (lib/amountShort): a stablecoin to cents, anything else
- * to 4 places, cut down and never rounded up ("1,223.10", "0.0042"). For the
- * balance pickers and success dialogs only; the amount field, Max, the fee and
- * You get lines, receipts and CSV keep every unit.
- */
-export function formatAssetShort(raw: bigint | string, asset: string): string {
-  let v: bigint;
-  try {
-    v = typeof raw === "bigint" ? raw : BigInt(raw || "0");
-  } catch {
-    return String(raw);
-  }
-  return shortAmount(v, assetDecimals(asset), isStableAsset(asset));
-}
-
-/** "1,223.10 USDC": formatAssetShort with the token's symbol. */
-export function formatAssetShortLabel(raw: bigint | string, asset: string): string {
-  return `${formatAssetShort(raw, asset)} ${assetLabel(asset)}`;
 }
 
 /**

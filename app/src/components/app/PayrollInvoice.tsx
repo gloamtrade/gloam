@@ -5,7 +5,7 @@ import { useModalFocus } from "@/hooks/useModalFocus";
 import { createPortal } from "react-dom";
 import { Mark } from "@/components/Logo";
 import { shortAddress } from "@/lib/chain";
-import { formatAssetAmountExact } from "@/lib/shield";
+import { formatAssetAmount } from "@/lib/shield";
 import type { PayrollBatch } from "@/lib/payroll";
 
 /**
@@ -41,9 +41,9 @@ export function PayrollInvoice({
     day: "numeric",
     year: "numeric",
   });
-  // Two decimals at least, the way an invoice reads, and never rounded: 0.004
-  // stays 0.004 and every line adds up to the total shown.
-  const money = (raw: bigint | string) => `${formatAssetAmountExact(raw, batch.asset, 2)} ${symbol}`;
+  // Two places, cut down and never rounded up, as every amount shows (lib/amountShort).
+  // The results CSV keeps every unit.
+  const money = (raw: bigint | string) => `${formatAssetAmount(raw, batch.asset)} ${symbol}`;
 
   useModalFocus(dialog, onClose, { initial: closeRef });
 

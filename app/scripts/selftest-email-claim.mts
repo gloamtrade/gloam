@@ -409,7 +409,7 @@ test("an Elysium link's amount reads from Elysium's tokens, whatever network the
   assert.notEqual(assetLabel(usdc.address), "USDC", "read from another network, it has no name (the bug)");
   setShownNetworkKey("elysium-mainnet");
   assert.equal(assetLabel(usdc.address), "USDC");
-  assert.equal(formatAssetAmount((10n ** BigInt(usdc.decimals)).toString(), usdc.address), "1");
+  assert.equal(formatAssetAmount((10n ** BigInt(usdc.decimals)).toString(), usdc.address), "1.00");
   const page = read("../src/app/claim/page.tsx");
   const at = page.indexOf("setShownNetworkKey(net);");
   assert.ok(at > 0 && at < page.indexOf("amount = formatAssetAmount(pack.amountWei, pack.asset);"), "set before the amount is read");

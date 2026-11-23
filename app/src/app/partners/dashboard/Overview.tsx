@@ -4,7 +4,7 @@ import { useState } from "react";
 import { SealDots } from "@/components/ui/SealDots";
 import { getNetwork } from "@/lib/networks";
 import type { Activity, FeeSetting, Stats } from "./client";
-import { ago, ArrowIcon, Card, fmtInt, fmtUnits, fmtUsd, fullDate, Kpi, LockIcon } from "./ui";
+import { ago, ArrowIcon, Card, fmtInt, fmtTokenText, fmtUnits, fmtUsd, fullDate, Kpi, LockIcon } from "./ui";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { PartnerBreakdown, SOURCE_LABEL } from "@/components/partners/PartnerBreakdown";
 
@@ -333,8 +333,8 @@ export function Overview({
                       <span className="block text-[12px] text-mute sm:hidden">{getNetwork(a.network).label}</span>
                     </td>
                     <td className="px-4 text-soft max-sm:hidden sm:px-6">{getNetwork(a.network).label}</td>
-                    <td className="px-4 text-soft sm:px-6">{Number(a.volume).toLocaleString("en-US", { maximumFractionDigits: 6 })}</td>
-                    <td className="px-4 text-foreground sm:px-6">{Number(a.commission).toLocaleString("en-US", { maximumFractionDigits: 6 })}</td>
+                    <td className="px-4 text-soft sm:px-6">{fmtTokenText(a.volume)}</td>
+                    <td className="px-4 text-foreground sm:px-6">{fmtTokenText(a.commission)}</td>
                   </tr>
                 ))}
               </tbody>

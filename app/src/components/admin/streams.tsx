@@ -12,7 +12,7 @@ import type { StoredEvent } from "@/lib/tractionStore";
 import { StreamCard, StreamIcon } from "./cards";
 import { MarkKey, TickRow, type Mark, type Point } from "./charts";
 import { adminName, MAINNET_DAY } from "./data";
-import { agoMs, dayOfMonth, fmtAge, fmtDay, fmtUsd, n, nShort } from "./format";
+import { agoMs, dayOfMonth, fmtAge, fmtAmount, fmtAmountLabel, fmtDay, fmtUsd, n, nShort } from "./format";
 import { sideRevenueDays, type LiveRelay, type Side } from "./side";
 import { Panel, Notice } from "./ui";
 
@@ -80,7 +80,7 @@ export function VaultStream({ side }: { side: Side }) {
           .sort((a, b) => a.ts - b.ts || Number(a.block) - Number(b.block))
           .map((r) => ({
             tone: r.kind === "transfer" || r.kind === "trade" ? "private" : "public",
-            title: `${KIND_WORD[r.kind]}${r.kind === "deposit" || r.kind === "cashout" ? `, ${r.detail}` : ""}${r.ts ? `, ${agoMs(r.ts * 1000)}` : `, block ${r.block}`}`,
+            title: `${KIND_WORD[r.kind]}${r.kind === "deposit" || r.kind === "cashout" ? `, ${fmtAmountLabel(r.detail)}` : ""}${r.ts ? `, ${agoMs(r.ts * 1000)}` : `, block ${r.block}`}`,
           }));
         return (
           <TickRow
@@ -186,7 +186,7 @@ export function BridgeStream({ side }: { side: Side }) {
               label={k}
               marks={list.map((r) => ({
                 tone: STAGE_MARK[r.stage],
-                title: `${STAGE_WORD[r.stage]}: ${r.inAmount ? Number(r.inAmount).toLocaleString("en-US", { maximumFractionDigits: 6 }) : ""} ${r.inSymbol}, ${agoMs(r.ts * 1000)}`,
+                title: `${STAGE_WORD[r.stage]}: ${r.inAmount ? fmtAmount(r.inAmount) : ""} ${r.inSymbol}, ${agoMs(r.ts * 1000)}`,
               }))}
               right={bad ? `${n(bad)} failed` : fmtUsd(usd)}
               rightTone={bad ? "danger" : "mute"}

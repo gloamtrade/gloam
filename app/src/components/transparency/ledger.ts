@@ -134,6 +134,10 @@ const HEAD_LAG: Record<number, bigint> = {
   // BNB Chain: blocks every ~0.45 s, so 20 blocks is about 9 s.
   56: 20n,
 };
+/** Blocks left unread at the head on a chain, for a reader that goes on from where it stopped (lib/walletActivity too). */
+export function headLag(chainId: number): bigint {
+  return HEAD_LAG[chainId] ?? 2n;
+}
 const FRESH_MS = 30_000;
 const CACHE_PREFIX = "gloam_transparency_v1";
 
@@ -310,7 +314,7 @@ async function readLedger(key: NetworkKey, prev: Ledger | null, progress: Progre
 
   const id = n.chainId;
   const head = await gated(id, () => c.getBlockNumber());
-  const lag = HEAD_LAG[id] ?? 2n;
+  const lag = headLag(id);
   const fromBlock = n.deployBlock;
   const resume = prev && BigInt(prev.scannedTo) >= fromBlock ? BigInt(prev.scannedTo) + 1n : fromBlock;
   // A lagging node behind the balancer can answer an older head. The scan never

@@ -5,6 +5,7 @@ import { GLOAM_NAMES_ADDRESS, NAME_GRACE_SECONDS } from "@/lib/gloamNames";
 import type { ClaimedName, NamesSnapshot } from "@/lib/nameStats";
 import { useAdminResource } from "../data";
 import { fmtWhen, n } from "../format";
+import { displayAmountNumber } from "@/lib/amountShort";
 import { DataTable, Note, Notice, Panel, PanelSkeleton, StatStrip } from "../ui";
 
 type Row = ClaimedName & { team: boolean };
@@ -12,7 +13,7 @@ type NamesData = Omit<NamesSnapshot, "names"> & { names: Row[]; /** Unix seconds
 
 const rh = getNetwork("robinhood-mainnet");
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
-const gloam = (v: number) => `${v.toLocaleString("en-US", { maximumFractionDigits: 2 })} GLOAM`;
+const gloam = (v: number) => `${displayAmountNumber(v)} GLOAM`;
 const day = (s: number) => new Date(s * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
 /** Every Gloam name claimed so far, newest first, read from the registry on Robinhood Chain. */
