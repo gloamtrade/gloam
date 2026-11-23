@@ -132,6 +132,15 @@ jobs:
           NEXT_PUBLIC_BNB_ENABLED=1 NEXT_PUBLIC_BNB_POOL=0x89d3042390204f57b8b4F8949D3c2203E4002164 NEXT_PUBLIC_BNB_DEPLOY_BLOCK=134300000 NEXT_PUBLIC_BNB_LIVE_SINCE="21 November 2026" ../mcp/node_modules/.bin/tsx scripts/selftest-activity-window.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-activity-eth.mts
 
+      # The public site, from its source: every page that sets its own openGraph still
+      # shares with a picture, next/link only points at Next pages (a static page
+      # there is prefetched into a 404), and every table scrolls inside itself on a phone.
+      - name: App site self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-share-cards.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-site-links.mts
+
       # Email updates: the list (subscribe, unsubscribe, admin CSV) and sending it
       # (markdown escaping, one message per person, one-click unsubscribe, never
       # twice across a crash). A fake Resend and the in-process store: no email is sent.

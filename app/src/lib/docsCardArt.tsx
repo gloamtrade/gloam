@@ -919,3 +919,24 @@ export function PlayArt() {
     </div>
   );
 }
+
+/** Status: a few parts, each with its row of check bars, one bar short of full. */
+export function StatusArt() {
+  const rows = [70, 92, 58];
+  const bars = 14;
+  return (
+    <svg width={324} height={170} viewBox="0 0 324 170">
+      {rows.map((label, i) => {
+        const y = 10 + i * 56;
+        return (
+          <g key={i}>
+            <rect x={4} y={y} width={label} height={12} rx={6} fill={C.line} />
+            {Array.from({ length: bars }, (_, b) => (
+              <rect key={b} x={4 + b * 23} y={y + 22} width={15} height={22} rx={4} fill={i === 1 && b === 9 ? C.faint : C.paper} />
+            ))}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
