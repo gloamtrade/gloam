@@ -13,8 +13,9 @@ import { IntentLink } from "@/components/IntentLink";
 import { Spinner } from "@/components/ui/Spinner";
 import { SOLANA_NET_LABEL } from "./SolanaParts";
 import { shortSol, useSolana } from "./SolanaAccount";
+import { ExitGlyph, GearGlyph, GridGlyph, SendGlyph } from "./MenuGlyphs";
 
-const glyph = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", "aria-hidden": true } as const;
+const glyph = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", "aria-hidden": true } as const;
 
 function WalletIcon({ src, size }: { src: string; size: number }) {
   return (
@@ -182,9 +183,9 @@ export function SolanaWalletMenu({ variant }: { variant?: "sidebar" | "compact" 
           <div className="mx-1 h-px bg-line" />
           <div className="py-1">
             {[
-              { href: "/app", label: "Portfolio" },
-              { href: "/app/vault?tab=move", label: "Pay privately" },
-              { href: "/app/settings", label: "Settings" },
+              { href: "/app", label: "Portfolio", icon: <GridGlyph /> },
+              { href: "/app/vault?tab=move", label: "Pay privately", icon: <SendGlyph /> },
+              { href: "/app/settings", label: "Settings", icon: <GearGlyph /> },
             ].map((l) => (
               <IntentLink
                 key={l.href}
@@ -193,6 +194,7 @@ export function SolanaWalletMenu({ variant }: { variant?: "sidebar" | "compact" 
                 onClick={() => setOpen(false)}
                 className="flex h-10 items-center gap-3 rounded-xl px-2.5 text-[14px] text-foreground transition-colors hover:bg-surface"
               >
+                <span className="text-mute">{l.icon}</span>
                 {l.label}
               </IntentLink>
             ))}
@@ -209,9 +211,7 @@ export function SolanaWalletMenu({ variant }: { variant?: "sidebar" | "compact" 
               }}
               className="flex h-10 w-full items-center gap-3 rounded-xl px-2.5 text-[14px] text-mute transition-colors hover:bg-surface hover:text-foreground"
             >
-              <svg {...glyph}>
-                <path d="M14 5.5H7A1.5 1.5 0 0 0 5.5 7v10A1.5 1.5 0 0 0 7 18.5h7M11 12h9M17 9l3 3-3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <ExitGlyph />
               Sign out
             </button>
           </div>
