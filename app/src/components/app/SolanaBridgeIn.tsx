@@ -17,18 +17,22 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "framer-motion";
-import { erc20Abi, formatUnits, isAddress, type Address, type Hex } from "viem";
-import { useAccount, useBalance, useConfig, useReadContract } from "wagmi";
-import { getAccount, getTransactionReceipt, readContract, sendTransaction, switchChain, waitForTransactionReceipt } from "wagmi/actions";
+import { erc20Abi, formatUnits, isAddress, type Address } from "viem";
+import { useAccount, useBalance, useConfig, useConnect, useReadContract } from "wagmi";
 import { BRIDGE_MAX_USD, BRIDGE_MIN_USD, validRefundAddress, type BridgeChain, type BridgeStatus } from "@/lib/bridge";
 import {
   FORM,
   SOLANA_BRIDGE_PRIVACY_NOTE,
+  bridgeButton,
   defaultLanding,
   flowReducer,
   landingAssets,
+  loadRefunds,
   loadTracked,
+  payRoute,
+  refundKey,
   refundPlace,
+  saveRefund,
   saveTracked,
   solanaBridgeSources,
   trackPhase,
@@ -39,8 +43,10 @@ import {
   watchingRelay,
   type Arrival,
   type Flow,
+  type RememberedRefunds,
   type SolanaBridgeQuote,
   type TrackedBridge,
+  type WalletState,
 } from "@/lib/solanaRings/bridgeIn";
 import type { ShieldResult } from "@/lib/solanaRings/arrivals";
 import type { RingsSession } from "@/lib/solanaRings/client";
@@ -48,12 +54,19 @@ import { ringsAssets, SOLANA_RINGS_NETWORK, type RingsNetwork } from "@/lib/sola
 import { originChain } from "@/lib/originChains";
 import type { GloamChainId } from "@/lib/networks";
 import { track } from "@/lib/track";
-import { failedBeforeSend, surelyNotSent, walletDeclined, walletErrorText } from "@/lib/walletErrors";
+import { payRelayTxs, wagmiPayActions, walletPaysAcrossChains, type PayActions } from "@/lib/relayWalletPay";
+import { walletErrorText } from "@/lib/walletErrors";
+import { shortAddress } from "@/lib/chain";
+import { EMBEDDED_CONNECTOR_ID, EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
+import { WALLETCONNECT_ID, prefersWalletConnect } from "@/lib/walletConnect";
+import { isTempoWallet } from "@/lib/tempoWallet";
+import { embeddedAvailability, openSignInSheet } from "@/lib/turnkeyBridge";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { SealedField } from "@/components/ui/SealedField";
 import { AmountProblem } from "./AmountProblem";
 import { SuccessReceipt } from "./SuccessModal";
-import { ChainLogo, CostWarning, PoweredByRelay, SourceBalance, TokenMark, feeRows, fmtMoney } from "./BridgeIn";
+import { ChainLogo, CostWarning, PoweredByRelay, SourceBalance, TokenMark, feeRows, fmtMoney, stableMax } from "./BridgeIn";
+import { WalletConnectSheet } from "./WalletConnectSheet";
 import { displayAmount, displayAmountNumber, displayAmountText } from "@/lib/amountShort";
 
 type KV = { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };
@@ -65,6 +78,8 @@ export type SolanaBridgeDeps = {
   arrivals(): Promise<Arrival[]>;
   makePrivate(a: Pick<Arrival, "assetId" | "tokenAccount">): Promise<ShieldResult>;
   store(): KV | null;
+  /** The connected EVM wallet paying on the source chain; wagmi's when left out. */
+  pay?: PayActions;
 };
 
 /** The private account the money goes to: its address and network (a RingsSession is one). */
@@ -243,7 +258,35 @@ export function SolanaBridgeIn({
     const t = loadTracked(deps.store(), key);
     return t && trackedLive(t, Date.now()) ? { kind: "track", t, relay: "waiting", shield: { kind: "idle" }, qr: null } : FORM;
   });
-  const [open, setOpen] = useState(false);
+  const [opened, setOpen] = useState(false);
+  // Connecting a wallet from the sheet: it steps aside for the sign-in or
+  // WalletConnect sheet, and comes back with the wallet paying once one is here.
+  const [resume, setResume] = useState(false);
+  const { address: evm } = useAccount();
+  const open = opened || (resume && Boolean(evm));
+  const { connect, connectors, isPending: connectPending, error: connectFailed } = useConnect();
+  const [wc, setWc] = useState<{ shown: boolean; open: boolean }>({ shown: false, open: false });
+  const closeWc = useCallback(() => setWc((w) => ({ ...w, open: false })), []);
+  const connectWallet = useCallback(() => {
+    const viaApp = prefersWalletConnect();
+    // A browser wallet in this browser, as the wallet menu picks it.
+    const browserWallet = connectors.find((c) => c.id !== EMBEDDED_CONNECTOR_ID && c.id !== WALLETCONNECT_ID && !isTempoWallet(c));
+    const viaWallet = () => {
+      if (viaApp) setWc({ shown: true, open: true });
+      else if (browserWallet) connect({ connector: browserWallet });
+    };
+    if (EMBEDDED_WALLETS && embeddedAvailability() !== "unavailable") {
+      setOpen(false);
+      setResume(true);
+      openSignInSheet({ onUseWallet: viaWallet, walletLabel: viaApp ? "Use a wallet app" : "Use a browser wallet" });
+    } else if (viaApp) {
+      setOpen(false);
+      setResume(true);
+      viaWallet();
+    } else {
+      viaWallet();
+    }
+  }, [connect, connectors]);
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
@@ -400,11 +443,16 @@ export function SolanaBridgeIn({
         relayFunded={relayFunded}
         waiting={(id) => arrivals.filter((a) => a.assetId === id).reduce((sum, a) => sum + a.amount, 0n)}
         onRetry={() => void shield()}
+        onConnect={connectWallet}
+        connecting={connectPending}
+        connectError={connectFailed ? walletErrorText(connectFailed) || "Couldn't connect the wallet. Try again." : null}
         onClose={() => {
           setOpen(false);
+          setResume(false);
           if (flow.kind === "landed") dispatch({ type: "reset" });
         }}
       />
+      {wc.shown && <WalletConnectSheet open={wc.open} onClose={closeWc} />}
     </div>
   );
 }
@@ -530,6 +578,9 @@ function BridgeSheet({
   relayFunded,
   waiting,
   onRetry,
+  onConnect,
+  connecting,
+  connectError,
   onClose,
 }: {
   open: boolean;
@@ -542,6 +593,10 @@ function BridgeSheet({
   /** How much of an asset is already waiting at the account, so only more counts as this transfer arriving. */
   waiting: (assetId: string) => bigint;
   onRetry: () => void;
+  /** Connect an EVM wallet to pay from (the sheet may step aside for it). */
+  onConnect: () => void;
+  connecting: boolean;
+  connectError: string | null;
   onClose: () => void;
 }) {
   const reduce = useReducedMotion();
@@ -555,21 +610,32 @@ function BridgeSheet({
   const [picking, setPicking] = useState(false);
   const [search, setSearch] = useState("");
   const [amount, setAmount] = useState("");
-  const [refundTyped, setRefundTyped] = useState("");
   const [copied, setCopied] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
   const onMainnet = account.network === "mainnet";
 
-  // An EVM wallet that is connected and can switch chains pays for itself; anything else gets a deposit address.
+  // The connected EVM wallet pays when it can switch to the chain picked (a browser
+  // wallet, a wallet app or a Gloam wallet): that is the default. A deposit address
+  // (an exchange, another wallet) is one tap away, and the only way from Tron or Bitcoin.
   const config = useConfig();
-  const { address: evm, connector } = useAccount();
-  const switchable = connector?.type === "injected" || connector?.type === "walletConnect";
-  const walletPays = chain.kind === "evm" && Boolean(evm) && switchable && config.chains.some((c) => c.id === chain.id);
-  const refundTo = chain.kind === "evm" && evm ? evm : refundTyped.trim();
+  const { address: evm, connector, status: evmStatus } = useAccount();
+  const onChain = config.chains.some((c) => c.id === chain.id);
+  const walletState: WalletState = !evm ? "none" : walletPaysAcrossChains(connector?.type) && onChain ? "pays" : "cannot";
+  const [wantAddress, setWantAddress] = useState(false);
+  const route = payRoute({ chainKind: chain.kind, wallet: walletState, wantAddress });
+  const walletPays = route === "wallet" && Boolean(evm);
+
+  // Where a failed transfer goes back to: the paying wallet, else the address in the
+  // field, which starts as the connected wallet or the one used here last time.
+  const refunds = refundKey(account.network, account.address);
+  const [remembered] = useState<RememberedRefunds>(() => loadRefunds(deps.store(), refunds));
+  const [typed, setTyped] = useState<RememberedRefunds>({});
+  const refundField = typed[chain.kind] ?? (chain.kind === "evm" && evm ? evm : (remembered[chain.kind] ?? ""));
+  const refundTo = walletPays && evm ? evm : refundField.trim();
 
   // The wallet's balance of the picked token on that chain, so the amount isn't a guess (and Max).
   const nativeToken = token.address === "0x0000000000000000000000000000000000000000";
-  const readable = open && walletPays && Boolean(evm) && isAddress(evm ?? "");
+  const readable = open && chain.kind === "evm" && onChain && Boolean(evm) && isAddress(evm ?? "");
   const srcToken = useReadContract({
     address: token.address as Address,
     abi: erc20Abi,
@@ -603,7 +669,23 @@ function BridgeSheet({
   const overSource = srcBalance != null && amountOk && amountNum > Number(formatUnits(srcBalance, token.decimals));
   const refundOk = validRefundAddress(chain.kind, refundTo);
   const landingReady = ready[landing] !== false;
-  const canAsk = onMainnet && amountOk && landingReady && flow.kind === "form";
+  const addressName = ADDRESS_NAME[chain.kind] ?? chain.name;
+  // The main button says what it does, or what is missing first.
+  const button = bridgeButton({
+    route,
+    busy: flow.kind === "quoting",
+    onMainnet,
+    landingReady,
+    amount,
+    stable: Boolean(token.stable),
+    symbol: token.symbol,
+    overSource,
+    refund: refundField,
+    refundOk,
+    addressName,
+  });
+  const canAsk = button.ready && flow.kind === "form";
+  const walletConnecting = connecting || evmStatus === "connecting" || evmStatus === "reconnecting";
 
   function body(extra: Record<string, unknown>) {
     return { chainId: chain.id, symbol: token.symbol, asset: landing, amount, recipient: account.address, ...extra };
@@ -611,10 +693,11 @@ function BridgeSheet({
 
   async function getAddress(e?: React.FormEvent) {
     e?.preventDefault();
-    if (!canAsk || !refundOk) return;
+    if (!canAsk || walletPays || !refundOk) return;
     dispatch({ type: "quoting" });
     try {
       const quote = await deps.quote(body({ refundTo }));
+      saveRefund(deps.store(), refunds, chain.kind, refundTo);
       const t = trackedFrom(quote, "address", Date.now(), { baseline: waiting(quote.receive.assetId) });
       dispatch({ type: "track", t });
       track("bridge_address_created", { source: quote.send.chain, token: quote.send.symbol, dest: "solana" });
@@ -631,11 +714,12 @@ function BridgeSheet({
 
   async function startWallet(e: React.FormEvent) {
     e.preventDefault();
-    if (!canAsk || !evm || overSource) return;
+    if (!canAsk || !walletPays || !evm) return;
     dispatch({ type: "quoting" });
     try {
       const quote = await deps.quote(body({ sender: evm }));
       if (!quote.evmTxs?.length) throw new Error("The bridge couldn't make a route right now. Try again.");
+      saveRefund(deps.store(), refunds, "evm", evm);
       dispatch({ type: "review", quote, at: Date.now() });
       track("bridge_wallet_review", { source: quote.send.chain, token: quote.send.symbol, dest: "solana" });
     } catch (err) {
@@ -659,65 +743,20 @@ function BridgeSheet({
       dispatch({ type: "signFailed", error: err instanceof Error ? err.message : "Couldn't refresh the price. Try again." });
       return;
     }
-    const txs = quote.evmTxs ?? [];
-    let hash: Hex | null = null;
-    let paying = false;
-    let approved = false;
-    try {
-      for (let i = 0; i < txs.length; i++) {
-        const tx = txs[i]!;
-        const last = i === txs.length - 1;
-        const chainId = tx.chainId as GloamChainId;
-        dispatch({
-          type: "signing",
-          quote,
-          at,
-          progress: txs.length > 1 ? (last ? "Now confirm the bridge in your wallet…" : "Approve in your wallet first (1 of 2)…") : null,
-        });
-        if (getAccount(config).chainId !== tx.chainId) await switchChain(config, { chainId });
-        paying = last;
-        const sent = await sendTransaction(config, { to: tx.to as Address, data: tx.data as Hex, value: BigInt(tx.value), chainId });
-        if (last) {
-          hash = sent;
-          break;
-        }
-        // wagmi throws on a reverted receipt, with a reason decoded from raw bytes: read it plainly then
-        const rec = await waitForTransactionReceipt(config, { hash: sent, chainId }).catch(async (e) => {
-          const plain = await getTransactionReceipt(config, { hash: sent, chainId }).catch(() => null);
-          if (plain) return plain;
-          throw e;
-        });
-        if (rec.status !== "success") throw new Error("The approval didn't go through.");
-        // Some wallets let the approval be edited down: stop here rather than hand over a deposit that can't go through.
-        if (tx.data.slice(0, 10).toLowerCase() === "0x095ea7b3") {
-          const spender = `0x${tx.data.slice(34, 74)}` as Address;
-          const needed = BigInt(`0x${tx.data.slice(74, 138)}`);
-          const allowed = await readContract(config, { address: tx.to as Address, abi: erc20Abi, functionName: "allowance", args: [evm, spender], chainId }).catch(() => null);
-          if (allowed !== null && allowed < needed) {
-            throw new Error(`Your wallet approved less than this needs. Try again and approve the amount shown, without editing it.`);
-          }
-        }
-        approved = true;
-        dispatch({ type: "signing", progress: "Approval done. Getting the bridge ready…" });
-        await new Promise((res) => window.setTimeout(res, 4000));
-      }
-    } catch (err) {
-      // Before the deposit, or a clear no from the wallet: nothing went out. A lost
-      // reply on the deposit may come after the wallet sent it: follow it then.
-      if (!paying || surelyNotSent(err)) {
-        dispatch({
-          type: "signFailed",
-          error: walletDeclined(err)
-            ? approved
-              ? "You cancelled the bridge. Nothing moved; the approval can be used next time."
-              : "You cancelled it in your wallet. Nothing moved."
-            : failedBeforeSend(err) && /chain/i.test(walletErrorText(err))
-              ? `Switch your wallet to ${quote.send.chain} to bridge from there.`
-              : walletErrorText(err) || "It didn't send. Try again.",
-        });
-        return;
-      }
+    // The same path as the bridge into a wallet on a Gloam network (lib/relayWalletPay).
+    const sentToken = chain.tokens.find((t) => t.symbol === quote.send.symbol) ?? token;
+    dispatch({ type: "signing", quote, at, progress: null });
+    const paid = await payRelayTxs(
+      quote.evmTxs ?? [],
+      { amount: quote.send.amount, symbol: quote.send.symbol, chain: quote.send.chain, decimals: sentToken.decimals },
+      deps.pay ?? wagmiPayActions(config),
+      (progress) => dispatch({ type: "signing", quote, at, progress })
+    );
+    if (!paid.sent) {
+      dispatch({ type: "signFailed", error: paid.error });
+      return;
     }
+    const hash = paid.hash;
     dispatch({ type: "track", t: trackedFrom(quote, "wallet", Date.now(), { hash, unsure: !hash, baseline: waiting(quote.receive.assetId) }) });
     track("bridge_wallet_sent", { source: quote.send.chain, token: quote.send.symbol, dest: "solana" });
   }
@@ -816,6 +855,7 @@ function BridgeSheet({
                           setSymbol(c.tokens[0]!.symbol);
                           setLanding(null);
                           setAmount("");
+                          setWantAddress(false);
                           setPicking(false);
                           setSearch("");
                         }}
@@ -836,7 +876,7 @@ function BridgeSheet({
             )}
 
             {!picking && (flow.kind === "form" || flow.kind === "quoting") && (
-              <form onSubmit={walletPays ? startWallet : getAddress} className="mt-5 grid gap-4">
+              <form onSubmit={walletPays ? startWallet : getAddress} className="mt-5 grid grid-cols-[minmax(0,1fr)] gap-4">
                 <div>
                   <p className="text-[13px] text-mute">From</p>
                   <button
@@ -919,18 +959,15 @@ function BridgeSheet({
                     <span className="text-[14px] text-mute">{token.symbol}</span>
                   </div>
                   <AmountProblem value={amount} decimals={token.decimals} />
-                  {walletPays && (
+                  {readable && (
                     <SourceBalance
                       value={srcBalance}
-                      loading={readable && srcRead.isLoading}
+                      loading={srcRead.isLoading}
                       decimals={token.decimals}
                       symbol={token.symbol}
                       over={overSource ? chain.name : null}
-                      onMax={
-                        token.stable && srcBalance != null
-                          ? () => setAmount(String(Math.min(BRIDGE_MAX_USD, Math.floor(Number(formatUnits(srcBalance, token.decimals)) * 100) / 100)))
-                          : null
-                      }
+                      // Stablecoins only: a chain's own coin also pays the network fee to send it.
+                      onMax={token.stable && srcBalance != null ? () => setAmount(stableMax(srcBalance, token.decimals)) : null}
                     />
                   )}
                   <p className="mt-1.5 text-[12px] text-mute">
@@ -941,17 +978,40 @@ function BridgeSheet({
                   </p>
                 </div>
 
-                {!walletPays && !(chain.kind === "evm" && evm) && (
+                {walletPays && evm && (
+                  <p className="-mt-1 text-[12.5px] leading-relaxed text-mute">
+                    Paying from your wallet <span className="tnum text-soft">{shortAddress(evm)}</span>. If the transfer fails, the money goes back to it.
+                  </p>
+                )}
+
+                {route === "connect" && (
                   <div>
+                    <button type="button" onClick={onConnect} disabled={walletConnecting} className="btn btn-ink btn-lg btn-block">
+                      {walletConnecting ? "Connecting…" : "Connect a wallet to pay from it"}
+                    </button>
+                    {connectError && (
+                      <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
+                        {connectError}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {!walletPays && (
+                  <div>
+                    {chain.kind === "evm" && <p className="mb-3 text-[13.5px] text-foreground">{route === "connect" ? "Or send from an exchange or another wallet" : "Send from an exchange or another wallet"}</p>}
                     <label htmlFor="sol-bridge-refund" className="text-[13px] text-mute">
-                      Your {ADDRESS_NAME[chain.kind] ?? chain.name} address
+                      Your {addressName} address
                     </label>
                     <input
                       id="sol-bridge-refund"
                       autoComplete="off"
                       spellCheck={false}
-                      value={refundTyped}
-                      onChange={(e) => setRefundTyped(e.target.value.trim())}
+                      value={refundField}
+                      onChange={(e) => {
+                        const v = e.target.value.trim();
+                        setTyped((t) => ({ ...t, [chain.kind]: v }));
+                      }}
                       placeholder={chain.kind === "evm" ? "0x…" : undefined}
                       className="gl-input tnum mt-1.5 h-12 px-3.5 text-[16px] sm:text-[14px]"
                     />
@@ -972,28 +1032,31 @@ function BridgeSheet({
 
                 <button
                   type="submit"
-                  disabled={flow.kind === "quoting" || !canAsk || (walletPays ? overSource : !refundOk)}
-                  className="btn btn-ink btn-lg btn-block"
+                  disabled={!canAsk}
+                  className={`btn ${route === "connect" ? "btn-ghost" : "btn-ink"} btn-lg btn-block h-auto min-h-12 whitespace-normal py-3 text-center leading-snug`}
                 >
-                  {flow.kind === "quoting"
-                    ? walletPays
-                      ? "Getting a price…"
-                      : "Getting an address…"
-                    : walletPays
-                      ? amountOk
-                        ? `Bridge ${displayAmountText(amount)} ${token.symbol} from your wallet`
-                        : "Bridge from your wallet"
-                      : "Get a deposit address"}
+                  {button.label}
                 </button>
-                {walletPays && (
+                {walletPays ? (
                   <button
                     type="button"
-                    onClick={() => void getAddress()}
-                    disabled={!canAsk || !refundOk}
-                    className="-mt-1 text-center text-[13px] text-mute underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:opacity-50 disabled:hover:no-underline"
+                    onClick={() => setWantAddress(true)}
+                    className="-mt-1 min-h-10 text-center text-[13px] text-mute underline-offset-4 transition-colors hover:text-foreground hover:underline"
                   >
-                    Sending from an exchange? Get a deposit address
+                    Or send from an exchange or another wallet
                   </button>
+                ) : (
+                  wantAddress &&
+                  walletState === "pays" &&
+                  chain.kind === "evm" && (
+                    <button
+                      type="button"
+                      onClick={() => setWantAddress(false)}
+                      className="-mt-1 min-h-10 text-center text-[13px] text-mute underline-offset-4 transition-colors hover:text-foreground hover:underline"
+                    >
+                      Pay from your wallet instead
+                    </button>
+                  )
                 )}
                 <p className="text-center text-[12px] leading-relaxed text-mute">
                   {SOLANA_BRIDGE_PRIVACY_NOTE} <PoweredByRelay />

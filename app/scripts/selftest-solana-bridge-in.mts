@@ -546,6 +546,179 @@ ok(!/\u2014/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /public/.test(bridgeIn
   );
 }
 
+// ---------------------------------------------------------------- paying from the connected wallet
+
+{
+  const { payRoute, bridgeButton, loadRefunds, saveRefund, refundKey } = bridgeIn;
+  const pay = await import("../src/lib/relayWalletPay");
+
+  // Which wallets pay: a browser wallet, a wallet app, a Gloam wallet (Turnkey). Tempo Wallet lives on Tempo only.
+  ok(
+    pay.walletPaysAcrossChains("injected") && pay.walletPaysAcrossChains("walletConnect") && pay.walletPaysAcrossChains("turnkey") && !pay.walletPaysAcrossChains("tempoWallet") && !pay.walletPaysAcrossChains(undefined),
+    "a browser wallet, a wallet app and a Gloam wallet pay from their chain; nothing else is asked to"
+  );
+
+  // The route: the wallet by default, a wallet to connect when there is none, a deposit address otherwise.
+  ok(payRoute({ chainKind: "evm", wallet: "pays", wantAddress: false }) === "wallet", "a connected wallet pays by default");
+  ok(payRoute({ chainKind: "evm", wallet: "pays", wantAddress: true }) === "address", "a deposit address when the person picks it (an exchange, another wallet)");
+  ok(payRoute({ chainKind: "evm", wallet: "none", wantAddress: false }) === "connect", "no wallet: connect one, the deposit address beside it");
+  ok(payRoute({ chainKind: "evm", wallet: "cannot", wantAddress: false }) === "address", "a wallet that can't pay there: a deposit address, not a connect button");
+  ok(payRoute({ chainKind: "tvm", wallet: "pays", wantAddress: false }) === "address" && payRoute({ chainKind: "bvm", wallet: "none", wantAddress: false }) === "address", "Tron and Bitcoin: always a deposit address");
+
+  // The button says what it does, or what is missing first.
+  const WALLET = "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8";
+  const base = { route: "wallet" as const, busy: false, onMainnet: true, landingReady: true, amount: "25", stable: true, symbol: "USDG", overSource: false, refund: "", refundOk: true, addressName: "Robinhood Chain" };
+  const b = (o: Partial<Parameters<typeof bridgeButton>[0]>) => bridgeButton({ ...base, ...o });
+  ok(b({}).ready && b({}).label === "Bridge 25.00 USDG from your wallet", "wallet ready: one button that bridges from it, amount in two places");
+  ok(!b({ amount: "" }).ready && b({ amount: "" }).label === "Enter an amount" && b({ amount: "0" }).label === "Enter an amount" && b({ amount: "0." }).label === "Enter an amount", "no amount: says to enter one");
+  ok(b({ amount: "abc" }).label === "Check the amount" && b({ amount: "." }).label === "Check the amount" && !b({ amount: "1.2.3" }).ready, "an amount that isn't one: says so");
+  ok(b({ amount: "0.5" }).label === "Enter at least 1.00 USDG" && b({ amount: "25001" }).label === "Enter at most 25,000.00 USDG", "the limits, in words");
+  ok(b({ amount: "0.5", stable: false, symbol: "ETH" }).ready, "a chain's own coin has no dollar floor here (Relay prices it)");
+  ok(!b({ overSource: true }).ready && b({ overSource: true }).label === "Not enough USDG in your wallet", "more than the wallet holds: says so");
+  ok(b({ busy: true }).label === "Getting a price…" && b({ route: "address", busy: true }).label === "Getting an address…" && !b({ busy: true }).ready, "while it asks Relay: says what it's doing");
+  ok(b({ onMainnet: false }).label === "Relay delivers to Solana mainnet only" && !b({ onMainnet: false }).ready, "a devnet build: says why");
+  ok(b({ landingReady: false }).label === "Pick what it lands as", "the landing asset not set up: says so");
+  ok(
+    !b({ route: "connect", refundOk: false }).ready && b({ route: "connect", refundOk: false }).label === "Connect a wallet or enter your Robinhood Chain address",
+    "no wallet, no address: connect a wallet or enter the address"
+  );
+  ok(b({ route: "connect", amount: "", refundOk: false }).label === "Enter an amount", "the amount comes first, as on the form");
+  ok(b({ route: "address", refundOk: false, addressName: "Tron" }).label === "Enter your Tron address", "a deposit address with no refund address: says which address");
+  ok(b({ route: "address", refund: "0x123", refundOk: false }).label === "Check your Robinhood Chain address", "a refund address that isn't one: says to check it");
+  ok(b({ route: "connect", refund: WALLET }).ready && b({ route: "connect", refund: WALLET }).label === "Get a deposit address", "an address given: the deposit address");
+  ok(b({ route: "address", overSource: true, refund: WALLET }).ready, "over the wallet's balance never blocks a deposit address (an exchange pays)");
+  ok([b({}), b({ amount: "" }), b({ route: "connect", refundOk: false }), b({ overSource: true })].every((x) => !/—|happy to/i.test(x.label)), "no em dash, no stock phrases");
+
+  // The refund address used last time, per private account and kind of chain.
+  const mem = new Map<string, string>();
+  const kv = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) };
+  const key = refundKey("mainnet", "Acct1111111111111111111111111111111111111111");
+  ok(Object.keys(loadRefunds(kv, key)).length === 0 && Object.keys(loadRefunds(null, key)).length === 0, "nothing used yet: nothing filled in");
+  saveRefund(kv, key, "evm", WALLET);
+  saveRefund(kv, key, "tvm", "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf");
+  saveRefund(kv, key, "evm", "0xnot-an-address");
+  saveRefund(kv, key, "svm", "So11111111111111111111111111111111111111112");
+  {
+    const r = loadRefunds(kv, key);
+    ok(r.evm === WALLET && r.tvm === "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf" && r.svm === undefined, "kept: the last good EVM and Tron addresses; a bad one or a Solana one is never kept");
+  }
+  ok(Object.keys(loadRefunds(kv, refundKey("mainnet", "Other111111111111111111111111111111111111111"))).length === 0, "another private account starts empty");
+  mem.set(key, JSON.stringify({ evm: "0x12", tvm: 5 }));
+  ok(Object.keys(loadRefunds(kv, key)).length === 0, "anything malformed is dropped");
+  mem.set(key, "{not json");
+  ok(Object.keys(loadRefunds(kv, key)).length === 0, "unreadable: nothing filled in");
+
+  // The shared pay path (BridgeIn and SolanaBridgeIn), against a fake wallet.
+  const RH = 4663;
+  const TOKEN_ADDR = "0x5fc5360B1d5B8e8a8A7C8a2c1D3FfAf2C1f9B1C8";
+  const SPENDER = "4cd00e387622c35bddb9b4c962c136462338bc31";
+  const approveData = (amount: bigint) => `0x095ea7b3${"0".repeat(24)}${SPENDER}${amount.toString(16).padStart(64, "0")}`;
+  const txs = [
+    { to: TOKEN_ADDR, data: approveData(25_000_000n), value: "0", chainId: RH },
+    { to: `0x${SPENDER}`, data: "0xe8017952", value: "0", chainId: RH },
+  ];
+  const send = { amount: "25", symbol: "USDG", chain: "Robinhood Chain", decimals: 6 };
+  type Fake = {
+    chain: number;
+    log: string[];
+    fail?: Partial<Record<"switch" | "approve" | "deposit", unknown>>;
+    reverted?: boolean;
+    allowance?: bigint | null;
+  };
+  const wallet = (f: Fake) => ({
+    chainId: () => f.chain,
+    account: () => WALLET as `0x${string}`,
+    switchChain: async (id: number) => {
+      f.log.push(`switch ${id}`);
+      if (f.fail?.switch) throw f.fail.switch;
+      f.chain = id;
+    },
+    send: async (tx: { data: string }) => {
+      const which = tx.data.startsWith("0x095ea7b3") ? "approve" : "deposit";
+      f.log.push(`send ${which}`);
+      if (f.fail?.[which]) throw f.fail[which];
+      return (which === "approve" ? `0x${"a".repeat(64)}` : `0x${"d".repeat(64)}`) as `0x${string}`;
+    },
+    receipt: async () => ({ status: (f.reverted ? "reverted" : "success") as "success" | "reverted" }),
+    allowance: async () => (f.allowance === undefined ? 25_000_000n : f.allowance),
+    wait: async (ms: number) => void f.log.push(`wait ${ms}`),
+  });
+  const declined = Object.assign(new Error("User rejected the request."), { name: "UserRejectedRequestError", code: 4001 });
+  const lost = Object.assign(new Error("The request took too long to respond."), { name: "TimeoutError" });
+
+  {
+    const f: Fake = { chain: 1, log: [] };
+    const lines: (string | null)[] = [];
+    const r = await pay.payRelayTxs(txs, send, wallet(f), (t) => lines.push(t));
+    ok(r.sent && r.hash === `0x${"d".repeat(64)}`, "approve then deposit: sent, with the deposit's hash");
+    ok(f.log.join(",") === "switch 4663,send approve,wait 4000,send deposit", "the wallet moves to the source chain once, approves, waits for the chain, then deposits");
+    ok(lines.join("|") === "Approve in your wallet first (1 of 2)…|Approval done. Getting the bridge ready…|Now confirm the bridge in your wallet…", "it says what the wallet is asking at each step");
+  }
+  {
+    const f: Fake = { chain: RH, log: [] };
+    const lines: (string | null)[] = [];
+    const r = await pay.payRelayTxs([txs[1]!], send, wallet(f), (t) => lines.push(t));
+    ok(r.sent && f.log.join(",") === "send deposit" && lines.join() === "", "a deposit alone, already on the chain: no switch, no step lines");
+  }
+  {
+    const f: Fake = { chain: RH, log: [], fail: { approve: declined } };
+    const r = await pay.payRelayTxs(txs, send, wallet(f), () => {});
+    ok(!r.sent && r.error === "You cancelled it in your wallet. Nothing moved." && !f.log.includes("send deposit"), "declined at the approve: nothing moved, said plainly");
+  }
+  {
+    const f: Fake = { chain: RH, log: [], fail: { deposit: declined } };
+    const r = await pay.payRelayTxs(txs, send, wallet(f), () => {});
+    ok(!r.sent && r.error === "You cancelled the bridge. Nothing moved; the approval can be used next time.", "declined at the deposit after approving: nothing moved, the approval kept");
+  }
+  {
+    const f: Fake = { chain: RH, log: [], fail: { deposit: lost } };
+    const r = await pay.payRelayTxs(txs, send, wallet(f), () => {});
+    ok(r.sent && r.hash === null, "a lost reply on the deposit may have gone out: followed as sent, unsure");
+  }
+  {
+    const f: Fake = { chain: RH, log: [], fail: { approve: lost } };
+    const r = await pay.payRelayTxs(txs, send, wallet(f), () => {});
+    ok(!r.sent && !f.log.includes("send deposit"), "a lost reply on the approve: the deposit was never asked for, so nothing moved");
+  }
+  {
+    const f: Fake = { chain: RH, log: [], allowance: 10_000_000n };
+    const r = await pay.payRelayTxs(txs, send, wallet(f), () => {});
+    ok(!r.sent && /approved less than this payment needs \(10 of 25 USDG\)/.test(r.error) && !f.log.includes("send deposit"), "an approval edited down: stopped before the deposit, with the numbers");
+  }
+  {
+    const f: Fake = { chain: RH, log: [], reverted: true };
+    const r = await pay.payRelayTxs(txs, send, wallet(f), () => {});
+    ok(!r.sent && r.error === "The approval didn't go through." && !f.log.includes("send deposit"), "a reverted approval: stopped, said so");
+  }
+  {
+    const f: Fake = { chain: 1, log: [], fail: { switch: Object.assign(new Error("Chain not configured."), { name: "SwitchChainError" }) } };
+    const r = await pay.payRelayTxs(txs, send, wallet(f), () => {});
+    ok(!r.sent && r.error === "Switch your wallet to Robinhood Chain to bridge from there." && !f.log.some((l) => l.startsWith("send")), "the wallet refused to switch: asks for the source chain, nothing sent");
+  }
+  {
+    const f: Fake = { chain: RH, log: [] };
+    const r = await pay.payRelayTxs([], send, wallet(f), () => {});
+    ok(!r.sent && f.log.length === 0, "nothing to sign: nothing asked of the wallet");
+  }
+  {
+    const switched: number[] = [];
+    const f: Fake = { chain: 1, log: [] };
+    await pay.payRelayTxs(txs, send, wallet(f), () => {}, (id) => switched.push(id));
+    ok(switched.join() === "4663", "the caller hears where the wallet moved (BridgeIn moves it back after)");
+  }
+
+  // Both bridges in pay through it, and the Solana sheet offers the wallet first.
+  const { readFileSync } = await import("node:fs");
+  const sheet = readFileSync(new URL("../src/components/app/SolanaBridgeIn.tsx", import.meta.url), "utf8");
+  const evmSheet = readFileSync(new URL("../src/components/app/BridgeIn.tsx", import.meta.url), "utf8");
+  ok(/payRelayTxs\(/.test(sheet) && /payRelayTxs\(/.test(evmSheet) && !/sendTransaction\(config/.test(sheet), "one pay path: both sheets call payRelayTxs, the Solana sheet sends nothing itself");
+  ok(/walletPaysAcrossChains\(connector\?\.type\)/.test(sheet) && /payRoute\(/.test(sheet) && /bridgeButton\(/.test(sheet), "the sheet picks its route and button from the tested rules");
+  ok(/Connect a wallet to pay from it/.test(sheet) && /Or send from an exchange or another wallet/.test(sheet) && /Pay from your wallet instead/.test(sheet), "connect a wallet, the deposit address beside it, and back again");
+  ok(/openSignInSheet\(/.test(sheet) && /<WalletConnectSheet/.test(sheet), "connecting uses the app's own sign-in: a Gloam wallet, a browser wallet or a wallet app");
+  ok(/stableMax\(srcBalance, token\.decimals\)/.test(sheet) && /<SourceBalance/.test(sheet), "the wallet's balance with Max (exact, up to the limit)");
+  ok(!/—/.test(sheet) && !/happy to/i.test(sheet), "no em dash, no stock phrases in the sheet");
+}
+
 // ---------------------------------------------------------------- the quote route, Relay faked
 
 {

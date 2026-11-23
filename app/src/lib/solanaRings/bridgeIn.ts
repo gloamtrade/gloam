@@ -30,7 +30,8 @@
  * wallet on Base got its [approve, deposit] into USDC. 20 USDC from Base landed
  * about 19.84 USDC.
  */
-import { BRIDGE_CHAINS, type BridgeAppFee, type BridgeChain, type BridgeStage, type BridgeToken } from "../bridge";
+import { BRIDGE_CHAINS, BRIDGE_MAX_USD, BRIDGE_MIN_USD, validRefundAddress, type BridgeAppFee, type BridgeChain, type BridgeChainKind, type BridgeStage, type BridgeToken } from "../bridge";
+import { displayAmountNumber, displayAmountText } from "../amountShort";
 import { RELAYED_DEPOSIT_MIN } from "./relayPolicy";
 import { ringsAssets, RINGS_SOL_MINT, SOLANA_RINGS_NETWORK, type RingsAsset, type RingsNetwork } from "./config";
 
@@ -181,6 +182,100 @@ export function saveTracked(store: KV | null, key: string, t: TrackedBridge | nu
     else store?.removeItem(key);
   } catch {
     // private mode or full storage: the money still shows as arrived on the next visit
+  }
+}
+
+// ---------------------------------------------------------------- how the sheet pays
+
+/**
+ * How money leaves the source chain:
+ *  - "wallet": the connected EVM wallet pays (it switches chain and signs);
+ *    a refund goes back to it.
+ *  - "connect": an EVM chain with no wallet connected. Connecting one is
+ *    offered first, a deposit address beside it.
+ *  - "address": a one-time deposit address, paid from an exchange or any
+ *    wallet; a refund goes to the address given. Always so for Tron and
+ *    Bitcoin, and when the person picks it.
+ */
+export type PayRoute = "wallet" | "connect" | "address";
+
+/** The connected EVM wallet: none, one that can pay on the chain picked, or one that can't (Tempo Wallet, a chain it doesn't know). */
+export type WalletState = "none" | "pays" | "cannot";
+
+export function payRoute(s: { chainKind: BridgeChainKind; wallet: WalletState; wantAddress: boolean }): PayRoute {
+  if (s.chainKind !== "evm" || s.wantAddress) return "address";
+  if (s.wallet === "pays") return "wallet";
+  return s.wallet === "none" ? "connect" : "address";
+}
+
+/**
+ * The sheet's main button: what it does, or what is missing before it can.
+ * Never a grey block that doesn't say why.
+ */
+export function bridgeButton(s: {
+  route: PayRoute;
+  busy: boolean;
+  onMainnet: boolean;
+  landingReady: boolean;
+  amount: string;
+  stable: boolean;
+  symbol: string;
+  /** The amount is more than the connected wallet holds there. */
+  overSource: boolean;
+  /** What the refund address field holds (the wallet route needs none). */
+  refund: string;
+  refundOk: boolean;
+  /** "Robinhood Chain", "Tron", "Bitcoin": the chain whose address a refund needs. */
+  addressName: string;
+}): { label: string; ready: boolean } {
+  const no = (label: string) => ({ label, ready: false });
+  if (s.busy) return no(s.route === "wallet" ? "Getting a price…" : "Getting an address…");
+  if (!s.onMainnet) return no("Relay delivers to Solana mainnet only");
+  const text = s.amount.trim();
+  const n = Number(text);
+  if (text === "" || (/^\d*\.?\d*$/.test(text) && n === 0)) return no("Enter an amount");
+  if (!/^\d+(\.\d+)?$/.test(text) || !Number.isFinite(n)) return no("Check the amount");
+  if (s.stable && n < BRIDGE_MIN_USD) return no(`Enter at least ${displayAmountNumber(BRIDGE_MIN_USD)} ${s.symbol}`);
+  if (s.stable && n > BRIDGE_MAX_USD) return no(`Enter at most ${displayAmountNumber(BRIDGE_MAX_USD)} ${s.symbol}`);
+  if (!s.landingReady) return no("Pick what it lands as");
+  if (s.route === "wallet") {
+    return s.overSource ? no(`Not enough ${s.symbol} in your wallet`) : { label: `Bridge ${displayAmountText(text)} ${s.symbol} from your wallet`, ready: true };
+  }
+  if (!s.refundOk) {
+    if (s.refund.trim()) return no(`Check your ${s.addressName} address`);
+    return no(s.route === "connect" ? `Connect a wallet or enter your ${s.addressName} address` : `Enter your ${s.addressName} address`);
+  }
+  return { label: "Get a deposit address", ready: true };
+}
+
+/** Refund addresses this browser used for a private account, one per kind of chain, so the next transfer starts with them. */
+export const refundKey = (network: RingsNetwork, account: string) => `gloam:solana-bridge:refund:v1:${network}:${account}`;
+
+export type RememberedRefunds = Partial<Record<BridgeChainKind, string>>;
+
+/** Read back safely: anything that isn't a valid address for its kind is dropped. */
+export function loadRefunds(store: KV | null, key: string): RememberedRefunds {
+  try {
+    const raw = store?.getItem(key);
+    if (!raw) return {};
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    const out: RememberedRefunds = {};
+    for (const kind of ["evm", "tvm", "bvm"] as const) {
+      const v = o?.[kind];
+      if (typeof v === "string" && validRefundAddress(kind, v)) out[kind] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function saveRefund(store: KV | null, key: string, kind: BridgeChainKind, address: string): void {
+  if (kind === "svm" || !validRefundAddress(kind, address)) return;
+  try {
+    store?.setItem(key, JSON.stringify({ ...loadRefunds(store, key), [kind]: address }));
+  } catch {
+    // private mode or full storage: the field is typed next time
   }
 }
 
