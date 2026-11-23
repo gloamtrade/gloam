@@ -101,11 +101,11 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-bnb.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-bnb-everywhere.mts
 
-      # Public activity on a mainnet: the first read covers the last week, newest
-      # blocks first, rows show as each span returns, Show older reads one more week,
-      # a pass stops at its time limit and the next resumes, and a failed or empty
-      # read is an error with Retry, never a skeleton. On Base and on BNB Chain;
-      # a stand-in chain, nothing reaches a host.
+      # Public activity on a mainnet: the first read covers the last week (a day on
+      # BNB Chain), newest blocks first, rows show as each span returns, Show older
+      # reads one more window, a call answers at its time limit while the read goes
+      # on, and nothing read in time is an error with Retry, never a skeleton. On
+      # Base and on BNB Chain; a stand-in chain, nothing reaches a host.
       - name: App activity self-tests
         working-directory: app
         run: |
