@@ -602,9 +602,16 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
     return Boolean(ok);
   }, [main, seen, returning, run, demo, demoBal, network]);
 
+  /** A sign out asked for while a wait ran (the wallet switched accounts mid-send): it runs once the wait ends. */
+  const signOutLater = useRef<boolean | null>(null);
+
   /** Close the account and forget this device's sign-in: the kept wallet and the kept account. */
   const signOut = useCallback((tellWallet: boolean) => {
-    if (busy.current) return;
+    if (busy.current) {
+      signOutLater.current = (signOutLater.current ?? false) || tellWallet;
+      return;
+    }
+    signOutLater.current = null;
     const s = sessionRef.current;
     if (s) void lib().then((l) => l.closeRingsAccount(s));
     const w = kept.main?.wallet;
@@ -625,6 +632,12 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const disconnect = useCallback(() => signOut(true), [signOut]);
+
+  // The wait that held a sign out back has ended: sign out now.
+  useEffect(() => {
+    if (task || busy.current || signOutLater.current === null) return;
+    signOut(signOutLater.current);
+  }, [task, signOut]);
 
   // The wallet switching to another account signs this one out: its kept account is not the new one's.
   useEffect(() => {
