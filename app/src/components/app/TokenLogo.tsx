@@ -45,7 +45,7 @@ const PNG_LOGO_IDS = new Set([
 ]);
 
 /** Round marks (a full disc): shown as a circle with no plate, so no white corners. */
-const DISC_LOGO_IDS = new Set(["usdg", "usdce", "usdc", "eurc", "usdt", "pyusd", "eth", "weth", "avgo", "mstr", "sbux", "usde", "u", "cbbtc", "bdx", "bnb"]);
+const DISC_LOGO_IDS = new Set(["usdg", "usdce", "usdc", "eurc", "usdt", "pyusd", "eth", "weth", "avgo", "mstr", "sbux", "usde", "u", "cbbtc", "bdx", "bnb", "sol"]);
 
 /**
  * White marks on a clear ground. On the usual white plate they vanish and leave
@@ -58,7 +58,7 @@ const INK_PLATE_LOGO_IDS = new Set(["dis", "hims", "ibm", "nke", "rblx", "uber",
  * tile edge to edge, so they get no plate and no border, only a hairline drawn
  * over the image so a dark tile keeps its edge on a dark panel.
  */
-const FULL_TILE_LOGO_IDS = new Set(["robinhood", "tempo", "base", "ethereum", "elysium"]);
+const FULL_TILE_LOGO_IDS = new Set(["robinhood", "tempo", "base", "ethereum", "elysium", "solana"]);
 
 /**
  * Network tiles by chain family. BNB Chain's family id is also its gas coin's
@@ -72,6 +72,8 @@ const NETWORK_TILES: Record<string, string> = {
   ethereum: "/brand/networks/ethereum.svg",
   elysium: "/brand/networks/elysium.png",
   bnb: "/brand/networks/bnb.png",
+  // Solana: its three bars on black, as Solana's own app tiles show them
+  solana: "/brand/networks/solana.svg",
 };
 
 const SPECIAL_LOGOS: Record<string, string> = {
@@ -81,6 +83,8 @@ const SPECIAL_LOGOS: Record<string, string> = {
   base: "/brand/networks/base.svg",
   ethereum: "/brand/networks/ethereum.svg",
   elysium: "/brand/networks/elysium.png",
+  // SOL, Solana's coin: Solana's three bars on a black disc (the Solana brand kit's mark)
+  sol: "/brand/tokens/sol.svg",
   // HYPE, Elysium's gas coin
   hype: "/brand/tokens/hype.png",
   // BNB, BNB Chain's gas coin (the mark the bridge list already uses)

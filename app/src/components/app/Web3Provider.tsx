@@ -14,6 +14,8 @@ import { ReconnectWatchdog } from "./ReconnectWatchdog";
 import { PeopleCount } from "./PeopleCount";
 import { RecoverySync } from "./RecoverySync";
 import { AccountScope } from "./AccountScope";
+import { SolanaAccountProvider } from "./SolanaAccount";
+import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 
 // Brings the private balance back on a new device after sign-in. Loaded apart from the page.
 const AutoRestore = dynamic(() => import("./AutoRestore"), { ssr: false });
@@ -51,7 +53,8 @@ export function Web3Provider({ children }: { children: ReactNode }) {
           <RecoverySync />
           <AutoRestore />
           <PeopleCount />
-          {children}
+          {/* Gloam on Solana: one account for every page while Solana is the network picked */}
+          {SOLANA_RINGS_ENABLED ? <SolanaAccountProvider>{children}</SolanaAccountProvider> : children}
         </NetworkProvider>
       </QueryClientProvider>
     </WagmiProvider>

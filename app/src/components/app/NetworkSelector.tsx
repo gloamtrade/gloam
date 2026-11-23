@@ -9,12 +9,30 @@
  * auto-enables a network the moment `networks.ts` marks it live. Full width of
  * its container: the sidebar on desktop (where the list flies out to the right
  * so the notes have room), the sheet on mobile (where it drops down).
+ *
+ * Solana (lib/solanaRings) is listed after BNB Chain while it is on. It is not
+ * an EVM network: picking it sets NetworkProvider's `solana` and keeps the
+ * EVM network as it was, and the app's pages show their Solana side.
  */
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { MAINNET_ENABLED, isNetworkWritable, shownNetworks } from "@/lib/networks";
+import { SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAssets } from "@/lib/solanaRings/config";
 import { useNetwork } from "./NetworkProvider";
 import { TokenLogo } from "./TokenLogo";
 import type { GloamNetwork } from "@/lib/networks";
+
+/** "SOL, USDC and USDT": what Gloam takes on Solana here. */
+function solanaAssetLine(): string {
+  const s = ringsAssets().map((a) => a.symbol);
+  return s.length <= 1 ? (s[0] ?? "") : `${s.slice(0, -1).join(", ")} and ${s[s.length - 1]}`;
+}
+
+/** The pages that have a Solana side; from any other, picking Solana opens Portfolio. */
+const SOLANA_PAGES = new Set(["/app", "/app/vault", "/app/payroll", "/app/settings"]);
+
+/** Solana's row sits in the mainnet list on a mainnet build, with the testnets on a devnet one. */
+const SOLANA_GROUP = SOLANA_RINGS_NETWORK === "devnet" ? "Testnet" : "Mainnet";
 
 /** One short line per network: what it holds. Same length and shape for every row. */
 function assetLine(n: GloamNetwork): string {
@@ -32,7 +50,9 @@ function assetLine(n: GloamNetwork): string {
 }
 
 export function NetworkSelector() {
-  const { network, setNetworkKey, settled } = useNetwork();
+  const { network, setNetworkKey, settled, solana, selectSolana } = useNetwork();
+  const router = useRouter();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -46,6 +66,16 @@ export function NetworkSelector() {
         ]
       : [{ title: "Network", hint: "", list: nets }]
   ).filter((group) => group.list.length > 0);
+  // Solana's row joins the group of its kind; a devnet build with the testnets hidden gives it a Testnet group of its own.
+  if (SOLANA_RINGS_ENABLED && !groups.some((g) => g.title === SOLANA_GROUP)) groups.push({ title: SOLANA_GROUP, hint: "", list: [] });
+  const shownLabel = solana ? "Solana" : network.label;
+  const shownNet = solana ? (SOLANA_RINGS_NETWORK === "devnet" ? "Devnet" : "Mainnet") : network.testnet ? "Testnet" : "Mainnet";
+
+  const pickSolana = () => {
+    setOpen(false);
+    if (!solana) selectSolana();
+    if (!SOLANA_PAGES.has(pathname)) router.push("/app");
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -79,27 +109,27 @@ export function NetworkSelector() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={settled ? `Network: ${network.label}. Change network` : "Change network"}
+        aria-label={settled ? `Network: ${shownLabel}. Change network` : "Change network"}
         className={`flex h-[52px] w-full items-center gap-3 rounded-full pl-2 pr-4 text-left text-foreground transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/50 ${
           open ? "bg-surface-2" : "bg-surface"
         }`}
       >
         {settled ? (
-          <TokenLogo id={network.family} symbol={network.label} size={34} network />
+          solana ? (
+            <TokenLogo id="solana" symbol="Solana" size={34} network />
+          ) : (
+            <TokenLogo id={network.family} symbol={network.label} size={34} network />
+          )
         ) : (
           <span className="h-[34px] w-[34px] shrink-0 rounded-full bg-surface-2" aria-hidden />
         )}
         {/* Until this browser's network is read, a neutral line: never a testnet label that flips to mainnet. */}
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[14px] font-medium leading-tight">
-            {settled ? network.label : "Network"}
+            {settled ? shownLabel : "Network"}
           </span>
           <span className="mt-0.5 block truncate text-[12px] leading-tight text-mute">
-            {!settled
-              ? "\u00a0"
-              : network.testnet
-                ? "Testnet"
-                : "Mainnet"}
+            {!settled ? "\u00a0" : shownNet}
           </span>
         </span>
         <svg
@@ -133,7 +163,7 @@ export function NetworkSelector() {
                 {group.hint && <span className="text-[11.5px] text-mute">{group.hint}</span>}
               </p>
               {group.list.map((n) => {
-                const active = n.key === network.key;
+                const active = !solana && n.key === network.key;
                 const writable = isNetworkWritable(n);
                 return (
                   <button
@@ -168,6 +198,27 @@ export function NetworkSelector() {
                   </button>
                 );
               })}
+              {SOLANA_RINGS_ENABLED && group.title === SOLANA_GROUP && (
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={solana}
+                  aria-label={`Solana ${SOLANA_RINGS_NETWORK}`}
+                  onClick={pickSolana}
+                  className={`flex h-[52px] w-full items-center gap-3 rounded-xl px-2.5 text-left transition-colors hover:bg-surface ${solana ? "bg-surface" : ""}`}
+                >
+                  <TokenLogo id="solana" symbol="Solana" size={30} network />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14px] font-medium leading-tight text-foreground">Solana</span>
+                    <span className="mt-0.5 block truncate text-[12px] leading-tight text-mute">{solanaAssetLine()}</span>
+                  </span>
+                  {solana && (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden className="shrink-0 text-foreground">
+                      <path d="m5.5 12.5 4 4 9-9" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </button>
+              )}
             </div>
           ))}
         </div>

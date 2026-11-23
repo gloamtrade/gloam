@@ -11,6 +11,13 @@
  * error. A claim or request link on a testnet still moves the page there, but
  * that visit is not saved, so the next one opens on mainnet again.
  *
+ * Solana (lib/solanaRings, only while NEXT_PUBLIC_SOLANA_RINGS_ENABLED is on)
+ * is picked in the same menu, but it is not an EVM network: picking it sets
+ * `solana` and leaves `network` on the last EVM network, so every EVM reader
+ * (balances, wallet, relay, payroll) keeps a network it understands. The app's
+ * pages read `solana` to show their Solana side. Picking an EVM network clears
+ * it. Saved apart from the EVM choice, under its own key.
+ *
  * This is the switch the app reads to know which chain to talk to. It does not
  * itself rewire the existing Robinhood write path (that stays the default);
  * consumers opt in by reading `useNetwork()` as they are migrated off the
@@ -34,8 +41,11 @@ import {
   type GloamNetwork,
   type NetworkKey,
 } from "@/lib/networks";
+import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 
 const STORAGE_KEY = "gloam.network";
+/** "solana" while Solana is the network picked in this browser. */
+const DESTINATION_KEY = "gloam.destination";
 
 interface NetworkContextValue {
   network: GloamNetwork;
@@ -47,6 +57,14 @@ interface NetworkContextValue {
    * (testnet or mainnet) show a neutral placeholder until then, not a guess.
    */
   settled: boolean;
+  /**
+   * Solana is the network picked. `network` then stays the last EVM network
+   * (never Solana), so code that talks to an EVM chain keeps working; pages
+   * show their Solana side instead. Always false while Solana is off.
+   */
+  solana: boolean;
+  /** Pick Solana. Picking an EVM network (setNetworkKey) leaves it. */
+  selectSolana: () => void;
 }
 
 const NetworkContext = createContext<NetworkContextValue | null>(null);
@@ -63,11 +81,31 @@ function readStored(): NetworkKey {
   return shownKeyOrDefault(v);
 }
 
+/** Whether this browser picked Solana last (and Solana is on here). */
+function readSolana(): boolean {
+  if (!SOLANA_RINGS_ENABLED || typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(DESTINATION_KEY) === "solana";
+  } catch {
+    return false;
+  }
+}
+
+function saveSolana(on: boolean) {
+  try {
+    if (on) window.localStorage.setItem(DESTINATION_KEY, "solana");
+    else window.localStorage.removeItem(DESTINATION_KEY);
+  } catch {
+    /* private mode / blocked storage: the choice holds for this visit */
+  }
+}
+
 export function NetworkProvider({ children }: { children: ReactNode }) {
   // Start from the default for a stable first render, then hydrate from storage
   // on mount to avoid an SSR/client mismatch.
   const [networkKey, setKey] = useState<NetworkKey>(FIRST_PAINT_NETWORK_KEY);
   const [settled, setSettled] = useState(false);
+  const [solana, setSolana] = useState(false);
 
   useEffect(() => {
     const stored = readStored();
@@ -75,6 +113,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
     setShownNetworkKey(stored);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the saved network lives only in the browser; the server renders the default and this reads it once after mount
     if (stored !== networkKey) setKey(stored);
+    if (readSolana()) setSolana(true);
     setSettled(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -86,6 +125,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
         setShownNetworkKey(e.newValue);
         setKey(e.newValue);
       }
+      if (e.key === DESTINATION_KEY) setSolana(SOLANA_RINGS_ENABLED && e.newValue === "solana");
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -94,6 +134,9 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   const setNetworkKey = (key: NetworkKey) => {
     setShownNetworkKey(key);
     setKey(key);
+    // an EVM network picked (by hand or by a link) leaves Solana
+    setSolana(false);
+    saveSolana(false);
     // a hidden testnet (opened from a claim link) is never saved over this browser's pick
     if (!isShownNetworkKey(key)) return;
     try {
@@ -103,9 +146,15 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const selectSolana = () => {
+    if (!SOLANA_RINGS_ENABLED) return;
+    setSolana(true);
+    saveSolana(true);
+  };
+
   const value = useMemo<NetworkContextValue>(
-    () => ({ network: getNetwork(networkKey), networkKey, setNetworkKey, settled }),
-    [networkKey, settled]
+    () => ({ network: getNetwork(networkKey), networkKey, setNetworkKey, settled, solana, selectSolana }),
+    [networkKey, settled, solana]
   );
 
   return (
@@ -122,5 +171,7 @@ export function useNetwork(): NetworkContextValue {
     networkKey: DEFAULT_NETWORK_KEY,
     setNetworkKey: () => {},
     settled: true,
+    solana: false,
+    selectSolana: () => {},
   };
 }
