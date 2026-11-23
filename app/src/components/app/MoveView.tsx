@@ -3202,6 +3202,9 @@ export function MoveView() {
                         "Syncing your balance…"
                       ) : payStyle === "bearer" ? (
                         "Make the claim link"
+                      ) : !recipientTag.trim() ? (
+                        // greyed out for one reason only: say it, as Solana's Pay does
+                        "Enter who to pay"
                       ) : (
                         "Send privately"
                       )}
