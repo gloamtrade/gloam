@@ -57,9 +57,10 @@ export function relayCurrency(asset: RingsAsset): string {
   return asset.mint ?? RINGS_SOL_MINT;
 }
 
-/** The assets money can land as: the listed ones Relay delivers. Mainnet's, since Relay only delivers there. */
+/** The assets money can land as, stablecoins first: the listed ones Relay delivers. Mainnet's, since Relay only delivers there. */
 export function landingAssets(network: RingsNetwork = "mainnet"): readonly RingsAsset[] {
-  return ringsAssets(network).filter((a) => a.id === "sol" || a.id === "usdc" || a.id === "usdt");
+  const order = ["usdc", "usdt", "sol"];
+  return order.map((id) => ringsAssets(network).find((a) => a.id === id)).filter((a): a is RingsAsset => Boolean(a));
 }
 
 /** What a token lands as by default: USDT stays USDT, everything else becomes USDC. */

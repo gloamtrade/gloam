@@ -142,7 +142,7 @@ function ArrivalsNotice({
                 <span className="tnum font-medium">
                   {formatLanding(a.amount, asset.decimals)} {asset.symbol}
                 </span>
-                is at your private account, not in your private balance yet.
+                arrived and isn&apos;t private yet.
               </p>
               {errors[key] && (
                 <p role="alert" className="mt-2 rounded-xl bg-danger-soft px-4 py-3 text-[13px] leading-relaxed text-danger">
@@ -364,9 +364,16 @@ export function SolanaBridgeIn({
         {flow.kind === "track" && phase ? (
           <>
             <PhaseLine flow={flow} phase={phase} compact />
-            <button type="button" onClick={() => setOpen(true)} className="btn btn-ghost btn-sm mt-4">
-              See the transfer
-            </button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {phase === "notPrivate" && (
+                <button type="button" onClick={() => void shield()} className="btn btn-ink btn-sm">
+                  Make it private
+                </button>
+              )}
+              <button type="button" onClick={() => setOpen(true)} className="btn btn-ghost btn-sm">
+                See the transfer
+              </button>
+            </div>
           </>
         ) : (
           <>
@@ -453,23 +460,46 @@ function arrivesText(q: { timeSec: number; bitcoin: boolean }): string {
 }
 
 /** The rows every screen of a transfer shows: what lands, the fees, when. */
-function QuoteRows({ q, sentRow }: { q: Pick<SolanaBridgeQuote, "receive" | "feeUsd" | "appFee" | "timeSec" | "bitcoin"> & { gasUsd?: number | null; send: SolanaBridgeQuote["send"] }; sentRow?: boolean }) {
-  const rows: [string, React.ReactNode][] = [
-    ...(sentRow ? ([["Sent", `${q.send.amount} ${q.send.symbol} on ${q.send.chain}`]] as [string, React.ReactNode][]) : []),
-    [
-      "Added privately, about",
-      <span key="a" className="flex items-center gap-1.5 font-medium">
-        <TokenMark src={q.receive.logo} size={18} />
-        {q.receive.decimals === 6 ? fmtMoney(Number(q.receive.amount)) : Number(q.receive.amount).toLocaleString("en-US", { maximumFractionDigits: 6 })}{" "}
-        {q.receive.symbol}
-      </span>,
-    ],
-    ["At least", `${q.receive.decimals === 6 ? fmtMoney(Number(q.receive.minimum)) : Number(q.receive.minimum).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${q.receive.symbol}`],
-    ...feeRows(q, "Bridge fee"),
-    ...(q.gasUsd != null && q.gasUsd >= 0.01 ? ([["Network fee", `about $${fmtMoney(q.gasUsd)} on ${q.send.chain}`]] as [string, React.ReactNode][]) : []),
-    ["Making it private", "Free, Gloam pays the Solana fee"],
-    ["Arrives", arrivesText(q)],
+function QuoteRows({
+  q,
+  sentRow,
+  returned = false,
+}: {
+  q: Pick<SolanaBridgeQuote, "receive" | "feeUsd" | "appFee" | "timeSec" | "bitcoin"> & {
+    gasUsd?: number | null;
+    send: SolanaBridgeQuote["send"];
+    /** The connected wallet pays, so its network fee shows in the wallet. */
+    walletPays?: boolean;
+  };
+  sentRow?: boolean;
+  /** Relay sent it back: nothing lands. */
+  returned?: boolean;
+}) {
+  const gas: [string, React.ReactNode][] =
+    q.gasUsd != null && q.gasUsd >= 0.01
+      ? [["Network fee", `about $${fmtMoney(q.gasUsd)} on ${q.send.chain}`]]
+      : q.walletPays
+        ? [["Network fee", `Shown in your wallet, on ${q.send.chain}`]]
+        : [];
+  const lands: [string, React.ReactNode] = [
+    "Added privately, about",
+    <span key="a" className="flex items-center gap-1.5 font-medium">
+      <TokenMark src={q.receive.logo} size={18} />
+      {q.receive.decimals === 6 ? fmtMoney(Number(q.receive.amount)) : Number(q.receive.amount).toLocaleString("en-US", { maximumFractionDigits: 6 })}{" "}
+      {q.receive.symbol}
+    </span>,
   ];
+  // Once it is paid, only what was sent, what lands and what it cost: the rest was for deciding.
+  const rows: [string, React.ReactNode][] = sentRow
+    ? [["Sent", `${q.send.amount} ${q.send.symbol} on ${q.send.chain}`], ...(returned ? [] : [lands]), ...feeRows(q, "Bridge fee")]
+    : [
+        lands,
+        ["At least", `${q.receive.decimals === 6 ? fmtMoney(Number(q.receive.minimum)) : Number(q.receive.minimum).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${q.receive.symbol}`],
+        ...feeRows(q, "Bridge fee"),
+        ...gas,
+        ["Making it private", "Free, Gloam pays the Solana fee"],
+        ["Arrives", arrivesText(q)],
+      ];
   return (
     <dl className="mt-4 divide-y divide-line text-[14px]">
       {rows.map(([k, v]) => (
@@ -984,7 +1014,7 @@ function BridgeSheet({
                   <ChainLogo id={flow.quote.send.chainId} size={18} />
                   {flow.quote.send.chain}
                 </p>
-                <QuoteRows q={flow.quote} />
+                <QuoteRows q={{ ...flow.quote, walletPays: true }} />
                 <CostWarning quote={flow.quote} />
                 {flow.signing && flow.progress && (
                   <p className="mt-4 flex items-center gap-2.5 rounded-2xl bg-surface px-4 py-3 text-[13.5px] text-foreground">
@@ -1074,15 +1104,9 @@ function Tracking({
             <span className="shrink-0 text-[13px] font-medium text-foreground">{copied ? "Copied" : "Copy"}</span>
           </button>
         </>
-      ) : (
-        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[14px] leading-relaxed text-foreground">
-          {t.send.amount} {t.send.symbol} from
-          <ChainLogo id={t.send.chainId} size={18} />
-          {t.send.chain}, into your private balance on Solana
-        </p>
-      )}
+      ) : null}
 
-      <QuoteRows q={{ ...t, gasUsd: null }} sentRow={!showAddress} />
+      <QuoteRows q={{ ...t, gasUsd: null }} sentRow={!showAddress} returned={phase === "refunded" || phase === "failed"} />
       {link && (
         <p className="mt-2 text-[13px]">
           <a href={link} target="_blank" rel="noopener noreferrer" className="text-foreground underline underline-offset-4">
@@ -1115,8 +1139,8 @@ function Tracking({
       ) : (
         <>
           <p className="mt-3 text-[12px] leading-relaxed text-mute">
-            You can close this. While Gloam is open it goes private as it arrives; if you leave, it waits in your private account and
-            shows here when you&apos;re back.
+            You can close this. It goes private as it arrives while Gloam is open. If you leave, it waits in your private account until
+            you&apos;re back.
           </p>
           {phase === "waiting" && (
             <button type="button" onClick={onReset} className="btn btn-ghost btn-sm mt-3">

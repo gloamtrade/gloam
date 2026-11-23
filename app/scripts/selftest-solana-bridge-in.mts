@@ -503,11 +503,11 @@ const tracked = bridgeIn.trackedFrom(quote, "address", Date.UTC(2026, 10, 23));
 
 // ---------------------------------------------------------------- copy and sources
 
-ok(!/—/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /public/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /token and amount stay hidden/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE), "the privacy line says the bridge is public and what stays hidden, no em dash");
+ok(!/\u2014/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /public/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /token and amount stay hidden/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE), "the privacy line says the bridge is public and what stays hidden, no em dash");
 {
   const ids = bridgeIn.solanaBridgeSources().map((c) => c.id);
   ok(!ids.includes(792703809) && !ids.includes(81457) && ids.includes(8453) && ids.includes(728126428) && ids.includes(8253038), "sources: every bridge chain but Solana itself and Blast (Relay refused it)");
-  ok(bridgeIn.landingAssets().map((a) => a.id).join() === "sol,usdc,usdt", "it lands as SOL, USDC or USDT");
+  ok(bridgeIn.landingAssets().map((a) => a.id).join() === "usdc,usdt,sol", "it lands as SOL, USDC or USDT");
   ok(bridgeIn.defaultLanding({ symbol: "USDT0" }) === "usdt" && bridgeIn.defaultLanding({ symbol: "ETH" }) === "usdc" && bridgeIn.defaultLanding({ symbol: "USDT" }, { usdt: false }) === "usdc", "USDT stays USDT, the rest lands as USDC, never on an asset not set up");
   ok(bridgeIn.relayCurrency(SOL) === "11111111111111111111111111111111" && bridgeIn.relayCurrency(USDC) === USDC.mint, "Relay's names for SOL and a mint");
   ok(bridgeIn.formatLanding(19_842_157n, 6) === "19.84" && bridgeIn.formatLanding(270_400_917n, 9) === "0.2704", "amounts read plainly");
