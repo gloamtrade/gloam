@@ -58,7 +58,7 @@
  * sealedSwap) is retired: its on-chain path reverts on every live pool.
  */
 
-export const SDK_VERSION = "0.9.0";
+export const SDK_VERSION = "0.9.1";
 
 export * from "./intents.js";
 export * from "./rates.js";

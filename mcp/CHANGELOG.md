@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.1 (23 November 2026)
 
 - **ZEC on Solana.** The `gloam_solana_*` tools take `ZEC`, Zcash bridged to Solana by NEAR's Omni Bridge (mint `A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS`, 8 decimals). `gloam_solana_info` says what stays public around it: the bridge itself and adding from the agent's wallet. Spending limits name it like SOL: `ZEC`, Solana's only, counted in ZEC (not a stablecoin). Needs the SDK release that lists it.
 
