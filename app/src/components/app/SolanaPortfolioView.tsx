@@ -50,6 +50,17 @@ function figureOf(t: { usd: number; unpriced: Row[] }): string {
   return t.usd > 0 ? `${usd(t.usd)} + ${rest}` : rest;
 }
 
+/**
+ * The hero's figure in two parts: the big number, and what has no price yet
+ * ("+ 4.25 SOL") on a smaller line under it. As one line it ran past a phone's
+ * width and was cut to "$1,550.00 +…".
+ */
+function heroParts(t: { usd: number; unpriced: Row[] }): { main: string; rest: string | null } {
+  const rest = t.unpriced.map((r) => `${r.text} ${r.symbol}`).join(" + ");
+  if (!rest) return { main: usd(t.usd), rest: null };
+  return t.usd > 0 ? { main: usd(t.usd), rest: `+ ${rest}` } : { main: rest, rest: null };
+}
+
 export function SolanaPortfolioView() {
   const sol = useSolana();
   const toUsd = useSolanaUsd();
@@ -72,7 +83,7 @@ export function SolanaPortfolioView() {
   const refreshing = sol.task?.kind === "refresh";
   const loading = !sol.balances;
   // The hero reads in dollars once priced; a lone token without a price reads as that token.
-  const figure = figureOf(privateSum);
+  const hero = heroParts(privateSum);
   const pct =
     privateTotal != null && walletTotal != null && privateTotal + walletTotal > 0
       ? Math.round((privateTotal / (privateTotal + walletTotal)) * 100)
@@ -116,9 +127,12 @@ export function SolanaPortfolioView() {
             ) : hidden ? (
               <SealDots n={7} dot={14} label="Private balance hidden" className="h-[1em]" />
             ) : (
-              <HeroFigure text={hasPrivate ? figure : "$0.00"} />
+              <HeroFigure text={hasPrivate ? hero.main : "$0.00"} />
             )}
           </p>
+          {hasPrivate && !hidden && !loading && hero.rest && (
+            <p className="tnum mt-3 truncate text-[20px] font-light leading-none tracking-[-0.01em] text-mute">{hero.rest}</p>
+          )}
           {hasPrivate && !hidden && (
             <VaultChips rows={held.map((r) => ({ key: r.id, id: r.id, symbol: r.symbol, amount: r.text }))} />
           )}
