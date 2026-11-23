@@ -11,7 +11,7 @@ import { n } from "../format";
 import { CsvLink, DataTable, Note, Notice, Panel, PanelSkeleton, StatStrip } from "../ui";
 
 type UpdatesData = { backend: string; count: number; bySource: { "sign-in": number; settings: number; site: number; contest?: number } };
-type ContestImport = { found: number; added: number; already: number; skipped: number };
+type ContestImport = { found: number; added: number; already: number; suppressed?: number; skipped: number };
 
 /** Adds every video and writing contest entrant's email to the list (api/updates/import). */
 function AddContestEmails({ onDone }: { onDone: () => void }) {
@@ -34,7 +34,7 @@ function AddContestEmails({ onDone }: { onDone: () => void }) {
       const d = json.data;
       setNote({
         ok: true,
-        text: `Added ${n(d.added)} new from the contests. ${n(d.already)} were on the list already.${d.skipped ? ` ${n(d.skipped)} weren't valid emails.` : ""}`,
+        text: `Added ${n(d.added)} new from the contests. ${n(d.already)} were on the list already.${d.suppressed ? ` ${n(d.suppressed)} had left the list and stay off.` : ""}${d.skipped ? ` ${n(d.skipped)} weren't valid emails.` : ""}`,
       });
       onDone();
     } catch (e) {

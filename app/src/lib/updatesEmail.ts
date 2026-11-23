@@ -34,6 +34,8 @@ export function normalizeEmail(raw: unknown): string | null {
   const local = email.slice(0, at);
   const domain = email.slice(at + 1);
   if (local.length > 64 || local.startsWith(".") || local.endsWith(".") || local.includes("..")) return null;
+  // the plain characters every mail service takes; others are valid on paper but refused by some senders
+  if (!/^[a-z0-9._%+-]+$/.test(local)) return null;
   const labels = domain.split(".");
   if (labels.length < 2) return null;
   if (!labels.every((l) => /^[a-z0-9-]{1,63}$/.test(l) && !l.startsWith("-") && !l.endsWith("-"))) return null;

@@ -57,7 +57,7 @@ const WALLET = "0x1111111111111111111111111111111111111111";
 function req(method: string, body: unknown, ip = "203.0.113.1", raw?: string): Request {
   return new Request("https://gloam.trade/api/updates", {
     method,
-    headers: { "Content-Type": "application/json", "x-forwarded-for": ip },
+    headers: { "Content-Type": "application/json", "x-forwarded-for": ip, Origin: "https://www.gloam.trade" },
     body: raw ?? JSON.stringify(body),
   });
 }
@@ -281,6 +281,35 @@ resetMemoryKv();
   n += 14;
 }
 
+// ------------------------------------------------------------ sign-ups only from gloam.trade
+{
+  const before = (await list.listUpdatesSubscribers()).length;
+  const cross = (headers: Record<string, string>) =>
+    route.POST(new Request("https://gloam.trade/api/updates", { method: "POST", headers: { "x-forwarded-for": "203.0.113.9", ...headers }, body: JSON.stringify({ email: "victim@example.com", source: "site" }) }));
+  assert.equal((await cross({ "Content-Type": "text/plain", Origin: "https://evil.example" })).status, 403, "a no-cors post from another site is refused");
+  assert.equal((await cross({ "Content-Type": "application/json", Origin: "https://evil.example" })).status, 403, "JSON from another site is refused");
+  assert.equal((await cross({ "Content-Type": "text/plain", Origin: "https://www.gloam.trade" })).status, 403, "the site's own form sends JSON");
+  assert.equal((await cross({ "Content-Type": "application/json" })).status, 403, "no Origin, no sign-up");
+  assert.equal((await list.listUpdatesSubscribers()).length, before, "nobody added");
+  // emails only with the plain characters every sender takes
+  assert.equal(normalizeEmail("a!b@example.com"), null, "a ! in the name part is refused");
+  assert.equal(normalizeEmail("first.last+tag@example.com"), "first.last+tag@example.com");
+  n += 7;
+}
+
+// ------------------------------------------------------------ who left stays off
+{
+  await list.subscribeToUpdates("leaver@example.com", "site");
+  const leaver = (await list.listUpdatesSubscribers()).find((s) => s.email === "leaver@example.com")!;
+  assert.equal(await list.unsubscribeToken(leaver.token), true);
+  assert.deepEqual(await list.subscribeToUpdates("leaver@example.com", "contest"), { added: false, suppressed: true }, "the contest import never brings back someone who unsubscribed");
+  assert.deepEqual(await list.subscribeToUpdates("leaver@example.com", "site"), { added: true }, "they can sign themselves back up");
+  assert.deepEqual(await list.subscribeToUpdates("leaver@example.com", "contest"), { added: false }, "and then they're simply on it");
+  await list.unsubscribeEmail("spammy@example.com", "complained");
+  assert.deepEqual(await list.subscribeToUpdates("spammy@example.com", "site"), { added: false, suppressed: true }, "a spam report is for good");
+  n += 5;
+}
+
 // ------------------------------------------------------------ add the contest entrants
 {
   const imp = await import("../src/app/api/updates/import/route");
@@ -313,7 +342,7 @@ resetMemoryKv();
   const res = await post({ from: "contests" });
   assert.equal(res.status, 200);
   const body = (await res.json()) as { ok: boolean; data: { found: number; added: number; already: number; skipped: number } };
-  assert.deepEqual(body.data, { found: 3, added: 2, already: 1, skipped: 1 }, "two new, one already on the list, one not an email, one entry without");
+  assert.deepEqual(body.data, { found: 3, added: 2, already: 1, suppressed: 0, skipped: 1 }, "two new, one already on the list, one not an email, one entry without");
   assert.ok(!JSON.stringify(body).includes("@"), "counts only, never an email");
   const after = await list.listUpdatesSubscribers();
   assert.equal(after.length, before.length + 2);
@@ -322,7 +351,7 @@ resetMemoryKv();
   assert.match(vid.token, list.UNSUBSCRIBE_TOKEN, "with their own unsubscribe link");
   assert.equal(after.find((s) => s.email === "write.one@example.org")?.source, "contest");
   assert.deepEqual(after.find((s) => s.email === onList.email), onList, "someone already on the list keeps their day, source and link");
-  assert.deepEqual(await addContestEmailsToUpdates(), { found: 3, added: 0, already: 3, skipped: 1 }, "running it again adds nobody");
+  assert.deepEqual(await addContestEmailsToUpdates(), { found: 3, added: 0, already: 3, suppressed: 0, skipped: 1 }, "running it again adds nobody");
   assert.equal(list.updatesSummary(after).bySource.contest, 2);
   assert.equal(await list.unsubscribeToken(vid.token), true, "a contest entrant can unsubscribe like anyone");
   await list.unsubscribeEmail("write.one@example.org");

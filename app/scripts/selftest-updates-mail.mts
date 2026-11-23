@@ -243,6 +243,8 @@ class FakeResend {
   keys = new Map<string, { hash: string; status: number; body: string }>();
   script: Script | null = null;
   reject = new Set<string>();
+  /** Answer a rejected address as Resend's 400 validation_error instead of 422. */
+  rejectAs400 = false;
 
   count(email: string) {
     return this.delivered.filter((m) => m.to.includes(email)).length;
@@ -281,8 +283,9 @@ class FakeResend {
       }
     }
     if (messages.some((m) => m.to.some((t) => this.reject.has(t)))) {
-      record(422);
-      return Response.json({ statusCode: 422, name: "validation_error", message: "Invalid `to` field." }, { status: 422 });
+      const status = this.rejectAs400 ? 400 : 422;
+      record(status);
+      return Response.json({ statusCode: status, name: "validation_error", message: "Invalid `to` field." }, { status });
     }
     // Resend took it: it goes out, and the answer is kept for the key
     this.delivered.push(...messages);
@@ -569,6 +572,20 @@ resetMemoryKv();
 }
 resetMemoryKv();
 {
+  // Resend's errors page lists a bad field as 400 validation_error: one such address
+  // must not stall the send (it used to stop every step at the same first batch)
+  await addSubscribers(40);
+  await list.subscribeToUpdates("bad-400@example.com", "site");
+  const fake = new FakeResend();
+  fake.reject.add("bad-400@example.com");
+  fake.rejectAs400 = true;
+  const { update } = await mail.startUpdate("A 400 address", "Body.", clock);
+  const p = await sendAll(update.id, opts(fake));
+  eq([p.done, p.sent, p.failed], [true, 40, 1], "a 400 validation_error is split out like a 422, the rest go");
+  eq(fake.count("bad-400@example.com"), 0, "and it never went out");
+}
+resetMemoryKv();
+{
   await addSubscribers(250);
   const fake = new FakeResend();
   const { update } = await mail.startUpdate("Quota", "Body.", clock);
@@ -823,8 +840,46 @@ resetMemoryKv();
   g.__testCookies = { [ADMIN_COOKIE]: createAdminSession()! };
   const got = (await (await mailRoute.GET()).json()) as { data: { tracking: boolean; problems: unknown[] } };
   eq([got.data.tracking, got.data.problems.length], [true, 3], "the admin sees tracking on and the problems");
+
+  // the store fails partway through a hard bounce: Resend's retry still takes the address off
+  await list.subscribeToUpdates("retry-bounce@example.com", "site");
+  const memStore = g.__gloamPartnersMem!;
+  const realGet = memStore.get.bind(memStore);
+  let broke = false;
+  memStore.get = ((k: string) => {
+    if (!broke && k.includes(":sub:")) {
+      broke = true;
+      throw new Error("store down");
+    }
+    return realGet(k);
+  }) as typeof memStore.get;
+  const bounce = ev("email.bounced", "em_r", "retry-bounce@example.com", { bounce: { type: "Permanent", message: "No such user" } });
+  ok((await call("r1", bounce)).status >= 500, "a failure partway answers 5xx, so Resend tries again");
+  memStore.get = realGet as typeof memStore.get;
+  eq((await call("r1", bounce)).status, 200, "the retry is taken");
+  ok(!(await list.listUpdatesSubscribers()).some((x) => x.email === "retry-bounce@example.com"), "and the address is off the list");
+  eq((await dlv.listDeliveryProblems()).filter((p) => p.email === "retry-bounce@example.com").length, 1, "listed once");
+  await call("r1", bounce);
+  eq((await dlv.listDeliveryProblems()).filter((p) => p.email === "retry-bounce@example.com").length, 1, "a third delivery of the same call changes nothing");
+
+  // an address that bounced for good or marked spam never comes back, by form or by import
+  const back1 = await list.subscribeToUpdates("retry-bounce@example.com", "site");
+  eq(back1, { added: false, suppressed: true }, "a bounced address can't be signed up again");
+  const back2 = await list.subscribeToUpdates("spam@example.com", "contest");
+  eq(back2, { added: false, suppressed: true }, "a spam report keeps the import from adding it back");
   g.__testCookies = {};
   delete env.RESEND_WEBHOOK_SECRET;
+}
+
+// ============================================================ an update listed twice shows once
+resetMemoryKv();
+{
+  await addSubscribers(3);
+  const { update } = await mail.startUpdate("Listed twice", "Body.", clock);
+  const mem2 = g.__gloamPartnersMem!;
+  const listKey = `${list.UPDATES_PREFIX}mails`;
+  mem2.set(listKey, { v: [update.id, ...(mem2.get(listKey)!.v as string[])] } as never);
+  eq((await mail.listUpdatesForAdmin()).filter((u) => u.id === update.id).length, 1, "two starts at once list it once for the admin");
 }
 
 // ============================================================ the list sources: only the updates list
