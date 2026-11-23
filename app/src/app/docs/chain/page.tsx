@@ -10,6 +10,8 @@ import { GLOAM_OWNER, GLOAM_OWNER_SAFE, GLOAM_RELAYERS, GLOAM_TREASURY, MAINNET_
 import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_LIVE_SINCE, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET, ELYSIUM_TESTNET_FLAG } from "@/lib/elysium";
 import { BNB, BNB_LIVE_SINCE } from "@/lib/bnb";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+import { AppLink } from "@/components/AppLink";
+import { RINGS_PAYROLL_NOTE, RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAssets } from "@/lib/solanaRings/config";
 
 export const metadata: Metadata = {
   title: "Networks",
@@ -79,6 +81,8 @@ export default function DocsNetworksPage() {
         { label: "Ethereum mainnet", value: "1" },
         ...(ELYSIUM ? [{ label: "Elysium mainnet", value: String(ELYSIUM.chainId) }] : []),
         ...(BNB ? [{ label: "BNB Chain mainnet", value: String(BNB.chainId) }] : []),
+        // Solana has no chain id: it runs through Helius Privacy Rings, not the vault
+        ...(SOLANA_RINGS_ENABLED ? [{ label: SOLANA_NAME, value: "Privacy Rings" }] : []),
         { label: "Testnets", value: ELYSIUM_TESTNET ? "46630 · 42431 · 84532 · 11155111 · 99801" : "46630 · 42431 · 84532 · 11155111" },
         { label: "Gas", value: `ETH; stablecoins on Tempo${ELYSIUM ? "; HYPE on Elysium" : ""}${BNB ? "; BNB on BNB Chain" : ""}` },
       ]}
@@ -94,6 +98,13 @@ export default function DocsNetworksPage() {
         {BNB ? ", and USDT, USDC, BNB and BDX on BNB Chain" : ""}. The app switches networks at runtime
         and points at the right pool for each.
       </p>
+      {SOLANA_RINGS_ENABLED && (
+        <p>
+          {SOLANA_NAME} is the exception: Gloam runs there through Helius Privacy
+          Rings, not this vault, and a payment hides less. See{" "}
+          <a href="#solana">{SOLANA_NAME}</a>.
+        </p>
+      )}
 
       <h2 id="mainnet">Mainnet</h2>
       <p>
@@ -1031,6 +1042,60 @@ export default function DocsNetworksPage() {
               <strong>Not on BNB Chain yet.</strong> Private swaps and bringing money over into
               the vault there. Payments, payroll, payment requests, claim links and proofs work as
               on the other chains.
+            </li>
+          </ul>
+        </>
+      )}
+
+      {SOLANA_RINGS_ENABLED && (
+        <>
+          <h2 id="solana">{SOLANA_NAME}</h2>
+          <p>
+            Gloam has no vault of its own here. It runs through Helius Privacy
+            Rings, on the open Default Ring, with Gloam&apos;s account layer on
+            top: your private account is its own key, opened by a signature
+            from your main wallet, so the main wallet stays out of your
+            payments. {RINGS_PRIVACY_NOTE}
+          </p>
+          <ul>
+            <li>
+              <strong>Network</strong>, Solana {SOLANA_RINGS_NETWORK === "devnet" ? "devnet" : "mainnet"}
+            </li>
+            <li>
+              <strong>Assets</strong>, {joinNames(ringsAssets().map((a) => a.symbol))}
+            </li>
+            {ringsAssets()
+              .filter((a) => a.mint)
+              .map((a) => (
+                <li key={a.id}>
+                  <strong>{a.symbol} mint</strong>, <code>{a.mint}</code>
+                </li>
+              ))}
+            <li>
+              <strong>What shows</strong>, adding money shows your wallet, the
+              token and the amount. A private payment shows the two private
+              accounts it moves between, not the token or the amount. A cash
+              out shows the address it goes to, the token and the amount.
+            </li>
+            <li>
+              <strong>Payroll.</strong> {RINGS_PAYROLL_NOTE}
+            </li>
+            <li>
+              <strong>Fees</strong>, Gloam&apos;s relay pays the Solana network
+              fees, so a private account never needs SOL of its own.
+            </li>
+            <li>
+              <strong>Who makes the proof</strong>, Helius&apos;s prover, in an
+              attested enclave that sees the payment&apos;s details.
+              Gloam&apos;s server only passes on requests encrypted to that
+              enclave. On the other networks, proofs are made on your device.
+            </li>
+            <li>
+              <strong>Not on Solana</strong>, proof of funds or payment,
+              private swaps and claim links.
+            </li>
+            <li>
+              <strong>In the app</strong>, <AppLink href="/app/solana">/app/solana</AppLink>
             </li>
           </ul>
         </>

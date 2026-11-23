@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getBase64Decoder, getBase64Encoder, getTransactionDecoder, getTransactionEncoder, partiallySignTransaction } from "@solana/kit";
-import { SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK } from "@/lib/solanaRings/config";
+import { RINGS_RELAY_LOW_LAMPORTS, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK } from "@/lib/solanaRings/config";
 import { checkSponsoredTransaction } from "@/lib/solanaRings/relayPolicy";
 import { heliusRpcUrl, relayerSigner, ringsRelayRate } from "@/lib/solanaRings/server";
 import { screenOtherChainAddresses } from "@/lib/screeningServer";
@@ -23,9 +23,6 @@ const refuse = (status: number, code: string, message: string) =>
  * checks it against lib/solanaRings/relayPolicy, screens the accounts it names,
  * simulates it, adds the relay's signature as fee payer and sends it.
  */
-/** Below this the relay reports itself empty: enough for a few dozen payments or a handful of registrations. */
-const RELAY_LOW_LAMPORTS = 10_000_000;
-
 export async function GET() {
   // The address is public (it is the fee payer on every transaction it sponsors), so
   // it is named even while Solana is off, to fund the relay before switching it on.
@@ -35,7 +32,7 @@ export async function GET() {
   if (signer && url) {
     try {
       const bal = await rpc<{ value?: number }>(url, "getBalance", [signer.address, { commitment: "confirmed" }]);
-      funded = (bal.result?.value ?? 0) >= RELAY_LOW_LAMPORTS;
+      funded = (bal.result?.value ?? 0) >= RINGS_RELAY_LOW_LAMPORTS;
     } catch {
       funded = false;
     }

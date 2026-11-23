@@ -1,6 +1,7 @@
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { GLOAM_TOKEN } from "@/lib/buybacks";
+import { RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 
 /**
  * /llms.txt (llmstxt.org): what Gloam is and where an agent or a model should
@@ -29,6 +30,12 @@ const DOCS: [path: string, title: string, about: string][] = [
   ["/docs/virtuals", "Virtuals agents", "private balances and payments for Virtuals (GAME and ACP) agents"],
 ];
 
+/** Gloam on Solana, only while it is on: its own line, since a payment there hides less than in the vault. */
+function solanaLine(): string {
+  if (!SOLANA_RINGS_ENABLED) return "";
+  return `- Gloam is on ${SOLANA_NAME} too, through Helius Privacy Rings, in the app at ${SITE}/app/solana. ${RINGS_PRIVACY_NOTE} Gloam's relay pays the Solana fees. Solana is in the app only: the SDK and the MCP servers cover the networks above.\n`;
+}
+
 function body(): string {
   const chains = liveMainnetNames();
   return `# Gloam
@@ -40,7 +47,7 @@ function body(): string {
 - Depositing wallets are screened. A user can prove a balance, a payment or a payroll total to one person they choose.
 - Gloam names: an @name points to a Gloam address and is paid for in $GLOAM.
 - $GLOAM is on Robinhood Chain at ${GLOAM_TOKEN}. A copycat token uses the same name, so match the address, not the name.
-
+${solanaLine()}
 ## For agents
 
 - [Hosted MCP server](${SITE}/mcp): streamable HTTP, no key. Tools: gloam_info, gloam_networks, gloam_vault_stats, gloam_plan_deposit, gloam_swap_quote, gloam_create_payment_request, gloam_verify_proof, gloam_mpp_how_to, gloam_connect_full_agent. Add it with \`claude mcp add --transport http gloam-hosted ${SITE}/mcp\`.

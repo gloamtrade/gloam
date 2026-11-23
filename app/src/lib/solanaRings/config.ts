@@ -31,6 +31,16 @@ export function ringsUrls(origin: string): { rpc: string; spr: string; relay: st
   return { rpc: o + RINGS_PROXY_PATHS.rpc, spr: o + RINGS_PROXY_PATHS.spr, relay: o + RINGS_PROXY_PATHS.relay };
 }
 
+/**
+ * Below this the relay reports itself unfunded (GET /api/solana/relay answers
+ * funded: false and the app pauses Solana payments): enough for a few dozen
+ * payments or a handful of registrations. The status page reads it too.
+ */
+export const RINGS_RELAY_LOW_LAMPORTS = 10_000_000;
+
+/** How the site names the network: "Solana", or "Solana devnet" on a devnet build. */
+export const SOLANA_NAME = SOLANA_RINGS_NETWORK === "devnet" ? "Solana devnet" : "Solana";
+
 export type RingsAsset = {
   id: string;
   symbol: string;
