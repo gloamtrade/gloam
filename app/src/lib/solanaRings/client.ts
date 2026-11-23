@@ -323,7 +323,7 @@ const b64 = (bytes: Uint8Array) => getBase64Decoder().decode(bytes);
 const fromB64 = (text: string) => new Uint8Array(getBase64Encoder().encode(text));
 
 /** Add the private account's signature to `tx`, the relay's slot left empty. */
-async function ownerSigned(s: RingsSession, tx: Transaction): Promise<Uint8Array> {
+export async function ownerSigned(s: RingsSession, tx: Transaction): Promise<Uint8Array> {
   const [sigs] = await s.keypair.toSolanaSigner().signTransactions([tx as never]);
   return encodeTx({ ...tx, signatures: { ...tx.signatures, ...sigs } } as Transaction);
 }
@@ -349,7 +349,7 @@ export class RingsRelayError extends Error {
 }
 
 /** What the relay sent: its signature, and the signed transaction to send again while it waits. */
-type Sent = { signature: string; signed: string | null };
+export type Sent = { signature: string; signed: string | null };
 
 /** The signed transactions the relay handed back, by signature, so a later confirm can rebroadcast them. */
 const signedBySignature = new Map<string, string>();
@@ -362,7 +362,7 @@ function remember(sent: Sent): void {
 }
 
 /** Hand a transaction the private account signed to Gloam's relay. */
-async function relay(wire: Uint8Array): Promise<Sent> {
+export async function relay(wire: Uint8Array): Promise<Sent> {
   let res: Response;
   try {
     res = await fetch(ringsUrls(location.origin).relay, {
@@ -424,7 +424,7 @@ function landingDeps(signature: string, blockhash: string | null, signed: string
 }
 
 /** Wait on something the relay sent: landed, failed, dropped for good, or unknown when the chain didn't answer in time. */
-function waitForSent(sent: Sent, blockhash: string | null): Promise<Landing> {
+export function waitForSent(sent: Sent, blockhash: string | null): Promise<Landing> {
   return awaitLanding(landingDeps(sent.signature, blockhash ?? (sent.signed ? blockhashOfWire(fromB64(sent.signed)) : null), sent.signed));
 }
 
@@ -441,7 +441,7 @@ async function relayInfo(): Promise<RelayInfo> {
  * pays set from Helius's recommended price. Built as it was if that can't be
  * read: then it carries the floor the SDK client was made with.
  */
-function withRelayFee<T extends Transaction>(tx: T, price: number | null): T {
+export function withRelayFee<T extends Transaction>(tx: T, price: number | null): T {
   try {
     const units = computeUnitsOf(tx.messageBytes);
     return units ? withPriorityFee(tx, priorityFeeFor(price, units)) : tx;

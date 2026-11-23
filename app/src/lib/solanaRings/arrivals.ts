@@ -6,25 +6,24 @@
  * Safe to retry by construction: a deposit moves what is at the address, so a
  * deposit that landed leaves nothing to deposit again, and one that didn't
  * leaves the money where it was. Nothing is stored. The relay pays only the
- * fee (relayPolicy readDeposit), so the account never needs SOL. Sent and
- * waited on as every relayed send is (lib/solanaRings/landing).
+ * fee (relayPolicy readDeposit), so the account never needs SOL. Sent,
+ * waited on and sent once more when dropped as every relayed send is, through
+ * the same helpers (lib/solanaRings/landing landWithOneResend, and client's
+ * relay, waitForSent and withRelayFee in the browser).
  *
  * buildRelayedDeposit and settleShield take everything they touch as
  * arguments, so the self-tests run them against a fake chain;
  * makeArrivalPrivate wires them to a session in the browser.
  */
-import { getAddressDecoder, getBase64Decoder, getBase64Encoder, getTransactionEncoder, type Address, type Transaction } from "@solana/kit";
+import { getAddressDecoder, getBase64Encoder, type Address, type Transaction } from "@solana/kit";
 import { arrivalsFrom, readTokenAccount, type Arrival } from "./bridgeIn";
 import { ringsAssets, ringsUrls, type RingsAsset, type RingsNetwork } from "./config";
 import {
   BLOCKHASH_CHECK_MS,
   LANDING_MAX_MS,
   RELAY_PRIORITY_FEE_FLOOR,
-  awaitLanding,
-  blockhashOfMessage,
-  computeUnitsOf,
-  priorityFeeFor,
-  sigStatusFrom,
+  blockhashOfWire,
+  landWithOneResend,
   withPriorityFee,
   type Landing,
 } from "./landing";
@@ -35,12 +34,13 @@ const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"; // ggi
 
 export type Rpc = <T>(method: string, params: unknown[]) => Promise<T>;
 
-/** One call to Gloam's Solana RPC proxy. */
+/** One call to Gloam's Solana RPC proxy. Never waits more than 15 seconds, as every Solana call (client proxyRpc). */
 export const proxyRpc: Rpc = async <T>(method: string, params: unknown[]): Promise<T> => {
   const res = await fetch(ringsUrls(location.origin).rpc, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    signal: AbortSignal.timeout(15_000),
   });
   const json = (await res.json().catch(() => null)) as { result?: T; error?: unknown } | null;
   if (!json || json.error || json.result === undefined) throw new Error("Solana is slow to answer. Try again.");
@@ -79,7 +79,8 @@ export async function readArrivals(rpc: Rpc, owner: string, network: RingsNetwor
  * The deposit of `amount` of `asset` from the private account (`depositor`,
  * which signs) into its own private balance, the relay (`feePayer`) paying
  * the fee: the SDK's deposit, version 1, with `priorityFeeLamports` (the
- * relay's floor unless the page read Helius's price, lib/solanaRings/landing).
+ * relay's floor by default; the page sets Helius's price before signing, as
+ * on every relayed send, client withRelayFee).
  * Never creates the mint's setup account (Gloam's to do), so it stays one
  * plain deposit, the only shape the relay pays for.
  */
@@ -127,14 +128,16 @@ export type ShieldResult =
 
 export type RelayRef = { address: Address; price: number | null };
 
+type Built = { wire: Uint8Array; blockhash: string; amount: bigint };
+
 export type ShieldDeps = {
   /** Gloam's relay: its address (the fee payer) and Helius's fee price. */
   relay(): Promise<RelayRef>;
   /** The signed deposit of what is there now, or null when nothing is. */
-  build(relay: RelayRef): Promise<{ wire: Uint8Array; blockhash: string; amount: bigint } | null>;
-  /** Hand it to Gloam's relay: its signature and the signed transaction, or a refusal saying whether it may have been sent. */
+  build(relay: RelayRef): Promise<Built | null>;
+  /** Hand it to Gloam's relay (client relay): its signature and the signed transaction, or a refusal saying whether it may have been sent. */
   send(wire: Uint8Array): Promise<{ ok: true; signature: string; signed: string | null } | { ok: false; message: string; maybeSent: boolean }>;
-  /** Wait for it as every relayed send waits (lib/solanaRings/landing awaitLanding: rebroadcast, bounded, dropped only for sure). */
+  /** Wait for it as every relayed send waits (client waitForSent: lib/solanaRings/landing awaitLanding). */
   wait(sent: { signature: string; signed: string | null; blockhash: string }): Promise<Landing>;
   blockhashValid(blockhash: string): Promise<boolean>;
   /** How much of this asset is at the address now (in that token account, or SOL). */
@@ -144,39 +147,53 @@ export type ShieldDeps = {
 };
 
 const NOT_SENT = "It didn't go through, so nothing moved. Try again.";
+const REFUSED = "Solana refused it, so nothing moved. Try again.";
 const TWICE = "Solana didn't take it, twice, and nothing moved. Try again in a minute.";
 const NOT_YET = "Solana hasn't said yet. If it went through, it shows in your private balance in a minute.";
 
 /**
  * Make one arrival private and follow it to an answer. A send Solana dropped
  * for sure (its blockhash expired, never seen) is built and sent once more on
- * its own, as every relayed send is. A relay answer lost with no signature is
- * told apart by the money: once the blockhash has expired, still at the
- * address means it never landed.
+ * its own, as every relayed send is (landing landWithOneResend). A relay answer
+ * lost with no signature is told apart by the money: once the blockhash has
+ * expired, still at the address means it never landed.
  */
 export async function settleShield(d: ShieldDeps): Promise<ShieldResult> {
   const relay = await d.relay();
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const built = await d.build(relay);
-    if (!built) return { state: "none" };
-    const sent = await d.send(built.wire);
-    if (!sent.ok) {
-      if (!sent.maybeSent) return { state: "notSent", message: sent.message };
-      return byMoney(d, built);
-    }
-    const r = await d.wait({ signature: sent.signature, signed: sent.signed, blockhash: built.blockhash });
-    if (r.state === "landed") return { state: "landed", signature: sent.signature, slot: r.slot };
-    if (r.state === "failed") return { state: "notSent", message: "Solana refused it, so nothing moved. Try again." };
-    if (r.state === "unknown") return { state: "unknown", message: NOT_YET };
-    // dropped: it never landed and never can, so building and sending again is safe
+  // Set when the relay's answer settles it with no signature to wait on.
+  let ended = null as ShieldResult | null;
+  let signature: string | null = null;
+  const r = await landWithOneResend<Built>({
+    build: () => d.build(relay),
+    sendAndWait: async (built) => {
+      const sent = await d.send(built.wire);
+      if (!sent.ok) {
+        ended = sent.maybeSent ? await byMoney(d, built) : { state: "notSent", message: sent.message };
+        return { state: "failed" }; // ends it here, never sent again on its own
+      }
+      signature = sent.signature;
+      return d.wait({ signature: sent.signature, signed: sent.signed, blockhash: built.blockhash });
+    },
+  });
+  if (ended) return ended;
+  switch (r.state) {
+    case "done":
+      return { state: "none" };
+    case "landed":
+      return { state: "landed", signature, slot: r.slot };
+    case "failed":
+      return { state: "notSent", message: REFUSED };
+    case "unknown":
+      return { state: "unknown", message: NOT_YET };
+    case "dropped":
+      return { state: "notSent", message: TWICE };
   }
-  return { state: "notSent", message: TWICE };
 }
 
 /** How long to wait on a send whose signature never came back, before saying it can't tell yet. */
 export const SHIELD_WAIT_MS = LANDING_MAX_MS;
 
-async function byMoney(d: ShieldDeps, built: { blockhash: string; amount: bigint }): Promise<ShieldResult> {
+async function byMoney(d: ShieldDeps, built: Built): Promise<ShieldResult> {
   const until = d.now() + SHIELD_WAIT_MS;
   while (d.now() < until) {
     if (!(await d.blockhashValid(built.blockhash).catch(() => true))) {
@@ -190,32 +207,6 @@ async function byMoney(d: ShieldDeps, built: { blockhash: string; amount: bigint
 }
 
 // ---------------------------------------------------------------- in the browser
-
-/** Relay refusals that come before it sends anything (app/api/solana/relay). */
-const RELAY_NOT_SENT = new Set(["relay_off", "relay_unavailable", "relay_empty", "simulate_failed"]);
-
-async function postToRelay(wire: Uint8Array): Promise<Awaited<ReturnType<ShieldDeps["send"]>>> {
-  let res: Response;
-  try {
-    res = await fetch(ringsUrls(location.origin).relay, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ tx: getBase64Decoder().decode(wire) }),
-      // past the relay's own limit (45 seconds): a lost answer, which may come after the send
-      signal: AbortSignal.timeout(55_000),
-    });
-  } catch {
-    return { ok: false, message: "Gloam's relay didn't answer. Check your connection.", maybeSent: true };
-  }
-  const json = (await res.json().catch(() => null)) as { ok?: boolean; signature?: string; tx?: unknown; error?: { code?: string; message?: string } } | null;
-  if (json?.ok && json.signature) return { ok: true, signature: json.signature, signed: typeof json.tx === "string" ? json.tx : null };
-  const code = json?.error?.code ?? "unknown";
-  return {
-    ok: false,
-    message: json?.error?.message ?? "Gloam's relay didn't take it. Try again.",
-    maybeSent: res.ok || (res.status >= 500 && !RELAY_NOT_SENT.has(code)),
-  };
-}
 
 /** One at a time per private account: a second asked for meanwhile waits its turn. */
 const queue = new Map<string, Promise<unknown>>();
@@ -238,8 +229,6 @@ export async function makeArrivalPrivate(
       (await readArrivals(proxyRpc, s.address, s.network)).find(
         (a) => a.assetId === arrival.assetId && (a.tokenAccount ?? null) === (arrival.tokenAccount ?? null)
       ) ?? null;
-    const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
-    const blockhashValid = async (blockhash: string) => (await proxyRpc<{ value: boolean }>("isBlockhashValid", [blockhash, { commitment: "confirmed" }])).value;
     const result = await settleShield({
       relay: async () => {
         const st = await client.relayStatus();
@@ -259,28 +248,21 @@ export async function makeArrivalPrivate(
           amount: here.amount,
           tokenAccount: (here.tokenAccount as Address | null) ?? null,
         });
-        const units = computeUnitsOf(unsigned.messageBytes);
-        const tx = units ? withPriorityFee(unsigned, priorityFeeFor(relay.price, units)) : unsigned;
-        const [sigs] = await s.keypair.toSolanaSigner().signTransactions([tx as never]);
-        const wire = new Uint8Array(getTransactionEncoder().encode({ ...tx, signatures: { ...tx.signatures, ...sigs } } as Transaction));
-        return { wire, blockhash: blockhashOfMessage(tx.messageBytes) ?? "", amount: here.amount };
+        const wire = await client.ownerSigned(s, client.withRelayFee(unsigned, relay.price));
+        return { wire, blockhash: blockhashOfWire(wire) ?? "", amount: here.amount };
       },
-      send: postToRelay,
-      wait: (sent) =>
-        awaitLanding({
-          status: async () => {
-            const st = await proxyRpc<{ value?: unknown[] }>("getSignatureStatuses", [[sent.signature], { searchTransactionHistory: true }]);
-            if (!Array.isArray(st.value)) throw new Error("no answer");
-            return sigStatusFrom(st.value[0] as never);
-          },
-          blockhashValid: sent.blockhash ? () => blockhashValid(sent.blockhash) : null,
-          ...(sent.signed ? { rebroadcast: () => proxyRpc<string>("sendTransaction", [sent.signed, { encoding: "base64", skipPreflight: true, maxRetries: 0 }]) } : {}),
-          sleep,
-          now: () => Date.now(),
-        }),
-      blockhashValid,
+      send: async (wire) => {
+        try {
+          return { ok: true, ...(await client.relay(wire)) };
+        } catch (e) {
+          if (e instanceof client.RingsRelayError) return { ok: false, message: e.message, maybeSent: e.maybeSent };
+          throw e;
+        }
+      },
+      wait: (sent) => client.waitForSent(sent, sent.blockhash || null),
+      blockhashValid: async (blockhash) => (await proxyRpc<{ value: boolean }>("isBlockhashValid", [blockhash, { commitment: "confirmed" }])).value,
       left: async () => (await now())?.amount ?? 0n,
-      sleep,
+      sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
       now: () => Date.now(),
     });
     if (result.state === "landed") {

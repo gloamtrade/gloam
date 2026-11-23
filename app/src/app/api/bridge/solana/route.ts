@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { formatUnits, isAddress, parseUnits } from "viem";
 import { getAddressEncoder, type Address } from "@solana/kit";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
+import { displayAmountNumber } from "@/lib/amountShort";
 import {
   BRIDGE_MAX_USD,
   BRIDGE_MIN_USD,
@@ -92,7 +93,7 @@ export async function POST(req: Request) {
   const amountText = typeof body.amount === "string" ? body.amount.trim() : "";
   if (!/^\d+(\.\d+)?$/.test(amountText) || !(Number(amountText) > 0)) return fail(400, "Enter an amount.");
   if (token.stable && (Number(amountText) < BRIDGE_MIN_USD || Number(amountText) > BRIDGE_MAX_USD)) {
-    return fail(400, `Enter an amount from ${BRIDGE_MIN_USD} to ${BRIDGE_MAX_USD.toLocaleString("en-US")}.`);
+    return fail(400, `Enter an amount from ${displayAmountNumber(BRIDGE_MIN_USD)} to ${displayAmountNumber(BRIDGE_MAX_USD)}.`);
   }
   let amount: bigint;
   try {

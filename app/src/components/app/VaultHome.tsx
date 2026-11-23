@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useMemo, type ReactNode } from "react";
 import { formatUnits } from "viem";
 import { formatEth } from "@/lib/chain";
+import { displayAmount } from "@/lib/amountShort";
 import { useAppAccount, useAppBalance, useAppTokenBalances } from "@/lib/demo";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { useAutoRestoreStatus } from "@/hooks/useAutoRestoreStatus";
@@ -236,7 +237,7 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
             badge="Only you"
             rows={privateRows}
             loading={privateLoading}
-            empty={balancesVisible ? "0" : null}
+            empty={balancesVisible ? displayAmount(BigInt(0), 0) : null}
             note={
               !isConnected
                 ? SIGNED_OUT_BALANCE_MESSAGE
@@ -257,7 +258,7 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
             badge={null}
             rows={wallet}
             loading={walletLoading}
-            empty={balancesVisible ? "0" : null}
+            empty={balancesVisible ? displayAmount(BigInt(0), 0) : null}
             note={
               balancesVisible && !wallet.length && !walletLoading
                 ? `No ${listOr(tokens.map((t) => t.symbol))} in this wallet.`
@@ -378,7 +379,7 @@ function BalancePane({
             </p>
           ) : (
             <p className={`tnum text-[32px] font-light leading-none tracking-[-0.02em] ${empty ? "text-foreground" : "text-faint"}`}>
-              {empty ?? "0"}
+              {empty ?? displayAmount(BigInt(0), 0)}
             </p>
           )}
         </div>

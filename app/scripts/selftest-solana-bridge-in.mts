@@ -78,6 +78,7 @@ const policy = await import("../src/lib/solanaRings/relayPolicy");
 const bridgeIn = await import("../src/lib/solanaRings/bridgeIn");
 const arrivals = await import("../src/lib/solanaRings/arrivals");
 const landing = await import("../src/lib/solanaRings/landing");
+const { displayAmount } = await import("../src/lib/amountShort");
 const config = await import("../src/lib/solanaRings/config");
 const server = await import("../src/lib/solanaRings/server");
 const ofac = (await import("../src/lib/solanaRings/ofacSolana.json", { with: { type: "json" } })).default;
@@ -539,7 +540,10 @@ ok(!/\u2014/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /public/.test(bridgeIn
   ok(bridgeIn.landingAssets().map((a) => a.id).join() === "usdc,usdt,sol", "it lands as SOL, USDC or USDT");
   ok(bridgeIn.defaultLanding({ symbol: "USDT0" }) === "usdt" && bridgeIn.defaultLanding({ symbol: "ETH" }) === "usdc" && bridgeIn.defaultLanding({ symbol: "USDT" }, { usdt: false }) === "usdc", "USDT stays USDT, the rest lands as USDC, never on an asset not set up");
   ok(bridgeIn.relayCurrency(SOL) === "11111111111111111111111111111111" && bridgeIn.relayCurrency(USDC) === USDC.mint, "Relay's names for SOL and a mint");
-  ok(bridgeIn.formatLanding(19_842_157n, 6) === "19.84" && bridgeIn.formatLanding(270_400_917n, 9) === "0.2704", "amounts read plainly");
+  ok(
+    !("formatLanding" in bridgeIn) && displayAmount(19_842_157n, 6) === "19.84" && displayAmount(270_400_917n, 9) === "0.27" && displayAmount(1_000n, 9) === "<0.01",
+    "amounts it shows read two places, cut down, through the one shared formatter (lib/amountShort)"
+  );
 }
 
 // ---------------------------------------------------------------- the quote route, Relay faked

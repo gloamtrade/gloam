@@ -5,6 +5,7 @@ import { HowItWorks } from "@/components/ui/HowItWorks";
 import { Select } from "@/components/ui/Select";
 import { PartnerBreakdown, type BreakdownStats } from "@/components/partners/PartnerBreakdown";
 import type { BackfillResult } from "@/lib/partnerBackfill";
+import { fmtAmount } from "./format";
 
 /**
  * Admin > Partners, one partner: their figures for one tier by source, kind, day
@@ -505,7 +506,7 @@ export function AdminBackfill({ onDone }: { onDone: () => void }) {
                       <td className="px-3 py-2">{a.counted}</td>
                       <td className="px-3 py-2">
                         {Object.entries(a.byToken)
-                          .map(([sym, v]) => `${Number(v).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${sym}`)
+                          .map(([sym, v]) => `${fmtAmount(String(v))} ${sym}`)
                           .join(", ") || "None"}
                       </td>
                     </tr>

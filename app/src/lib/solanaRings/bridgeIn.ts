@@ -366,13 +366,3 @@ export function refundPlace(t: Pick<TrackedBridge, "mode" | "send">): string {
 /** The one line on what is public, said wherever money comes in from another chain. */
 export const SOLANA_BRIDGE_PRIVACY_NOTE =
   "Bridging in is public, like any deposit: the chain you pay from and Relay show it. Once private on Solana, the token and amount stay hidden.";
-
-/** "19.84" for a stablecoin, up to six decimals for SOL, from base units. */
-export function formatLanding(amount: bigint, decimals: number): string {
-  const base = 10n ** BigInt(decimals);
-  const whole = amount / base;
-  const keep = decimals === 6 ? 2 : 6;
-  const frac = (amount % base).toString().padStart(decimals, "0").slice(0, keep);
-  const trimmed = decimals === 6 ? frac : frac.replace(/0+$/, "");
-  return trimmed ? `${whole.toLocaleString("en-US")}.${trimmed}` : whole.toLocaleString("en-US");
-}

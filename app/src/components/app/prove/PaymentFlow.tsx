@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useId, useMemo, useState } from "react";
 import { encodeProof, provePayment } from "@/lib/proofs";
-import { assetDecimals, assetLabel, formatAssetAmount, parseAssetAmount, type LocalNote } from "@/lib/shield";
+import { assetDecimals, assetLabel, formatAssetAmount, formatAssetAmountExact, parseAssetAmount, type LocalNote } from "@/lib/shield";
 import { amountTextError } from "@/lib/amountText";
 import { PaymentNoteLine } from "../PaymentNote";
 import {
@@ -158,12 +158,13 @@ export function PaymentFlow({ notes }: { notes: LocalNote[] }) {
           headline={
             done.amount != null ? (
               <>
-                A payment of {formatAssetAmount(done.amount, done.asset)}{" "}
+                {/* what the proof states, so every unit: the rest of the app shows two places */}
+                A payment of {formatAssetAmountExact(done.amount, done.asset)}{" "}
                 <span className="text-mute">{assetLabel(done.asset)}</span>
               </>
             ) : (
               <>
-                A payment of at least {formatAssetAmount(done.minAmount, done.asset)}{" "}
+                A payment of at least {formatAssetAmountExact(done.minAmount, done.asset)}{" "}
                 <span className="text-mute">{assetLabel(done.asset)}</span>
               </>
             )
@@ -260,7 +261,7 @@ export function PaymentFlow({ notes }: { notes: LocalNote[] }) {
           <div role="radiogroup" aria-labelledby={`${ids}-show`} className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {(
               [
-                [true, "Show the amount", `They see ${formatAssetAmount(amount, asset)} ${sym}`],
+                [true, "Show the amount", `They see ${formatAssetAmountExact(amount, asset)} ${sym}`],
                 [false, "Only show it was at least…", "The exact amount stays hidden"],
               ] as const
             ).map(([value, label, hint]) => {
@@ -370,12 +371,13 @@ function PaymentAside({
 }) {
   const unset = <span className="text-faint">Not set yet</span>;
   const until = expiresAt ?? expiresAtFor(expiry);
+  // what the proof states, so every unit: the rest of the app shows two places
   const amountValue = !note
     ? unset
     : reveal
-      ? `${formatAssetAmount(note.amountWei, note.asset)} ${assetLabel(note.asset)}`
+      ? `${formatAssetAmountExact(note.amountWei, note.asset)} ${assetLabel(note.asset)}`
       : minAmount != null && minAmount > 0n
-        ? `At least ${formatAssetAmount(minAmount, note.asset)} ${assetLabel(note.asset)}`
+        ? `At least ${formatAssetAmountExact(minAmount, note.asset)} ${assetLabel(note.asset)}`
         : unset;
   return (
     <>

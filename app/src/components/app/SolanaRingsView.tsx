@@ -36,11 +36,9 @@ export function parseAmount(text: string, decimals: number): bigint | null {
   return v > 0n ? v : null;
 }
 
+import { displayAmount } from "@/lib/amountShort";
 export function formatAmount(v: bigint, decimals: number): string {
-  const base = 10n ** BigInt(decimals);
-  const whole = v / base;
-  const frac = (v % base).toString().padStart(decimals, "0").replace(/0+$/, "").slice(0, 6);
-  return frac ? `${whole.toLocaleString("en-US")}.${frac}` : whole.toLocaleString("en-US");
+  return displayAmount(v, decimals);
 }
 
 export function SolanaRingsView() {

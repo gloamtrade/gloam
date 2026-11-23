@@ -8,7 +8,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { payrollParts } from "@gloamtrade/sdk";
 import { encodeProof, provePayrollTotal, type PayrollNote } from "@/lib/proofs";
 import { payrollProofNotes, type PayrollBatch } from "@/lib/payroll";
-import { formatAssetAmount, summaryDecimals } from "@/lib/shield";
+import { formatAssetAmount } from "@/lib/shield";
 import { track } from "@/lib/track";
 import { SealDots } from "@/components/ui/SealDots";
 import { SealedField } from "@/components/ui/SealedField";
@@ -199,7 +199,7 @@ export function ProveTotal({
                 <div className="relative">
                   <p className="text-[13px] text-mute">The proof says</p>
                   <p className="tnum mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[28px] font-light leading-tight tracking-[-0.018em] text-foreground">
-                    <span>Paid {formatAssetAmount(total, batch.asset, summaryDecimals(batch.asset))}</span>
+                    <span>Paid {formatAssetAmount(total, batch.asset)}</span>
                     <TokenLogo id={logoId} symbol={symbol} size={22} />
                     <span className="text-mute">{symbol}</span>
                   </p>
@@ -427,7 +427,7 @@ function ShareCard({
             id={`${ids}-title`}
             className="tnum mt-4 text-[26px] font-light leading-tight tracking-[-0.018em] text-foreground sm:text-[30px]"
           >
-            {payments(count)} adding up to {formatAssetAmount(total, asset, summaryDecimals(asset))} <span className="text-mute">{symbol}</span>
+            {payments(count)} adding up to {formatAssetAmount(total, asset)} <span className="text-mute">{symbol}</span>
           </p>
           <dl className="mt-4 grid grid-cols-1 gap-x-8 gap-y-2 text-[13.5px] sm:grid-cols-2">
             {rows.map((r) => (

@@ -26,7 +26,6 @@ import {
   SOLANA_BRIDGE_PRIVACY_NOTE,
   defaultLanding,
   flowReducer,
-  formatLanding,
   landingAssets,
   loadTracked,
   refundPlace,
@@ -55,6 +54,7 @@ import { SealedField } from "@/components/ui/SealedField";
 import { AmountProblem } from "./AmountProblem";
 import { SuccessReceipt } from "./SuccessModal";
 import { ChainLogo, CostWarning, PoweredByRelay, SourceBalance, TokenMark, feeRows, fmtMoney } from "./BridgeIn";
+import { displayAmount, displayAmountNumber, displayAmountText } from "@/lib/amountShort";
 
 type KV = { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };
 
@@ -140,7 +140,7 @@ function ArrivalsNotice({
               <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[14px] leading-relaxed text-foreground">
                 <TokenMark src={`/brand/tokens/${asset.id}.png`} size={18} />
                 <span className="tnum font-medium">
-                  {formatLanding(a.amount, asset.decimals)} {asset.symbol}
+                  {displayAmount(a.amount, asset.decimals)} {asset.symbol}
                 </span>
                 arrived and isn&apos;t private yet.
               </p>
@@ -485,16 +485,16 @@ function QuoteRows({
     "Added privately, about",
     <span key="a" className="flex items-center gap-1.5 font-medium">
       <TokenMark src={q.receive.logo} size={18} />
-      {q.receive.decimals === 6 ? fmtMoney(Number(q.receive.amount)) : Number(q.receive.amount).toLocaleString("en-US", { maximumFractionDigits: 6 })}{" "}
+      {displayAmountText(q.receive.amount)}{" "}
       {q.receive.symbol}
     </span>,
   ];
   // Once it is paid, only what was sent, what lands and what it cost: the rest was for deciding.
   const rows: [string, React.ReactNode][] = sentRow
-    ? [["Sent", `${q.send.amount} ${q.send.symbol} on ${q.send.chain}`], ...(returned ? [] : [lands]), ...feeRows(q, "Bridge fee")]
+    ? [["Sent", `${displayAmountText(q.send.amount)} ${q.send.symbol} on ${q.send.chain}`], ...(returned ? [] : [lands]), ...feeRows(q, "Bridge fee")]
     : [
         lands,
-        ["At least", `${q.receive.decimals === 6 ? fmtMoney(Number(q.receive.minimum)) : Number(q.receive.minimum).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${q.receive.symbol}`],
+        ["At least", `${displayAmountText(q.receive.minimum)} ${q.receive.symbol}`],
         ...feeRows(q, "Bridge fee"),
         ...gas,
         ["Making it private", "Free, Gloam pays the Solana fee"],
@@ -925,7 +925,6 @@ function BridgeSheet({
                       loading={readable && srcRead.isLoading}
                       decimals={token.decimals}
                       symbol={token.symbol}
-                      stable={token.stable}
                       over={overSource ? chain.name : null}
                       onMax={
                         token.stable && srcBalance != null
@@ -936,7 +935,7 @@ function BridgeSheet({
                   )}
                   <p className="mt-1.5 text-[12px] text-mute">
                     {token.stable
-                      ? `From ${BRIDGE_MIN_USD} to ${BRIDGE_MAX_USD.toLocaleString("en-US")} ${token.symbol}.`
+                      ? `From ${displayAmountNumber(BRIDGE_MIN_USD)} to ${displayAmountNumber(BRIDGE_MAX_USD)} ${token.symbol}.`
                       : `Up to about $${BRIDGE_MAX_USD.toLocaleString("en-US")} worth.`}{" "}
                     All of what arrives goes private.
                   </p>
@@ -982,7 +981,7 @@ function BridgeSheet({
                       : "Getting an address…"
                     : walletPays
                       ? amountOk
-                        ? `Bridge ${amount} ${token.symbol} from your wallet`
+                        ? `Bridge ${displayAmountText(amount)} ${token.symbol} from your wallet`
                         : "Bridge from your wallet"
                       : "Get a deposit address"}
                 </button>
@@ -1008,7 +1007,7 @@ function BridgeSheet({
                   Bridge
                   <TokenMark src={flow.quote.send.logo} size={18} />
                   <span className="tnum font-medium">
-                    {flow.quote.send.amount} {flow.quote.send.symbol}
+                    {displayAmountText(flow.quote.send.amount)} {flow.quote.send.symbol}
                   </span>
                   from your wallet on
                   <ChainLogo id={flow.quote.send.chainId} size={18} />
@@ -1159,7 +1158,7 @@ function Landed({ flow, onDone }: { flow: Extract<Flow, { kind: "landed" }>; onD
   const done = useRef<HTMLButtonElement>(null);
   useModalFocus(receipt, noop, { initial: done });
   const asset = assetOf(flow.t.receive.assetId);
-  const amount = asset && flow.amount > 0n ? formatLanding(flow.amount, asset.decimals) : flow.t.receive.amount;
+  const amount = asset && flow.amount > 0n ? displayAmount(flow.amount, asset.decimals) : displayAmountText(flow.t.receive.amount);
   return (
     <div ref={receipt} className="relative pt-3 text-center">
       <SuccessReceipt

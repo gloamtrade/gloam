@@ -71,6 +71,16 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-payroll-csv.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-site.mts
 
+      # Every token amount the app shows: two places, cut down and never rounded up,
+      # "<0.01" for dust, "0.00" for zero, thousands separators, 6- and 18-decimal
+      # tokens and bigints (lib/amountShort, lib/shield formatAssetAmount), and the
+      # exact formatter that what is sent, copied, exported or proved keeps.
+      - name: App amount display self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-amount-display.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-amount-short.mts
+
       # Each sign-in's own private account in a browser: signed out shows nothing, a second
       # wallet sees and spends none of the first's, the first account goes to its owner on
       # evidence only, backups stay per account. In-memory storage and a stand-in backup service.

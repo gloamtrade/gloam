@@ -100,7 +100,7 @@ test("stablecoins get 25 to 1,000, up to the spendable balance", () => {
   const got = presetAmounts({ chainId: BASE, asset: USDC_BASE, spendable: units(300) });
   assert.deepEqual(got.map((x) => x.value), ["25", "50", "100", "250"]);
   assert.deepEqual(got.map((x) => x.wei), [units(25), units(50), units(100), units(250)]);
-  assert.deepEqual(got.map((x) => x.label), ["25", "50", "100", "250"]);
+  assert.deepEqual(got.map((x) => x.label), ["25.00", "50.00", "100.00", "250.00"]);
 });
 
 test("a preset equal to the balance is offered; one over it is not", () => {
@@ -110,11 +110,11 @@ test("a preset equal to the balance is offered; one over it is not", () => {
   assert.deepEqual(presetAmounts({ chainId: BASE, asset: USDC_BASE, spendable: 0n }), []);
 });
 
-test("1,000 is labelled with a separator and the field gets plain digits", () => {
+test("1,000 is labelled 1,000.00, two places with a separator, and the field gets plain digits", () => {
   const got = presetAmounts({ chainId: ETHEREUM, asset: USDG_ETH, spendable: units(5000) });
   assert.deepEqual(got.map((x) => x.value), [...STABLE_PRESETS]);
   const top = got.at(-1)!;
-  assert.equal(top.label, "1,000");
+  assert.equal(top.label, "1,000.00");
   assert.equal(top.value, "1000");
   assert.equal(top.wei, 1_000_000_000n);
 });
@@ -138,7 +138,7 @@ test("ETH and WETH get 0.01 to 0.5, in 18 decimals", () => {
   const eth = presetAmounts({ chainId: BASE, asset: ETH, spendable: 2n * 10n ** 17n });
   assert.deepEqual(eth.map((x) => x.value), ["0.01", "0.05", "0.1"]);
   assert.deepEqual(eth.map((x) => x.wei), [10n ** 16n, 5n * 10n ** 16n, 10n ** 17n]);
-  assert.deepEqual(eth.map((x) => x.label), ["0.01", "0.05", "0.1"]);
+  assert.deepEqual(eth.map((x) => x.label), ["0.01", "0.05", "0.10"]);
   const weth = presetAmounts({ chainId: 4663, asset: WETH_RH, spendable: 10n ** 18n });
   assert.deepEqual(weth.map((x) => x.value), [...ETH_PRESETS]);
   assert.deepEqual(presetAmounts({ chainId: BASE, asset: ETH, spendable: 10n ** 16n - 1n }), []);
