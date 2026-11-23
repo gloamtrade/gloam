@@ -6,8 +6,9 @@
  * unsubscribe link and RFC 8058 one-click headers. Nobody ever sees anyone
  * else's address. RESEND_API_KEY unset means sending is off.
  *
- * Only the updates list (lib/updatesList) is ever read for recipients:
- * never testers, contest entries, partners or anything else.
+ * Only the updates list (lib/updatesList) is ever read for recipients. Contest
+ * entrants are on it only once the admin adds them (lib/updatesImport); never
+ * testers, partners or anything else.
  *
  * Never twice. An update has an id and its stored email (subject, HTML and text,
  * with a mark where each person's link goes, so a resend is byte for byte the
@@ -45,6 +46,7 @@ import {
   type UpdatesSubscriber,
 } from "./updatesList";
 import { SITE, UNSUBSCRIBE_MARK, checkUpdate, escapeHtml, renderUpdateEmail } from "./updatesMailRender";
+import { deliveryCounts, type DeliveryCounts } from "./updatesDelivery";
 
 export const RESEND_BATCH_URL = "https://api.resend.com/emails/batch";
 export const DEFAULT_FROM = "Gloam <updates@gloam.trade>";
@@ -697,6 +699,8 @@ export async function retryFailed(id: string): Promise<SendProgress> {
 // ------------------------------------------------------------------ reading
 
 export type AdminUpdate = Omit<SendProgress, "busy" | "stopped"> & {
+  /** What Resend told us after sending (api/updates/webhook): delivered, bounced, complaints, delays. */
+  delivery: DeliveryCounts;
   subject: string;
   day: string;
   createdAt: number;
@@ -716,8 +720,10 @@ export async function listUpdatesForAdmin(): Promise<AdminUpdate[]> {
     const rec = jsonOf<UpdateRecord>(raw);
     if (!rec) continue;
     const p = await progressOf(rec);
+    const delivery = await deliveryCounts(rec.id);
     out.push({
       id: rec.id,
+      delivery,
       status: rec.status,
       sent: p.sent,
       failed: p.failed,

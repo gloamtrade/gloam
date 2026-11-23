@@ -441,7 +441,9 @@ export default function PrivacyPage() {
         send updates. It is stored on its own, apart from any wallet. We note
         which updates went to it, so nobody gets the same one twice, and we
         don&apos;t track whether you open an update or click its links. Resend
-        delivers the emails for us. You can unsubscribe with the link in any
+        delivers the emails for us and tells us whether each one was delivered,
+        bounced or marked as spam; an address that bounces for good or reports
+        spam comes off the list. You can unsubscribe with the link in any
         update, with your mail app&apos;s Unsubscribe button, or by writing to{" "}
         <a href="mailto:hello@gloam.trade">hello@gloam.trade</a>. The updates
         themselves are public at <Link href="/updates">gloam.trade/updates</Link>.

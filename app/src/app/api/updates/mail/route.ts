@@ -4,6 +4,7 @@ import { hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { KvUnavailableError, kv, kvBackend } from "@/lib/partnersKv";
 import { sameSiteJson } from "@/lib/partnersAuth";
 import { UPDATES_IDS } from "@/lib/updatesList";
+import { deliveryTrackingOn, listDeliveryProblems } from "@/lib/updatesDelivery";
 import {
   MailInputError,
   MailOffError,
@@ -45,17 +46,21 @@ function failed(e: unknown) {
 
 /**
  * Admin only: whether sending is on (and why not), the sender, how many are
- * on the list, and every update with its counts. Never the API key or an email.
+ * on the list, and every update with its counts and what Resend said after
+ * (delivered, bounced, complaints). Never the API key; the only emails are
+ * bounced or complaining addresses, so the admin sees who left the list and why.
  */
 export async function GET() {
   if (!(await isAdminAuthenticated())) return fail(401, "Admin session required.");
   const backend = kvBackend();
   const mail = publicMailConfig();
-  if (backend === "none") return done({ mail, backend, subscribers: 0, updates: [] });
+  const tracking = deliveryTrackingOn();
+  if (backend === "none") return done({ mail, backend, subscribers: 0, updates: [], tracking, problems: [] });
   try {
     const [count] = await kv([["SCARD", UPDATES_IDS]]);
     const updates = await listUpdatesForAdmin();
-    return done({ mail, backend, subscribers: Number(count) || 0, updates });
+    const problems = await listDeliveryProblems(100);
+    return done({ mail, backend, subscribers: Number(count) || 0, updates, tracking, problems });
   } catch (e) {
     return failed(e);
   }
