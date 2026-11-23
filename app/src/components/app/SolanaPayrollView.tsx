@@ -27,6 +27,7 @@ import {
   type RowStatus,
 } from "@/lib/solanaRings/payroll";
 import type { PayrollStore } from "@/lib/solanaRings/payrollStore";
+import { displayAmount } from "@/lib/amountShort";
 import { Spinner } from "@/components/ui/Spinner";
 import { TokenLogo } from "./TokenLogo";
 import { useSolana, type SolanaPayrollEngine } from "./SolanaAccount";
@@ -53,7 +54,6 @@ function short(a: string) {
   return a.length > 12 ? `${a.slice(0, 4)}...${a.slice(-4)}` : a;
 }
 
-import { displayAmount } from "@/lib/amountShort";
 function fmt(v: bigint, decimals: number): string {
   return displayAmount(v, decimals);
 }

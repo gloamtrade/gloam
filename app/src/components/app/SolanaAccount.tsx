@@ -16,6 +16,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNetwork } from "./NetworkProvider";
 import { useDemo } from "@/lib/demo";
+import { displayAmount } from "@/lib/amountShort";
 import { RINGS_PROXY_PATHS, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAssets, ringsBalancesFrom, type RingsAsset, type RingsNetwork } from "@/lib/solanaRings/config";
 import type { RelayStatus, RingsSession } from "@/lib/solanaRings/client";
 import type { PayrollDeps } from "@/lib/solanaRings/payroll";
@@ -104,12 +105,9 @@ export function parseSolAmount(text: string, decimals: number): bigint | null {
   return v > 0n ? v : null;
 }
 
-/** An amount in base units as text: grouped, at most six decimals. */
+/** An amount in base units as shown, like every amount in the app: two places, cut down (lib/amountShort). */
 export function formatSolAmount(v: bigint, decimals: number): string {
-  const base = 10n ** BigInt(decimals);
-  const whole = v / base;
-  const frac = (v % base).toString().padStart(decimals, "0").replace(/0+$/, "").slice(0, 6);
-  return frac ? `${whole.toLocaleString("en-US")}.${frac}` : whole.toLocaleString("en-US");
+  return displayAmount(v, decimals);
 }
 
 /** The same amount as plain text for an input (no grouping, every decimal). */
