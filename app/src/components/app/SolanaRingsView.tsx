@@ -15,6 +15,8 @@ import type { RelayStatus, RingsSession } from "@/lib/solanaRings/client";
 import { canSignMessage, connectSolana, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
 import { CopyButton } from "@/components/ui/CodeBlock";
 import { SolanaPayrollView } from "./SolanaPayrollView";
+import { SolanaArrivals, SolanaBridgeIn } from "./SolanaBridgeIn";
+import { solanaBridgeVisible } from "@/lib/solanaRings/bridgeIn";
 
 type Tab = "balance" | "add" | "pay" | "payroll" | "cashout";
 
@@ -212,6 +214,7 @@ export function SolanaRingsView() {
         ))}
       </div>
 
+      {tab === "balance" && <SolanaArrivals session={session} onPrivate={() => void lib().then((l) => setBalances(l.ringsBalances(session)))} />}
       {tab === "balance" && (
         <Card title="Private balance">
           <dl className="mt-4 space-y-2">
@@ -261,6 +264,9 @@ export function SolanaRingsView() {
             })
           }
         />
+      )}
+      {tab === "add" && solanaBridgeVisible() && (
+        <SolanaBridgeIn session={session} ready={ready} relayFunded={relay.funded} onPrivate={() => void lib().then((l) => setBalances(l.ringsBalances(session)))} />
       )}
 
       {tab === "pay" && (

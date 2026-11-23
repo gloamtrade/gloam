@@ -116,7 +116,7 @@ type WalletStage =
   | { kind: "sent"; quote: BridgeQuote; hash: Hex | null; unsure: boolean };
 
 /** A chain's logo, with its dark-theme version when Relay ships one. */
-function ChainLogo({ id, size = 24, className = "" }: { id: number; size?: number; className?: string }) {
+export function ChainLogo({ id, size = 24, className = "" }: { id: number; size?: number; className?: string }) {
   return (
     <span className={`relative inline-block shrink-0 overflow-hidden rounded-full ${className}`} style={{ width: size, height: size }}>
       {/* eslint-disable-next-line @next/next/no-img-element -- small local logos */}
@@ -127,7 +127,7 @@ function ChainLogo({ id, size = 24, className = "" }: { id: number; size?: numbe
   );
 }
 
-function TokenMark({ src, size = 20 }: { src: string; size?: number }) {
+export function TokenMark({ src, size = 20 }: { src: string; size?: number }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element -- small local logos
     <img src={src} alt="" width={size} height={size} className="shrink-0 rounded-full" style={{ width: size, height: size }} />
@@ -2143,7 +2143,7 @@ function stableMax(value: bigint, decimals: number): string {
 }
 
 /** "Balance 727.49 USDC" under the amount, with Max when it has one. Nothing without a reading. */
-function SourceBalance({
+export function SourceBalance({
   value,
   loading,
   decimals,
@@ -2192,7 +2192,7 @@ function SourceBalance({
 }
 
 /** "Powered by" Relay's own wordmark, dark or light with the theme, linking to Relay. */
-function PoweredByRelay() {
+export function PoweredByRelay() {
   return (
     <span className="whitespace-nowrap">
       Powered by{" "}
@@ -2346,7 +2346,7 @@ function SwapReview({
 }
 
 /** Dollars with cents and thousands separators. */
-function fmtMoney(n: number): string {
+export function fmtMoney(n: number): string {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
@@ -2392,7 +2392,7 @@ function SwapPrice({ quote, from, to }: { quote: BridgeQuote | null; from: strin
 }
 
 /** Relay's fee under `label`, then Gloam's own on a line of its own when it takes one (BRIDGE_FEE_BPS). */
-function feeRows(q: { feeUsd: number; appFee: BridgeAppFee | null }, label: string): [string, string][] {
+export function feeRows(q: { feeUsd: number; appFee: BridgeAppFee | null }, label: string): [string, string][] {
   const { relayUsd, app } = bridgeFeeLines(q);
   const said = (usd: number) => (usd < 0.01 ? "Under a cent" : `about $${fmtMoney(usd)}`);
   return [[label, said(relayUsd)], ...(app ? ([[`Gloam fee (${formatFeePercent(app.bps)})`, said(app.usd)]] as [string, string][]) : [])];
@@ -2403,7 +2403,7 @@ function feeRows(q: { feeUsd: number; appFee: BridgeAppFee | null }, label: stri
  * (lib/bridge expensiveRoute). The fees are already in the rows above; this
  * puts the total in plain words and says what tends to cost less.
  */
-function CostWarning({ quote }: { quote: CostedQuote & { receive: { symbol: string } } }) {
+export function CostWarning({ quote }: { quote: CostedQuote & { receive: { symbol: string } } }) {
   const cost = expensiveRoute(quote);
   if (!cost) return null;
   const pct = cost.share >= 0.1 ? Math.round(cost.share * 100) : Math.round(cost.share * 1000) / 10;
