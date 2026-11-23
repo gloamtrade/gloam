@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { loadBnbUsd, loadEthUsd, loadHypeUsd, loadLiveMarkets } from "@/lib/live-quotes";
+import { loadBnbUsd, loadEthUsd, loadHypeUsd, loadLiveMarkets, loadSolUsd } from "@/lib/live-quotes";
 import { BNB_ENABLED } from "@/lib/bnb";
+import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 import { logSafe } from "@/lib/logSafe";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 
@@ -18,6 +19,8 @@ type Body = {
   hypeUsd: number | null;
   /** BNB in USD, BNB Chain's gas coin: only while BNB Chain is on (lib/bnb), else left out. */
   bnbUsd?: number | null;
+  /** SOL in USD, for Gloam on Solana: only while Solana is on (lib/solanaRings/config), else left out. */
+  solUsd?: number | null;
   meta: { liveCount: number; total: number; fetchedAt: number };
 };
 
@@ -25,14 +28,15 @@ let cached: { at: number; body: Body } | null = null;
 let inflight: Promise<Body> | null = null;
 
 async function load(): Promise<Body> {
-  const [markets, ethUsd, hypeUsd, bnbUsd] = await Promise.all([
+  const [markets, ethUsd, hypeUsd, bnbUsd, solUsd] = await Promise.all([
     loadLiveMarkets(),
     loadEthUsd(),
     loadHypeUsd(),
     BNB_ENABLED ? loadBnbUsd() : Promise.resolve(null),
+    SOLANA_RINGS_ENABLED ? loadSolUsd() : Promise.resolve(null),
   ]);
   const liveCount = markets.filter((m) => m.source === "live").length;
-  return { markets, ethUsd, hypeUsd, ...(BNB_ENABLED ? { bnbUsd } : {}), meta: { liveCount, total: markets.length, fetchedAt: Date.now() } };
+  return { markets, ethUsd, hypeUsd, ...(BNB_ENABLED ? { bnbUsd } : {}), ...(SOLANA_RINGS_ENABLED ? { solUsd } : {}), meta: { liveCount, total: markets.length, fetchedAt: Date.now() } };
 }
 
 async function fresh(): Promise<Body> {
