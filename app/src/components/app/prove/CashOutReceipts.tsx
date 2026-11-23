@@ -41,6 +41,8 @@ export function CashOutReceipts() {
   const pathname = usePathname();
   const txParam = sp.get("tx");
   const netParam = sp.get("net");
+  // which cash out in that transaction: a cash out across balances sends its parts in one
+  const partParam = sp.get("part");
 
   // this account's notes, read once they are open, and again when they change
   const [notesVersion, setNotesVersion] = useState(0);
@@ -140,13 +142,15 @@ export function CashOutReceipts() {
     if (!txParam || !isTxHash(txParam) || openedParam.current === txParam) return;
     openedParam.current = txParam;
     const on = isNetworkKey(netParam) ? getNetwork(netParam) : network;
-    void openReceipt(txParam, undefined, on);
+    const part = partParam && /^0x[0-9a-fA-F]{64}$/.test(partParam) ? (partParam as Hex) : undefined;
+    void openReceipt(txParam, part, on);
     const params = new URLSearchParams(Array.from(sp.entries()));
     params.delete("tx");
     params.delete("net");
+    params.delete("part");
     const q = params.toString();
     router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
-  }, [txParam, netParam, network, openReceipt, sp, router, pathname]);
+  }, [txParam, netParam, partParam, network, openReceipt, sp, router, pathname]);
 
   if (!network.pool) {
     return <EmptyCard title="No vault on this network" body="Switch to a network Gloam runs on to see your cash outs." />;

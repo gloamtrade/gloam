@@ -2,7 +2,7 @@
  * Gloam relay, browser side. See lib/relay/server.ts for what the relay will
  * and will not do. Everything here degrades to "send from your wallet".
  */
-import type { BatchPart } from "./batch";
+import type { BatchPart, UnshieldBatchPart } from "./batch";
 import type { Address, Hex, PublicClient } from "viem";
 import { getRhPublicClient } from "@/lib/rhClient";
 import { readDemo } from "@/lib/demoFlag";
@@ -155,7 +155,19 @@ export async function relayTransferBatch(p: { chainId: number; parts: readonly B
 }
 
 /** A batch the relay refused before sending: the parts can still go one by one. */
-export const BATCH_REFUSED_CODES: ReadonlySet<string> = new Set(["batch_big", "batch_parts", "batch_repeat", "no_memo", "memo_sent", "gas_most"]);
+export const BATCH_REFUSED_CODES: ReadonlySet<string> = new Set(["batch_big", "batch_parts", "batch_repeat", "batch_network", "no_memo", "memo_sent", "gas_most"]);
+
+/**
+ * A cash out across balances as one transaction (lib/relay/batch): every part's cash out
+ * to the same wallet, all landing or none. `feeBps` is the cash-out fee the person
+ * confirmed: the relay refuses it (code fee_moved) if the vault's fee is now higher.
+ * Refused with nothing sent where it can't go in one (batch_big, batch_network, an older
+ * relay that doesn't know it): the caller sends the parts one by one instead.
+ */
+export async function relayUnshieldBatch(p: { chainId: number; pool: Address; feeBps: number; parts: readonly UnshieldBatchPart[] }): Promise<Hex> {
+  const parts = p.parts.map(({ proof, root, nullifier, asset, to, amount }) => ({ proof, root, nullifier, asset, to, amount }));
+  return (await post({ action: "unshieldBatch", chainId: p.chainId, pool: p.pool, feeBps: p.feeBps, parts })).hash;
+}
 
 export async function relayUnshield(p: {
   chainId: number;

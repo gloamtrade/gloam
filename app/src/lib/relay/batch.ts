@@ -8,6 +8,11 @@
  * can put them all in one Multicall3 aggregate3 call with allowFailure false.
  * Either every part lands, with its payment message, or none does.
  *
+ * A cash out across balances (lib/cashOutAcross) goes the same way: its parts'
+ * unshields, each spending its own note to the same wallet, in one aggregate3
+ * call, all or nothing (unshieldBatchCalls). The vault's unshield() never reads
+ * msg.sender either: each proof binds its own amount and wallet.
+ *
  * Multicall3 has the same address and the same code on every network the relay
  * serves: Robinhood Chain, Tempo, Base, Ethereum, BNB Chain and Elysium, and
  * their testnets (code hash read on each, 23 November 2026). A network missing from BATCH_CHAIN_IDS sends
@@ -16,7 +21,7 @@
  * Shared by the relay (lib/relay/server) and the app (lib/relay/client): no
  * server code here.
  */
-import { encodeFunctionData, type Address, type Hex } from "viem";
+import { decodeFunctionData, encodeFunctionData, type Address, type Hex } from "viem";
 
 export const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11" as const satisfies Address;
 /** keccak256 of Multicall3's runtime code, the same on every chain below. */
@@ -132,4 +137,104 @@ export function batchCalldata(pool: Address, memoBoard: Address | null, parts: r
 /** Whether payments in parts go as one transaction on this network. */
 export function batchesOn(chainId: number): boolean {
   return BATCH_CHAIN_IDS.has(chainId);
+}
+
+// ---------------------------------------------------------------- cash outs
+
+/** One part of a cash out in one go: a proven unshield, exactly what a single relayed cash out takes. */
+export type UnshieldBatchPart = {
+  proof: Hex;
+  root: Hex;
+  nullifier: Hex;
+  asset: Address;
+  to: Address;
+  amount: bigint;
+};
+
+const unshieldAbi = [
+  {
+    type: "function",
+    name: "unshield",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "proof", type: "bytes" },
+      { name: "root", type: "bytes32" },
+      { name: "nullifier", type: "bytes32" },
+      { name: "asset", type: "address" },
+      { name: "to", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+] as const;
+
+/**
+ * The relay refuses a cash out in one go with this code when the vault's cash-out
+ * fee is now higher than the one the person confirmed: every part would pay less
+ * than it showed. Nothing is sent, and the parts don't go one by one either.
+ */
+export const FEE_MOVED_CODE = "fee_moved";
+
+/**
+ * The calls a cash out in one go makes, in order: each part's unshield on the
+ * vault, not allowed to fail. Nothing else: no value, no other target, no other
+ * function, no payment message.
+ */
+export function unshieldBatchCalls(pool: Address, parts: readonly UnshieldBatchPart[]): BatchCall[] {
+  return parts.map((p) => ({
+    target: pool,
+    allowFailure: false,
+    callData: encodeFunctionData({ abi: unshieldAbi, functionName: "unshield", args: [p.proof, p.root, p.nullifier, p.asset, p.to, p.amount] }),
+  }));
+}
+
+/** The aggregate3 calldata for a cash out in one go, as the relay sends it to MULTICALL3. */
+export function unshieldBatchCalldata(pool: Address, parts: readonly UnshieldBatchPart[]): Hex {
+  return encodeFunctionData({ abi: multicall3Abi, functionName: "aggregate3", args: [unshieldBatchCalls(pool, parts)] });
+}
+
+/**
+ * What is wrong with a cash out batch's calls, or null when nothing is: one call
+ * per part, in order, each the vault's own unshield on `pool`, not allowed to
+ * fail, carrying exactly that part's proof, root, nullifier, asset, wallet and
+ * amount. The relay checks the calls it built with this just before it sends
+ * them, so nothing but those unshields can ever go out in one.
+ */
+export function unshieldBatchProblem(
+  pool: Address,
+  parts: readonly UnshieldBatchPart[],
+  calls: readonly { target: Address; allowFailure: boolean; callData: Hex }[]
+): string | null {
+  if (calls.length !== parts.length) return "A cash out in one go makes one call per part.";
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  for (let i = 0; i < calls.length; i++) {
+    const c = calls[i]!;
+    const p = parts[i]!;
+    if (!same(c.target, pool)) return "A cash out in one go only calls this network's vault.";
+    if (c.allowFailure !== false) return "No part of a cash out in one go may fail on its own.";
+    let args: readonly unknown[] | undefined;
+    try {
+      const decoded = decodeFunctionData({ abi: unshieldAbi, data: c.callData });
+      if (decoded.functionName !== "unshield") return "A cash out in one go only calls the vault's unshield.";
+      args = decoded.args;
+    } catch {
+      return "A cash out in one go only calls the vault's unshield.";
+    }
+    const [proof, root, nullifier, asset, to, amount] = args as readonly [Hex, Hex, Hex, Address, Address, bigint];
+    if (
+      !same(proof, p.proof) ||
+      !same(root, p.root) ||
+      !same(nullifier, p.nullifier) ||
+      !same(asset, p.asset) ||
+      !same(to, p.to) ||
+      amount !== p.amount
+    ) {
+      return "A call in this cash out isn't the part it was given for.";
+    }
+    // the calldata is exactly that one call, nothing tacked on after it
+    if (!same(c.callData, encodeFunctionData({ abi: unshieldAbi, functionName: "unshield", args: [p.proof, p.root, p.nullifier, p.asset, p.to, p.amount] }))) {
+      return "A call in this cash out isn't the part it was given for.";
+    }
+  }
+  return null;
 }

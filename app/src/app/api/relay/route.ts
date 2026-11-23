@@ -16,6 +16,7 @@ import {
   relayTransfer,
   relayTransferBatch,
   relayUnshield,
+  relayUnshieldBatch,
   relayVaultSwap,
   relayVaultSwapExit,
   type SendHooks,
@@ -35,10 +36,12 @@ export async function GET() {
 
 /**
  * Submit an already-proven private action through the Gloam relay.
- * Body: { chainId, action: "transfer" | "transferBatch" | "unshield" | "memo" | "swap" | "swapExit" | "nameClaim", ...args }
+ * Body: { chainId, action: "transfer" | "transferBatch" | "unshield" | "unshieldBatch" | "memo" | "swap" | "swapExit" | "nameClaim", ...args }
  * "transferBatch" takes { parts: [{ proof, root, nullifier, commitments, memo? }] }: one
- * payment in parts, sent as one transaction (lib/relay/batch). Each part counts against
- * the rate limits as the send it replaces. It carries no partner code.
+ * payment in parts, sent as one transaction (lib/relay/batch). "unshieldBatch" takes
+ * { pool, feeBps, parts: [{ proof, root, nullifier, asset, to, amount }] }: a cash out
+ * across balances, every part's unshield to one wallet in one transaction. Each part of
+ * either counts against the rate limits as the send it replaces. Neither carries a partner code.
  * Returns { ok: true, hash } as soon as the transaction is sent; the client
  * waits for the receipt itself. A transfer also returns `memoTicket` for its
  * payment (commitments[0]), null when the relay has no memo secret: sent back
@@ -67,8 +70,8 @@ export async function POST(req: Request) {
     await checkRateLimit(requester);
     // payment messages have budgets of their own (lib/relay/server holdMemoSlot)
     if (body.action !== "memo") await checkChainRateLimit(net, requester);
-    // a payment in parts counts each part as the send it replaces
-    if (body.action === "transferBatch" && Array.isArray(body.parts)) {
+    // a payment or a cash out in parts counts each part as the send it replaces
+    if ((body.action === "transferBatch" || body.action === "unshieldBatch") && Array.isArray(body.parts)) {
       for (let i = 1; i < Math.min(body.parts.length, BATCH_MAX_PARTS); i++) {
         await checkRateLimit(requester);
         await checkChainRateLimit(net, requester);
@@ -105,6 +108,9 @@ export async function POST(req: Request) {
         break;
       case "unshield":
         hash = await relayUnshield(net, body, requester, hooks);
+        break;
+      case "unshieldBatch":
+        hash = await relayUnshieldBatch(net, body, requester);
         break;
       case "gas-station":
         hash = await relayGasStation(net, body, requester);

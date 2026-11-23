@@ -25,7 +25,8 @@ import { proveCashOut, type CashOutCall } from "@/lib/cashOutProof";
 import { freshPath, splitForCashOut, splitMaybeSent, type TransferArgs } from "@/lib/cashOutSplit";
 import { getLogsSafe } from "@/lib/logRange";
 import { getAllNotes } from "@/lib/noteVault";
-import { relayUnshield, waitForTx } from "@/lib/relay/client";
+import { RelaySubmitError, relayUnshield, relayUnshieldBatch, waitForTx } from "@/lib/relay/client";
+import { FEE_MOVED_CODE, batchesOn } from "@/lib/relay/batch";
 import { publicClientFor } from "@/lib/rhClient";
 import { formatAssetLabel, shieldPoolAbi, updateLocalNote } from "@/lib/shield";
 import { walletErrorForPeople } from "@/lib/walletErrors";
@@ -126,6 +127,18 @@ export function useCashOutAcross(
             setStatus(r.relay ? "Sending through the Gloam relay…" : "Confirm the cash out in your wallet…");
             return r.relay ? relayUnshield(call) : latest.current.walletUnshield(call);
           },
+          // through the relay, every part in one transaction where the network has Multicall3
+          // (lib/relay/batch), at the fee confirmed; a batch the relay surely didn't send
+          // leaves the parts to go one by one, unless the fee went up since
+          ...(r.relay && batchesOn(r.chainId) && typeof r.feeBps === "number"
+            ? {
+                submitTogether: (calls: CashOutCall[]) => {
+                  setStatus("Sending every part together through the Gloam relay…");
+                  return relayUnshieldBatch({ chainId: r.chainId, pool: r.pool, feeBps: r.feeBps!, parts: calls });
+                },
+                togetherRefused: (e: unknown) => !splitMaybeSent(e, true) && !(e instanceof RelaySubmitError && e.code === FEE_MOVED_CODE),
+              }
+            : {}),
           maybeSent: (e) => splitMaybeSent(e, r.relay),
           waitForTx: (h) => waitForTx(h, undefined, client),
           isSpent: async (nullifier) =>
@@ -245,10 +258,11 @@ export function CashOutAcrossPanel({ across, networkKey }: { across: CashOutAcro
           {sent.length > 0 && (
             <div className="mt-2 flex flex-col">
               <span className="text-mute">Get receipts</span>
+              {/* parts sent together share one transaction: each receipt names its own part's spend */}
               {sent.map((x, i) => (
                 <Link
-                  key={x.txHash}
-                  href={`/app/disclose?mode=cashout&tx=${x.txHash}&net=${networkKey}`}
+                  key={x.nullifier ?? `${x.txHash}-${i}`}
+                  href={`/app/disclose?mode=cashout&tx=${x.txHash}&net=${networkKey}${x.nullifier ? `&part=${x.nullifier}` : ""}`}
                   className="inline-flex min-h-10 items-center font-medium text-foreground underline underline-offset-4"
                 >
                   Part {i + 1}: {formatAssetLabel(x.amount, run.asset)}

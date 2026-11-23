@@ -40,6 +40,7 @@ export function DiscloseView() {
     // a receipt link opens once: switching tabs drops it
     params.delete("tx");
     params.delete("net");
+    params.delete("part");
     if (id === "exact") params.delete("mode");
     else params.set("mode", id);
     const q = params.toString();

@@ -68,7 +68,22 @@
  * signs the memo tickets; unset, no tickets go out and every payment message
  * but a partner key's shares the small allowance.
  */
-import { BATCH_MAX_PARTS, BATCH_MIN_PARTS, MULTICALL3, batchCalls, batchCalldata, multicall3Abi, type BatchPart } from "./batch";
+import {
+  BATCH_MAX_PARTS,
+  BATCH_MIN_PARTS,
+  FEE_MOVED_CODE,
+  MULTICALL3,
+  MULTICALL3_CODEHASH,
+  batchCalls,
+  batchCalldata,
+  batchesOn,
+  multicall3Abi,
+  unshieldBatchCalls,
+  unshieldBatchProblem,
+  type BatchCall,
+  type BatchPart,
+  type UnshieldBatchPart,
+} from "./batch";
 import {
   BaseError,
   ContractFunctionRevertedError,
@@ -750,6 +765,17 @@ export function batchGasMost(chainId: number, parts: readonly Pick<BatchPart, "m
 }
 export const BATCH_TOO_BIG_MESSAGE = "This payment is too big to send in one go here. It goes in parts instead.";
 
+/**
+ * What a cash out in one go may use: each part's unshield within a single cash
+ * out's room (sendGasMost), summed. None on Tempo, like every send there. One cash
+ * out with its token transfer is about 350k on Base (sim-cashout-across-fork).
+ */
+export function unshieldBatchGasMost(chainId: number, parts: number): bigint | null {
+  const one = sendGasMost(chainId, "unshield");
+  return one === null ? null : one * BigInt(parts);
+}
+export const UNSHIELD_BATCH_TOO_BIG_MESSAGE = "This cash out is too big to send in one go here. It goes in parts instead.";
+
 function padGas(est: bigint) {
   const padded = (est * 13n) / 10n;
   return padded > GAS_CAP ? GAS_CAP : padded;
@@ -773,17 +799,23 @@ export type Call =
   | { kind: "swapExit"; router: Address; args: readonly [Address, Required<EscrowKey>, Address, Hex] }
   | { kind: "nameClaim"; registrar: Address; args: ReturnType<typeof claimArgs> }
   /** A payment in parts: each part's transfer, then its message, in one Multicall3 call (lib/relay/batch). */
-  | { kind: "batch"; parts: readonly BatchPart[] };
+  | { kind: "batch"; parts: readonly BatchPart[] }
+  /** A cash out across balances: each part's unshield, to one wallet, in one Multicall3 call (lib/relay/batch). */
+  | { kind: "unshieldBatch"; parts: readonly UnshieldBatchPart[] };
 
 /** Public addresses a call pays out to: a cash out's and a swap exit's. */
 function publicRecipients(call: Call): Address[] {
   if (call.kind === "swapExit") return [call.args[2]];
+  // relayUnshieldBatch takes one wallet for every part; each is screened all the same
+  if (call.kind === "unshieldBatch") return [...new Map(call.parts.map((p) => [p.to.toLowerCase(), p.to])).values()];
   return call.kind === "unshield" ? [call.args[4]] : [];
 }
 
 /** The asset a public payout moves. */
 function payoutAsset(call: Call): Address | null {
   if (call.kind === "unshield") return call.args[3];
+  // one asset for every part (relayUnshieldBatch)
+  if (call.kind === "unshieldBatch") return call.parts[0]?.asset ?? null;
   return call.kind === "swapExit" ? call.args[0] : null;
 }
 
@@ -919,6 +951,8 @@ function callTx(net: GloamNetwork, call: Call): { to: Address; data: Hex } | nul
       return { to: call.registrar, data: encodeFunctionData({ abi: nameClaimCallAbi, functionName: "claim", args: call.args }) };
     case "batch":
       return { to: MULTICALL3, data: batchCalldata(net.pool!, net.payMemo?.address ?? null, call.parts) };
+    case "unshieldBatch":
+      return { to: MULTICALL3, data: encodeFunctionData({ abi: multicall3Abi, functionName: "aggregate3", args: [unshieldBatchCalls(net.pool!, call.parts)] }) };
     default:
       return null;
   }
@@ -1084,6 +1118,14 @@ async function holdSpend(
 
 async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Promise<Hex> {
   const started = Date.now();
+  // A cash out in one go: its calls are built here, from the parts alone, and checked to be
+  // nothing but those parts' unshields on this network's vault before anything else happens.
+  let unshieldCalls: BatchCall[] = [];
+  if (call.kind === "unshieldBatch") {
+    unshieldCalls = unshieldBatchCalls(net.pool!, call.parts);
+    const problem = unshieldBatchProblem(net.pool!, call.parts, unshieldCalls);
+    if (problem) throw new RelayError(problem, 400, "batch_calls");
+  }
   // Screen before anything else: a blocked call never reaches the chain.
   if (!opts.screened) await screenCall(call, net);
   const pub = relayPublicClient(net);
@@ -1116,6 +1158,8 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
         return pub.estimateContractGas({ address: call.registrar, abi: nameClaimCallAbi, functionName: "claim", args: call.args, account });
       case "batch":
         return pub.estimateContractGas({ address: MULTICALL3, abi: multicall3Abi, functionName: "aggregate3", args: [batchCalls(pool, net.payMemo?.address ?? null, call.parts)], account });
+      case "unshieldBatch":
+        return pub.estimateContractGas({ address: MULTICALL3, abi: multicall3Abi, functionName: "aggregate3", args: [unshieldCalls], account });
     }
   };
   let fees: FeeCap | undefined;
@@ -1142,6 +1186,8 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
         return wallet.writeContract({ address: call.registrar, abi: nameClaimCallAbi, functionName: "claim", args: call.args, gas, nonce, chain: net.chain, account: from, ...fees });
       case "batch":
         return wallet.writeContract({ address: MULTICALL3, abi: multicall3Abi, functionName: "aggregate3", args: [batchCalls(pool, net.payMemo?.address ?? null, call.parts)], gas, nonce, chain: net.chain, account: from, ...fees });
+      case "unshieldBatch":
+        return wallet.writeContract({ address: MULTICALL3, abi: multicall3Abi, functionName: "aggregate3", args: [unshieldCalls], gas, nonce, chain: net.chain, account: from, ...fees });
     }
   };
 
@@ -1156,10 +1202,17 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
   if ((call.kind === "make" || call.kind === "pump") && gas > STATION_MAX_ESTIMATE) {
     throw new RelayError(STATION_ESTIMATE_MESSAGE, 422, "station_gas");
   }
-  const most = call.kind === "batch" ? batchGasMost(net.chainId, call.parts) : sendGasMost(net.chainId, call.kind);
-  if (most !== null && gas > most) throw new RelayError(call.kind === "batch" ? BATCH_TOO_BIG_MESSAGE : GAS_TOO_MUCH_MESSAGE, 422, call.kind === "batch" ? "batch_big" : "gas_most");
+  const most =
+    call.kind === "batch"
+      ? batchGasMost(net.chainId, call.parts)
+      : call.kind === "unshieldBatch"
+        ? unshieldBatchGasMost(net.chainId, call.parts.length)
+        : sendGasMost(net.chainId, call.kind);
+  const inOne = call.kind === "batch" || call.kind === "unshieldBatch";
+  const tooBig = call.kind === "unshieldBatch" ? UNSHIELD_BATCH_TOO_BIG_MESSAGE : BATCH_TOO_BIG_MESSAGE;
+  if (most !== null && gas > most) throw new RelayError(inOne ? tooBig : GAS_TOO_MUCH_MESSAGE, 422, inOne ? "batch_big" : "gas_most");
   // a batch padded past what one transaction may carry goes in parts instead, never short of gas
-  if (call.kind === "batch" && (gas * 13n) / 10n > GAS_CAP) throw new RelayError(BATCH_TOO_BIG_MESSAGE, 422, "batch_big");
+  if (inOne && (gas * 13n) / 10n > GAS_CAP) throw new RelayError(tooBig, 422, "batch_big");
 
   const holds: Hold[] = [];
   let mayBeOut = false;
@@ -1172,7 +1225,7 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
     // and one turned away after it (no slot, no lane) gives every hold back below.
     holds.push(
       ...(await holdSpend(net, pub, gas, fees, {
-        tier: opts.returning?.() === true ? "back" : call.kind === "unshield" ? "cashout" : "new",
+        tier: opts.returning?.() === true ? "back" : call.kind === "unshield" || call.kind === "unshieldBatch" ? "cashout" : "new",
         memo: call.kind === "memo" ? call.budget : undefined,
         senders: sendersOf(opts.sender?.()),
       }))
@@ -1183,6 +1236,9 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
         holds.push(await holdNetworkSlot(net));
         if (part.memo) holds.push(await holdMemoSlot(net, "paid"));
       }
+    } else if (call.kind === "unshieldBatch") {
+      // each part counts as the cash out it would have been
+      for (let i = 0; i < call.parts.length; i++) holds.push(await holdNetworkSlot(net));
     } else {
       holds.push(await (call.kind === "memo" ? holdMemoSlot(net, call.budget) : holdNetworkSlot(net)));
     }
@@ -1458,6 +1514,7 @@ export async function relayTransfer(net: GloamNetwork, body: Record<string, unkn
  * nothing sent, and the app sends the parts one by one instead.
  */
 export async function relayTransferBatch(net: GloamNetwork, body: Record<string, unknown>, sender?: Sender): Promise<Hex> {
+  assertBatchNetwork(net);
   const raw = body.parts;
   if (!Array.isArray(raw) || raw.length < BATCH_MIN_PARTS || raw.length > BATCH_MAX_PARTS) {
     throw new RelayError(`A payment in one go has ${BATCH_MIN_PARTS} to ${BATCH_MAX_PARTS} parts.`, 400, "batch_parts");
@@ -1503,6 +1560,7 @@ export async function relayTransferBatch(net: GloamNetwork, body: Record<string,
   const lock: InflightLock = { key: keys.join(","), store: locks[0]!.store, release: releaseAll };
   let keep = false;
   try {
+    await assertMulticall3(net);
     for (const key of keys) await assertEarlierSendSettled(net, key);
     for (const p of parts) await precheckSpend(net, p.root, p.nullifier);
     // each message is the payer's own, against its payment's few
@@ -1526,6 +1584,172 @@ export async function relayTransferBatch(net: GloamNetwork, body: Record<string,
         },
       }
     );
+    keep = true;
+    return hash;
+  } finally {
+    if (!keep) await releaseAll();
+  }
+}
+
+export const BATCH_NETWORK_MESSAGE = "Sending in one go isn't open on this network. It goes in parts instead.";
+
+/**
+ * Refuses a batch on a network outside BATCH_CHAIN_IDS (lib/relay/batch), before anything
+ * else: where nothing lives at MULTICALL3, a call to it succeeds and does nothing, so the
+ * relay would pay gas for calls that never reach the vault. Refused as batch_network:
+ * nothing is sent, and the app sends the parts one by one.
+ */
+function assertBatchNetwork(net: Pick<GloamNetwork, "chainId">): void {
+  if (!batchesOn(net.chainId)) throw new RelayError(BATCH_NETWORK_MESSAGE, 400, "batch_network");
+}
+
+/** Networks whose code at MULTICALL3 was read and matched. Multicall3 has no owner and no selfdestruct, so its code never changes. */
+const multicall3Seen = new Set<number>();
+
+/** Test hook: read the code at MULTICALL3 again on the next batch. */
+export function resetMulticall3Seen(): void {
+  multicall3Seen.clear();
+}
+
+/**
+ * The code at MULTICALL3 on `net` is the canonical Multicall3's (MULTICALL3_CODEHASH),
+ * read once per network for the life of this instance. Other code, or none, refuses the
+ * batch as batch_network; a read that fails refuses it as check_failed. Nothing is sent.
+ */
+async function assertMulticall3(net: GloamNetwork): Promise<void> {
+  if (multicall3Seen.has(net.chainId)) return;
+  let code: Hex | undefined;
+  try {
+    code = await relayPublicClient(net).getCode({ address: MULTICALL3 });
+  } catch {
+    throw new RelayError("Could not check this network's batch contract. Try again shortly.", 503, "check_failed");
+  }
+  if (!code || code === "0x" || keccak256(code) !== MULTICALL3_CODEHASH) throw new RelayError(BATCH_NETWORK_MESSAGE, 400, "batch_network");
+  multicall3Seen.add(net.chainId);
+}
+
+/** The vault's cash-out fee went up after the person confirmed a cash out in one go. */
+export const feeRoseMessage = (liveBps: number) =>
+  `The cash-out fee went up to ${(liveBps / 100).toFixed(2).replace(/\.?0+$/, "")}% after you confirmed, so nothing more was cashed out. Stop the rest to keep the money in your private balance, then cash out again to see the new numbers.`;
+
+/**
+ * Refuses a cash out in one go when the vault's fee, read fresh, is above `shownBps`, the
+ * fee the person confirmed: every part would pay less than it showed (code fee_moved,
+ * nothing sent). A fee that went down pays more than shown, and goes. A fee that can't
+ * be read refuses it as check_failed.
+ */
+async function assertFeeAsShown(net: GloamNetwork, shownBps: number): Promise<void> {
+  let live: number;
+  try {
+    live = Number(await relayPublicClient(net).readContract({ address: net.pool!, abi: withdrawFeeAbi, functionName: "withdrawFeeBps" }));
+  } catch {
+    throw new RelayError("Could not read the vault's fee. Try again shortly.", 503, "check_failed");
+  }
+  if (live > shownBps) throw new RelayError(feeRoseMessage(live), 409, FEE_MOVED_CODE);
+}
+
+/** The most a vault's cash-out fee can be (ShieldPoolCore.MAX_WITHDRAW_FEE_BPS is lower still). */
+const FEE_BPS_MOST = 10_000;
+
+/**
+ * A cash out across balances, sent as one transaction (lib/relay/batch, lib/cashOutAcross):
+ * BATCH_MIN_PARTS to BATCH_MAX_PARTS proven unshields, each exactly what relayUnshield
+ * takes, in one Multicall3 aggregate3 call that fails whole if any part fails. Body:
+ * { pool, feeBps, parts: [{ proof, root, nullifier, asset, to, amount }] }. As strict as a
+ * single relayed cash out, part by part, and then some:
+ *   - only on a network with the canonical Multicall3 (assertBatchNetwork, assertMulticall3)
+ *   - only this network's vault, named by the request as `pool` and checked against the
+ *     relay's own; the calls are built here from the parts, and checked to be nothing but
+ *     their unshields on that vault (unshieldBatchProblem): no value, no other target, no
+ *     other function, no message
+ *   - every part's proof, root, nullifier, asset, wallet and amount checked as
+ *     relayUnshield checks them; one wallet and one asset for every part, no nullifier twice
+ *   - the wallet: no cash out to the vault, the memo board, a token, a swap router, the
+ *     zero address or a swap's escrow, and screened (sanctions, and on Tempo the asset's
+ *     TIP-403 policy) before anything is locked or read
+ *   - every part's nullifier locked, all or none; a part whose earlier send may still land
+ *     refuses the batch; every part's note unspent and its root known
+ *   - `feeBps`, the cash-out fee the person confirmed: refused as fee_moved when the
+ *     vault's fee is now higher (assertFeeAsShown)
+ *   - the dry run, the gas ceiling, the spend cap (the cash-out share) and a network slot
+ *     per part, as if each had gone alone; unshieldBatchGasMost caps the gas
+ * What the batch can't do here (too big, not this network, a part the vault refuses) is
+ * refused with nothing sent, and the app sends the parts one by one instead. A fee that went
+ * up is the exception: the app stops the cash out there.
+ */
+export async function relayUnshieldBatch(net: GloamNetwork, body: Record<string, unknown>, sender?: Sender): Promise<Hex> {
+  assertBatchNetwork(net);
+  const raw = body.parts;
+  if (!Array.isArray(raw) || raw.length < BATCH_MIN_PARTS || raw.length > BATCH_MAX_PARTS) {
+    throw new RelayError(`A cash out in one go has ${BATCH_MIN_PARTS} to ${BATCH_MAX_PARTS} parts.`, 400, "batch_parts");
+  }
+  const pool = asAddress(body.pool, "vault");
+  if (pool.toLowerCase() !== net.pool!.toLowerCase()) throw new RelayError("This cash out was made for another vault.", 400, "batch_pool");
+  const feeBps = body.feeBps;
+  if (typeof feeBps !== "number" || !Number.isInteger(feeBps) || feeBps < 0 || feeBps > FEE_BPS_MOST) throw new RelayError("Invalid fee.");
+  const parts: UnshieldBatchPart[] = raw.map((r) => {
+    const p = (r ?? {}) as Record<string, unknown>;
+    return {
+      proof: asProof(p.proof),
+      root: asBytes32(p.root, "root"),
+      nullifier: asBytes32(p.nullifier, "nullifier"),
+      asset: asAddress(p.asset, "asset"),
+      to: asAddress(p.to, "recipient"),
+      amount: asAmount(p.amount),
+    };
+  });
+  const to = parts[0]!.to;
+  const asset = parts[0]!.asset;
+  if (parts.some((p) => p.to.toLowerCase() !== to.toLowerCase())) {
+    throw new RelayError("A cash out in one go pays one wallet.", 400, "batch_mismatch");
+  }
+  if (parts.some((p) => p.asset.toLowerCase() !== asset.toLowerCase())) {
+    throw new RelayError("A cash out in one go moves one asset.", 400, "batch_mismatch");
+  }
+  const nullifiers = parts.map((p) => p.nullifier.toLowerCase());
+  if (new Set(nullifiers).size !== nullifiers.length) throw new RelayError("A part is in this cash out twice.", 400, "batch_repeat");
+  // the wallet, as relayUnshield checks it: never one that strands the money or a swap's escrow, and screened once
+  assertCashOutTarget(net, to);
+  await assertNotSwapEscrow(net, to);
+  const call = { kind: "unshieldBatch", parts } as const;
+  await screenCall(call, net);
+
+  // every part's lock, all or none, before anything is read from the chain
+  const keys = parts.map((p) => inflightKey(net.chainId, p.nullifier));
+  const locks: InflightLock[] = [];
+  const releaseAll = async () => {
+    await Promise.all(locks.map((l) => l.release()));
+  };
+  try {
+    for (const key of keys) {
+      const lock = await takeInflight(key, inflightTtlSec(net.chainId));
+      if (!lock) throw new RelayError(IN_FLIGHT_MESSAGE, 409, "in_flight");
+      locks.push(lock);
+    }
+  } catch (e) {
+    await releaseAll();
+    if (e instanceof LockStoreDown) throw relayOff();
+    throw e;
+  }
+  const lock: InflightLock = { key: keys.join(","), store: locks[0]!.store, release: releaseAll };
+  let keep = false;
+  try {
+    await assertMulticall3(net);
+    for (const key of keys) await assertEarlierSendSettled(net, key);
+    for (const p of parts) await precheckSpend(net, p.root, p.nullifier);
+    await assertFeeAsShown(net, feeBps);
+    const hash = await submit(net, call, {
+      onMaybeSent: () => {
+        keep = true;
+      },
+      sender: () => sender,
+      screened: true,
+      lock,
+      // every part's spend is on record with this one transaction
+      onSent: async (sent) => {
+        await Promise.all(keys.map((k) => recordSent(k, sent)));
+      },
+    });
     keep = true;
     return hash;
   } finally {

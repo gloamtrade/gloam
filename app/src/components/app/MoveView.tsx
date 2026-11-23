@@ -1392,6 +1392,8 @@ export function MoveView() {
       owner: address as Address,
       to,
       relay: relayOn,
+      // the fee on screen: through the relay the parts go together only at it (or lower)
+      feeBps: liveFeeBps,
       parts,
       noteIds,
       noteAmounts: amounts,
@@ -3450,7 +3452,7 @@ export function MoveView() {
                       <p id="cashout-amt-help" className={`mt-1 text-[12.5px] leading-relaxed ${cashOutAcrossPlan ? (cashOutAcrossPlan.ok ? "text-mute" : "text-warn") : cashOutRead.invalid ? "text-warn" : "text-mute"}`}>
                         {cashOutAcrossPlan
                           ? cashOutAcrossPlan.ok
-                            ? `Cashed out as ${cashOutAcrossPlan.parts.length} public withdrawals to the same wallet. Each shows its amount on the chain.`
+                            ? `Cashed out as ${cashOutAcrossPlan.parts.length} public withdrawals to the same wallet${relayOn && batchesOn(network.chainId) && liveFeeBps !== null ? ", in one transaction" : ""}. Each shows its amount on the chain.`
                             : cashOutAcrossPlan.reason === "over_total"
                               ? `That's more than your private balance in ${assetLabel(selected.asset)}. You can cash out up to ${formatAssetLabel(cashOutAcrossPlan.most, selected.asset)}.`
                               : `That needs too many withdrawals at once. Cash out up to ${formatAssetLabel(cashOutAcrossPlan.most, selected.asset)} now, then the rest.`
