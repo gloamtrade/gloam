@@ -13,7 +13,6 @@
  * (lib/allNetworkBalances); prices come from the feeds the app already reads.
  * The eye hides every amount here too.
  */
-import { formatUnits } from "viem";
 import { useAllNetworkHoldings } from "@/hooks/useAllNetworkHoldings";
 import { useCoingeckoMarks } from "@/hooks/useCoingeckoMarks";
 import { useLiveMarkets } from "@/hooks/useLiveMarkets";
@@ -23,7 +22,7 @@ import { useAppAccount } from "@/lib/demo";
 import { useHideAmounts } from "@/lib/hideAmounts";
 import { formatUsdCompact } from "@/lib/markets";
 import type { NetworkKey } from "@/lib/networks";
-import { tidyAmount } from "@/lib/portfolioValue";
+import { displayAmount } from "@/lib/amountShort";
 import { SealDots } from "@/components/ui/SealDots";
 import { useNetwork } from "./NetworkProvider";
 import { TokenLogo } from "./TokenLogo";
@@ -52,7 +51,8 @@ export function AllNetworksCard() {
     if (g) g.rows.push(r);
     else groups.push({ key: r.networkKey, label: r.network, rows: [r] });
   }
-  const amountOf = (r: PricedHolding) => `${tidyAmount(Number(formatUnits(r.amount, r.decimals)))} ${r.symbol}`;
+  // two places, cut down, from the raw units (lib/amountShort): never a float, so never rounded up
+  const amountOf = (r: PricedHolding) => `${displayAmount(r.amount, r.decimals)} ${r.symbol}`;
   const unpricedCount = priced.unpriced.length;
   const showUsd = settings.showUsd;
 

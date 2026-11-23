@@ -4,18 +4,10 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Mark } from "@/components/Logo";
 import { useModalFocus } from "@/hooks/useModalFocus";
-import { formatUnits } from "viem";
+import { displayAmount } from "@/lib/amountShort";
 import { shortAddress } from "@/lib/chain";
 import { receiptNetworkOf, receiptNumber, receiptToken, type CashOutReceipt } from "@/lib/cashOutReceipt";
 import type { BridgeMark } from "@/lib/cashOutBridge";
-
-/** Every unit kept, cents padded: "1,250.50". */
-function exact(raw: bigint, decimals: number): string {
-  const [whole, frac = ""] = formatUnits(raw, decimals).split(".");
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  const digits = frac.padEnd(Math.min(2, decimals), "0");
-  return digits ? `${grouped}.${digits}` : grouped;
-}
 
 /**
  * A Gloam receipt for a cash out to a public wallet, the same sheet as the
@@ -43,7 +35,9 @@ export function CashOutReceiptSheet({
   const explorerTx = (h: string) => net?.explorerTx(h) ?? "#";
   const explorerAddress = (a: string) => net?.explorerAddress(a) ?? "#";
   const { symbol, decimals } = receiptToken(receipt.chainId, receipt.asset);
-  const money = (raw: bigint) => `${exact(raw, decimals)} ${symbol}`;
+  // two places, cut down and never rounded up, like every amount shown and the payroll invoice
+  // (lib/amountShort); the transaction linked below has every unit
+  const money = (raw: bigint) => `${displayAmount(raw, decimals)} ${symbol}`;
   const when = new Date(receipt.time);
   // the day in UTC, like the time beside it: a cash out at 23:43 UTC is that day everywhere
   const day = when.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });

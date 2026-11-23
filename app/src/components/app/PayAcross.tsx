@@ -22,7 +22,7 @@ import { newLinkPayment, settlePartnerTx } from "@/lib/partnerLinkClient";
 import { batchesOn } from "@/lib/relay/batch";
 import { splitMaybeSent } from "@/lib/cashOutSplit";
 import { publicClientFor } from "@/lib/rhClient";
-import { formatAssetLabel } from "@/lib/shield";
+import { assetLabel, formatAssetAmountExact, formatAssetLabel } from "@/lib/shield";
 import { walletErrorForPeople } from "@/lib/walletErrors";
 import type { GloamNetwork } from "@/lib/networks";
 
@@ -191,8 +191,11 @@ export function PayAcrossPanel({ across }: { across: PayAcross }) {
   const { run, running, error } = across;
   if (!run) return null;
   const p = payRunProgress(run);
+  // how it ended: two places, cut down, like every amount shown (lib/amountShort)
   const total = formatAssetLabel(payRunTotal(run), run.asset);
   const paid = formatAssetLabel(payRunPaid(run), run.asset);
+  // while it goes, or waits on Resume: the amount typed, every unit, as a single payment's Sending line says it
+  const typed = `${formatAssetAmountExact(payRunTotal(run), run.asset)} ${assetLabel(run.asset)}`;
   const to = run.rows[0]?.name ?? "them";
   const cancelled = p.done && run.rows.some((r) => r.error === "Cancelled");
 
@@ -222,7 +225,7 @@ export function PayAcrossPanel({ across }: { across: PayAcross }) {
         <>
           <p className="flex items-center gap-2 text-foreground">
             {running && <Spinner />}
-            {running ? `Paying ${total} to ${to}` : `Your payment of ${total} to ${to} isn't finished`}
+            {running ? `Paying ${typed} to ${to}` : `Your payment of ${typed} to ${to} isn't finished`}
           </p>
           <p className="tnum mt-0.5 text-mute">
             {p.sent} of {p.parts} sent

@@ -87,12 +87,14 @@ jobs:
       # Every token amount the app shows: two places, cut down and never rounded up,
       # "<0.01" for dust, "0.00" for zero, thousands separators, 6- and 18-decimal
       # tokens and bigints (lib/amountShort, lib/shield formatAssetAmount), and the
-      # exact formatter that what is sent, copied, exported or proved keeps.
+      # exact formatter that what is sent, copied, exported or proved keeps. Then the
+      # screens only next-release has: one balance, receipts, pay and cash out in parts.
       - name: App amount display self-tests
         working-directory: app
         run: |
           ../mcp/node_modules/.bin/tsx scripts/selftest-amount-display.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-amount-short.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-amount-across.mts
 
       # Each sign-in's own private account in a browser: signed out shows nothing, a second
       # wallet sees and spends none of the first's, the first account goes to its owner on
