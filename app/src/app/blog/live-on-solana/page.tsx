@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound } from "next/navigation";
+import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 import { AppLink } from "@/components/AppLink";
 import { ArticleLayout } from "@/components/blog/ArticleLayout";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
@@ -39,6 +41,7 @@ const GLANCE = [
 ];
 
 export default function LiveOnSolanaPost() {
+  if (!SOLANA_RINGS_ENABLED) notFound();
   return (
     <ArticleLayout
       slug="live-on-solana"
