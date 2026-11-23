@@ -60,7 +60,10 @@ jobs:
 
       # Solana (off by default): account derivation, the proxy allowlist and the relay
       # policy; money from another chain made private (the relay's deposit rule, the
-      # flow and its retries against a fake chain); payroll's list checks, pacing and
+      # flow and its retries against a fake chain); a wallet with no SOL adding a token,
+      # the relay paying the fee (its one version 0 shape, every way it is refused, who
+      # pays, the client against the real route with Helius faked, the per-wallet
+      # count); payroll's list checks, pacing and
       # resume against a fake chain; the public site's Solana copy and status checks,
       # off and on; a returning wallet, staying signed in and signing out, and Solana's
       # place in the menus; bridged ZEC (its mint, shown only once its ring interface is
@@ -70,6 +73,7 @@ jobs:
         run: |
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-rings.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-bridge-in.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-relay-add.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-payroll.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-payroll-csv.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-site.mts
