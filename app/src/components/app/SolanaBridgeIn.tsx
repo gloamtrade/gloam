@@ -54,6 +54,7 @@ import {
 import type { ShieldResult } from "@/lib/solanaRings/arrivals";
 import type { RingsSession } from "@/lib/solanaRings/client";
 import { ringsAssets, SOLANA_RINGS_NETWORK, type RingsNetwork } from "@/lib/solanaRings/config";
+import { ringsAmount } from "@/lib/solanaRings/amount";
 import { originChain } from "@/lib/originChains";
 import type { GloamChainId } from "@/lib/networks";
 import { track } from "@/lib/track";
@@ -70,7 +71,7 @@ import { AmountProblem } from "./AmountProblem";
 import { SuccessReceipt } from "./SuccessModal";
 import { ChainLogo, CostWarning, PoweredByRelay, SourceBalance, TokenMark, feeRows, fmtMoney, stableMax } from "./BridgeIn";
 import { WalletConnectSheet } from "./WalletConnectSheet";
-import { displayAmount, displayAmountNumber, displayAmountText, typedAmount } from "@/lib/amountShort";
+import { displayAmountNumber, displayAmountText, typedAmount } from "@/lib/amountShort";
 
 type KV = { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };
 
@@ -163,7 +164,7 @@ function ArrivalsNotice({
               <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[14px] leading-relaxed text-foreground">
                 <TokenMark src={`/brand/tokens/${asset.id}.png`} size={18} />
                 <span className="tnum font-medium">
-                  {displayAmount(a.amount, asset.decimals)} {asset.symbol}
+                  {ringsAmount(a.amount, asset.decimals)} {asset.symbol}
                 </span>
                 arrived and isn&apos;t private yet.
               </p>
@@ -1346,7 +1347,7 @@ function Landed({ flow, onDone }: { flow: Extract<Flow, { kind: "landed" }>; onD
   const done = useRef<HTMLButtonElement>(null);
   useModalFocus(receipt, noop, { initial: done });
   const asset = assetOf(flow.t.receive.assetId);
-  const amount = asset && flow.amount > 0n ? displayAmount(flow.amount, asset.decimals) : displayAmountText(flow.t.receive.amount);
+  const amount = asset && flow.amount > 0n ? ringsAmount(flow.amount, asset.decimals) : displayAmountText(flow.t.receive.amount);
   return (
     <div ref={receipt} className="relative pt-3 text-center">
       <SuccessReceipt
