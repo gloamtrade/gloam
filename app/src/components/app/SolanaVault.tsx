@@ -584,7 +584,8 @@ function SolanaReceiveView() {
           </div>
         </div>
 
-        <div>
+        {/* stacked on a phone: a hairline above, as EVM's Receive sets off its second part */}
+        <div className="max-lg:border-t max-lg:border-line max-lg:pt-6">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-[15px] font-medium text-foreground">Payments to you</h3>
             {/* -my-2: the button doesn't push this title below the one beside it */}
