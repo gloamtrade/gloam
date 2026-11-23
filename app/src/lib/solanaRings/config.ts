@@ -131,7 +131,7 @@ export const ZEC_PLACES = 4;
 const ZEC: RingsAsset = {
   id: "zec",
   symbol: "ZEC",
-  name: "Zcash (bridged)",
+  name: "Zcash",
   mint: ZEC_SOLANA_MINT,
   decimals: ZEC_DECIMALS,
   hiddenUntilReady: true,

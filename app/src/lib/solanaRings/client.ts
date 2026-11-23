@@ -113,6 +113,12 @@ export type RingsStep = "sending" | "waiting" | "resending" | "confirm_again" | 
 export type StepOptions = {
   /** Called at each step of a send, with plain words for it. */
   onStep?: (step: RingsStep, label: string) => void;
+  /**
+   * For an add: take the private balance's catch-up read (the indexer reaching
+   * the add's slot) instead of waiting on it, so the add is done the moment
+   * Solana confirms it. The caller owns the promise and its failure.
+   */
+  syncLater?: (sync: Promise<void>) => void;
 };
 
 /** Plain words for each step (the page adds "Keep this tab open"). */
@@ -747,7 +753,9 @@ export async function addToPrivate(s: RingsSession, asset: RingsAsset, amount: b
   });
   if (r.state === "landed") {
     noteWalletAdd(signature);
-    await syncRings(s, r.slot);
+    const sync = syncRings(s, r.slot);
+    if (opts.syncLater) opts.syncLater(sync);
+    else await sync;
     return signature;
   }
   if (r.state === "failed") throw new Error(ADD_FAILED);

@@ -702,8 +702,16 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
         if (!s) throw new Error("Open your private account first.");
         const l = await lib();
         hook.current = { ask: () => step(1), answer: () => step(2) };
-        const sig = await l.addToPrivate(s, asset, amount, { onStep: (_step, label) => detail(label) });
-        setBalancesState(l.ringsBalances(s));
+        const sig = await l.addToPrivate(s, asset, amount, {
+          onStep: (_step, label) => detail(label),
+          // Done once Solana confirms it: the private balance's read catches up behind the success screen.
+          syncLater: (sync) => void sync.then(() => setBalancesState(l.ringsBalances(s))).catch(() => {}),
+        });
+        // The add landed, so it is in the private balance: show it now; the read above settles the exact figure.
+        setBalancesState((b) => {
+          const base = b ?? l.ringsBalances(s);
+          return { ...base, [asset.id]: (base[asset.id] ?? 0n) + amount };
+        });
         void readPublic();
         return sig;
       });
