@@ -360,6 +360,8 @@ const REFUSED = new Set([
   "gas_high",
   "gas_most",
   "spend_cap",
+  // the note's sends reverted too often this hour: it waits, and tries again next pass
+  "note_wait",
 ]);
 /** Of those, the ones that mean this cash out can never go out as it is. */
 const PERMANENT = new Set(["screened", "asset_policy", "vault_recipient", "bad_request", "network"]);

@@ -429,6 +429,9 @@ const PER_NETWORK_KEY_MEMO_HOURLY_DEAR_GAS = PER_NETWORK_OPEN_MEMO_HOURLY_DEAR_G
  * new swaps wait for the next hour, and so does a refund or exit under the floor. One at
  * or over the floor goes regardless. One note or escrow can revert NOTE_REVERTS_HOURLY
  * times an hour before it waits, alone, so it can't use the budget up for everyone.
+ * Cash outs and private sends count their notes' reverts the same way on every chain,
+ * a batch's every part too (assertNoteUnderReverts), so a note sent to revert at will
+ * can't burn the relay's gas again and again behind changing IPs.
  */
 const SWAP_REVERT_GAS_HOURLY = 20_000_000;
 const WAITING_GAS_HOURLY = 30_000_000;
@@ -1366,6 +1369,9 @@ function afterReply(task: () => Promise<void>): void {
  * can retry at once; once a transaction is out it stays until it expires,
  * unless its receipt shows it reverted. That is read after the reply, so the
  * caller gets the hash at once however long the transaction takes to land.
+ * A cash out or a private send counts its note's reverts, on every chain: a note
+ * whose sends reverted NOTE_REVERTS_HOURLY times this hour waits, alone
+ * (assertNoteUnderReverts), so one that reverts at will can't be sent again and again.
  */
 async function submitSpend(
   net: GloamNetwork,
@@ -1384,6 +1390,8 @@ async function submitSpend(
       : isSwap || call.kind === "nameClaim"
         ? call.args[0].nullifier
         : call.args[2];
+  // a cash out or a private send: checked and counted here (a swap's precheck and onEnd do their own)
+  const plain = call.kind === "transfer" || call.kind === "unshield";
   const key = inflightKey(net.chainId, lockOn ?? nullifier);
   let lock: Awaited<ReturnType<typeof takeInflight>>;
   try {
@@ -1400,14 +1408,17 @@ async function submitSpend(
     // an earlier send of this spend that may still land is never sent again, however old the lock
     await assertEarlierSendSettled(net, key);
     if (precheck) await precheck();
-    else if (call.kind === "transfer" || call.kind === "unshield") await precheckSpend(net, call.args[1], nullifier);
+    else if (plain) await precheckSpend(net, call.args[1], nullifier);
+    // a note that keeps reverting waits, alone, before its dry run
+    if (plain) await assertNoteUnderReverts(nullifier);
     const hash = await submit(net, call, {
       onMaybeSent: () => {
         keep = true;
       },
       afterDryRun,
       returning,
-      onEnd,
+      // a revert counts against the note, beside the caller's own hook
+      onEnd: plain ? countingNoteReverts([nullifier], onEnd) : onEnd,
       sender,
       screened,
       watchUntil,
@@ -1506,6 +1517,8 @@ export async function relayTransfer(net: GloamNetwork, body: Record<string, unkn
  *   - every part's nullifier locked (lib/relay/inflight) before anything is read, all or
  *     none; a part whose earlier send may still land refuses the whole batch
  *   - every part's note unspent and root known, and no nullifier or new note twice
+ *   - every part's note under its hourly reverts (note_wait): one over refuses the batch,
+ *     and a batch that reverts counts a revert against every part's note
  *   - a message only for its own part's payment, which the transfer before it puts in
  *     the vault in the same call; it counts against that payment's own few messages
  *   - the dry run, the gas ceiling, the spend cap and a slot per part (and per message)
@@ -1564,6 +1577,8 @@ export async function relayTransferBatch(net: GloamNetwork, body: Record<string,
     await assertMulticall3(net);
     for (const key of keys) await assertEarlierSendSettled(net, key);
     for (const p of parts) await precheckSpend(net, p.root, p.nullifier);
+    // one part whose note keeps reverting refuses the whole batch
+    for (const p of parts) await assertNoteUnderReverts(p.nullifier);
     // each message is the payer's own, against its payment's few
     for (const p of parts) {
       if (!p.memo) continue;
@@ -1580,7 +1595,8 @@ export async function relayTransferBatch(net: GloamNetwork, body: Record<string,
         sender: () => sender,
         lock,
         beforeBroadcast: hooks.beforeBroadcast,
-        onEnd: hooks.onEnd,
+        // it fails whole: a revert counts against every part's note
+        onEnd: countingNoteReverts(parts.map((p) => p.nullifier), hooks.onEnd),
         // every part's spend is on record with this one transaction
         onSent: async (sent) => {
           await Promise.all(keys.map((k) => recordSent(k, sent)));
@@ -1674,6 +1690,8 @@ const FEE_BPS_MOST = 10_000;
  *     TIP-403 policy) before anything is locked or read
  *   - every part's nullifier locked, all or none; a part whose earlier send may still land
  *     refuses the batch; every part's note unspent and its root known
+ *   - every part's note under its hourly reverts (note_wait): one over refuses the batch,
+ *     and a batch that reverts counts a revert against every part's note
  *   - `feeBps`, the cash-out fee the person confirmed: refused as fee_moved when the
  *     vault's fee is now higher (assertFeeAsShown)
  *   - the dry run, the gas ceiling, the spend cap (the cash-out share) and a network slot
@@ -1742,6 +1760,8 @@ export async function relayUnshieldBatch(net: GloamNetwork, body: Record<string,
     await assertMulticall3(net);
     for (const key of keys) await assertEarlierSendSettled(net, key);
     for (const p of parts) await precheckSpend(net, p.root, p.nullifier);
+    // one part whose note keeps reverting refuses the whole batch
+    for (const p of parts) await assertNoteUnderReverts(p.nullifier);
     await assertFeeAsShown(net, feeBps);
     const hash = await submit(net, call, {
       onMaybeSent: () => {
@@ -1751,7 +1771,8 @@ export async function relayUnshieldBatch(net: GloamNetwork, body: Record<string,
       screened: true,
       lock,
       beforeBroadcast: hooks.beforeBroadcast,
-      onEnd: hooks.onEnd,
+      // it fails whole: a revert counts against every part's note
+      onEnd: countingNoteReverts(parts.map((p) => p.nullifier), hooks.onEnd),
       // every part's spend is on record with this one transaction
       onSent: async (sent) => {
         await Promise.all(keys.map((k) => recordSent(k, sent)));
@@ -2165,14 +2186,40 @@ async function assertEscrowPaid(net: GloamNetwork, unshieldTx: Hex | null, paid:
   }
 }
 
-/** Where gas is dear, one note or escrow that keeps reverting waits, on its own. `key` names it. */
-async function assertNoteMayRetry(net: GloamNetwork, key: string): Promise<void> {
-  if (!hasSwapFloor(net.chainId)) return;
+/**
+ * One note or escrow that keeps reverting waits, on its own: after NOTE_REVERTS_HOURLY reverts
+ * in an hour, nothing more of it is sent until the hour turns (note_wait, nothing sent). `key`
+ * names it. A note goes by its nullifier, so its cash outs and private sends share one count,
+ * and where gas is dear its swaps too. Read under the note's lock, before the dry run.
+ */
+async function assertNoteUnderReverts(key: string): Promise<void> {
   if ((await sharedCount(key, "relay-note-reverts")) >= NOTE_REVERTS_HOURLY) throw new RelayError(NOTE_WAIT_MESSAGE, 429, "note_wait");
 }
 
+/** Counts a revert against `key` once a receipt shows one. A send nobody saw land never gets here, so it never counts. */
+async function countNoteRevert(key: string, status: SendEnd["status"]): Promise<void> {
+  if (status === "reverted") await relayCount(key, "relay-note-reverts", NOTE_REVERTS_HOURLY, Date.now(), 3600);
+}
+
+/** Where gas is dear, a swap's note or escrow that keeps reverting waits, on its own. `key` names it. */
+async function assertNoteMayRetry(net: GloamNetwork, key: string): Promise<void> {
+  if (!hasSwapFloor(net.chainId)) return;
+  await assertNoteUnderReverts(key);
+}
+
 async function noteEnded(net: GloamNetwork, key: string, status: SendEnd["status"]): Promise<void> {
-  if (status === "reverted" && hasSwapFloor(net.chainId)) await relayCount(key, "relay-note-reverts", NOTE_REVERTS_HOURLY, Date.now(), 3600);
+  if (hasSwapFloor(net.chainId)) await countNoteRevert(key, status);
+}
+
+/**
+ * A cash out's or a private send's `onEnd`, on every chain: a revert counts against every
+ * note it spent (a batch's every part), beside the caller's own hook. Each runs on its own,
+ * so one that throws never stops the others.
+ */
+function countingNoteReverts(nullifiers: readonly Hex[], onEnd?: SubmitOpts["onEnd"]): NonNullable<SubmitOpts["onEnd"]> {
+  return async (status) => {
+    await Promise.all([...nullifiers.map((n) => countNoteRevert(n, status).catch(() => {})), onEnd?.(status).catch(() => {})]);
+  };
 }
 
 async function sharedCount(owner: string, bucket: string): Promise<number> {
