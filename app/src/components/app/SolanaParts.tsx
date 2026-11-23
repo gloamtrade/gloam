@@ -15,6 +15,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { CashOutPercentChips } from "./CashOutPrivacy";
 import { TokenLogo } from "./TokenLogo";
 import { shortSol, formatSolAmount, plainSolAmount, useSolana, type SolanaTask, type SolanaTaskKind } from "./SolanaAccount";
+import { GloamAccountHint, GloamAccountNote } from "./GloamAccountParts";
 
 /** "Solana mainnet" or "Solana devnet". */
 export const SOLANA_NET_LABEL = SOLANA_RINGS_NETWORK === "devnet" ? "devnet" : "mainnet";
@@ -345,30 +346,35 @@ function WalletGrid() {
   const connecting = sol.task?.kind === "connect";
   if (sol.wallets.length === 0) {
     return (
-      <p className="mt-5 rounded-[16px] bg-surface px-4 py-3.5 text-[13.5px] leading-relaxed text-soft">
-        No Solana wallet in this browser. Install Phantom, Solflare or Backpack, then reload this page.
-      </p>
+      <GloamAccountHint>
+        <p className="mt-5 rounded-[16px] bg-surface px-4 py-3.5 text-[13.5px] leading-relaxed text-soft">
+          No Solana wallet in this browser. Install Phantom, Solflare or Backpack, then reload this page.
+        </p>
+      </GloamAccountHint>
     );
   }
   return (
-    <div className="mt-5 grid gap-2 sm:grid-cols-2">
-      {sol.wallets.map((w) => (
-        <button
-          key={w.name}
-          type="button"
-          disabled={Boolean(sol.task)}
-          onClick={() => void sol.connect(w)}
-          className="flex h-[56px] items-center gap-3 rounded-2xl border border-line pl-3 pr-4 text-left text-[15px] text-foreground transition-colors hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-[9px] bg-white ring-1 ring-line">
-            {/* eslint-disable-next-line @next/next/no-img-element -- the wallet's own data-URL icon */}
-            {w.icon && <img src={w.icon} alt="" width={32} height={32} className="h-8 w-8 object-cover" />}
-          </span>
-          <span className="min-w-0 flex-1 truncate">{w.name}</span>
-          {connecting && <Spinner />}
-        </button>
-      ))}
-    </div>
+    <>
+      <GloamAccountHint />
+      <div className="mt-5 grid gap-2 sm:grid-cols-2">
+        {sol.wallets.map((w) => (
+          <button
+            key={w.name}
+            type="button"
+            disabled={Boolean(sol.task)}
+            onClick={() => void sol.connect(w)}
+            className="flex h-[56px] items-center gap-3 rounded-2xl border border-line pl-3 pr-4 text-left text-[15px] text-foreground transition-colors hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-[9px] bg-white ring-1 ring-line">
+              {/* eslint-disable-next-line @next/next/no-img-element -- the wallet's own data-URL icon */}
+              {w.icon && <img src={w.icon} alt="" width={32} height={32} className="h-8 w-8 object-cover" />}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{w.name}</span>
+            {connecting && <Spinner />}
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -452,6 +458,7 @@ export function SolanaGate({ lead }: { lead?: ReactNode }) {
             Disconnect
           </button>
         </div>
+        <GloamAccountNote wallet={main.wallet} className="mt-3" />
         {!relay.funded && (
           <p className="mt-4 rounded-[16px] bg-warn-soft px-4 py-3 text-[13px] leading-relaxed text-warn">
             Private payments on Solana are paused for a moment. Try again later.

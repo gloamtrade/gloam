@@ -15,6 +15,7 @@ import { PeopleCount } from "./PeopleCount";
 import { RecoverySync } from "./RecoverySync";
 import { AccountScope } from "./AccountScope";
 import { SolanaAccountProvider } from "./SolanaAccount";
+import { GloamSolanaAutoConnect } from "./GloamSolanaAutoConnect";
 import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 
 // Brings the private balance back on a new device after sign-in. Loaded apart from the page.
@@ -53,8 +54,16 @@ export function Web3Provider({ children }: { children: ReactNode }) {
           <RecoverySync />
           <AutoRestore />
           <PeopleCount />
-          {/* Gloam on Solana: one account for every page while Solana is the network picked */}
-          {SOLANA_RINGS_ENABLED ? <SolanaAccountProvider>{children}</SolanaAccountProvider> : children}
+          {/* Gloam on Solana: one account for every page while Solana is the network picked;
+              someone signed in with a Gloam wallet is connected to its Solana account (GloamSolanaAutoConnect) */}
+          {SOLANA_RINGS_ENABLED ? (
+            <SolanaAccountProvider>
+              {EMBEDDED_WALLETS && <GloamSolanaAutoConnect />}
+              {children}
+            </SolanaAccountProvider>
+          ) : (
+            children
+          )}
         </NetworkProvider>
       </QueryClientProvider>
     </WagmiProvider>
