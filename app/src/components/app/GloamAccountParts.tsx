@@ -2,9 +2,20 @@
 
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Spinner } from "@/components/ui/Spinner";
-import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
+import { EMBEDDED_WALLETS, embeddedRpId } from "@/lib/embeddedWallet";
 import { embeddedAuth, onEmbeddedAuth } from "@/lib/turnkeyBridge";
-import { GLOAM_ACCOUNT_NOTE, GLOAM_SOLANA_OFF, gloamSolana, isGloamAccount, onGloamSolana, retryGloamSolana } from "@/lib/turnkeySolana";
+import { GLOAM_SOLANA_OFF, gloamSolana, onGloamSolana, retryGloamSolana } from "@/lib/turnkeySolana";
+import { keepCodeSecret, keptCodeSecret } from "@/lib/solanaRings/gloamCodes";
+import {
+  BAD_CODE_TEXT,
+  GloamRootError,
+  accountSeedFromRoot,
+  backupCodeFor,
+  newCodeSecret,
+  passkeyRoot,
+  secretFromBackupCode,
+} from "@/lib/solanaRings/gloamRoot";
+import { useSolana } from "./SolanaAccount";
 
 /** How long "Opening your Gloam account" waits for the kit before it stops saying so. */
 const STARTING_MS = 12_000;
@@ -51,11 +62,230 @@ export function GloamAccountHint({ children }: { children?: ReactNode }) {
   return <>{children}</>;
 }
 
+/** What the setup card's button is: the card's own SolanaActionButton, with `stop` when it can't go yet. */
+export type GloamAccountAction = (label: string, onClick: () => void, stop?: string | null) => ReactNode;
+
+type Mode = "auto" | "code-new" | "code-show" | "code-enter";
+
 /**
- * Before a Gloam account signs the message that opens a private account: who
- * else could open it (lib/turnkeySolana GLOAM_ACCOUNT_NOTE, as /privacy says).
+ * How a Gloam account (lib/turnkeySolana) opens its private account on Solana,
+ * in the setup card: never from a signature, which Turnkey keeps, but from a
+ * secret Turnkey never sees (lib/solanaRings/gloamRoot).
+ *  - This browser keeps the account's backup code: it opens with no prompt.
+ *  - Signed in with a passkey: the passkey opens it (one prompt), on every
+ *    device that has the passkey. "Use a backup code" stays open for a browser
+ *    where the passkey can't.
+ *  - Signed in with an email alone: a backup code made here, shown once to save,
+ *    then kept sealed in this browser (lib/solanaRings/gloamCodes) and in a
+ *    passkey recovery backup. A new device asks for it.
  */
-export function GloamAccountNote({ wallet, className = "" }: { wallet: { name: string; wallet?: unknown } | null | undefined; className?: string }) {
-  if (!isGloamAccount(wallet)) return null;
-  return <p className={`text-[12.5px] leading-relaxed text-mute ${className}`}>{GLOAM_ACCOUNT_NOTE}</p>;
+export function GloamAccountOpen({ returning, action }: { returning: boolean; action: GloamAccountAction }) {
+  const sol = useSolana();
+  const gloam = useSyncExternalStore(onGloamSolana, gloamSolana, () => GLOAM_SOLANA_OFF);
+  const owner = sol?.main?.account.address ?? null;
+  const passkey = gloam.passkeys.length > 0;
+  const [stored, setStored] = useState<{ owner: string; has: boolean } | null>(null);
+  const [mode, setMode] = useState<Mode>("auto");
+  const [fresh, setFresh] = useState<{ owner: string; secret: Uint8Array; code: string } | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const busy = Boolean(sol?.task);
+
+  // Whether this browser keeps this account's backup code (read once per account).
+  useEffect(() => {
+    if (!owner) return;
+    let live = true;
+    void keptCodeSecret(owner)
+      .then((secret) => {
+        secret?.fill(0);
+        if (live) setStored({ owner, has: Boolean(secret) });
+      })
+      .catch(() => live && setStored({ owner, has: false }));
+    return () => {
+      live = false;
+    };
+  }, [owner, sol?.task]);
+
+  // The code made for this account is wiped from memory when the card goes.
+  useEffect(
+    () => () => {
+      fresh?.secret.fill(0);
+    },
+    [fresh],
+  );
+
+  if (!sol || !owner) return null;
+  const known = stored?.owner === owner ? stored.has : null;
+
+  /** Open with the code kept for this account (`secret`, or the one this browser keeps): keeps it first, never over another. */
+  const openWithCode = (secret: Uint8Array | null) =>
+    void sol.setUp({
+      first: "Reading your backup code",
+      seed: async (index) => {
+        let root: Uint8Array | null;
+        if (secret) {
+          root = await keepCodeSecret(owner, secret);
+          if (!root.every((b, i) => b === secret[i])) {
+            root.fill(0);
+            throw new GloamRootError("This browser holds another backup code for this account. Reload the page to open with it.", "badcode");
+          }
+        } else {
+          root = await keptCodeSecret(owner);
+          if (!root) throw new GloamRootError("This browser no longer holds your backup code. Enter it to open your private account.", "badcode");
+        }
+        try {
+          return await accountSeedFromRoot(root, "code", index);
+        } finally {
+          root.fill(0);
+        }
+      },
+    });
+
+  const openWithPasskey = () =>
+    void sol.setUp({
+      first: "Confirm with your passkey",
+      seed: async (index) => {
+        const root = await passkeyRoot({ rpId: embeddedRpId(window.location.hostname), credentialIds: gloam.passkeys });
+        try {
+          return await accountSeedFromRoot(root, "passkey", index);
+        } finally {
+          root.fill(0);
+        }
+      },
+    });
+
+  const lead = (text: string) => <p className="mt-4 max-w-[56ch] text-[13.5px] leading-relaxed text-mute">{text}</p>;
+  const link = (text: string, onClick: () => void) => (
+    <button type="button" disabled={busy} onClick={onClick} className="btn btn-quiet btn-sm mt-2 h-10 text-mute">
+      {text}
+    </button>
+  );
+
+  if (known === null) {
+    return (
+      <p role="status" aria-live="polite" className="mt-5 flex items-center gap-2.5 rounded-[16px] bg-surface px-4 py-3.5 text-[13.5px] text-foreground">
+        <Spinner />
+        Checking this browser
+      </p>
+    );
+  }
+
+  // Kept here: no prompt at all.
+  if (known && mode === "auto") {
+    return (
+      <>
+        {lead("This browser keeps your backup code, so your private account opens with no prompt.")}
+        {action(returning ? "Open your private account" : "Set up your private account", () => openWithCode(null))}
+      </>
+    );
+  }
+
+  if (mode === "code-show" && fresh?.owner === owner) {
+    const copy = () =>
+      void navigator.clipboard?.writeText(fresh.code).then(
+        () => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1400);
+        },
+        () => undefined,
+      );
+    return (
+      <>
+        {lead("Save this code somewhere safe, like a password manager. It opens your private account on a new device, and it is shown only once.")}
+        <div className="mt-4 flex items-center gap-3 rounded-[16px] bg-surface py-3 pl-4 pr-2">
+          <p className="tnum min-w-0 flex-1 select-all break-all text-[15px] font-medium tracking-wide text-foreground" aria-label="Your backup code">
+            {fresh.code}
+          </p>
+          <button type="button" onClick={copy} className="btn btn-quiet btn-sm h-10 shrink-0">
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-[14px] px-1 py-1">
+          <input type="checkbox" checked={saved} disabled={busy} onChange={(e) => setSaved(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-ink" />
+          <span className="text-[13.5px] text-foreground">I saved my backup code</span>
+        </label>
+        {action("Continue", () => openWithCode(fresh.secret), saved ? null : "Save your code to continue")}
+      </>
+    );
+  }
+
+  if (mode === "code-enter" || (mode === "auto" && !passkey && returning)) {
+    const go = async () => {
+      setProblem(null);
+      const secret = await secretFromBackupCode(typed);
+      if (!secret) {
+        setProblem(BAD_CODE_TEXT);
+        return;
+      }
+      openWithCode(secret);
+    };
+    return (
+      <>
+        {lead("Enter the backup code you saved when you set up your private account.")}
+        <label htmlFor="gloam-backup-code" className="mt-4 block text-[13px] text-mute">
+          Backup code
+        </label>
+        <input
+          id="gloam-backup-code"
+          className="gl-input tnum mt-1.5 text-[15px] tracking-wide"
+          value={typed}
+          onChange={(e) => {
+            setTyped(e.target.value);
+            setProblem(null);
+          }}
+          spellCheck={false}
+          autoComplete="off"
+          autoCapitalize="characters"
+          placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+          disabled={busy}
+          aria-invalid={Boolean(problem) || undefined}
+        />
+        {problem && (
+          <p role="alert" className="mt-1.5 text-[13px] text-danger">
+            {problem}
+          </p>
+        )}
+        {action("Open your private account", () => void go(), typed.trim() ? null : "Enter your backup code")}
+        {link(passkey ? "Use my passkey instead" : returning ? "I don't have a code: set up a new private account" : "Back", () => {
+          setProblem(null);
+          setMode(passkey ? "auto" : "code-new");
+        })}
+      </>
+    );
+  }
+
+  if (passkey && mode === "auto") {
+    return (
+      <>
+        {lead(
+          returning
+            ? "Your passkey opens it again. Nothing new is created."
+            : "Your passkey opens it, on any device that has the passkey. The key comes from your passkey, so Turnkey and Gloam's servers never see it.",
+        )}
+        {action(returning ? "Open with passkey" : "Set up with passkey", openWithPasskey)}
+        {link("No passkey here? Use a backup code", () => setMode("code-new"))}
+      </>
+    );
+  }
+
+  // Email sign-in (or a passkey that can't here): a backup code made in this browser.
+  const make = () => {
+    fresh?.secret.fill(0);
+    const secret = newCodeSecret();
+    void backupCodeFor(secret).then((code) => {
+      setFresh({ owner, secret, code });
+      setSaved(false);
+      setMode("code-show");
+    });
+  };
+  return (
+    <>
+      {lead("A backup code opens it. The code is made in this browser, so Turnkey and Gloam's servers never see it.")}
+      {action("Make my backup code", make)}
+      {link("I have a backup code", () => setMode("code-enter"))}
+      {passkey && link("Use my passkey instead", () => setMode("auto"))}
+    </>
+  );
 }

@@ -46,6 +46,7 @@ import {
   type SolanaAccount,
   type SolanaWallet,
 } from "@/lib/solanaWallet";
+import { isGloamAccount } from "@/lib/turnkeySolana";
 
 const lib = () => import("@/lib/solanaRings/client");
 
@@ -74,6 +75,14 @@ export type SolanaPayrollEngine = {
 };
 
 type Main = { wallet: SolanaWallet; account: SolanaAccount };
+
+/**
+ * How a Gloam account (lib/turnkeySolana) opens its private account: from a
+ * secret Turnkey never sees (its passkey, or a backup code: lib/solanaRings/gloamRoot),
+ * never from a signature, which Turnkey keeps. `first` names the wait's first
+ * step; `seed` gives the account's 32-byte seed for an index.
+ */
+export type AccountOpener = { first: string; seed: (index: number) => Promise<Uint8Array> };
 
 type SolanaCtx = {
   /** Solana is the network picked (and on). */
@@ -105,7 +114,8 @@ type SolanaCtx = {
   task: SolanaTask | null;
   error: { kind: SolanaTaskKind; message: string } | null;
   connect(w: SolanaWallet): Promise<boolean>;
-  setUp(): Promise<boolean>;
+  /** Set up (or open) the private account: from the main wallet's signature, or from `open` (a Gloam account: never a signature). */
+  setUp(open?: AccountOpener): Promise<boolean>;
   /** Sign out: close the account, forget the wallet and the kept account on this device. */
   disconnect(): void;
   refresh(): Promise<boolean>;
@@ -321,7 +331,7 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
   const returning = Boolean(owner && seen?.owner === owner && seen.seen);
 
   const wallets = useMemo(
-    () => (demo ? [{ name: "Demo wallet", icon: DEMO_ICON, wallet: null as unknown as SolanaWallet["wallet"] }] : found.filter(canSignMessage)),
+    () => (demo ? [{ name: "Demo wallet", icon: DEMO_ICON, wallet: null as unknown as SolanaWallet["wallet"] }] : found.filter((w) => canSignMessage(w) || isGloamAccount(w))),
     [demo, found]
   );
 
@@ -521,12 +531,12 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
     })();
   }, [on, demo, main, wallets, keepMain, reopenKept]);
 
-  const setUp = useCallback(async () => {
+  const setUp = useCallback(async (open?: AccountOpener) => {
     const m = main;
     if (!m) return false;
     const owner = m.account.address;
     const index = seen?.owner === owner ? seen.index : 0;
-    const sign = `Sign the message in ${m.wallet.name}`;
+    const sign = open?.first ?? `Sign the message in ${m.wallet.name}`;
     const opening = "Opening your private account";
     const ready = "Getting it ready on Solana";
     const reading = "Reading your private balance";
@@ -550,7 +560,16 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
       const held: { seed: Uint8Array | null } = { seed: null };
       let s: RingsSession;
       try {
-        s = await l.openRingsAccount({ wallet: watched, account: m.account, index, network, onSeed: (x) => void (held.seed = x.slice()) });
+        if (open) {
+          held.seed = await open.seed(index);
+          step(1);
+          s = await l.reopenRingsAccount({ wallet: watched, account: m.account, index, network, seed: held.seed });
+        } else if (isGloamAccount(m.wallet)) {
+          // A Gloam account's signatures are Turnkey's to keep: its private account never comes from one.
+          throw new Error("Open your private account with your passkey or backup code.");
+        } else {
+          s = await l.openRingsAccount({ wallet: watched, account: m.account, index, network, onSeed: (x) => void (held.seed = x.slice()) });
+        }
         hook.current = {};
         try {
           const registered = await l.isRegistered(s).catch(() => false);

@@ -6,22 +6,17 @@
  *
  * It reaches the app's Solana code as a Wallet Standard wallet called "Gloam
  * account", announced on the page the way Phantom announces itself
- * (registerStandardWallet), so lib/solanaWallet finds it and everything built on
- * that (opening the private account, adding money, paying a bridge order from
- * Solana) works unchanged. Its key stays in Turnkey: a message or a transaction
- * is signed through Turnkey's raw Ed25519 signing (sign_raw_payload, no hash).
+ * (registerStandardWallet), so lib/solanaWallet finds it and adding money or
+ * paying a bridge order from Solana works unchanged. Its key stays in Turnkey: a
+ * transaction is signed through Turnkey's raw Ed25519 signing (sign_raw_payload,
+ * no hash).
  *
- * The private account (lib/solanaRings/account) is derived from the signature
- * over a fixed message, so that signature has to come out the same every time.
- * Ed25519 signing is deterministic (RFC 8032) and Turnkey's is too, but a
- * Gloam account still signs a message twice and hands it over only when both
- * match and check out against its key: a signature that would open some other
- * account next visit is never used.
- *
- * Turnkey keeps a record of every signature it makes, and Gloam's Turnkey
- * account can read those records (the /privacy page says so). The signature
- * that opens the private account is one of them, so the app says so before a
- * Gloam account opens one (GLOAM_ACCOUNT_NOTE).
+ * It signs transactions and nothing else. It has no signMessage on purpose: a
+ * browser wallet opens its private account from a signature (lib/solanaRings/account),
+ * but Turnkey keeps every signature it makes and Gloam's Turnkey account can read
+ * them, so a private account opened that way could be rebuilt without the person.
+ * A Gloam account's private account opens from a secret Turnkey never sees
+ * instead: the person's passkey or a backup code (lib/solanaRings/gloamRoot).
  *
  * Plain logic, with no React and no Turnkey SDK, so scripts/selftest-turnkey-solana.mts
  * runs it with a stand-in Turnkey.
@@ -36,10 +31,6 @@ export const GLOAM_ACCOUNT_NAME = "Gloam account";
 export const GLOAM_ACCOUNT_ICON = `data:image/svg+xml;base64,${b64(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#0B0C0E"/><rect x="15" y="4" width="12" height="12" rx="3.5" fill="#FFFFFF"/></svg>',
 )}`;
-
-/** Said before a Gloam account opens a private account on Solana (components/app/GloamAccountNote). */
-export const GLOAM_ACCOUNT_NOTE =
-  "Turnkey makes and keeps the signature that opens it, so Turnkey, and anyone with access to Gloam's Turnkey account, could open this private account. A Solana wallet you hold yourself avoids that.";
 
 /** The Solana account's path in the Gloam wallet: Turnkey's first Solana account. Never change it. */
 export const GLOAM_SOLANA_PATH = "m/44'/501'/0'/0'";
@@ -130,10 +121,6 @@ function toHex(b: Uint8Array): string {
   return s;
 }
 
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
-}
-
 /**
  * The 64-byte Ed25519 signature from Turnkey's answer: R then S, 32 bytes each,
  * in hex (Turnkey names them r and s for every curve). Null when it isn't that.
@@ -149,8 +136,7 @@ export function ed25519FromParts(r: unknown, s: unknown): Uint8Array | null {
 
 /**
  * Whether `signature` is `publicKey`'s Ed25519 signature over `message`. Null
- * when this browser can't check Ed25519 (the chain still checks a transaction;
- * the private account's own check, lib/solanaRings/client, refuses a message).
+ * when this browser can't check Ed25519 (the chain still checks a transaction).
  */
 async function ed25519Check(publicKey: Uint8Array, message: Uint8Array, signature: Uint8Array): Promise<boolean | null> {
   const subtle = globalThis.crypto?.subtle;
@@ -222,7 +208,7 @@ export function turnkeyEd25519Signer(
 /* ---------------------------------------------------------------- the wallet */
 
 const CHAINS = ["solana:mainnet", "solana:devnet"] as const;
-const FEATURES = ["solana:signMessage", "solana:signTransaction"] as const;
+const FEATURES = ["solana:signTransaction"] as const;
 
 type StandardAccount = {
   address: string;
@@ -231,7 +217,6 @@ type StandardAccount = {
   features: readonly string[];
 };
 type TxInput = { account: StandardAccount; chain?: string; transaction: Uint8Array };
-type MessageInput = { account: StandardAccount; message: Uint8Array };
 type ChangeListener = (props: { accounts?: readonly StandardAccount[] }) => void;
 
 /** A Gloam account as a Wallet Standard wallet (the shape lib/solanaWallet reads). */
@@ -245,7 +230,6 @@ export type GloamSolanaWallet = {
     "standard:connect": { version: "1.0.0"; connect(input?: { silent?: boolean }): Promise<{ accounts: readonly StandardAccount[] }> };
     "standard:disconnect": { version: "1.0.0"; disconnect(): Promise<void> };
     "standard:events": { version: "1.0.0"; on(event: "change", listener: ChangeListener): () => void };
-    "solana:signMessage": { version: "1.0.0"; signMessage(...inputs: MessageInput[]): Promise<{ signedMessage: Uint8Array; signature: Uint8Array }[]> };
     "solana:signTransaction": {
       version: "1.0.0";
       supportedTransactionVersions: readonly ("legacy" | 0)[];
@@ -258,8 +242,6 @@ export type GloamSolanaWallet = {
   end(): void;
 };
 
-export const SIGNED_TWO_WAYS =
-  "Your Gloam account signed the same message two different ways, so it can't open a private account. Nothing was opened. Try again later.";
 const SIGNED_WRONG = "Your Gloam account's signature didn't check out, so nothing was signed. Try again.";
 const NOT_A_SIGNER = "This transaction doesn't ask your Gloam account to sign it.";
 const ENDED = "Sign in to your Gloam wallet first.";
@@ -283,17 +265,6 @@ export function makeGloamSolanaWallet(opts: { address: string; sign: Ed25519Sign
   const mine = (a: { address?: string } | undefined) => {
     if (!a || a.address !== opts.address) throw new Error("That isn't your Gloam account.");
   };
-
-  async function signMessage(message: Uint8Array): Promise<Uint8Array> {
-    live();
-    const bytes = new Uint8Array(message);
-    // twice, and only when both match: the private account comes from this signature
-    const first = await opts.sign(bytes);
-    const second = await opts.sign(bytes);
-    if (!sameBytes(first, second)) throw new Error(SIGNED_TWO_WAYS);
-    if ((await ed25519Check(publicKey!, bytes, first)) === false) throw new Error(SIGNED_WRONG);
-    return first;
-  }
 
   async function signTransaction(wire: Uint8Array): Promise<Uint8Array> {
     live();
@@ -334,18 +305,6 @@ export function makeGloamSolanaWallet(opts: { address: string; sign: Ed25519Sign
           if (event !== "change") return () => {};
           listeners.add(listener);
           return () => listeners.delete(listener);
-        },
-      },
-      "solana:signMessage": {
-        version: "1.0.0",
-        async signMessage(...inputs) {
-          const out: { signedMessage: Uint8Array; signature: Uint8Array }[] = [];
-          for (const input of inputs) {
-            mine(input?.account);
-            const signature = await signMessage(input.message);
-            out.push({ signedMessage: new Uint8Array(input.message), signature });
-          }
-          return out;
         },
       },
       "solana:signTransaction": {
@@ -461,17 +420,21 @@ export function registerStandardWallet(wallet: object, target: EventTarget = win
  * - making: its Solana account is being made
  * - ready: announced as a Solana wallet, at `address`
  * - failed: it wasn't made; `error` says why, and retryGloamSolana tries again
+ * `passkeys`: the credential ids of the passkeys the person signs in to Gloam with
+ * (Turnkey's authenticators; public), which open the private account
+ * (lib/solanaRings/gloamRoot). Empty for someone who signs in with an email alone.
  */
 export type GloamSolanaStatus = "off" | "starting" | "making" | "ready" | "failed";
-export type GloamSolanaState = { status: GloamSolanaStatus; address: string | null; error: string | null };
+export type GloamSolanaState = { status: GloamSolanaStatus; address: string | null; error: string | null; passkeys: readonly string[] };
 
-export const GLOAM_SOLANA_OFF: GloamSolanaState = Object.freeze({ status: "off", address: null, error: null });
+export const GLOAM_SOLANA_OFF: GloamSolanaState = Object.freeze({ status: "off", address: null, error: null, passkeys: Object.freeze([]) as readonly string[] });
 let state: GloamSolanaState = GLOAM_SOLANA_OFF;
 const stateListeners = new Set<() => void>();
 
 export function setGloamSolana(next: GloamSolanaState) {
-  if (next.status === state.status && next.address === state.address && next.error === state.error) return;
-  state = next.status === "off" ? GLOAM_SOLANA_OFF : Object.freeze({ ...next });
+  const same = next.passkeys.length === state.passkeys.length && next.passkeys.every((p, i) => p === state.passkeys[i]);
+  if (next.status === state.status && next.address === state.address && next.error === state.error && same) return;
+  state = next.status === "off" ? GLOAM_SOLANA_OFF : Object.freeze({ ...next, passkeys: Object.freeze([...next.passkeys]) });
   stateListeners.forEach((fn) => fn());
 }
 

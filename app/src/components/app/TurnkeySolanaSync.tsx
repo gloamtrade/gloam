@@ -6,6 +6,7 @@ import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 import { embeddedNeedsWallet, onEmbeddedNeedsWallet } from "@/lib/turnkeyBridge";
 import {
   GLOAM_SOLANA_ACCOUNT,
+  GLOAM_SOLANA_OFF,
   createSolanaErrorText,
   endGloamSolanaWallet,
   gloamSolanaRetries,
@@ -36,7 +37,7 @@ import { useNetwork } from "./NetworkProvider";
  *   takes it off the page: the same wallet comes back with the kit.
  */
 export function TurnkeySolanaSync() {
-  const { authState, wallets, httpClient, session, createWalletAccounts, refreshWallets } = useTurnkey();
+  const { authState, wallets, httpClient, session, user, createWalletAccounts, refreshWallets } = useTurnkey();
   const { solana } = useNetwork();
   const signedIn = authState === AuthState.Authenticated;
   const organizationId = session?.organizationId ?? null;
@@ -111,7 +112,10 @@ export function TurnkeySolanaSync() {
     return registerStandardWallet(gloamSolanaWalletFor(address), window);
   }, [address, organizationId]);
 
-  // What the rest of the app reads (the wallet menu, Solana's connect card).
+  // What the rest of the app reads (the wallet menu, Solana's connect card), with the
+  // passkeys this person signs in with: one of them opens the private account (GloamAccountOpen).
+  const passkeys = signedIn ? (user?.authenticators ?? []).map((a) => a.credentialId).filter((id): id is string => typeof id === "string" && id.length > 0) : [];
+  const passkeyKey = passkeys.join(",");
   const status =
     plan.kind === "ready"
       ? { status: "ready" as const, address: plan.address, error: null }
@@ -123,9 +127,9 @@ export function TurnkeySolanaSync() {
           ? { status: "starting" as const, address: null, error: null }
           : { status: "off" as const, address: null, error: null };
   useEffect(() => {
-    setGloamSolana(status);
-  }, [status.status, status.address, status.error]); // eslint-disable-line react-hooks/exhaustive-deps -- the object is rebuilt each render; its fields are what change
-  useEffect(() => () => setGloamSolana({ status: "off", address: null, error: null }), []);
+    setGloamSolana({ ...status, passkeys: passkeyKey ? passkeyKey.split(",") : [] });
+  }, [status.status, status.address, status.error, passkeyKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the object is rebuilt each render; its fields are what change
+  useEffect(() => () => setGloamSolana(GLOAM_SOLANA_OFF), []);
 
   return null;
 }
