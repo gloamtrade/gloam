@@ -46,7 +46,7 @@ import { WalletMenu } from "./WalletMenu";
 import { TokenLogo } from "./TokenLogo";
 import { Select } from "@/components/ui/Select";
 import { SuccessModal } from "./SuccessModal";
-import { displayAmount, displayAmountText } from "@/lib/amountShort";
+import { displayAmount, displayAmountText, typedAmount } from "@/lib/amountShort";
 import { DevKeysBanner } from "./DevKeysBanner";
 import { BridgeInCard } from "./BridgeIn";
 import { RefreshIcon } from "./VaultHealth";
@@ -1240,7 +1240,7 @@ export function ShieldView() {
                 </span>
               </div>
               <p className="tnum mt-3 truncate text-[28px] font-light leading-none tracking-[-0.02em] text-foreground">
-                {displayAmountText(amtNum > 0 ? amount : "0")}{" "}
+                {amtNum > 0 ? typedAmount(amount) : displayAmountText("0")}{" "}
                 <span className="text-[15px] tracking-normal text-mute">{symbol}</span>
               </p>
             </div>

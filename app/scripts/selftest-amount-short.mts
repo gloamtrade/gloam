@@ -33,7 +33,7 @@ globalThis.fetch = (async (url: unknown) => {
   throw new Error(`selftest-amount-short: no network calls allowed (${String(url)})`);
 }) as typeof fetch;
 
-const { amountDown, displayAmount, displayAmountText } = await import("../src/lib/amountShort");
+const { amountDown, displayAmount, displayAmountText, typedAmount } = await import("../src/lib/amountShort");
 const { formatAssetAmount, formatAssetLabel, formatAssetAmountExact, isStableAsset } = await import("../src/lib/shield");
 const nets = await import("../src/lib/networks");
 const { CASH_OUT_EMPTY_HELP, readCashOutAmount, wholeBalanceText } = await import("../src/lib/cashOutAmount");
@@ -238,6 +238,40 @@ test("To is your own Gloam address: allowed, one quiet line, no warning", () => 
   assert.ok(!/text-warn|text-danger|role="alert"/.test(line), "no warning colour");
   // nothing in the send path stops it
   assert.equal((move.match(/payingSelf/g) ?? []).length, 2, "declared once, drawn once: never a gate");
+});
+
+// ------------------------------------------------------------- the amount as typed, said back
+
+test("typedAmount says back what was typed, every decimal: 0.001 reads 0.001, never <0.01", () => {
+  assert.equal(typedAmount("0.001"), "0.001");
+  assert.equal(typedAmount(" 0.000001 "), "0.000001");
+  assert.equal(typedAmount("1250.123456"), "1,250.123456");
+  assert.equal(typedAmount("1,250.5"), "1,250.5");
+  assert.equal(typedAmount("25"), "25");
+  assert.equal(typedAmount("007"), "7");
+  assert.equal(typedAmount(".5"), "0.5");
+  assert.equal(typedAmount("5."), "5");
+  assert.equal(typedAmount("abc"), "abc");
+  assert.equal(displayAmountText("0.001"), "<0.01", "two places stays for balances and quotes");
+});
+
+test("buttons and review lines that repeat the amount field use the typed amount", () => {
+  const bridge = src("../src/components/app/BridgeIn.tsx");
+  const sol = src("../src/components/app/SolanaBridgeIn.tsx");
+  const send = src("../src/components/app/SendView.tsx");
+  const shield = src("../src/components/app/ShieldView.tsx");
+  const request = src("../src/components/app/PaymentRequest.tsx");
+  assert.match(bridge, /`Bridge \$\{typedAmount\(amount\)\} \$\{token\.symbol\} from your wallet`/);
+  assert.match(bridge, /typedAmount\(wallet\.quote\.send\.amount\)/);
+  assert.match(bridge, /typedAmount\(q\.receive\.amount\)/, "private review: what lands is what was typed");
+  assert.match(sol, /typedAmount\(flow\.quote\.send\.amount\)/);
+  assert.equal((send.match(/typedAmount\(amount\)/g) ?? []).length, 3, "Sending, Amount and Confirm send");
+  assert.ok(!/displayAmountText\(amount\)/.test(send));
+  assert.match(shield, /amtNum > 0 \? typedAmount\(amount\)/);
+  assert.match(request, /typedAmount\(r\.value\)/);
+  assert.match(request, /typedAmount\(request\.amount\)/);
+  const lib = src("../src/lib/solanaRings/bridgeIn.ts");
+  assert.match(lib, /`Bridge \$\{typedAmount\(text\)\} \$\{s\.symbol\} from your wallet`/);
 });
 
 // ------------------------------------------------------------- copy

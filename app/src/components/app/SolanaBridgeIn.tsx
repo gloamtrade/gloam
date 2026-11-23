@@ -22,6 +22,8 @@ import { useAccount, useBalance, useConfig, useConnect, useReadContract } from "
 import { BRIDGE_MAX_USD, BRIDGE_MIN_USD, validRefundAddress, type BridgeChain, type BridgeStatus } from "@/lib/bridge";
 import {
   FORM,
+  LIVE_PRICE_DEBOUNCE_MS,
+  LIVE_PRICE_REFRESH_MS,
   SOLANA_BRIDGE_PRIVACY_NOTE,
   bridgeButton,
   defaultLanding,
@@ -67,7 +69,7 @@ import { AmountProblem } from "./AmountProblem";
 import { SuccessReceipt } from "./SuccessModal";
 import { ChainLogo, CostWarning, PoweredByRelay, SourceBalance, TokenMark, feeRows, fmtMoney, stableMax } from "./BridgeIn";
 import { WalletConnectSheet } from "./WalletConnectSheet";
-import { displayAmount, displayAmountNumber, displayAmountText } from "@/lib/amountShort";
+import { displayAmount, displayAmountNumber, displayAmountText, typedAmount } from "@/lib/amountShort";
 
 type KV = { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };
 
@@ -89,7 +91,12 @@ function liveDeps(session: RingsSession | Account): SolanaBridgeDeps {
   const lib = () => import("@/lib/solanaRings/arrivals");
   return {
     async quote(body) {
-      const res = await fetch("/api/bridge/solana", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      let res: Response;
+      try {
+        res = await fetch("/api/bridge/solana", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      } catch {
+        throw new Error("Couldn't reach the bridge. Check your connection and try again.");
+      }
       const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: SolanaBridgeQuote; error?: { message?: string } } | null;
       if (!json?.ok || !json.data) throw new Error(json?.error?.message ?? "The bridge couldn't make a route right now. Try again.");
       return json.data;
@@ -539,11 +546,11 @@ function QuoteRows({
   ];
   // Once it is paid, only what was sent, what lands and what it cost: the rest was for deciding.
   const rows: [string, React.ReactNode][] = sentRow
-    ? [["Sent", `${displayAmountText(q.send.amount)} ${q.send.symbol} on ${q.send.chain}`], ...(returned ? [] : [lands]), ...feeRows(q, "Bridge fee")]
+    ? [["Sent", `${typedAmount(q.send.amount)} ${q.send.symbol} on ${q.send.chain}`], ...(returned ? [] : [lands]), ...feeRows(q, "Relay fee")]
     : [
         lands,
         ["At least", `${displayAmountText(q.receive.minimum)} ${q.receive.symbol}`],
-        ...feeRows(q, "Bridge fee"),
+        ...feeRows(q, "Relay fee"),
         ...gas,
         ["Making it private", "Free, Gloam pays the Solana fee"],
         ["Arrives", arrivesText(q)],
@@ -557,6 +564,77 @@ function QuoteRows({
         </div>
       ))}
     </dl>
+  );
+}
+
+/**
+ * The live price under the amount, before anything is asked of the wallet:
+ * what lands privately, Relay's fee (and Gloam's when it takes one), the
+ * network fee when the wallet pays, when it arrives, and the cost warning when
+ * the route takes a large share. Relay delivers exactly what the amount buys
+ * (exact input), so nothing comes back and there is no leftover line here.
+ */
+function LivePrice({
+  quote,
+  error,
+  walletPays,
+  onRetry,
+}: {
+  quote: SolanaBridgeQuote | null;
+  error: string | null;
+  walletPays: boolean;
+  onRetry: () => void;
+}) {
+  if (error) {
+    return (
+      <div role="alert" className="flex items-start justify-between gap-3 rounded-xl bg-danger-soft px-4 py-3 text-[13px] leading-relaxed text-danger">
+        <p className="min-w-0 py-1">{error}</p>
+        <button type="button" onClick={onRetry} className="-my-0.5 min-h-10 shrink-0 rounded-lg px-1 font-medium underline underline-offset-4">
+          Try again
+        </button>
+      </div>
+    );
+  }
+  const wait = <span aria-hidden className="inline-block h-3.5 w-20 animate-pulse rounded bg-foreground/10" />;
+  const gas: [string, React.ReactNode][] = !walletPays
+    ? []
+    : quote?.gasUsd != null && quote.gasUsd >= 0.01
+      ? [["Network fee", `about $${fmtMoney(quote.gasUsd)} on ${quote.send.chain}`]]
+      : [["Network fee", "Shown in your wallet"]];
+  const rows: [string, React.ReactNode][] = [
+    ["At least", quote ? `${displayAmountText(quote.receive.minimum)} ${quote.receive.symbol}` : wait],
+    ...(quote ? feeRows(quote, "Relay fee") : ([["Relay fee", wait]] as [string, React.ReactNode][])),
+    ...gas,
+    ["Arrives", quote ? arrivesText(quote) : wait],
+  ];
+  return (
+    <div aria-live="polite" aria-busy={!quote}>
+      <div className="rounded-2xl bg-surface px-4">
+        <p className="flex min-h-12 flex-wrap items-center gap-x-1.5 gap-y-1 py-2.5 text-[14px] leading-relaxed text-foreground">
+          {quote ? (
+            <>
+              You get about
+              <TokenMark src={quote.receive.logo} size={18} />
+              <span className="tnum font-medium">
+                {displayAmountText(quote.receive.amount)} {quote.receive.symbol}
+              </span>
+              in your private balance
+            </>
+          ) : (
+            <span className="text-mute">Getting a price…</span>
+          )}
+        </p>
+        <dl className="divide-y divide-line border-t border-line text-[13.5px]">
+          {rows.map(([k, v]) => (
+            <div key={k} className="flex min-h-10 items-center justify-between gap-3">
+              <dt className="text-mute">{k}</dt>
+              <dd className="tnum text-right text-foreground">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+      {quote && <CostWarning quote={quote} />}
+    </div>
   );
 }
 
@@ -686,6 +764,50 @@ function BridgeSheet({
   });
   const canAsk = button.ready && flow.kind === "form";
   const walletConnecting = connecting || evmStatus === "connecting" || evmStatus === "reconnecting";
+
+  // The live price under the amount, as soon as one is typed: what lands, the fees, when.
+  // Asked after a pause in typing, again every 20 seconds, and whenever what it depends on
+  // changes. A price only: no deposit address and nothing to sign (the route's `preview`).
+  const priceAsk = useMemo(() => {
+    if (!open || picking || flow.kind !== "form" || !onMainnet || !landingReady || !amountOk) return null;
+    return {
+      chainId: chain.id,
+      symbol: token.symbol,
+      asset: landing,
+      amount: amount.trim(),
+      recipient: account.address,
+      preview: true,
+      ...(walletPays && evm ? { sender: evm } : {}),
+    };
+  }, [open, picking, flow.kind, onMainnet, landingReady, amountOk, chain.id, token.symbol, landing, amount, account.address, walletPays, evm]);
+  const priceKey = priceAsk ? JSON.stringify(priceAsk) : null;
+  const [price, setPrice] = useState<{ key: string; quote: SolanaBridgeQuote | null; error: string | null } | null>(null);
+  const [priceTick, setPriceTick] = useState(0);
+  useEffect(() => {
+    if (!priceAsk || !priceKey) return;
+    let live = true;
+    const t = window.setTimeout(() => {
+      void deps
+        .quote(priceAsk)
+        .then((quote) => live && setPrice({ key: priceKey, quote, error: null }))
+        .catch((err) => live && setPrice({ key: priceKey, quote: null, error: err instanceof Error ? err.message : "Couldn't get a price. Try again." }));
+    }, LIVE_PRICE_DEBOUNCE_MS);
+    return () => {
+      live = false;
+      window.clearTimeout(t);
+    };
+  }, [priceAsk, priceKey, deps, priceTick]);
+  useEffect(() => {
+    if (!priceKey) return;
+    const t = window.setInterval(() => setPriceTick((n) => n + 1), LIVE_PRICE_REFRESH_MS);
+    return () => window.clearInterval(t);
+  }, [priceKey]);
+  // The price for what is on screen now; an older one stays up while a refresh of the same ask is on its way.
+  const livePrice = priceKey && price?.key === priceKey ? price : null;
+  const retryPrice = useCallback(() => {
+    setPrice(null);
+    setPriceTick((n) => n + 1);
+  }, []);
 
   function body(extra: Record<string, unknown>) {
     return { chainId: chain.id, symbol: token.symbol, asset: landing, amount, recipient: account.address, ...extra };
@@ -978,6 +1100,8 @@ function BridgeSheet({
                   </p>
                 </div>
 
+                {priceKey && <LivePrice quote={livePrice?.quote ?? null} error={livePrice?.error ?? null} walletPays={walletPays} onRetry={retryPrice} />}
+
                 {walletPays && evm && (
                   <p className="-mt-1 text-[12.5px] leading-relaxed text-mute">
                     Paying from your wallet <span className="tnum text-soft">{shortAddress(evm)}</span>. If the transfer fails, the money goes back to it.
@@ -1070,7 +1194,7 @@ function BridgeSheet({
                   Bridge
                   <TokenMark src={flow.quote.send.logo} size={18} />
                   <span className="tnum font-medium">
-                    {displayAmountText(flow.quote.send.amount)} {flow.quote.send.symbol}
+                    {typedAmount(flow.quote.send.amount)} {flow.quote.send.symbol}
                   </span>
                   from your wallet on
                   <ChainLogo id={flow.quote.send.chainId} size={18} />

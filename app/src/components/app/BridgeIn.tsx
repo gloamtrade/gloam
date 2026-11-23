@@ -49,7 +49,7 @@ import { AmountProblem } from "./AmountProblem";
 import { BackupStep, useBackupGate } from "./RecoveryPanel";
 import { keepStorage } from "@/lib/backupGate";
 import { SuccessReceipt } from "./SuccessModal";
-import { displayAmount, displayAmountNumber, displayAmountText } from "@/lib/amountShort";
+import { displayAmount, displayAmountNumber, displayAmountText, typedAmount } from "@/lib/amountShort";
 
 const noopSubscribe = () => () => {};
 const noop = () => {};
@@ -1403,7 +1403,7 @@ function BridgeSheet({
                       ? "Review the swap"
                       : walletPays
                         ? amountNum > 0 && /^\d+(\.\d+)?$/.test(amount)
-                          ? `Bridge ${displayAmountText(amount)} ${token.symbol} from your wallet`
+                          ? `Bridge ${typedAmount(amount)} ${token.symbol} from your wallet`
                           : "Bridge from your wallet"
                         : "Get a deposit address")}
             </button>
@@ -1505,7 +1505,7 @@ function BridgeSheet({
                 <dt className="text-mute">Sent</dt>
                 <dd className="tnum flex items-center gap-1.5 text-right text-foreground">
                   <TokenMark src={wallet.quote.send.logo} size={18} />
-                  {displayAmountText(wallet.quote.send.amount)} {wallet.quote.send.symbol} on {wallet.quote.send.chain}
+                  {typedAmount(wallet.quote.send.amount)} {wallet.quote.send.symbol} on {wallet.quote.send.chain}
                 </dd>
               </div>
               <div className="flex min-h-11 items-center justify-between gap-3">
@@ -1739,7 +1739,7 @@ function WalletReview({
         Bridge
         <TokenMark src={q.send.logo} size={18} />
         <span className="tnum font-medium">
-          {displayAmountText(q.send.amount)} {q.send.symbol}
+          {typedAmount(q.send.amount)} {q.send.symbol}
         </span>
         from your wallet on
         <ChainLogo id={q.send.chainId} size={18} />
@@ -1883,7 +1883,8 @@ function PrivateReview({
       "Added privately",
       <span key="a" className="flex items-center gap-1.5 font-medium">
         <TokenMark src={q.receive.logo} size={18} />
-        {displayAmountText(q.receive.amount)} {q.receive.symbol}
+        {/* What lands is the amount typed (exact output), said back as typed. */}
+        {typedAmount(q.receive.amount)} {q.receive.symbol}
       </span>,
     ],
     ["On", q.receive.chain],
@@ -2192,7 +2193,7 @@ function SwapReview({
         Swap
         <TokenMark src={quote.send.logo} size={18} />
         <span className="tnum font-medium">
-          {displayAmountText(quote.send.amount)} {quote.send.symbol}
+          {typedAmount(quote.send.amount)} {quote.send.symbol}
         </span>
         on
         <ChainLogo id={quote.send.chainId} size={18} />
