@@ -43,17 +43,11 @@ function total(rows: Row[]): { usd: number; unpriced: Row[] } {
   return { usd: sum, unpriced };
 }
 
-/** "$1,550.00", "$1,550.00 + 4.25 SOL", or "4.25 SOL". */
-function figureOf(t: { usd: number; unpriced: Row[] }): string {
-  const rest = t.unpriced.map((r) => `${r.text} ${r.symbol}`).join(" + ");
-  if (!rest) return usd(t.usd);
-  return t.usd > 0 ? `${usd(t.usd)} + ${rest}` : rest;
-}
-
 /**
- * The hero's figure in two parts: the big number, and what has no price yet
- * ("+ 4.25 SOL") on a smaller line under it. As one line it ran past a phone's
- * width and was cut to "$1,550.00 +…".
+ * A total in two parts: the dollars ("$1,550.00"), and what has no price yet
+ * ("+ 4.25 SOL") for a smaller line under it; "4.25 SOL" alone when nothing has
+ * a price. As one line ("$1,550.00 + 4.25 SOL") it ran past a phone's width and
+ * was cut to "$1,550.00 +…".
  */
 function heroParts(t: { usd: number; unpriced: Row[] }): { main: string; rest: string | null } {
   const rest = t.unpriced.map((r) => `${r.text} ${r.symbol}`).join(" + ");
@@ -84,6 +78,7 @@ export function SolanaPortfolioView() {
   const loading = !sol.balances;
   // The hero reads in dollars once priced; a lone token without a price reads as that token.
   const hero = heroParts(privateSum);
+  const walletParts = heroParts(walletSum);
   const pct =
     privateTotal != null && walletTotal != null && privateTotal + walletTotal > 0
       ? Math.round((privateTotal / (privateTotal + walletTotal)) * 100)
@@ -243,7 +238,15 @@ export function SolanaPortfolioView() {
               {sol.walletBalances ? (
                 <p className="tnum shrink-0 text-right text-[17px] text-foreground">
                   <span className="sr-only">Total in your wallet: </span>
-                  {hidden ? <SealDots n={5} /> : figureOf(walletSum)}
+                  {hidden ? (
+                    <SealDots n={5} />
+                  ) : (
+                    <>
+                      {walletParts.main}
+                      {/* what has no price yet goes under the total, so the title beside it keeps its width */}
+                      {walletParts.rest && <span className="mt-0.5 block text-[13px] text-mute">{walletParts.rest}</span>}
+                    </>
+                  )}
                 </p>
               ) : (
                 <span role="status" aria-label="Loading the total" className="mt-1 inline-block h-5 w-16 shrink-0 rounded-md bg-surface-2 motion-safe:animate-pulse" />
