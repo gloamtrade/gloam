@@ -312,7 +312,7 @@ function PasskeyCard({ demo }: { demo: boolean }) {
       flush
     >
       {demo ? (
-        <Row label="Passkey lock" hint="Off in the demo." />
+        <Row label="Off in the demo" />
       ) : vault.protected ? (
         <>
           <Row
@@ -353,7 +353,7 @@ function PasskeyCard({ demo }: { demo: boolean }) {
           </Row>
         </>
       ) : support === "no" ? (
-        <Row label="Passkey lock" hint={NO_PRF_MESSAGE} />
+        <Row label="Not on this browser" hint={NO_PRF_MESSAGE} />
       ) : (
         <Row
           label="Protect with a passkey"
