@@ -774,17 +774,11 @@ export function VaultSwapView() {
   return (
     <div className="grid items-start gap-6">
       <div className="gl-card min-w-0 p-5 sm:p-7">
-        <div className="flex items-start justify-between gap-3 px-1 pb-5">
-          <div className="min-w-0">
-            <h2 className="t-title text-foreground">Swap</h2>
-            <p className="mt-1 text-[14px] leading-relaxed text-mute">
-              Who swapped stays private. The tokens and amounts show, like any trade.
-            </p>
-          </div>
-          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-sealed-soft px-2.5 py-1 text-[12px] font-medium text-sealed">
-            <LockIcon />
-            Private
-          </span>
+        <div className="min-w-0 pb-6">
+          <h2 className="t-title text-foreground">Swap</h2>
+          <p className="mt-1 text-[14px] leading-relaxed text-mute">
+            Who swapped stays private. The tokens and amounts show, like any trade.
+          </p>
         </div>
 
         {link && (
@@ -1016,7 +1010,7 @@ export function VaultSwapView() {
               (valueGap != null && valueGap >= VALUE_WARN_BPS) ||
               (impact != null && impact >= IMPACT_WARN_BPS) ||
               (note && amount !== null && amount < BigInt(note.amountWei))) && (
-              <div className="gl-settle mt-4 space-y-2.5 px-1 text-[12.5px] leading-[1.6]">
+              <div className="gl-settle mt-4 space-y-2.5 text-[12.5px] leading-[1.6]">
                 {/* a swap link's banner already says what to add */}
                 {!notes.length && !busy && addable.length > 0 && linkStep?.kind !== "add" && (
                   <p className="text-mute">
@@ -1106,8 +1100,9 @@ export function VaultSwapView() {
         )}
       </div>
 
-      {/* The token check (Blocktronics) and the privacy notes sit under the swap, side by side on wide screens. */}
-      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+      {/* The token check (Blocktronics) and the privacy notes sit under the swap, side by side on wide
+          screens; alone (no token check), the notes take the full width of the swap above them. */}
+      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2 [&>*]:min-w-0 lg:[&>:only-child]:col-span-2">
         <TokenCheckCard chainId={network.chainId} asset={toAsset} />
         <PrivacyNotes venue={venue} />
       </div>
