@@ -67,7 +67,9 @@ jobs:
       # resume against a fake chain; the public site's Solana copy and status checks,
       # off and on; a returning wallet, staying signed in and signing out, and Solana's
       # place in the menus; bridged ZEC (its mint, shown only once its ring interface is
-      # read as set up, priced, two places). No network.
+      # read as set up, priced, two places); Solana in /admin (the relay's history read
+      # into accounts opened, bring-ins, wallet adds, payments and cash-outs, wallet adds
+      # reported and checked, the mainnet totals with Solana in). No network.
       - name: App Solana self-tests
         working-directory: app
         run: |
@@ -79,6 +81,7 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-site.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-opened.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-zec.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-metrics.mts
 
       # Every token amount the app shows: two places, cut down and never rounded up,
       # "<0.01" for dust, "0.00" for zero, thousands separators, 6- and 18-decimal
