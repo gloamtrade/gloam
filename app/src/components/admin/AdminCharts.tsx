@@ -11,6 +11,7 @@ import { shortAddress } from "@/lib/chain";
 import { getNetwork, isNetworkKey, type GloamNetwork } from "@/lib/networks";
 import { ELYSIUM_LOGO } from "@/lib/chainLogo";
 import type { NetworkMetrics, RecentRow } from "@/lib/onchainMetrics";
+import { fmtAmount, fmtAmountLabel } from "./format";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -272,7 +273,7 @@ function tokensMoved(m: NetworkMetrics): string | null {
   const side = (pick: (a: NetworkMetrics["assets"][number]) => string) =>
     m.assets
       .filter((a) => !a.stable && Number(pick(a)) > 0)
-      .map((a) => `${Number(pick(a)).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${a.symbol}`)
+      .map((a) => `${fmtAmount(pick(a))} ${a.symbol}`)
       .join(", ");
   const inS = side((a) => a.deposited);
   const outS = side((a) => a.cashedOut);
@@ -394,7 +395,7 @@ export function ActivityFeed({ rows, name }: { rows: RecentRow[]; name: (n: Gloa
                     <span className="hidden sm:inline">Amount hidden</span>
                   </>
                 ) : (
-                  r.detail
+                  fmtAmountLabel(r.detail)
                 )}
               </p>
               <a

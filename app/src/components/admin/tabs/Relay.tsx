@@ -5,7 +5,7 @@ import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { MetricCard } from "../cards";
 import { DayBars, StemChart } from "../charts";
 import { weekChange } from "../data";
-import { fmtDay, fmtUsd, fmtUsdBig, fmtUsdShort, fmtWhen, n } from "../format";
+import { fmtAmount, fmtDay, fmtUsd, fmtUsdBig, fmtUsdShort, fmtWhen, n } from "../format";
 import { dayPoints } from "../series";
 import type { Side } from "../side";
 import { BridgeStream } from "../streams";
@@ -171,8 +171,8 @@ export function RelayTab({ side }: { side: Side }) {
               rows={live.recent.map((r) => [
                 r.kind === "swap" ? "Swap" : "Bridge",
                 relayChainName(r.fromChainId),
-                `${r.inAmount ? Number(r.inAmount).toLocaleString("en-US", { maximumFractionDigits: 6 }) : ""} ${r.inSymbol}`.trim(),
-                `${r.outAmount ? Number(r.outAmount).toLocaleString("en-US", { maximumFractionDigits: 2 }) : ""} ${r.outSymbol}`.trim(),
+                `${r.inAmount ? fmtAmount(r.inAmount) : ""} ${r.inSymbol}`.trim(),
+                `${r.outAmount ? fmtAmount(r.outAmount) : ""} ${r.outSymbol}`.trim(),
                 <span key="s" className={r.stage === "failed" || r.stage === "refunded" ? "text-danger" : r.stage === "done" ? "text-foreground" : "text-mute"}>
                   {r.stage === "done" ? "Done" : r.stage === "refunded" ? "Refunded" : r.stage === "failed" ? "Failed" : "In flight"}
                 </span>,

@@ -1,7 +1,10 @@
 /**
  * Number and time formatting for /admin. Every figure on the page goes
  * through one of these, so dollars, counts and days read the same everywhere.
+ * Token amounts show two places, cut down, as everywhere in the app
+ * (lib/amountShort).
  */
+import { displayAmountNumber, displayAmountText } from "@/lib/amountShort";
 
 const usdFmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 const usdWhole = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -86,11 +89,24 @@ export function agoMs(ms: number, now = Date.now()): string {
   return `${Math.round(s / 86_400)}d ago`;
 }
 
-/** ETH to four places. */
+/** ETH to two places, cut down. */
 export function fmtEth(v: number | null | undefined): string {
   if (v == null) return "Unknown";
-  if (v > 0 && v < 0.0001) return "<0.0001 ETH";
-  return `${v.toLocaleString("en-US", { maximumFractionDigits: 4 })} ETH`;
+  return `${displayAmountNumber(v)} ETH`;
+}
+
+/** A token amount as text ("12.345678"), two places, cut down: "12.34". */
+export function fmtAmount(text: string): string {
+  return displayAmountText(text);
+}
+
+/**
+ * "12.345678 USDG" from the metrics, its leading amount to two places ("12.34
+ * USDG"). Text that doesn't start with an amount ("Private transfer") is kept.
+ */
+export function fmtAmountLabel(text: string): string {
+  const m = /^(\S+)(\s[\s\S]*)?$/.exec(text);
+  return m ? `${displayAmountText(m[1]!)}${m[2] ?? ""}` : text;
 }
 
 /** A share as "42%", or "<1%" for a sliver that is not zero. */
