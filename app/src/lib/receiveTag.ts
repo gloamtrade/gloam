@@ -13,6 +13,7 @@
 
 import { accountShown, scopedKey, SignedOutError, writableKey } from "./accountSlot";
 import { readDemo } from "./demoFlag";
+import { resetReceiveCursors } from "./receiveCursor";
 
 /**
  * The receive key of the browser's first account. Every other sign-in's carries
@@ -208,6 +209,8 @@ export function importReceiveKeys(data: { current?: unknown; previous?: unknown 
     const current = restored ?? local;
     await savePrevious(prev.filter((p) => p.publicSpkiB64 !== current?.publicSpkiB64));
     if (restored && local?.publicSpkiB64 !== restored.publicSpkiB64) await saveCurrent(restored);
+    // payments to these keys may sit on blocks already read without them: read every board again
+    resetReceiveCursors();
   });
 }
 
@@ -238,6 +241,7 @@ export function rotateReceiveIdentity(): Promise<ReceiveIdentity> {
     }
     const s = await generateIdentity();
     await saveCurrent(s);
+    resetReceiveCursors();
     return identityOf(s);
   });
 }

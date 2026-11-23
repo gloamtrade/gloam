@@ -19,8 +19,10 @@
  */
 import type { Address, Hex, PublicClient } from "viem";
 import { keepStorage } from "./backupGate";
-import { claimNoteId } from "./claimSweep";
-import { accountShown, scopedKey } from "./accountSlot";
+import { CLAIM_PREFIX } from "./claimSweep";
+import { accountShown } from "./accountSlot";
+import { receiveCursorEpoch, receiveCursorKey } from "./receiveCursor";
+import { knownTokens } from "./tokens";
 import { readDemo } from "./demoFlag";
 import { decodeNotePackage } from "./notePackage";
 import { noteCommitmentPoseidon, noteNullifierPoseidon } from "./notePoseidon";
@@ -29,7 +31,8 @@ import { fieldToHex, hexToField } from "./poseidon";
 import { claimNetworkProblem } from "./paymentRequest";
 import { publicClientFor } from "./rhClient";
 import { dataKeyLocked, getAllNotes } from "./noteVault";
-import { formatAssetLabel, saveLocalNote, shieldPoolAbi, type LocalNote } from "./shield";
+import { isNativeAsset, saveLocalNote, shieldPoolAbi, type LocalNote } from "./shield";
+import { formatUnits } from "viem";
 import { syncShieldTree } from "./treeSync";
 import type { GloamNetwork, NetworkKey } from "./networks";
 
@@ -46,7 +49,6 @@ export type ReceivedPayment = {
   amountWei: string;
 };
 
-const CURSOR_BASE = "gloam.receive.cursor.v1";
 /** Blocks read again each time, in case the last ones were reorganised away. */
 const REORG_BLOCKS = 64n;
 /** At most one read of a network's board this often, ms. */
@@ -57,7 +59,35 @@ const running = new Set<string>();
 
 function cursorKey(net: GloamNetwork): string | null {
   if (!net.pool) return null;
-  return scopedKey(`${CURSOR_BASE}:${net.chainId}:${net.pool.toLowerCase()}`);
+  return receiveCursorKey(net.chainId, net.pool);
+}
+
+/**
+ * "0.003 ETH" read on the network the payment landed on, not the one shown:
+ * its native coin's name (ETH, BNB, HYPE) and its token's decimals (USDT and
+ * USDC have 18 on BNB Chain, 6 elsewhere).
+ */
+export function receivedLabel(net: Pick<GloamNetwork, "chainId" | "primaryAsset">, amountWei: string, asset: string): string {
+  const token = isNativeAsset(asset) ? null : knownTokens(net.chainId).find((t) => t.address.toLowerCase() === asset.toLowerCase());
+  const symbol = isNativeAsset(asset) ? net.primaryAsset.symbol : (token?.symbol ?? `${asset.slice(0, 6)}…${asset.slice(-4)}`);
+  const decimals = isNativeAsset(asset) ? 18 : (token?.decimals ?? 18);
+  let raw: bigint;
+  try {
+    raw = BigInt(amountWei);
+  } catch {
+    return `${amountWei} ${symbol}`;
+  }
+  const n = Number(formatUnits(raw, decimals));
+  if (raw > 0n && n > 0 && n < 0.0001) return `<0.0001 ${symbol}`;
+  return `${n.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${symbol}`;
+}
+
+/**
+ * The note id of a payment that landed here: the same for every tab and pass,
+ * from its commitment, so two saves of one payment are one note.
+ */
+export function receivedNoteId(commitment: string): string {
+  return `${CLAIM_PREFIX}rx-${commitment.toLowerCase()}`;
 }
 
 function readCursor(key: string): bigint | null {
@@ -98,6 +128,8 @@ export async function receiveWaitingPayments(
   if (!opts.force && now - (lastRun.get(runKey) ?? 0) < RECEIVE_EVERY_MS) return [];
   running.add(runKey);
   lastRun.set(runKey, now);
+  // a reset during this pass (keys restored, new address) wins: its cursor isn't written over
+  const epoch = receiveCursorEpoch();
   try {
     const client = opts.client ?? publicClientFor(net);
     const pool = net.pool;
@@ -141,7 +173,7 @@ export async function receiveWaitingPayments(
       if (!inVault || spent) continue;
       mine.add(commitment);
       found.push({
-        label: formatAssetLabel(pack.amountWei, pack.asset),
+        label: receivedLabel(net, pack.amountWei, pack.asset),
         note: pack.note,
         local: {
           chainId: net.chainId,
@@ -162,25 +194,32 @@ export async function receiveWaitingPayments(
       });
     }
 
-    if (found.length) {
+    // another tab may have saved some of these meanwhile: what is on disk now decides
+    const onDisk = new Set(
+      getAllNotes()
+        .filter((n) => n.chainId === net.chainId && n.pool.toLowerCase() === pool.toLowerCase())
+        .map((n) => n.commitment.toLowerCase())
+    );
+    const fresh = found.filter((f) => !onDisk.has(f.local.commitment.toLowerCase()));
+    if (fresh.length) {
       keepStorage();
-      // where each sits in the vault, so it can be secured at once
+      // where each sits in the vault, so it can be secured at once; the vault already
+      // said it holds each one, so a failed tree read only leaves the index for later
       const tree = await syncShieldTree(client, net).catch(() => null);
-      let i = 0;
-      for (const f of found) {
+      for (const f of fresh) {
         const idx = tree?.indexByCommitment.get(f.local.commitment.toLowerCase());
         await saveLocalNote({
           ...f.local,
-          id: `${claimNoteId()}-${i++}-${Math.random().toString(36).slice(2, 8)}`,
+          id: receivedNoteId(f.local.commitment),
           leafIndex: idx ?? undefined,
-          unfunded: idx == null,
+          unfunded: false,
         } as LocalNote);
       }
     }
-    // read up to here: the next pass starts from this block
-    writeCursor(key, head);
+    // read up to here: the next pass starts from this block (unless a reset came meanwhile)
+    if (receiveCursorEpoch() === epoch) writeCursor(key, head);
 
-    const landed: ReceivedPayment[] = found.map((f) => ({
+    const landed: ReceivedPayment[] = fresh.map((f) => ({
       label: f.label,
       note: f.note,
       network: net.label,

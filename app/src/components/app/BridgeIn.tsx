@@ -43,6 +43,7 @@ import { failedBeforeSend, solanaDeclined, solanaSurelyNotSent, surelyNotSent, w
 import { SealedField } from "@/components/ui/SealedField";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useNetwork } from "./NetworkProvider";
+import { useAccountScope } from "./AccountScope";
 import { AmountProblem } from "./AmountProblem";
 import { BackupStep, useBackupGate } from "./RecoveryPanel";
 import { keepStorage } from "@/lib/backupGate";
@@ -268,6 +269,8 @@ function BridgeSheet({
   onPrivate?: () => void;
 }) {
   const { network } = useNetwork();
+  // the wallet keeps switching accounts and the page can't reload yet (lib/accountScope "leaving")
+  const scopeLeaving = useAccountScope().phase === "leaving";
   // Only opened from BridgeInCard and SwapToStableButton, which render nothing
   // on a chain without a bridge, so the destination is always there.
   const dest = BRIDGE_DESTINATIONS[network.family]!;
@@ -724,6 +727,11 @@ function BridgeSheet({
   /** Save the note, then have the wallet sign and send the order. */
   async function confirmPrivate(afterBackup = false) {
     if (priv.kind !== "review" || priv.signing) return;
+    // the page is bound to another account than the one signed in: nothing is deposited
+    if (scopeLeaving) {
+      setPriv({ ...priv, error: "Your wallet switched accounts. Reload the page to add money." });
+      return;
+    }
     if (!afterBackup && backupGate.needed()) {
       setBackupAsk(true);
       return;

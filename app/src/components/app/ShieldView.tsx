@@ -22,6 +22,7 @@ import {
   useAppWriteContract,
 } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
+import { useAccountScope } from "./AccountScope";
 import { getActiveNetwork } from "@/lib/networks";
 import { safeParseEther, safeParseUnits } from "@/lib/amount";
 import { amountTextError } from "@/lib/amountText";
@@ -74,6 +75,8 @@ export const DEPOSIT_MAYBE_SENT =
 export function ShieldView() {
   const { address, isConnected, chainId, demo } = useAppAccount();
   const { network } = useNetwork();
+  // the wallet keeps switching accounts and the page can't reload yet (lib/accountScope "leaving")
+  const scopeLeaving = useAccountScope().phase === "leaving";
   // The network the page shows now. Work that outlives the render it started in
   // (a proof, an approval's wait) checks against it right before it sends.
   const networkNow = useRef(network);
@@ -730,7 +733,7 @@ export function ShieldView() {
       } catch (err) {
         // The note store's own words say what to do; a prover or chunk-load error is no use to read.
         setFormError(
-          err instanceof Error && err.name === "NoteSaveError"
+          err instanceof Error && (err.name === "NoteSaveError" || err.name === "SignedOutError")
             ? err.message
             : "Could not prepare your private deposit. Try again."
         );
@@ -761,6 +764,11 @@ export function ShieldView() {
   /** `afterBackup`: the backup step just finished or was skipped, so it isn't asked again. */
   async function onSubmit(e?: React.FormEvent, afterBackup = false) {
     e?.preventDefault();
+    // the page is bound to another account than the one signed in: nothing is deposited
+    if (scopeLeaving) {
+      setFormError("Your wallet switched accounts. Reload the page to add money.");
+      return;
+    }
     const err = validate();
     if (err) {
       setFormError(err);
@@ -1075,6 +1083,8 @@ export function ShieldView() {
   const liveLimit = typedValue !== null && typedValue > BigInt(0) ? limitProblem(typedValue) : null;
   const ctaStop: string | null = working
     ? null
+    : scopeLeaving
+      ? "Reload the page to add money"
     : walletBalance === BigInt(0)
       ? `No ${symbol} in this wallet`
       : !amount.trim() || (typedValue === null && !amountProblem) || (typedValue !== null && typedValue <= BigInt(0))
