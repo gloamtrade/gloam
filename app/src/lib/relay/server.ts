@@ -1511,9 +1511,10 @@ export async function relayTransfer(net: GloamNetwork, body: Record<string, unkn
  *   - the dry run, the gas ceiling, the spend cap and a slot per part (and per message)
  *     as if each had gone alone; batchGasMost caps the gas
  * Anything the batch can't do here (too big, a part the vault refuses) is refused with
- * nothing sent, and the app sends the parts one by one instead.
+ * nothing sent, and the app sends the parts one by one instead. `hooks` as relayTransfer's:
+ * the before-broadcast hook is handed the one aggregate3 call (a partner link's binding).
  */
-export async function relayTransferBatch(net: GloamNetwork, body: Record<string, unknown>, sender?: Sender): Promise<Hex> {
+export async function relayTransferBatch(net: GloamNetwork, body: Record<string, unknown>, sender?: Sender, hooks: SendHooks = {}): Promise<Hex> {
   assertBatchNetwork(net);
   const raw = body.parts;
   if (!Array.isArray(raw) || raw.length < BATCH_MIN_PARTS || raw.length > BATCH_MAX_PARTS) {
@@ -1578,6 +1579,8 @@ export async function relayTransferBatch(net: GloamNetwork, body: Record<string,
         },
         sender: () => sender,
         lock,
+        beforeBroadcast: hooks.beforeBroadcast,
+        onEnd: hooks.onEnd,
         // every part's spend is on record with this one transaction
         onSent: async (sent) => {
           await Promise.all(keys.map((k) => recordSent(k, sent)));
@@ -1675,9 +1678,9 @@ const FEE_BPS_MOST = 10_000;
  *     per part, as if each had gone alone; unshieldBatchGasMost caps the gas
  * What the batch can't do here (too big, not this network, a part the vault refuses) is
  * refused with nothing sent, and the app sends the parts one by one instead. A fee that went
- * up is the exception: the app stops the cash out there.
+ * up is the exception: the app stops the cash out there. `hooks` as relayUnshield's.
  */
-export async function relayUnshieldBatch(net: GloamNetwork, body: Record<string, unknown>, sender?: Sender): Promise<Hex> {
+export async function relayUnshieldBatch(net: GloamNetwork, body: Record<string, unknown>, sender?: Sender, hooks: SendHooks = {}): Promise<Hex> {
   assertBatchNetwork(net);
   const raw = body.parts;
   if (!Array.isArray(raw) || raw.length < BATCH_MIN_PARTS || raw.length > BATCH_MAX_PARTS) {
@@ -1745,6 +1748,8 @@ export async function relayUnshieldBatch(net: GloamNetwork, body: Record<string,
       sender: () => sender,
       screened: true,
       lock,
+      beforeBroadcast: hooks.beforeBroadcast,
+      onEnd: hooks.onEnd,
       // every part's spend is on record with this one transaction
       onSent: async (sent) => {
         await Promise.all(keys.map((k) => recordSent(k, sent)));

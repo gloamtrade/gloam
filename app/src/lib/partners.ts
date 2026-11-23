@@ -491,6 +491,13 @@ export type ActivityRecord = {
    * its wallet sent (attribution grade). lib/partnerAttribution.
    */
   linkBind?: "relay" | "wallet" | null;
+  /**
+   * A later part of one payment or cash out sent in parts from a partner's link
+   * (lib/partnerAttribution): the payment was counted with its first part, so this
+   * one adds its own amount and fees, never another payment. Left out on every
+   * other record.
+   */
+  part?: true;
   /** The vault's own cash-out fee on it, smallest units of `asset`; null when not known. */
   vaultFee?: string | null;
   vaultFeeUsd?: number | null;
@@ -533,19 +540,22 @@ function normalized(r: ActivityRecord): ActivityRecord {
  */
 export function incrementsOf(r: ActivityRecord): [string, bigint][] {
   const base = `${r.network}|${r.source ?? "api"}|${r.kind}|`;
-  const out: [string, bigint][] = [[`${base}n`, 1n]];
+  // a later part of a payment counted already adds its amounts and fees, none of the counts
+  const part = r.part === true;
+  const out: [string, bigint][] = part ? [] : [[`${base}n`, 1n]];
   // a link count the payer's wallet registered, apart from the relay-bound ones
-  if ((r.source ?? "api") === "link" && r.linkBind === "wallet") out.push([`${base}nw`, 1n]);
+  if (!part && (r.source ?? "api") === "link" && r.linkBind === "wallet") out.push([`${base}nw`, 1n]);
   const fee = toMicros(r.feeUsd);
-  if (fee != null) out.push([`${base}fee`, fee]);
+  if (fee != null && !(part && fee === 0n)) out.push([`${base}fee`, fee]);
   if (r.kind !== "private_payment") {
     const usd = toMicros(r.volumeUsd);
-    out.push(usd != null ? [`${base}usd`, usd] : [`${base}unp`, 1n]);
+    if (usd != null) out.push([`${base}usd`, usd]);
+    else if (!part) out.push([`${base}unp`, 1n]);
   }
   const vf = r.vaultFee == null ? null : BigInt(r.vaultFee);
   const vfUsd = toMicros(r.vaultFeeUsd);
   if (vfUsd != null && vfUsd > 0n) out.push([`${base}vf`, vfUsd]);
-  else if (vf != null && vf > 0n) out.push([`${base}vfu`, 1n]);
+  else if (vf != null && vf > 0n && !part) out.push([`${base}vfu`, 1n]);
   if (r.kind !== "private_payment" && r.asset && r.decimals != null && r.amount != null) {
     const tag = `a|${r.chainId}|${r.asset.toLowerCase()}|${r.kind}|`;
     out.push([`${tag}vt`, toMicroUnits(BigInt(r.amount), r.decimals)]);
@@ -590,6 +600,12 @@ export async function recordActivity(args: {
   vaultFee?: bigint | null;
   /** When it happened, ms (the block's time for a link or an on-chain match): it keeps its own day and never moves `last` back. */
   now?: number;
+  /**
+   * A later part of a payment counted already (ActivityRecord part): its amount, the vault's
+   * fee on it and a share-of-amount fee count; it is not another payment, and a flat fee per
+   * payment is not charged again.
+   */
+  part?: boolean;
 }): Promise<{ recorded: true; record: ActivityRecord } | { recorded: false; reason: "duplicate" }> {
   const { partner, network: net, kind } = args;
   const source: ActivitySource = args.source ?? "api";
@@ -611,6 +627,9 @@ export async function recordActivity(args: {
     };
   }
   let c = commissionFor(kind, partner.fees, edgeAmount);
+  // a private payment's fee is per payment: its later parts carry none
+  const flatPart = args.part === true && kind === "private_payment";
+  if (flatPart) c = { ...c, feeUsdMicros: 0n };
   if (testnet) c = { ...c, feeUsdMicros: null, volumeUsdMicros: null };
   // Deposits and private payments are free in the vault: their fee is 0, known.
   const vaultFee =
@@ -636,6 +655,7 @@ export async function recordActivity(args: {
     keyId: source === "api" ? args.keyId : null,
     linkCode: source === "link" ? (args.linkCode ?? null) : null,
     linkBind: source === "link" ? (args.linkBind ?? null) : null,
+    ...(args.part === true ? { part: true as const } : {}),
     vaultFee: vaultFee == null ? null : vaultFee.toString(),
     vaultFeeUsd: micros(vaultFeeUsdMicros),
     asset: kind === "private_payment" || !args.edge ? null : (getAddress(args.edge.asset) as Address),
@@ -645,7 +665,7 @@ export async function recordActivity(args: {
     volumeUsd: micros(c.volumeUsdMicros),
     feeUsd: micros(c.feeUsdMicros),
     feeToken: c.feeToken == null ? null : c.feeToken.toString(),
-    feeBasis: describeFee(kind, partner.fees),
+    feeBasis: flatPart ? "Counted with the payment's first part" : describeFee(kind, partner.fees),
   };
   const json = JSON.stringify(record);
   const lastField = `last|${tierOf(net.key)}`;

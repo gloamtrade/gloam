@@ -4,6 +4,11 @@
  * Pay, sent in parts (lib/payAcross): the hook that runs a payment's parts on
  * payroll's engine through the relay, and the panel that shows "2 of 3 sent",
  * finishes a payment a refresh cut short, and stops the parts not sent yet.
+ *
+ * Paying a partner's request (the same rule as a single payment's, MoveView), every
+ * part carries the link's code and one tag for the whole payment, in one transaction
+ * or one by one, so the partner counts it as one payment (lib/partnerAttribution).
+ * The code is held in this tab only: parts a refresh leaves to finish go without it.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Address, Hex } from "viem";
@@ -13,6 +18,7 @@ import { isPayMemoLive } from "@/lib/payMemo";
 import { runNetwork, runPayroll, type PayrollBatch } from "@/lib/payroll";
 import { loadBatches } from "@/lib/payrollStore";
 import { relayMemo, relayTransfer, relayTransferBatch, waitForTx } from "@/lib/relay/client";
+import { newLinkPayment, settlePartnerTx } from "@/lib/partnerLinkClient";
 import { batchesOn } from "@/lib/relay/batch";
 import { splitMaybeSent } from "@/lib/cashOutSplit";
 import { publicClientFor } from "@/lib/rhClient";
@@ -25,7 +31,8 @@ export type PayAcross = {
   run: PayrollBatch | null;
   running: boolean;
   error: string | null;
-  start: (run: PayrollBatch) => Promise<void>;
+  /** `link`: paying a partner's request, its code (null otherwise). */
+  start: (run: PayrollBatch, link?: { code: string } | null) => Promise<void>;
   resume: () => Promise<void>;
   cancel: () => Promise<void>;
   close: () => void;
@@ -35,6 +42,9 @@ export type PayAcross = {
 function unfinished(run: PayrollBatch): boolean {
   return run.status !== "done";
 }
+
+/** A partner's link a run pays a request of: its code, and the tag every part carries. */
+type RunLink = { runId: string; code: string; payment: Hex };
 
 export function usePayAcross(address: Address | undefined, network: GloamNetwork, opts: { signedIn: boolean; onSettled: () => void }): PayAcross {
   const [run, setRun] = useState<PayrollBatch | null>(null);
@@ -47,6 +57,8 @@ export function usePayAcross(address: Address | undefined, network: GloamNetwork
   }, [opts.onSettled]);
 
   const runningNow = useRef(false);
+  // the partner's link the run started here pays a request of, if any: this tab only
+  const link = useRef<RunLink | null>(null);
 
   // A payment a refresh or a closed tab cut short shows again, to finish.
   useEffect(() => {
@@ -73,17 +85,25 @@ export function usePayAcross(address: Address | undefined, network: GloamNetwork
     setRun(r);
     const net = runNetwork(r);
     const client = publicClientFor(net ?? network);
+    // a partner's request: every part (or the one transaction) carries the code and the payment's tag,
+    // and is counted once it lands (the relay counts it too). The messages never carry them.
+    const from = link.current?.runId === r.id ? link.current : null;
+    const linked = from ? { partnerCode: from.code, partnerPayment: from.payment } : {};
+    const counted = (h: Hex) => {
+      if (from) settlePartnerTx({ chainId: r.chainId, txHash: h });
+      return h;
+    };
     try {
       const done = await runPayroll(r, {
         client,
         // always through the relay: one tap, never a wallet prompt per part
-        submitTransfer: (a) => relayTransfer({ chainId: r.chainId, ...a }),
+        submitTransfer: (a) => relayTransfer({ chainId: r.chainId, ...a, ...linked }).then(counted),
         submitMemo: isPayMemoLive() ? (m) => relayMemo({ chainId: r.chainId, ...m }) : null,
         // every part in one transaction where the network has Multicall3 (lib/relay/batch);
         // a batch the relay surely didn't send leaves the parts to go one by one
         ...(batchesOn(r.chainId)
           ? {
-              submitTransferBatch: (parts) => relayTransferBatch({ chainId: r.chainId, parts }),
+              submitTransferBatch: (parts) => relayTransferBatch({ chainId: r.chainId, parts, ...linked }).then(counted),
               batchRefused: (e: unknown) => !splitMaybeSent(e, true),
             }
           : {}),
@@ -105,7 +125,7 @@ export function usePayAcross(address: Address | undefined, network: GloamNetwork
     }
   }, [network]);
 
-  const start = useCallback(async (r: PayrollBatch) => {
+  const start = useCallback(async (r: PayrollBatch, from?: { code: string } | null) => {
     if (runningNow.current) return;
     // Saved before anything is sent, so a refresh finds it and finishes it. One at a time:
     // a payment of this account's not finished here comes back instead of a second one.
@@ -121,6 +141,8 @@ export function usePayAcross(address: Address | undefined, network: GloamNetwork
       setError("A payment of yours isn't finished yet. Resume it, or stop the rest, before a new one.");
       return;
     }
+    // only this run, started from the partner's request now: never one left from before
+    link.current = from ? { runId: begun.run.id, code: from.code, payment: newLinkPayment() } : null;
     await go(begun.run);
   }, [go]);
 

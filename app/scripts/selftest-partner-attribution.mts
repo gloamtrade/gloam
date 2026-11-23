@@ -670,13 +670,14 @@ await test("V3 fixed: a payment binding made just before a send lasts an hour, a
   const bound = (await b)!;
   const ttlSec = (key: string) => Math.round((g().get(key)!.exp! - Date.now()) / 1000);
   assert.ok(ttlSec(bound.key) <= 3600 && ttlSec(bound.key) > 3590, `pending: ${ttlSec(bound.key)} s`);
-  assert.ok(ttlSec(bound.seen) <= 3600);
+  assert.equal(bound.seen.length, 1, "one note spent: one mark");
+  for (const seen of bound.seen) assert.ok(ttlSec(seen) <= 3600);
   // the send went out: the hash binding is written, and the payment binding is kept as long
   await A.afterRelaySend({ net: RH, hash: h, code: offrampCode, flow: "pay", at: Date.now(), bound: b, wait: async () => {
     throw new Error("not landed yet");
   } });
   assert.ok(ttlSec(bound.key) > 7 * 86_400 - 10, `after the send: ${ttlSec(bound.key)} s`);
-  assert.ok(ttlSec(bound.seen) > 7 * 86_400 - 10);
+  for (const seen of bound.seen) assert.ok(ttlSec(seen) > 7 * 86_400 - 10);
   unregister([h]);
   // the relay was busy, its lock store down or the node refused: the binding is taken back
   const gone = (await bindPay(offrampCode, h, Date.now()))!;

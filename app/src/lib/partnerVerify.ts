@@ -4,23 +4,30 @@
  * no RPC, no storage, so the selftest can hold it against recorded receipts.
  *
  * A transaction is one of these, or nothing:
- *   private_payment  exactly one Transferred from the vault, and no note in or out
- *   cash_out         exactly one Unshielded from the vault, to an address that is
- *                    not a swap router, with no swap and no note going in
+ *   private_payment  one Transferred from the vault, and no note in or out; or a
+ *                    payment in one go (lib/relay/batch): 2 to BATCH_MAX_PARTS
+ *                    Transferred and nothing else, one payment in parts
+ *   cash_out         one Unshielded from the vault, to an address that is not a
+ *                    swap router, with no swap and no note going in; or a cash out
+ *                    in one go: 2 to BATCH_MAX_PARTS Unshielded, every one to the
+ *                    same address in the same asset, and nothing else
  *   private_swap     exactly one VaultSwap from a router Gloam runs on that chain,
  *                    whose note left the vault in the same transaction (Unshielded,
  *                    same nullifier) and whose new note came back in through that
  *                    router (Shielded, same commitment, from the router)
- * Anything else (a deposit, a refund, a swap's exit, two actions packed into one
- * transaction, logs from some other contract) is refused: attribution fails closed.
+ * Anything else (a deposit, a refund, a swap's exit, two kinds of action packed
+ * into one transaction, cash outs to two addresses or in two assets, logs from
+ * some other contract) is refused: attribution fails closed.
  *
- * What comes out is only what the chain already shows: the kind, the spend's
- * nullifier, and for a cash out or a swap the asset and amount that left the
- * vault and the vault's own fee on it (its WithdrawFee log, same nullifier; 0
- * when there is none). A cash out's receiving address comes out too, so it can
- * be matched to a partner's own address; callers never store it.
+ * What comes out is only what the chain already shows: the kind, the spends'
+ * nullifiers, and for a cash out or a swap the asset and amount that left the
+ * vault and the vault's own fee on it (its WithdrawFee logs, same nullifier; 0
+ * when there is none). A cash out in one go is one cash out: its parts' amounts
+ * and fees added up. A cash out's receiving address comes out too, so it can be
+ * matched to a partner's own address; callers never store it.
  */
 import { decodeEventLog, toEventSelector, type Address, type Hex } from "viem";
+import { BATCH_MAX_PARTS } from "./relay/batch";
 
 export type ReceiptLog = { address: string; topics: readonly string[]; data: string };
 
@@ -91,18 +98,22 @@ export type VaultTxFacts =
       ok: true;
       kind: "private_payment";
       nullifier: Hex;
-      /** The payment's new note commitment (newCommitments[0]): chosen by the payer when it sends. */
+      /** Every spend in it, in log order: one, or a payment in one go's parts. `nullifier` is the first. */
+      nullifiers: readonly Hex[];
+      /** The payment's new note commitment (newCommitments[0]): chosen by the payer when it sends. The first part's in a payment in one go. */
       paymentCommitment: Hex;
     }
   | {
       ok: true;
       kind: "cash_out" | "private_swap";
-      /** The spend's nullifier: what a link registration is found by (lib/partnerAttribution). */
+      /** The spend's nullifier: what a link registration is found by (lib/partnerAttribution). The first part's in a cash out in one go. */
       nullifier: Hex;
-      /** The asset and amount that left the vault (the note's full amount, before the fee). */
+      /** Every spend in it, in log order: one, or a cash out in one go's parts. */
+      nullifiers: readonly Hex[];
+      /** The asset and amount that left the vault (the notes' full amount, before the fee; every part's, added up). */
       asset: Address;
       amount: bigint;
-      /** The vault's own fee on it, in the same asset (WithdrawFee); 0n when it kept none. */
+      /** The vault's own fee on it, in the same asset (WithdrawFee, every part's); 0n when it kept none. */
       vaultFee: bigint;
       /** A cash out's receiving address (read to match a partner's own address; never stored with a record). */
       to: Address | null;
@@ -171,7 +182,16 @@ export function classifyVaultTx(
     if (!same(out.nullifier, swap.nullifier) || !same(back.commitment, swap.commitment) || !same(back.from, log.address)) {
       return { ok: false, reason: "mixed" };
     }
-    return { ok: true, kind: "private_swap", nullifier: out.nullifier, asset: out.asset, amount: out.amount, vaultFee: feeFor(out.nullifier, out.asset), to: null };
+    return {
+      ok: true,
+      kind: "private_swap",
+      nullifier: out.nullifier,
+      nullifiers: [out.nullifier],
+      asset: out.asset,
+      amount: out.amount,
+      vaultFee: feeFor(out.nullifier, out.asset),
+      to: null,
+    };
   }
 
   // a note a router put in with no swap beside it is a refund: money coming back, not anyone's payment
@@ -179,17 +199,36 @@ export function classifyVaultTx(
   if (vault.length === 0) return { ok: false, reason: "not_vault" };
   if (shielded.length) return { ok: false, reason: unshielded.length || transferred.length ? "mixed" : "not_vault" };
 
-  if (unshielded.length === 1 && transferred.length === 0) {
+  // One cash out, or a cash out in one go: every part to the same address in the same asset.
+  if (unshielded.length >= 1 && transferred.length === 0) {
     const out = unshielded[0]!;
+    if (unshielded.length > BATCH_MAX_PARTS || !distinct(unshielded.map((u) => u.nullifier))) return { ok: false, reason: "mixed" };
+    if (unshielded.some((u) => !same(u.to, out.to) || !same(u.asset, out.asset))) return { ok: false, reason: "mixed" };
     // a cash out never pays a router (lib/cashOutTarget refuses it); one that did is a swap's leg
     if (anyRouter.has(out.to.toLowerCase())) return { ok: false, reason: "mixed" };
-    return { ok: true, kind: "cash_out", nullifier: out.nullifier, asset: out.asset, amount: out.amount, vaultFee: feeFor(out.nullifier, out.asset), to: out.to };
+    return {
+      ok: true,
+      kind: "cash_out",
+      nullifier: out.nullifier,
+      nullifiers: unshielded.map((u) => u.nullifier),
+      asset: out.asset,
+      amount: unshielded.reduce((s, u) => s + u.amount, 0n),
+      vaultFee: unshielded.reduce((s, u) => s + feeFor(u.nullifier, out.asset), 0n),
+      to: out.to,
+    };
   }
-  if (transferred.length === 1 && unshielded.length === 0) {
+  // One private payment, or a payment in one go.
+  if (transferred.length >= 1 && unshielded.length === 0) {
     const t = transferred[0]!;
-    return { ok: true, kind: "private_payment", nullifier: t.nullifier, paymentCommitment: t.newCommitments[0] };
+    if (transferred.length > BATCH_MAX_PARTS || !distinct(transferred.map((x) => x.nullifier))) return { ok: false, reason: "mixed" };
+    return { ok: true, kind: "private_payment", nullifier: t.nullifier, nullifiers: transferred.map((x) => x.nullifier), paymentCommitment: t.newCommitments[0] };
   }
   return { ok: false, reason: unshielded.length || transferred.length ? "mixed" : "not_vault" };
+}
+
+/** No nullifier twice (the vault refuses a spent one anyway). */
+function distinct(nullifiers: readonly Hex[]): boolean {
+  return new Set(nullifiers.map((n) => n.toLowerCase())).size === nullifiers.length;
 }
 
 /** The flows a link opens, and what each may count as. */

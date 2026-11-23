@@ -69,6 +69,13 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-relay-batch.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-cashout-across.mts
 
+      # Partner links: a payment or cash out in parts counts to the partner as one
+      # payment, from one balance entry, part by part or in one transaction. The
+      # in-process partner store and a fake chain: nothing reaches a host.
+      - name: App partner link self-tests
+        working-directory: app
+        run: ../mcp/node_modules/.bin/tsx scripts/selftest-partner-across.mts
+
       # Each sign-in's own private account in a browser: signed out shows nothing, a second
       # wallet sees and spends none of the first's, the first account goes to its owner on
       # evidence only, backups stay per account. In-memory storage and a stand-in backup service.

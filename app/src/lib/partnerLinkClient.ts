@@ -11,6 +11,9 @@
  *    commitment, or its proof), so it can only ever count for that link
  *    (registerLinkSpend); a send through the relay carries the code to the relay
  *    instead, which ties it to the transaction it sends;
+ *  - for a payment or cash out sent in parts, makes one random tag the parts all
+ *    carry with the code (newLinkPayment), so the server counts them as one
+ *    payment, however many transactions they take;
  *  - once the payment, cash out or swap lands, asks the server to count it
  *    (settlePartnerTx). The server reads the chain; the partner comes from the
  *    registration, not from this call;
@@ -21,8 +24,8 @@
  *
  * None of this ever holds up a payment or a swap: every call is fire and forget,
  * and a failure is silent. What is sent is the code, the chain, a hash of the
- * spend's nullifier or the transaction hash, and the flow: never an amount, an
- * address or a note.
+ * spend's nullifier or the transaction hash, the flow, and for a part the
+ * payment's random tag: never an amount, an address or a note.
  */
 import type { Hex } from "viem";
 import { useEffect, useState } from "react";
@@ -32,6 +35,17 @@ import { readDemo } from "./demoFlag";
 export type LinkFlow = "pay" | "swap";
 
 const names = new Map<string, Promise<string | null>>();
+
+/**
+ * A new tag for one payment or cash out sent in parts from a partner's link: 32
+ * random bytes, the same on every part, so the parts count as one payment
+ * (lib/partnerAttribution). Says nothing about the payment; made fresh each time.
+ */
+export function newLinkPayment(): Hex {
+  const b = new Uint8Array(32);
+  crypto.getRandomValues(b);
+  return `0x${Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("")}` as Hex;
+}
 
 /** The approved partner name for a live code, null otherwise; cached per page. A POST, so the code stays out of request logs. */
 export function lookupPartnerName(code: string): Promise<string | null> {
@@ -92,9 +106,11 @@ function postQuietly(path: string, body: unknown): Promise<Response | null> {
  * wallet is asked, bound to a value only this send has: `bind` is a private
  * payment's new note commitment, or `proof` a cash out's proof. Fire and forget.
  * Not on chains with a public mempool (Ethereum): there only relay-sent link
- * payments count.
+ * payments count. `payment`: the tag of the payment in parts this is a part of.
  */
-export function registerLinkSpend(r: { code: string | null | undefined; chainId: number; nullifier: Hex } & ({ bind: Hex } | { proof: Hex })): void {
+export function registerLinkSpend(
+  r: { code: string | null | undefined; chainId: number; nullifier: Hex; payment?: Hex } & ({ bind: Hex } | { proof: Hex })
+): void {
   if (typeof window === "undefined" || readDemo() || !isLinkCodeShape(r.code) || !/^0x[0-9a-fA-F]{64}$/.test(r.nullifier)) return;
   if (PUBLIC_MEMPOOL_CHAINS.includes(r.chainId)) return;
   const value = "bind" in r ? r.bind : proofBindValue(r.proof);
@@ -105,6 +121,7 @@ export function registerLinkSpend(r: { code: string | null | undefined; chainId:
     bindHash: linkBindHash(value),
     code: r.code,
     flow: "pay",
+    ...(r.payment && /^0x[0-9a-fA-F]{64}$/.test(r.payment) ? { payment: r.payment } : {}),
   });
 }
 
