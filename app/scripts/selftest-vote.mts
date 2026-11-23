@@ -1062,11 +1062,11 @@ await test("weight at close: the ballots cast before the change still verify, un
 // ---------------------------------------------------------------- display
 
 await test("amounts and shares read plainly", () => {
-  assert.equal(core.formatGloam(0n), "0");
+  assert.equal(core.formatGloam(0n), "0.00");
   assert.equal(core.formatGloam(1n), "<0.01");
-  assert.equal(core.formatGloam(1234n * ONE + ONE / 2n), "1,234.5");
+  assert.equal(core.formatGloam(1234n * ONE + ONE / 2n), "1,234.50");
   assert.equal(core.formatGloam((ONE * 5n) / 100n), "0.05");
-  assert.equal(core.formatGloam((54_550n * ONE).toString()), "54,550");
+  assert.equal(core.formatGloam((54_550n * ONE).toString()), "54,550.00");
   assert.equal(core.percentOf(1n, 3n), 33.3);
   assert.equal(core.percentOf(0n, 0n), 0);
   assert.equal(core.sharePercent(1240n * ONE, 447_743n * ONE), "0.27%");

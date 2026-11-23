@@ -7,7 +7,7 @@ import {
   type PayrollSchedule,
   type ScheduleState,
 } from "@/lib/payrollSchedule";
-import { formatAssetAmount, summaryDecimals } from "@/lib/shield";
+import { formatAssetAmount } from "@/lib/shield";
 import { TokenLogo } from "../TokenLogo";
 import { ScheduleIcon, type AssetOption } from "./scheduleUi";
 
@@ -59,7 +59,7 @@ export function DueBanner({
           <p className="tnum mt-1 flex flex-wrap items-center gap-x-1.5 text-[13.5px] text-mute">
             <span>{people(s.people.length)},</span>
             <span className="inline-flex items-center gap-1.5 text-foreground">
-              {formatAssetAmount(scheduleTotal(s), s.asset, summaryDecimals(s.asset))}
+              {formatAssetAmount(scheduleTotal(s), s.asset)}
               {opt && <TokenLogo id={opt.logoId} symbol={opt.symbol} size={16} />}
             </span>
             <span>from your private balance.</span>

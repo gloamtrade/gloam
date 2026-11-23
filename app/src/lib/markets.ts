@@ -1,3 +1,5 @@
+import { displayAmount } from "./amountShort";
+
 export type MarketKind = "stock" | "native";
 
 export type MarketSource = "live" | "static";
@@ -233,12 +235,9 @@ export function formatUsd(n: number) {
   });
 }
 
-export function formatTokenAmount(raw: bigint, decimals = 18, maxDigits = 4) {
-  const n = Number(raw) / 10 ** decimals;
-  if (!Number.isFinite(n) || n === 0) return "0";
-  if (n < 0.0001) return "<0.0001";
-  if (n >= 1_000_000) return compactAmount(n);
-  return n.toLocaleString(undefined, { maximumFractionDigits: maxDigits });
+/** A token amount on screen: two places, cut down (lib/amountShort displayAmount). */
+export function formatTokenAmount(raw: bigint, decimals = 18) {
+  return displayAmount(raw, decimals);
 }
 
 /**

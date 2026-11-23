@@ -49,10 +49,9 @@ function short(a: string) {
   return a.length > 12 ? `${a.slice(0, 4)}...${a.slice(-4)}` : a;
 }
 
+import { displayAmount } from "@/lib/amountShort";
 function fmt(v: bigint, decimals: number): string {
-  const base = 10n ** BigInt(decimals);
-  const frac = (v % base).toString().padStart(decimals, "0").replace(/0+$/, "");
-  return `${(v / base).toLocaleString("en-US")}${frac ? `.${frac}` : ""}`;
+  return displayAmount(v, decimals);
 }
 
 /** A new run, stamped now. */

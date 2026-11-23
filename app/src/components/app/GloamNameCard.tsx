@@ -14,7 +14,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
-import { erc20Abi, formatEther, parseEther, zeroAddress, type Hex } from "viem";
+import { erc20Abi, parseEther, zeroAddress, type Hex } from "viem";
+import { displayAmount } from "@/lib/amountShort";
 import { useSendTransaction, useWriteContract } from "wagmi";
 import { buildEthToGloamSwap, ethWithBuffer, quoteCall } from "@/lib/ethForGloam";
 import { useAppAccount, useDemo } from "@/lib/demo";
@@ -69,7 +70,8 @@ const rh = () => publicClientFor(getNetwork("robinhood-mainnet"));
 /** ETH kept back for the swap, approval and registration gas when paying with ETH. */
 const GAS_RESERVE = parseEther("0.0002");
 /** ETH as a short figure: 0.002958 -> 0.003. */
-const ethShort = (wei: bigint) => Number(formatEther(wei)).toLocaleString("en-US", { maximumSignificantDigits: 2 });
+/** ETH on screen: two places, cut down (lib/amountShort), like every amount. */
+const ethShort = (wei: bigint) => displayAmount(wei, 18);
 
 export function GloamNameCard({ tag }: { tag: string }) {
   const demo = useDemo();

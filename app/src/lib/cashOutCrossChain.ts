@@ -40,6 +40,7 @@
  * should not.
  */
 import { decodeFunctionData, formatUnits, isAddress, parseAbi, parseUnits, zeroAddress } from "viem";
+import { displayAmountNumber } from "./amountShort";
 import { BRIDGE_MAX_USD, BRIDGE_MIN_USD, RELAY_REFERRER, relayChainName } from "./bridge";
 
 /** Relay's id for Solana. */
@@ -348,7 +349,7 @@ export function crossChainAmountProblem(amount: bigint, decimals: number): strin
   const min = parseUnits(String(BRIDGE_MIN_USD), decimals);
   const max = parseUnits(String(BRIDGE_MAX_USD), decimals);
   if (amount < min || amount > max) {
-    return `Cash out ${BRIDGE_MIN_USD} to ${BRIDGE_MAX_USD.toLocaleString("en-US")} to another chain at a time.`;
+    return `Cash out ${displayAmountNumber(BRIDGE_MIN_USD)} to ${displayAmountNumber(BRIDGE_MAX_USD)} to another chain at a time.`;
   }
   return null;
 }

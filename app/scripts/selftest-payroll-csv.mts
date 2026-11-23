@@ -12,6 +12,9 @@
  *     is now checked against that order (an independent model of it here).
  *   - the shortfall, the run total and the invoice rounded to two decimals
  *     (0.004 showed as 0.00, Number lost units on big amounts); they are exact.
+ *     Since 23 Nov 2026 what the screen and the invoice show reads two places,
+ *     cut down ("<0.01" for 0.004, lib/amountShort); the funding step and the
+ *     results file keep every unit.
  *
  * Security review, 25 Oct 2026: the results file put a payee's name, as typed
  * in the list, in a cell a spreadsheet runs as a formula (=, +, -, @), next to
@@ -222,6 +225,19 @@ test("the results file never writes a name as a formula, and keeps the claim lin
     assert.equal(row[5], claimLink("https://gloam.trade", "robinhood-mainnet", tickets[i]!), `row ${i}: the claim link is untouched`);
   });
   assert.ok(lines[0]!.endsWith(`"'=HYPERLINK(1)"`) || lines[0]!.endsWith(`'=HYPERLINK(1)`), "the note column too");
+});
+
+test("the results file keeps every unit of each amount, never the two places the screen shows", () => {
+  const amounts = ["0.004", "1250.123456789", "7.869953", "1"];
+  const batch = {
+    id: "b2", title: "Nov", createdAt: 0, chainId: 4663, pool: "0x39e28cde55cab798874746ac52cb4b5cc99a0194" as Address, asset: ASSET,
+    employer: "0x1111111111111111111111111111111111111111" as Address, relay: true, status: "done" as const,
+    rows: amounts.map((a, i) => ({ id: `r${i}`, name: `P${i}`, recipient: "", kind: "link", amount: units(a), status: "paid", ticket: `gloam1.eyJ2IjoxLCJrIjoi${i}` })),
+  };
+  const out = exportResultsCsv(batch as never, { origin: "https://gloam.trade", networkKey: "robinhood-mainnet", assetLabel: "X", explorerTx: (h: string) => h });
+  const cells = (line: string) => [...line.matchAll(/("(?:[^"]|"")*"|[^,]*)(,|$)/g)].map((m) => m[1]!.replace(/^"([\s\S]*)"$/, "$1")).slice(0, -1);
+  const col = out.split("\n").slice(1).map((l) => cells(l)[2]);
+  assert.deepEqual(col, ["0.004", "1,250.123456789", "7.869953", "1"]);
 });
 
 // ------------------------------------------------------------------ Gloam names in the address column

@@ -32,7 +32,7 @@ import { claimNetworkProblem } from "./paymentRequest";
 import { publicClientFor } from "./rhClient";
 import { dataKeyLocked, getAllNotes } from "./noteVault";
 import { isNativeAsset, saveLocalNote, shieldPoolAbi, type LocalNote } from "./shield";
-import { formatUnits } from "viem";
+import { displayAmount } from "./amountShort";
 import { syncShieldTree } from "./treeSync";
 import type { GloamNetwork, NetworkKey } from "./networks";
 
@@ -63,7 +63,7 @@ function cursorKey(net: GloamNetwork): string | null {
 }
 
 /**
- * "0.003 ETH" read on the network the payment landed on, not the one shown:
+ * "0.50 BNB" read on the network the payment landed on, not the one shown:
  * its native coin's name (ETH, BNB, HYPE) and its token's decimals (USDT and
  * USDC have 18 on BNB Chain, 6 elsewhere).
  */
@@ -77,9 +77,7 @@ export function receivedLabel(net: Pick<GloamNetwork, "chainId" | "primaryAsset"
   } catch {
     return `${amountWei} ${symbol}`;
   }
-  const n = Number(formatUnits(raw, decimals));
-  if (raw > 0n && n > 0 && n < 0.0001) return `<0.0001 ${symbol}`;
-  return `${n.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${symbol}`;
+  return `${displayAmount(raw, decimals)} ${symbol}`;
 }
 
 /**
