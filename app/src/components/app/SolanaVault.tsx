@@ -587,11 +587,12 @@ function SolanaReceiveView() {
         <div>
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-[15px] font-medium text-foreground">Payments to you</h3>
-            <button type="button" aria-busy={refreshing || undefined} onClick={() => !sol.task && void sol.refresh()} className="btn btn-ghost btn-sm h-10">
+            {/* -my-2: the button doesn't push this title below the one beside it */}
+            <button type="button" aria-busy={refreshing || undefined} onClick={() => !sol.task && void sol.refresh()} className="btn btn-ghost btn-sm -my-2 h-10">
               Check now
             </button>
           </div>
-          <p className="mt-2 text-[13.5px] leading-relaxed text-mute">Payments to your private address land in your balance on their own.</p>
+          <p className="mt-2 text-[13px] leading-relaxed text-mute">Payments to your private address land in your balance on their own.</p>
           <ul className="mt-4 divide-y divide-line border-y border-line">
             {assets.map((a) => (
               <li key={a.id} className="flex min-h-[56px] items-center justify-between gap-3 py-2.5">

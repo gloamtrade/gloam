@@ -3803,7 +3803,7 @@ export function MoveView() {
                         void rotateReceiveIdentity().then(setMyIdentity);
                       }}
                       title="Makes a new address to share. Payments to your earlier addresses still open in this browser."
-                      className="btn btn-quiet btn-sm -mr-2 text-mute"
+                      className="btn btn-quiet btn-sm -my-2 -mr-2 text-mute"
                     >
                       New address
                     </button>
