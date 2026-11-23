@@ -790,7 +790,8 @@ https://gloam.trade/app/vault?tab=swap#from=0x5fc5360D0400a0Fd4f2af552ADD042D716
         to you even if it was opened from another partner&apos;s link; one sent
         with an API key stays with that key&apos;s partner. Only your addresses
         and their signatures are kept, nothing about who sent the money. A
-        transaction is never counted twice.
+        transaction is never counted twice: a cash out sent in parts as one
+        transaction counts once, with every part&apos;s amount.
       </p>
       <p>
         Past private payments can&apos;t be matched: inside the vault the payee and

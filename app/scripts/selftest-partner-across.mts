@@ -12,6 +12,10 @@
  *    another proof of them, nothing for any other call
  *  - through the relay in one go: counted once, with the whole amount, the vault
  *    fees added up and one flat fee; a reverted one counts nothing
+ *  - a reverted batch's parts relayed again by someone else with another code,
+ *    alone or in a new batch, stay with the first link; so does a reverted payment
+ *    wrapped in a new batch with a throwaway part. A batch binds each part too, and
+ *    takes back only the part bindings it wrote
  *  - part by part, through the relay or registered from the wallet, with the
  *    payment's tag: the first transaction counted is the payment, the rest add
  *    their amounts and fees only; some parts alone and the rest in one go too
@@ -19,7 +23,9 @@
  *    exactly; a tag joins one partner's parts only; no tag counts each on its own
  *  - a wallet's own Multicall3 batch never matches a registration
  *  - the on-chain match settles a one-go cash out the relay bound but never
- *    counted, once; the address match still takes plain cash outs only
+ *    counted, once; a one-go cash out to a partner's own proven address counts
+ *    once, every part's amount and fee, its other parts already counted, in a dry
+ *    run too, and earns what the same parts one by one would
  *  - the register route takes an optional 32-byte tag, and nothing else new
  *
  * The partner store is the in-process one and every chain read is a fake: nothing
@@ -175,8 +181,14 @@ const settle = (h: Hex) => A.settleLinkTx({ chainId: RH.chainId, txHash: h }, de
  * What the relay route does for a send from a link: binds the code to the call just
  * before it goes out, then (after the reply) binds the hash and counts it once landed.
  */
-async function relaySend(code: string, call: { to: string; data: Hex }, logs: Log[], payment?: Hex, opts: { after?: boolean; status?: "success" | "reverted" } = {}): Promise<Hex> {
-  const at = Date.now();
+async function relaySend(
+  code: string,
+  call: { to: string; data: Hex },
+  logs: Log[],
+  payment?: Hex,
+  opts: { after?: boolean; status?: "success" | "reverted"; at?: number } = {}
+): Promise<Hex> {
+  const at = opts.at ?? Date.now();
   const bound = A.bindRelaySpend({ net: RH, tx: call, code, flow: "pay", at, payment });
   await bound;
   const hash = land({ from: RELAYER, to: call.to, input: call.data, logs, status: opts.status });
@@ -331,6 +343,74 @@ await test("relay, in one go: a batch that reverted counts nothing; its parts se
   near(t.publicVolumeUsd, 10, "both parts' amount");
 });
 
+await test("relay, in one go: a reverted batch's parts relayed again by someone else with another code, alone or in a new batch, stay with the first link", async () => {
+  const first = await partnerWithCode("First Link");
+  const other = await partnerWithCode("Other Code");
+  const tag = fresh();
+  const parts = [cashPart(5), cashPart(3), cashPart(2)];
+  // it reverted a few seconds ago, which made its proofs public
+  await relaySend(first.code, oneGoCash(parts), [], tag, { status: "reverted", at: Date.now() - 5_000 });
+  // someone sends the first part alone, then the other two as a new batch, with their own code
+  const again = parts.map((p) => ({ ...p, proof: proof() }));
+  const alonePart = await relaySend(other.code, alone(again[0]!), cashLogs([again[0]!]));
+  const rebatched = await relaySend(other.code, oneGoCash(again.slice(1)), cashLogs(again.slice(1)), fresh());
+  for (const h of [alonePart, rebatched]) assert.equal((await P.countedRecord(RH.chainId, h))?.partnerId, first.partner.id);
+  const t = await totals(first.partner.id);
+  assert.equal(t.cashOuts, 1, "one cash out, the first link's");
+  near(t.publicVolumeUsd, 10, "every part's amount");
+  assert.equal((await totals(other.partner.id)).cashOuts, 0, "nothing for the other code");
+});
+
+await test("relay: a reverted payment from a link, resent inside a new batch with a throwaway part and another code, stays with the first link", async () => {
+  const first = await partnerWithCode("First Pay Link");
+  const other = await partnerWithCode("Wrapper Code");
+  const p = payPart(true);
+  await relaySend(first.code, aloneTransfer(p), [], undefined, { status: "reverted", at: Date.now() - 5_000 });
+  const throwaway = payPart();
+  const wrapped = [{ ...p, proof: proof() }, throwaway];
+  const h = await relaySend(other.code, oneGoPay(wrapped), payLogs(wrapped), fresh());
+  const c = await P.countedRecord(RH.chainId, h);
+  assert.equal(c?.partnerId, first.partner.id);
+  assert.equal(c?.record.kind, "private_payment");
+  assert.equal((await totals(first.partner.id)).privatePayments, 1);
+  assert.equal((await totals(other.partner.id)).privatePayments, 0, "the fresh batch identity earns nothing");
+  // the same for a cash out, wrapped with another part to the same wallet, even bound in the same
+  // millisecond: the part's binding was there first, as the batch found it taken
+  const q = cashPart(4);
+  const at = Date.now() - 5_000;
+  await relaySend(first.code, alone(q), [], undefined, { status: "reverted", at });
+  const wrappedCash = [{ ...q, proof: proof() }, cashPart(1)];
+  const hc = await relaySend(other.code, oneGoCash(wrappedCash), cashLogs(wrappedCash), fresh(), { at });
+  assert.equal((await P.countedRecord(RH.chainId, hc))?.partnerId, first.partner.id);
+  assert.equal((await totals(other.partner.id)).cashOuts, 0);
+});
+
+await test("relay, in one go: the binding names each part too; one that surely didn't go out takes back only the part bindings it wrote; one that went out keeps them a week", async () => {
+  const { k, kv1 } = await import("../src/lib/partnersKv");
+  const one = await partnerWithCode("Part Keys One");
+  const two = await partnerWithCode("Part Keys Two");
+  const parts = [cashPart(2), cashPart(2)];
+  const partKey = (p: CashPart) => k("relayspend", RH.chainId, A.spendIdOf(RH, { to: POOL, input: alone(p).data })!.id.toLowerCase());
+  const held = await A.bindRelaySpend({ net: RH, tx: alone(parts[0]!), code: one.code, flow: "pay", at: Date.now() });
+  assert.ok(held?.wrote);
+  const b = await A.bindRelaySpend({ net: RH, tx: oneGoCash(parts), code: two.code, flow: "pay", at: Date.now() });
+  assert.ok(b && b.wrote);
+  assert.deepEqual(b.parts?.map((x) => [x.key, x.wrote]), [[partKey(parts[0]!), false], [partKey(parts[1]!), true]], "the earlier binding of part 1 stands");
+  assert.equal(await kv1(["GET", partKey(parts[1]!)]), b.value);
+  await A.unbindRelaySpend(b);
+  assert.equal(await kv1(["GET", b.key]), null);
+  assert.equal(await kv1(["GET", partKey(parts[1]!)]), null, "its own part binding is taken back");
+  assert.equal(await kv1(["GET", partKey(parts[0]!)]), held.value, "an earlier one stays");
+  // sent: every part binding lasts as long as the hash binding
+  const more = [cashPart(1), cashPart(1)];
+  const sent = A.bindRelaySpend({ net: RH, tx: oneGoCash(more), code: two.code, flow: "pay", at: Date.now() });
+  await A.afterRelaySend({ net: RH, hash: fresh(), code: two.code, flow: "pay", at: Date.now(), bound: sent, wait: async () => {
+    throw new Error("not landed yet");
+  } });
+  const mem = (globalThis as { __gloamPartnersMem?: Map<string, { exp?: number }> }).__gloamPartnersMem!;
+  for (const p of (await sent)!.parts!) assert.ok(mem.get(p.key)!.exp! - Date.now() > 7 * 86_400_000 - 10_000, "kept a week");
+});
+
 // ---------------------------------------------------------------- part by part
 
 await test("relay, part by part: three cash outs with one tag are one cash out of the whole amount; vault fees and the share fee add up", async () => {
@@ -477,7 +557,7 @@ await test("relay: transferBatch and unshieldBatch are payments and cash outs to
 
 // ---------------------------------------------------------------- the on-chain match
 
-await test("match: a one-go cash out the relay bound but never counted is settled once; the address match still takes plain cash outs only", async () => {
+await test("match: a one-go cash out the relay bound but never counted is settled once", async () => {
   const { partner, code } = await partnerWithCode("Matched Later");
   const parts = [cashPart(5), cashPart(5)];
   const hash = await relaySend(code, oneGoCash(parts), cashLogs(parts), undefined, { after: false });
@@ -503,22 +583,76 @@ await test("match: a one-go cash out the relay bound but never counted is settle
   const t = await totals(partner.id);
   assert.equal(t.cashOuts, 1);
   near(t.publicVolumeUsd, 10, "volume");
+});
 
-  // a one-go cash out to a partner's own proven address, from no link: not a plain cash out, as before
-  const shop = await P.upsertPartner(wallet(), { name: "Proven Shop" });
+await test("match: a cash out in one go to a partner's own proven address, from no link, counts once with every part's amount and fee; its other parts are already counted", async () => {
+  const shop = await P.upsertPartner(wallet(), { name: "Proven Shop", fees: { privatePaymentCents: 5, cashoutBps: 25, depositBps: 0 } });
   const shopTo = "0x00000000000000000000000000000000000a11d1" as Address;
   await AD.setPartnerAddresses(shop.id, [{ chainId: RH.chainId, address: shopTo }], "add");
   await AD.verifyPartnerAddresses(shop.id, [{ chainId: RH.chainId, address: shopTo, signature: `0x${"aa".repeat(65)}` }], async () => true);
-  const toShop = [cashPart(1, { to: shopTo }), cashPart(1, { to: shopTo })];
+  const book = new Map([[RH.chainId, new Map([[shopTo.toLowerCase(), shop.id]])]]);
+  const toShop = [cashPart(5, { to: shopTo }), cashPart(3, { to: shopTo }), cashPart(2, { to: shopTo })];
   const h2 = land({ from: RELAYER, to: batch.MULTICALL3, input: oneGoCash(toShop).data, logs: cashLogs(toShop) });
   const l2 = chain.get(h2)!;
-  logs.splice(0, logs.length, ...toShop.map((p) => ({ txHash: h2, blockNumber: l2.block, nullifier: p.nullifier, asset: p.asset, to: p.to, amount: p.amount })));
-  const r2 = await B.runBackfill(
-    { dryRun: false, from: "deploy", book: new Map([[RH.chainId, new Map([[shopTo.toLowerCase(), shop.id]])]]), budgetMs: 60_000, chains: [RH.chainId] },
+  const logs = toShop.map((p) => ({ txHash: h2, blockNumber: l2.block, nullifier: p.nullifier, asset: p.asset, to: p.to, amount: p.amount }));
+  const run = (dryRun: boolean) =>
+    B.runBackfill(
+      { dryRun, from: "deploy", book, budgetMs: 60_000, chains: [RH.chainId] },
+      {
+        ...B.backfillDeps,
+        head: async () => l2.block,
+        unshielded: async (_net, from, to) => (l2.block >= from && l2.block <= to ? logs : []),
+        receipt: deps.receipt,
+        blockTime: deps.blockTime,
+        readCursor: async () => null,
+        writeCursor: async () => {},
+        now: () => Date.now(),
+      }
+    );
+  const fees = vaultFeeOn(usd(5)) + vaultFeeOn(usd(3)) + vaultFeeOn(usd(2));
+
+  // a dry run shows it once, the whole amount, never once per part
+  const dry = await run(true);
+  assert.deepEqual(dry.matches.map((m) => m.result), ["would_record", "already_counted", "already_counted"]);
+  assert.deepEqual(dry.matches.map((m) => m.reason), [undefined, B.COUNTED_WITH_ITS_PARTS, B.COUNTED_WITH_ITS_PARTS]);
+  assert.equal(dry.matches[0]!.amount, usd(10).toString());
+  assert.equal(dry.matches[0]!.vaultFee, fees.toString());
+  assert.deepEqual(dry.byAddress.map((a) => [a.matches, a.counted, a.byToken.USDG]), [[3, 1, "10"]]);
+  assert.equal((await totals(shop.id)).cashOuts, 0, "a dry run writes nothing");
+
+  // the real pass counts it once, the same as the dry run showed
+  const real = await run(false);
+  assert.deepEqual(real.matches.map((m) => m.result), ["recorded", "already_counted", "already_counted"]);
+  const c = await P.countedRecord(RH.chainId, h2);
+  assert.ok(c && c.partnerId === shop.id);
+  assert.equal(c.record.source, "chain");
+  assert.equal(c.record.amount, usd(10).toString());
+  assert.equal(c.record.vaultFee, fees.toString());
+  const t = await totals(shop.id);
+  assert.equal(t.cashOuts, 1);
+  near(t.publicVolumeUsd, 10, "every part's amount");
+  near(t.vaultFeeUsd, 0.05, "every part's vault fee");
+  near(t.commissionUsd, 0.025, "0.25% of the whole, as one by one would earn");
+
+  // again: nothing more
+  const again = await run(false);
+  assert.deepEqual(again.matches.map((m) => m.result), ["already_counted", "already_counted", "already_counted"]);
+  assert.deepEqual(await totals(shop.id), t);
+
+  // the same parts one by one earn the same: each its own cash out, the same volume and share
+  const apart = await P.upsertPartner(wallet(), { name: "Proven Apart", fees: { privatePaymentCents: 5, cashoutBps: 25, depositBps: 0 } });
+  const apartTo = "0x00000000000000000000000000000000000a11d2" as Address;
+  await AD.setPartnerAddresses(apart.id, [{ chainId: RH.chainId, address: apartTo }], "add");
+  await AD.verifyPartnerAddresses(apart.id, [{ chainId: RH.chainId, address: apartTo, signature: `0x${"aa".repeat(65)}` }], async () => true);
+  const one = [cashPart(5, { to: apartTo }), cashPart(3, { to: apartTo }), cashPart(2, { to: apartTo })];
+  const hs = one.map((p) => land({ from: RELAYER, to: POOL, input: unshieldInput(p), logs: cashLogs([p]) }));
+  const ones = one.map((p, i) => ({ txHash: hs[i]!, blockNumber: chain.get(hs[i]!)!.block, nullifier: p.nullifier, asset: p.asset, to: p.to, amount: p.amount }));
+  const r3 = await B.runBackfill(
+    { dryRun: false, from: "deploy", book: new Map([[RH.chainId, new Map([[apartTo.toLowerCase(), apart.id]])]]), budgetMs: 60_000, chains: [RH.chainId] },
     {
       ...B.backfillDeps,
-      head: async () => l2.block,
-      unshielded: async (_net, from, to) => (l2.block >= from && l2.block <= to ? logs : []),
+      head: async () => ones[2]!.blockNumber,
+      unshielded: async (_net, from, to) => ones.filter((l) => l.blockNumber >= from && l.blockNumber <= to),
       receipt: deps.receipt,
       blockTime: deps.blockTime,
       readCursor: async () => null,
@@ -526,8 +660,11 @@ await test("match: a one-go cash out the relay bound but never counted is settle
       now: () => Date.now(),
     }
   );
-  assert.deepEqual(r2.matches.map((m) => m.reason), ["Not a plain cash out.", "Not a plain cash out."]);
-  assert.equal((await totals(shop.id)).cashOuts, 0);
+  assert.deepEqual(r3.matches.map((m) => m.result), ["recorded", "recorded", "recorded"]);
+  const ta = await totals(apart.id);
+  near(ta.publicVolumeUsd, t.publicVolumeUsd, "volume");
+  near(ta.vaultFeeUsd, t.vaultFeeUsd, "vault fee");
+  near(ta.commissionUsd, t.commissionUsd, "share");
 });
 
 // ---------------------------------------------------------------- the register route
