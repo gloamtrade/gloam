@@ -20,11 +20,19 @@
  *    nullifier, so the same note can never pay out twice;
  *  - one run at a time per account and vault, held under one lock, so two taps
  *    or two tabs start one cash out; Stop the rest works from the stored run.
- * Sending is one function (deps.submit), so the parts can later go out
- * together in one transaction.
+ *
+ * Through the relay (Hide my wallet), where the network has Multicall3, the cash
+ * outs go together in one transaction (deps.submitTogether, lib/relay/batch), all
+ * or nothing: a set-aside step first if the last part needs one, then one send
+ * for every part, so at most two relay transactions. Each part keeps its own
+ * nullifier on record before that send, and is settled from the chain on its
+ * own after it, exactly as when the parts go one by one. Refused with nothing
+ * sent (an older relay, a batch too big for the network), the parts go one by
+ * one. From the wallet they always go one by one.
  */
 import type { Address, Hex } from "viem";
 import type { CashOutCall } from "./cashOutProof";
+import { BATCH_MIN_PARTS } from "./relay/batch";
 import { PAY_MAX_PARTS, planPayFrom } from "./payAcross";
 import { withRunLock } from "./payroll";
 import type { LocalNote } from "./shield";
@@ -85,6 +93,11 @@ export type CashOutAcrossRun = {
   to: Address;
   /** Through the relay (Hide my wallet) or from the wallet. */
   relay: boolean;
+  /**
+   * The vault's cash-out fee shown when it was confirmed, in basis points: the parts
+   * go together only at that fee or lower (the relay checks). Unknown, they go one by one.
+   */
+  feeBps?: number;
   createdAt: number;
   status: "running" | "done";
   parts: CashOutPart[];
@@ -119,6 +132,8 @@ export function newCashOutRun(args: {
   owner: Address;
   to: Address;
   relay: boolean;
+  /** The cash-out fee on screen when it was confirmed, when it was read. */
+  feeBps?: number | null;
   parts: bigint[];
   noteIds: string[];
   noteAmounts: Record<string, string>;
@@ -134,6 +149,7 @@ export function newCashOutRun(args: {
     owner: args.owner,
     to: args.to,
     relay: args.relay,
+    ...(typeof args.feeBps === "number" ? { feeBps: args.feeBps } : {}),
     createdAt: now,
     status: "running",
     parts: args.parts.map((amount, i) => {
@@ -177,9 +193,20 @@ export type CashOutAcrossDeps = {
   split: (note: LocalNote, amount: bigint) => Promise<LocalNote>;
   /** A cash out of all of `note` to `to`. */
   prove: (note: LocalNote, to: Address) => Promise<CashOutCall>;
-  /** Hand the cash out to the relay or the wallet. One function, so parts can later go out together. */
+  /** Hand one cash out to the relay or the wallet. */
   submit: (call: CashOutCall) => Promise<Hex>;
-  /** A failed submit that may still have gone out. */
+  /**
+   * Every part's cash out in one transaction through the relay (lib/relay/batch), all or
+   * nothing. Left out (the wallet sends, or the network has no Multicall3), each part goes
+   * on its own through submit.
+   */
+  submitTogether?: (calls: CashOutCall[]) => Promise<Hex>;
+  /**
+   * A failed submitTogether that surely sent nothing, after which the parts may go one by
+   * one (an older relay, a batch too big here). Not a fee that went up since it was shown.
+   */
+  togetherRefused?: (e: unknown) => boolean;
+  /** A failed submit or submitTogether that may still have gone out. */
   maybeSent: (e: unknown) => boolean;
   waitForTx: (hash: Hex) => Promise<"success" | "reverted" | null>;
   isSpent: (nullifier: Hex) => Promise<boolean>;
@@ -275,6 +302,9 @@ export function runCashOutAcross(run: Pick<CashOutAcrossRun, "id">, deps: CashOu
     };
     if (r.status === "done") return r;
 
+    // Through the relay, every part's note is made ready first (1 and 2), then they are
+    // proven and sent together (sendTogether); what that can't send goes one by one.
+    const together: ReadyPart[] | null = r.relay && deps.submitTogether ? [] : null;
     for (const part of r.parts) {
       if (part.status === "paid" || part.status === "failed") continue;
       if (deps.shouldStop?.()) break;
@@ -348,91 +378,22 @@ export function runCashOutAcross(run: Pick<CashOutAcrossRun, "id">, deps: CashOu
         continue;
       }
 
-      // 3. Prove, save the nullifier, then send.
-      const call = await deps.prove(target, r.to);
-      if (call.to.toLowerCase() !== r.to.toLowerCase() || call.amount !== BigInt(part.amount)) {
-        throw new Error("The cash out didn't match what was set up, so nothing was sent.");
-      }
-      if (await deps.isSpent(call.nullifier)) {
-        // spent before this send: by an earlier send of this part that landed late, or elsewhere
-        // (another tab or device)
-        const by = part.nullifier === call.nullifier ? await spentBy(part, r.to, deps) : "moved";
-        if (by === "unknown") {
-          part.error = CASHOUT_WAITING;
-          await save();
-          return r;
-        }
-        part.status = by === "paid" ? "paid" : "failed";
-        if (by === "paid") delete part.error;
-        else part.error = CASHOUT_MOVED;
-        await save();
+      // 3. Prove, save the nullifier, then send: now, or with the other parts in one transaction.
+      if (together) {
+        together.push({ part, target });
         continue;
       }
-      const block = deps.blockNumber ? await deps.blockNumber().catch(() => null) : null;
-      part.nullifier = call.nullifier;
-      part.targetNoteId = target.id;
-      part.status = "sent";
-      part.sentAt = now();
-      if (block != null) part.sentBlock = block.toString();
-      else delete part.sentBlock;
-      delete part.error;
-      await save();
+      if ((await sendOne(r, part, target, deps, save, now)) === "held") return r;
+    }
 
-      let hash: Hex;
-      try {
-        hash = await deps.submit(call);
-      } catch (e) {
-        if (deps.maybeSent(e)) {
-          part.error = CASHOUT_MAYBE_SENT;
-          await save();
-          return r;
-        }
-        // surely not sent: the part waits for the next try
-        part.status = "ready";
-        delete part.sentAt;
-        part.error = e instanceof Error ? e.message : "The cash out didn't go through.";
-        await save();
-        throw e;
+    // Every part's note is ready: they go together, and what can't go that way goes one by one.
+    if (together?.length && !deps.shouldStop?.()) {
+      const left = await sendTogether(r, together, deps, save, now);
+      if (left === "held") return r;
+      for (const one of left) {
+        if (deps.shouldStop?.()) break;
+        if ((await sendOne(r, one.part, one.target, deps, save, now, one.call)) === "held") return r;
       }
-      part.txHash = hash;
-      await save();
-
-      const outcome = await deps.waitForTx(hash).catch(() => null);
-      if (outcome === "success") {
-        part.status = "paid";
-        deps.markSpent(target.id, hash);
-        await save();
-        continue;
-      }
-      if (outcome === "reverted" && !(await deps.isSpent(call.nullifier))) {
-        part.status = "ready";
-        delete part.sentAt;
-        part.error = "This part didn't go through on this try. Resume to try it again.";
-        await save();
-        return r;
-      }
-      if (outcome === "reverted") {
-        // reverted, yet the note is spent: an earlier send of it landed, or something else spent it
-        const by = await spentBy(part, r.to, deps);
-        if (by === "unknown") {
-          part.error = CASHOUT_WAITING;
-          await save();
-          return r;
-        }
-        if (by === "moved") {
-          part.status = "failed";
-          part.error = CASHOUT_MOVED;
-          await save();
-          continue;
-        }
-        part.status = "paid";
-        deps.markSpent(target.id, hash);
-        await save();
-        continue;
-      }
-      part.error = CASHOUT_WAITING;
-      await save();
-      return r;
     }
 
     if (r.parts.every((p) => p.status === "paid" || p.status === "failed")) {
@@ -441,6 +402,239 @@ export function runCashOutAcross(run: Pick<CashOutAcrossRun, "id">, deps: CashOu
     }
     return r;
   });
+}
+
+/** A part whose note is ready to cash out, and its proof once made. */
+type ReadyPart = { part: CashOutPart; target: LocalNote; call?: CashOutCall };
+
+/**
+ * A part's note found spent before it was sent: paid by an earlier send of this same
+ * part that landed late, or moved (another tab or device). "held" when the vault's log
+ * can't say which yet. Saved either way.
+ */
+async function spentBeforeSend(r: CashOutAcrossRun, part: CashOutPart, call: CashOutCall, deps: CashOutAcrossDeps, save: () => Promise<void>): Promise<"next" | "held"> {
+  const by = part.nullifier === call.nullifier ? await spentBy(part, r.to, deps) : "moved";
+  if (by === "unknown") {
+    part.error = CASHOUT_WAITING;
+    await save();
+    return "held";
+  }
+  part.status = by === "paid" ? "paid" : "failed";
+  if (by === "paid") delete part.error;
+  else part.error = CASHOUT_MOVED;
+  await save();
+  return "next";
+}
+
+/**
+ * 3. One part on its own: prove it (or take the proof made to send it with the others),
+ * save its nullifier and the chain's block, then send it and settle it. "held" when the
+ * run stops here for the chain or the person to settle it; throws when the send surely
+ * didn't go out (the part waits for the next try).
+ */
+async function sendOne(
+  r: CashOutAcrossRun,
+  part: CashOutPart,
+  target: LocalNote,
+  deps: CashOutAcrossDeps,
+  save: () => Promise<void>,
+  now: () => number,
+  proven?: CashOutCall
+): Promise<"next" | "held"> {
+  const call = proven ?? (await deps.prove(target, r.to));
+  if (call.to.toLowerCase() !== r.to.toLowerCase() || call.amount !== BigInt(part.amount)) {
+    throw new Error("The cash out didn't match what was set up, so nothing was sent.");
+  }
+  // spent before this send: by an earlier send of this part that landed late, or elsewhere
+  // (another tab or device)
+  if (await deps.isSpent(call.nullifier)) return spentBeforeSend(r, part, call, deps, save);
+  const block = deps.blockNumber ? await deps.blockNumber().catch(() => null) : null;
+  part.nullifier = call.nullifier;
+  part.targetNoteId = target.id;
+  part.status = "sent";
+  part.sentAt = now();
+  if (block != null) part.sentBlock = block.toString();
+  else delete part.sentBlock;
+  delete part.error;
+  await save();
+
+  let hash: Hex;
+  try {
+    hash = await deps.submit(call);
+  } catch (e) {
+    if (deps.maybeSent(e)) {
+      part.error = CASHOUT_MAYBE_SENT;
+      await save();
+      return "held";
+    }
+    // surely not sent: the part waits for the next try
+    part.status = "ready";
+    delete part.sentAt;
+    part.error = e instanceof Error ? e.message : "The cash out didn't go through.";
+    await save();
+    throw e;
+  }
+  part.txHash = hash;
+  await save();
+
+  const outcome = await deps.waitForTx(hash).catch(() => null);
+  if (outcome === "success") {
+    part.status = "paid";
+    deps.markSpent(target.id, hash);
+    await save();
+    return "next";
+  }
+  if (outcome === "reverted" && !(await deps.isSpent(call.nullifier))) {
+    part.status = "ready";
+    delete part.sentAt;
+    part.error = "This part didn't go through on this try. Resume to try it again.";
+    await save();
+    return "held";
+  }
+  if (outcome === "reverted") {
+    // reverted, yet the note is spent: an earlier send of it landed, or something else spent it
+    const by = await spentBy(part, r.to, deps);
+    if (by === "unknown") {
+      part.error = CASHOUT_WAITING;
+      await save();
+      return "held";
+    }
+    if (by === "moved") {
+      part.status = "failed";
+      part.error = CASHOUT_MOVED;
+      await save();
+      return "next";
+    }
+    part.status = "paid";
+    deps.markSpent(target.id, hash);
+    await save();
+    return "next";
+  }
+  part.error = CASHOUT_WAITING;
+  await save();
+  return "held";
+}
+
+/**
+ * Every ready part in one transaction (deps.submitTogether). Each part is proven and
+ * checked as sendOne checks it, and every part's nullifier, marked sent, and the chain's
+ * block are saved before the one send goes. Then:
+ *  - landed: every part's own cash out ran in it (all or nothing), so each is paid
+ *  - refused with nothing sent (deps.togetherRefused): back to ready, and returned to go
+ *    one by one with the proofs already made
+ *  - reverted: nothing in it landed; a part whose note is unspent goes again on its own,
+ *    proven afresh; one whose note is spent is settled as sendOne settles it (spentBy:
+ *    paid by an earlier send of it, or moved by something else)
+ *  - may have gone out, or no answer: "held", every part kept as sent until the chain
+ *    settles it (runCashOutAcross step 1, settleSent, part by part, never sent twice)
+ *  - any other refusal (a fee that went up, a rate limit): back to ready, and thrown
+ * Fewer than two parts left to send come back to go one by one.
+ */
+async function sendTogether(
+  r: CashOutAcrossRun,
+  ready: ReadyPart[],
+  deps: CashOutAcrossDeps,
+  save: () => Promise<void>,
+  now: () => number
+): Promise<ReadyPart[] | "held"> {
+  if (ready.length < BATCH_MIN_PARTS || !deps.submitTogether) return ready;
+  const going: Required<ReadyPart>[] = [];
+  for (const one of ready) {
+    if (deps.shouldStop?.()) return "held";
+    const call = await deps.prove(one.target, r.to);
+    if (call.to.toLowerCase() !== r.to.toLowerCase() || call.amount !== BigInt(one.part.amount)) {
+      throw new Error("The cash out didn't match what was set up, so nothing was sent.");
+    }
+    if (await deps.isSpent(call.nullifier)) {
+      if ((await spentBeforeSend(r, one.part, call, deps, save)) === "held") return "held";
+      continue;
+    }
+    going.push({ ...one, call });
+  }
+  if (going.length < BATCH_MIN_PARTS) return going;
+  if (deps.shouldStop?.()) return "held";
+
+  // every part's nullifier and the chain's block on record before the one send
+  const block = deps.blockNumber ? await deps.blockNumber().catch(() => null) : null;
+  const sentAt = now();
+  for (const g of going) {
+    g.part.nullifier = g.call.nullifier;
+    g.part.targetNoteId = g.target.id;
+    g.part.status = "sent";
+    g.part.sentAt = sentAt;
+    if (block != null) g.part.sentBlock = block.toString();
+    else delete g.part.sentBlock;
+    delete g.part.txHash;
+    delete g.part.error;
+  }
+  await save();
+
+  let hash: Hex;
+  try {
+    hash = await deps.submitTogether(going.map((g) => g.call));
+  } catch (e) {
+    if (deps.maybeSent(e)) {
+      for (const g of going) g.part.error = CASHOUT_MAYBE_SENT;
+      await save();
+      return "held";
+    }
+    // surely not sent: every part waits for its next try
+    for (const g of going) {
+      g.part.status = "ready";
+      delete g.part.sentAt;
+    }
+    if (deps.togetherRefused?.(e)) {
+      await save();
+      return going;
+    }
+    for (const g of going) g.part.error = e instanceof Error ? e.message : "The cash out didn't go through.";
+    await save();
+    throw e;
+  }
+  for (const g of going) g.part.txHash = hash;
+  await save();
+
+  const outcome = await deps.waitForTx(hash).catch(() => null);
+  if (outcome === "success") {
+    // allowFailure false: the transaction succeeded only if every part's cash out did
+    for (const g of going) {
+      g.part.status = "paid";
+      deps.markSpent(g.target.id, hash);
+    }
+    await save();
+    return [];
+  }
+  if (outcome !== "reverted") {
+    for (const g of going) g.part.error = CASHOUT_WAITING;
+    await save();
+    return "held";
+  }
+  // reverted: none of it landed
+  const again: ReadyPart[] = [];
+  let held = false;
+  for (const g of going) {
+    if (!(await deps.isSpent(g.call.nullifier))) {
+      g.part.status = "ready";
+      delete g.part.sentAt;
+      delete g.part.txHash;
+      again.push({ part: g.part, target: g.target });
+      continue;
+    }
+    // spent all the same: an earlier send of it landed, or something else spent it
+    const by = await spentBy(g.part, r.to, deps);
+    if (by === "unknown") {
+      g.part.error = CASHOUT_WAITING;
+      held = true;
+    } else if (by === "moved") {
+      g.part.status = "failed";
+      g.part.error = CASHOUT_MOVED;
+    } else {
+      g.part.status = "paid";
+      deps.markSpent(g.target.id, hash);
+    }
+  }
+  await save();
+  return held ? "held" : again;
 }
 
 /** Stop the parts not sent yet, from the stored run. Null while a part is on its way (the chain settles it first). */

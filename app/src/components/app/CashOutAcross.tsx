@@ -22,10 +22,11 @@ import {
 } from "@/lib/cashOutAcross";
 import { loadCashOutRun, loadCashOutRuns, saveCashOutRun } from "@/lib/cashOutAcrossStore";
 import { proveCashOut, type CashOutCall } from "@/lib/cashOutProof";
-import { freshPath, splitForCashOut, splitMaybeSent, type TransferArgs } from "@/lib/cashOutSplit";
+import { cashOutTogetherRefused, freshPath, splitForCashOut, splitMaybeSent, type TransferArgs } from "@/lib/cashOutSplit";
 import { getLogsSafe } from "@/lib/logRange";
 import { getAllNotes } from "@/lib/noteVault";
-import { relayUnshield, waitForTx } from "@/lib/relay/client";
+import { relayUnshield, relayUnshieldBatch, waitForTx } from "@/lib/relay/client";
+import { batchesOn } from "@/lib/relay/batch";
 import { publicClientFor } from "@/lib/rhClient";
 import { formatAssetLabel, shieldPoolAbi, updateLocalNote } from "@/lib/shield";
 import { walletErrorForPeople } from "@/lib/walletErrors";
@@ -126,6 +127,18 @@ export function useCashOutAcross(
             setStatus(r.relay ? "Sending through the Gloam relay…" : "Confirm the cash out in your wallet…");
             return r.relay ? relayUnshield(call) : latest.current.walletUnshield(call);
           },
+          // through the relay, every part in one transaction where the network has Multicall3
+          // (lib/relay/batch), at the fee confirmed; a batch the relay surely didn't send
+          // leaves the parts to go one by one, unless the fee went up since
+          ...(r.relay && batchesOn(r.chainId) && typeof r.feeBps === "number"
+            ? {
+                submitTogether: (calls: CashOutCall[]) => {
+                  setStatus("Sending every part together through the Gloam relay…");
+                  return relayUnshieldBatch({ chainId: r.chainId, pool: r.pool, feeBps: r.feeBps!, parts: calls });
+                },
+                togetherRefused: cashOutTogetherRefused,
+              }
+            : {}),
           maybeSent: (e) => splitMaybeSent(e, r.relay),
           waitForTx: (h) => waitForTx(h, undefined, client),
           isSpent: async (nullifier) =>
@@ -233,6 +246,8 @@ export function CashOutAcrossPanel({ across, networkKey }: { across: CashOutAcro
   const paid = formatAssetLabel(cashOutPaid(run), run.asset);
   const cancelled = p.done && run.parts.some((x) => x.error === CASHOUT_CANCELLED);
   const sent = run.parts.filter((x) => x.status === "paid" && x.txHash);
+  // parts sent together wait on the chain together
+  const onTheirWay = run.parts.filter((x) => x.status === "sent").length;
 
   return (
     <div role="status" aria-live="polite" className="rounded-[16px] border border-line bg-surface px-4 py-3.5 text-[13.5px] leading-relaxed">
@@ -245,10 +260,11 @@ export function CashOutAcrossPanel({ across, networkKey }: { across: CashOutAcro
           {sent.length > 0 && (
             <div className="mt-2 flex flex-col">
               <span className="text-mute">Get receipts</span>
+              {/* parts sent together share one transaction: each receipt names its own part's spend */}
               {sent.map((x, i) => (
                 <Link
-                  key={x.txHash}
-                  href={`/app/disclose?mode=cashout&tx=${x.txHash}&net=${networkKey}`}
+                  key={x.nullifier ?? `${x.txHash}-${i}`}
+                  href={`/app/disclose?mode=cashout&tx=${x.txHash}&net=${networkKey}${x.nullifier ? `&part=${x.nullifier}` : ""}`}
                   className="inline-flex min-h-10 items-center font-medium text-foreground underline underline-offset-4"
                 >
                   Part {i + 1}: {formatAssetLabel(x.amount, run.asset)}
@@ -268,7 +284,7 @@ export function CashOutAcrossPanel({ across, networkKey }: { across: CashOutAcro
           </p>
           <p className="tnum mt-0.5 text-mute">
             {p.paid} of {p.parts} cashed out
-            {running && status ? `. ${status}` : p.waiting ? ". One is waiting for the network to confirm it." : "."}
+            {running && status ? `. ${status}` : p.waiting ? (onTheirWay === 1 ? ". One is waiting for the network to confirm it." : `. ${onTheirWay} are waiting for the network to confirm them.`) : "."}
           </p>
           {error && !running && <p className="mt-1 text-warn">{error}</p>}
           {!running && (

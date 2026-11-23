@@ -21,6 +21,7 @@ import { buildTransferWitness, type TransferWitness } from "./proverTransfer";
 import { fieldToBytes32, proveTransferInBrowser } from "./proveClient";
 import type { PoseidonMerklePath } from "./merklePoseidon";
 import { relayTransfer, RelaySubmitError, waitForTx } from "./relay/client";
+import { FEE_MOVED_CODE } from "./relay/batch";
 import { publicClientFor } from "./rhClient";
 import { readDemo } from "./demoFlag";
 import { demoLeafIndex } from "./demo/store";
@@ -52,6 +53,16 @@ export const SPLIT_REVERTED =
 /** Whether a failed send of the first step may still have gone out (then its notes are kept). */
 export function splitMaybeSent(e: unknown, relayOn: boolean): boolean {
   return relayOn ? e instanceof RelaySubmitError && RELAY_MAYBE_SENT.has(e.code) : !surelyNotSent(e);
+}
+
+/**
+ * A cash out in one go (lib/relay/batch) the relay refused with nothing sent, after which
+ * its parts may go one by one (lib/cashOutAcross): an older relay that doesn't know it, a
+ * batch too big for the network, any clear refusal. Never a send that may have gone out,
+ * and never a fee that went up since it was confirmed: the parts would pay less one by one too.
+ */
+export function cashOutTogetherRefused(e: unknown): boolean {
+  return !splitMaybeSent(e, true) && !(e instanceof RelaySubmitError && e.code === FEE_MOVED_CODE);
 }
 
 export type TransferArgs = {

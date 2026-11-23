@@ -13,6 +13,19 @@
  *    may have gone out too, one refused before sending drops them all
  *  - every part's spend is on record with the one transaction
  *  - through the route, rate limits count each part
+ *  - only on a network with the canonical Multicall3: outside BATCH_CHAIN_IDS, or with
+ *    other code at its address, a batch is refused as batch_network, nothing sent
+ *
+ * A cash out in one go (relayUnshieldBatch, action "unshieldBatch"):
+ *  - the calls are only the vault's unshield, one per part, on this network's vault, not
+ *    allowed to fail; unshieldBatchProblem refuses any other call, target or part
+ *  - refused with nothing sent: one part or a 7th, another vault, two wallets or two
+ *    assets, a part twice, a bad proof or amount or fee, a wallet that strands the money
+ *    (the vault) or is a swap's escrow or is sanctioned, a fee higher than the one
+ *    confirmed, a spent part, a part already being sent, a batch past its gas room
+ *  - sent: one transaction to Multicall3, no value, every lock kept, every spend on record
+ *  - may have gone out keeps every lock; refused by the node drops them all
+ *  - through the route, rate limits count each part
  *
  * fetch is stubbed: chain calls go to an in-process fake. The relay key is a
  * throwaway made here. Nothing reaches any host.
@@ -20,7 +33,8 @@
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-relay-batch.mts
  */
 import assert from "node:assert/strict";
-import { decodeFunctionData, getAddress, parseTransaction, toFunctionSelector, toHex, type Address, type Hex } from "viem";
+import { readFileSync } from "node:fs";
+import { decodeFunctionData, encodeFunctionData, getAddress, keccak256, parseTransaction, toFunctionSelector, toHex, type Address, type Hex } from "viem";
 import { generatePrivateKey } from "viem/accounts";
 
 delete process.env.UPSTASH_REDIS_REST_URL;
@@ -30,7 +44,7 @@ process.env.GLOAM_RELAYER_PRIVATE_KEY = generatePrivateKey();
 
 const server = await import("../src/lib/relay/server");
 const batch = await import("../src/lib/relay/batch");
-const { inflightKey, takeInflight, readSent } = await import("../src/lib/relay/inflight");
+const { inflightKey, takeInflight, readSent, markSwapEscrow } = await import("../src/lib/relay/inflight");
 const { getNetwork } = await import("../src/lib/networks");
 const { POST: relayPost } = await import("../src/app/api/relay/route");
 
@@ -61,10 +75,17 @@ let counter = 0;
 const fresh = (): Hex => `0x${(++counter).toString(16).padStart(64, "0")}` as Hex;
 
 // ---------------------------------------------------------------- fake chain
+/** Multicall3's runtime code as Base mainnet holds it (fixtures/multicall3-runtime.json). */
+const MULTICALL3_CODE = (JSON.parse(readFileSync(new URL("./fixtures/multicall3-runtime.json", import.meta.url), "utf8")) as { code: Hex }).code;
+assert.equal(keccak256(MULTICALL3_CODE), batch.MULTICALL3_CODEHASH, "the fixture is the canonical Multicall3");
 const chain = {
   spent: new Set<string>(),
   estimate: 1_800_000n,
   send: "ok" as "ok" | "drop" | "reject",
+  /** What eth_getCode answers at MULTICALL3. */
+  code: MULTICALL3_CODE as Hex,
+  /** The vault's cash-out fee, in basis points. */
+  feeBps: 50,
 };
 const sentRaw: Hex[] = [];
 const methods: string[] = [];
@@ -72,6 +93,7 @@ const SEL = {
   spent: toFunctionSelector("spent(bytes32)"),
   isKnownRoot: toFunctionSelector("isKnownRoot(bytes32)"),
   commitmentSeen: toFunctionSelector("commitmentSeen(bytes32)"),
+  withdrawFeeBps: toFunctionSelector("withdrawFeeBps()"),
 };
 const word = (b: boolean) => "0x" + (b ? "1" : "0").padStart(64, "0");
 const Z32 = "0x" + "00".repeat(32);
@@ -100,6 +122,10 @@ function answer(r: RpcReq): { result?: unknown; error?: { code: number; message:
       return { result: toHex(chain.estimate) };
     case "eth_getBalance":
       return { result: toHex(10n ** 20n) };
+    case "eth_getCode": {
+      const at = String(r.params?.[0]).toLowerCase();
+      return { result: at === batch.MULTICALL3.toLowerCase() ? chain.code : "0x" };
+    }
     case "eth_call": {
       const p = r.params?.[0] as { data?: string; input?: string };
       const data = String(p?.data ?? p?.input);
@@ -107,6 +133,7 @@ function answer(r: RpcReq): { result?: unknown; error?: { code: number; message:
       if (sel === SEL.spent) return { result: word(chain.spent.has(("0x" + data.slice(10, 74)).toLowerCase())) };
       if (sel === SEL.isKnownRoot) return { result: word(true) };
       if (sel === SEL.commitmentSeen) return { result: word(false) };
+      if (sel === SEL.withdrawFeeBps) return { result: "0x" + chain.feeBps.toString(16).padStart(64, "0") };
       return { error: { code: -32000, message: `fake chain: unknown call ${sel}` } };
     }
     case "eth_getTransactionByHash":
@@ -271,6 +298,235 @@ await test("through /api/relay: one hash back, and each part counts against the 
     if (r.status === 429) limitedAt = i;
   }
   assert.ok(limitedAt > 0 && limitedAt <= 68, `six parts count as six sends against the limits (limited at batch ${limitedAt})`);
+});
+
+// ---------------------------------------------------------------- only where Multicall3 is
+await test("a payment in one go is refused as batch_network outside BATCH_CHAIN_IDS, before any lock or chain call", async () => {
+  const elsewhere = { ...net, chainId: 31337 };
+  const parts = [part(), part()];
+  methods.length = 0;
+  const before = sentRaw.length;
+  await assert.rejects(server.relayTransferBatch(elsewhere as never, { parts }), isRelayError("batch_network", 400));
+  assert.equal(methods.length, 0, "no chain call");
+  assert.equal(sentRaw.length, before);
+  for (const p of parts) assert.ok(await free(p.nullifier), "no lock taken");
+});
+
+await test("other code at MULTICALL3, or none, refuses a payment in one go as batch_network, every lock dropped; the right code is read once", async () => {
+  for (const code of ["0x", "0x6080604052"] as Hex[]) {
+    server.resetMulticall3Seen();
+    chain.code = code;
+    const parts = [part(), part()];
+    methods.length = 0;
+    const before = sentRaw.length;
+    await assert.rejects(server.relayTransferBatch(net, { parts }), isRelayError("batch_network", 400));
+    assert.ok(!methods.includes("eth_estimateGas"), "no dry run");
+    assert.equal(sentRaw.length, before);
+    for (const p of parts) assert.ok(await free(p.nullifier), "lock dropped");
+  }
+  chain.code = MULTICALL3_CODE;
+  server.resetMulticall3Seen();
+  methods.length = 0;
+  await server.relayTransferBatch(net, { parts: [part(), part()] });
+  await server.relayTransferBatch(net, { parts: [part(), part()] });
+  assert.equal(methods.filter((m) => m === "eth_getCode").length, 1, "read once for this network");
+});
+
+// ---------------------------------------------------------------- cash outs in one go
+const CLEAN = getAddress("0x1111111111111111111111111111111111111111");
+const OTHER = getAddress("0x3333333333333333333333333333333333333333");
+// Lazarus Group (Ronin bridge exploit), on the OFAC SDN list since 2022-04-14
+const LISTED = getAddress("0x098b716b8aaf21512996dc57eb0615e2383e2f96");
+const ASSET = getAddress("0x4444444444444444444444444444444444444444");
+const ASSET2 = getAddress("0x5555555555555555555555555555555555555555");
+type CashPart = { proof: Hex; root: Hex; nullifier: Hex; asset: Address; to: Address; amount: string };
+function cash(over: Partial<CashPart> = {}): CashPart {
+  return { proof: PROOF, root: ROOT, nullifier: fresh(), asset: ASSET, to: CLEAN, amount: "10000000", ...over };
+}
+const cashBody = (parts: unknown[], over: Record<string, unknown> = {}) => ({ pool: POOL, feeBps: 50, parts, ...over });
+const asBatchPart = (p: CashPart) => ({ ...p, amount: BigInt(p.amount) });
+const unshieldSel = toFunctionSelector("unshield(bytes,bytes32,bytes32,address,address,uint256)");
+
+await test("a cash out in one go is only the vault's unshield, once per part, on this vault, nothing allowed to fail", () => {
+  const parts = [cash(), cash({ amount: "7000000" }), cash({ amount: "3000000" })].map(asBatchPart);
+  const calls = batch.unshieldBatchCalls(POOL, parts);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every((c) => c.target === POOL && c.allowFailure === false && c.callData.slice(0, 10) === unshieldSel));
+  assert.equal(batch.unshieldBatchProblem(POOL, parts, calls), null, "the calls it builds pass its own check");
+  const unshieldArgs = decodeFunctionData({ abi: server.relayPoolAbi, data: calls[1]!.callData }).args!;
+  assert.deepEqual(unshieldArgs, [parts[1]!.proof, parts[1]!.root, parts[1]!.nullifier, parts[1]!.asset, parts[1]!.to, parts[1]!.amount]);
+});
+
+await test("unshieldBatchProblem refuses a non-unshield call, another target, a call allowed to fail, a call for another part, extra bytes, a call too many", () => {
+  const parts = [cash(), cash()].map(asBatchPart);
+  const good = batch.unshieldBatchCalls(POOL, parts);
+  const swap = (i: number, c: Partial<(typeof good)[number]>) => good.map((g, j) => (j === i ? { ...g, ...c } : g));
+  // the vault's transfer, the vault's spent(), postMemo on the board: none is a cash out
+  const transfer = encodeFunctionData({ abi: server.relayPoolAbi, functionName: "transfer", args: [PROOF, ROOT, parts[1]!.nullifier, [fresh(), fresh()]] });
+  const spentCall = encodeFunctionData({ abi: server.relayPoolAbi, functionName: "spent", args: [parts[1]!.nullifier] });
+  assert.match(String(batch.unshieldBatchProblem(POOL, parts, swap(1, { callData: transfer }))), /only calls the vault's unshield/);
+  assert.match(String(batch.unshieldBatchProblem(POOL, parts, swap(1, { callData: spentCall }))), /only calls the vault's unshield/);
+  assert.match(String(batch.unshieldBatchProblem(POOL, parts, swap(0, { target: BOARD }))), /only calls this network's vault/);
+  assert.match(String(batch.unshieldBatchProblem(POOL, parts, swap(0, { target: batch.MULTICALL3 }))), /only calls this network's vault/);
+  assert.match(String(batch.unshieldBatchProblem(OTHER, parts, good)), /only calls this network's vault/, "a wrong pool");
+  assert.match(String(batch.unshieldBatchProblem(POOL, parts, swap(0, { allowFailure: true as false }))), /may fail on its own/);
+  const otherWallet = batch.unshieldBatchCalls(POOL, [parts[0]!, { ...parts[1]!, to: OTHER }]);
+  assert.match(String(batch.unshieldBatchProblem(POOL, parts, otherWallet)), /isn't the part it was given for/, "another wallet");
+  const otherAmount = batch.unshieldBatchCalls(POOL, [parts[0]!, { ...parts[1]!, amount: parts[1]!.amount + 1n }]);
+  assert.match(String(batch.unshieldBatchProblem(POOL, parts, otherAmount)), /isn't the part it was given for/, "another amount");
+  assert.match(String(batch.unshieldBatchProblem(POOL, parts, swap(1, { callData: (good[1]!.callData + "00") as Hex }))), /isn't the part it was given for/, "bytes tacked on");
+  assert.match(String(batch.unshieldBatchProblem(POOL, parts, [...good, good[0]!])), /one call per part/, "a call too many");
+});
+
+await test("cash out in one go, refused with nothing sent and no lock: parts, vault, wallets, assets, repeats, formats, fee", async () => {
+  const before = sentRaw.length;
+  methods.length = 0;
+  const a = cash();
+  const refusals: [Record<string, unknown>, string, number][] = [
+    [cashBody([cash()]), "batch_parts", 400],
+    [cashBody(Array.from({ length: 7 }, () => cash())), "batch_parts", 400],
+    [cashBody("nope" as never), "batch_parts", 400],
+    [cashBody([cash(), cash()], { pool: OTHER }), "batch_pool", 400],
+    [cashBody([cash(), cash()], { pool: undefined }), "bad_request", 400],
+    [cashBody([a, cash({ to: OTHER })]), "batch_mismatch", 400],
+    [cashBody([a, cash({ asset: ASSET2 })]), "batch_mismatch", 400],
+    [cashBody([a, cash({ nullifier: a.nullifier })]), "batch_repeat", 400],
+    [cashBody([a, cash({ proof: "0x1234" })]), "bad_request", 400],
+    [cashBody([a, cash({ amount: "0" })]), "bad_request", 400],
+    [cashBody([a, cash({ amount: 5 as never })]), "bad_request", 400],
+    [cashBody([a, cash()], { feeBps: undefined }), "bad_request", 400],
+    [cashBody([a, cash()], { feeBps: -1 }), "bad_request", 400],
+    [cashBody([a, cash()], { feeBps: 0.5 }), "bad_request", 400],
+    [cashBody([cash({ to: POOL }), cash({ to: POOL })]), "vault_recipient", 400],
+    [cashBody([cash({ to: BOARD }), cash({ to: BOARD })]), "vault_recipient", 400],
+    [cashBody([cash({ to: LISTED }), cash({ to: LISTED })]), "screened", 403],
+  ];
+  for (const [body, code, status] of refusals) {
+    await assert.rejects(server.relayUnshieldBatch(net, body), isRelayError(code, status), `${code}: ${JSON.stringify(body).slice(0, 80)}`);
+  }
+  await assert.rejects(server.relayUnshieldBatch({ ...net, chainId: 31337 } as never, cashBody([cash(), cash()])), isRelayError("batch_network", 400));
+  assert.equal(sentRaw.length, before, "nothing went out");
+  assert.equal(methods.length, 0, "and nothing was read from the chain");
+  assert.ok(await free(a.nullifier), "no lock left behind");
+});
+
+await test("a cash out in one go to a swap's escrow is refused, as a single cash out is", async () => {
+  const escrow = getAddress("0x6666666666666666666666666666666666666666");
+  await markSwapEscrow(net.chainId, escrow);
+  const parts = [cash({ to: escrow }), cash({ to: escrow })];
+  await assert.rejects(server.relayUnshieldBatch(net, cashBody(parts)), isRelayError("vault_recipient", 400));
+  for (const p of parts) assert.ok(await free(p.nullifier));
+});
+
+await test("a vault fee higher than the one confirmed refuses it as fee_moved, every lock dropped; the same or lower goes", async () => {
+  chain.feeBps = 60;
+  const parts = [cash(), cash()];
+  const before = sentRaw.length;
+  methods.length = 0;
+  await assert.rejects(server.relayUnshieldBatch(net, cashBody(parts, { feeBps: 50 })), isRelayError(batch.FEE_MOVED_CODE, 409));
+  assert.ok(!methods.includes("eth_estimateGas"), "no dry run");
+  assert.equal(sentRaw.length, before);
+  for (const p of parts) assert.ok(await free(p.nullifier), "lock dropped");
+  chain.feeBps = 50;
+  assert.equal(await server.relayUnshieldBatch(net, cashBody([cash(), cash()], { feeBps: 50 })), TX_HASH, "the fee confirmed");
+  chain.feeBps = 25;
+  assert.equal(await server.relayUnshieldBatch(net, cashBody([cash(), cash()], { feeBps: 50 })), TX_HASH, "a lower fee pays more than shown");
+  chain.feeBps = 50;
+});
+
+await test("a spent part refuses the cash out before the dry run; a part already being sent refuses it and leaves the rest free", async () => {
+  const parts = [cash(), cash(), cash()];
+  chain.spent.add(parts[2]!.nullifier.toLowerCase());
+  methods.length = 0;
+  const before = sentRaw.length;
+  await assert.rejects(server.relayUnshieldBatch(net, cashBody(parts)), isRelayError("AlreadySpent", 409));
+  assert.ok(!methods.includes("eth_estimateGas"));
+  for (const p of parts) assert.ok(await free(p.nullifier));
+  const parts2 = [cash(), cash(), cash()];
+  const held = await takeInflight(inflightKey(net.chainId, parts2[1]!.nullifier), 60);
+  await assert.rejects(server.relayUnshieldBatch(net, cashBody(parts2)), isRelayError("in_flight", 409));
+  assert.ok(await free(parts2[0]!.nullifier));
+  assert.ok(await free(parts2[2]!.nullifier));
+  await held!.release();
+  assert.equal(sentRaw.length, before);
+});
+
+await test("a cash out in one go past its parts' summed cash-out gas room is refused as batch_big, nothing sent", async () => {
+  // Robinhood Chain: 1.2M a cash out, times four for the parent chain, per part
+  assert.equal(server.unshieldBatchGasMost(net.chainId, 3), 3n * 1_200_000n * 4n);
+  assert.equal(server.unshieldBatchGasMost(8453, 3), 3n * 1_200_000n, "Base: a single cash out's room per part");
+  assert.equal(server.unshieldBatchGasMost(4217, 3), null, "Tempo: none, like every send there");
+  chain.estimate = 2n * 1_200_000n * 4n + 1n;
+  const parts = [cash(), cash()];
+  const before = sentRaw.length;
+  await assert.rejects(server.relayUnshieldBatch(net, cashBody(parts)), isRelayError("batch_big", 422));
+  assert.equal(sentRaw.length, before);
+  for (const p of parts) assert.ok(await free(p.nullifier));
+  chain.estimate = 1_800_000n;
+});
+
+await test("three cash outs go as one transaction to Multicall3: only their unshields on the vault, no value, every lock kept, every spend on record", async () => {
+  const parts = [cash(), cash({ amount: "7000000" }), cash({ amount: "3000000" })];
+  const before = sentRaw.length;
+  // a request can't name anything else to call: extra fields are never read
+  const sneaky = {
+    calls: [{ target: BOARD, allowFailure: true, callData: "0xdeadbeef" }],
+    target: BOARD,
+    data: "0xdeadbeef",
+    value: "1",
+  };
+  const hash = await server.relayUnshieldBatch(net, cashBody(parts.map((p) => ({ ...p, target: BOARD, callData: "0xdeadbeef" })), sneaky));
+  assert.equal(hash, TX_HASH);
+  assert.equal(sentRaw.length, before + 1, "one transaction");
+  const tx = parseTransaction(sentRaw[sentRaw.length - 1]!);
+  assert.equal(getAddress(tx.to!), batch.MULTICALL3);
+  assert.equal(tx.value ?? 0n, 0n, "no value");
+  const { functionName, args } = decodeFunctionData({ abi: batch.multicall3Abi, data: tx.data! });
+  assert.equal(functionName, "aggregate3");
+  const calls = args![0] as readonly { target: Address; allowFailure: boolean; callData: Hex }[];
+  assert.equal(batch.unshieldBatchProblem(POOL, parts.map(asBatchPart), calls), null, "exactly the three parts' unshields");
+  for (const p of parts) {
+    assert.ok(!(await free(p.nullifier)), "the lock stays while it may land");
+    assert.equal((await readSent(inflightKey(net.chainId, p.nullifier)))?.hash, TX_HASH, "each spend on record with the one transaction");
+  }
+  // a copy of any part, alone or in another batch, is refused while it may land
+  await assert.rejects(server.relayUnshield(net, { ...parts[0]! }), isRelayError("in_flight", 409));
+  await assert.rejects(server.relayUnshieldBatch(net, cashBody([parts[1]!, cash()])), isRelayError("in_flight", 409));
+});
+
+await test("a cash out in one go that may have gone out keeps every lock; one the node refuses drops them all", async () => {
+  const maybe = [cash(), cash()];
+  chain.send = "drop";
+  await assert.rejects(server.relayUnshieldBatch(net, cashBody(maybe)), isRelayError("maybe_sent", 502));
+  for (const p of maybe) assert.ok(!(await free(p.nullifier)), "kept: it may land");
+  const refused = [cash(), cash()];
+  chain.send = "reject";
+  await assert.rejects(server.relayUnshieldBatch(net, cashBody(refused)), (e: unknown) => e instanceof server.RelayError && e.code !== "maybe_sent");
+  chain.send = "ok";
+  for (const p of refused) assert.ok(await free(p.nullifier), "dropped: nothing went out");
+});
+
+await test("through /api/relay: unshieldBatch answers one hash, each part counts against the rate limits, a partner code changes nothing", async () => {
+  const req = (body: Record<string, unknown>, ip: string) =>
+    relayPost(
+      new Request("https://gloam.trade/api/relay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-forwarded-for": ip },
+        body: JSON.stringify({ chainId: net.chainId, action: "unshieldBatch", ...body }),
+      })
+    );
+  const ok = await req(cashBody([cash(), cash()], { partnerCode: "abc" }), "198.51.100.17");
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { ok: true, hash: TX_HASH });
+  const bad = await req(cashBody([cash(), cash({ to: OTHER })]), "198.51.100.17");
+  assert.equal(bad.status, 400);
+  assert.equal(((await bad.json()) as { code: string }).code, "batch_mismatch");
+  let limitedAt = 0;
+  for (let i = 1; i <= 80 && !limitedAt; i++) {
+    const r = await req(cashBody(Array.from({ length: 6 }, () => cash())), "198.51.100.18");
+    if (r.status === 429) limitedAt = i;
+  }
+  assert.ok(limitedAt > 0 && limitedAt <= 68, `six parts count as six cash outs against the limits (limited at batch ${limitedAt})`);
 });
 
 console.log(`\n${passed} relay batch checks passed`);
