@@ -66,6 +66,7 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-payroll.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-payroll-csv.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-pay-across.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-relay-batch.mts
 
       # Each sign-in's own private account in a browser: signed out shows nothing, a second
       # wallet sees and spends none of the first's, the first account goes to its owner on

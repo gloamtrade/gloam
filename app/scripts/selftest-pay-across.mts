@@ -71,6 +71,7 @@ function mockPool() {
   const spent = new Set<string>();
   const receipts = new Map<string, "success" | "reverted">();
   const held = new Map<string, Transfer>();
+  const heldAll = new Map<string, Transfer[]>();
   let n = 0;
   const nextHash = () => `0x${(++n).toString(16).padStart(64, "0")}` as Hex;
   async function insert(c: Hex) {
@@ -93,6 +94,40 @@ function mockPool() {
     async land(t: Transfer): Promise<Hex> {
       const hash = nextHash();
       receipts.set(hash, (await apply(t)) ? "success" : "reverted");
+      return hash;
+    },
+    /** Every part in one transaction: all land, or none does (Multicall3 with allowFailure false). */
+    async landAll(ts: Transfer[]): Promise<Hex> {
+      const hash = nextHash();
+      const seen = new Set<string>();
+      let ok = true;
+      for (const t of ts) {
+        const outs = t.commitments.map(lc);
+        if (!roots.has(lc(t.root)) || spent.has(lc(t.nullifier)) || seen.has(lc(t.nullifier))) ok = false;
+        if (outs.some((c) => index.has(c) || seen.has(c))) ok = false;
+        seen.add(lc(t.nullifier));
+        for (const c of outs) seen.add(c);
+      }
+      if (ok) for (const t of ts) await apply(t);
+      receipts.set(hash, ok ? "success" : "reverted");
+      return hash;
+    },
+    holdAll(ts: Transfer[]): Hex {
+      const hash = nextHash();
+      heldAll.set(hash, ts);
+      return hash;
+    },
+    async mineAll(hash: Hex) {
+      const ts = heldAll.get(hash)!;
+      heldAll.delete(hash);
+      let ok = ts.every((t) => roots.has(lc(t.root)) && !spent.has(lc(t.nullifier)) && t.commitments.every((c) => !index.has(lc(c))));
+      if (ok) for (const t of ts) ok = (await apply(t)) && ok;
+      receipts.set(hash, ok ? "success" : "reverted");
+    },
+    /** A transaction that reverts: nothing lands. */
+    revert(): Hex {
+      const hash = nextHash();
+      receipts.set(hash, "reverted");
       return hash;
     },
     hold(t: Transfer): Hex {
@@ -475,6 +510,131 @@ await test("Stop the rest in another tab: refused while a tab pays it, and a sto
     assert.ok(stopped);
     assert.deepEqual(stopped.rows.map((r) => r.status), ["paid", "failed"], "from the stored run, not the stale copy");
   }
+});
+
+// ------------------------------------------------------------------ one transaction (lib/relay/batch)
+
+type BatchSent = { parts: (Transfer & { memo?: Hex })[] };
+function batchDeps(
+  pool: Pool,
+  sendAll: (ts: Transfer[]) => Promise<Hex> | Hex,
+  log: { batches: BatchSent[]; singles: Transfer[]; memos: Hex[] },
+  refused: (e: unknown) => boolean = () => false
+): PayrollEngineDeps {
+  return {
+    ...deps(pool, (t) => pool.land(t), log.singles),
+    submitMemo: async (m) => {
+      log.memos.push(m.paymentCommitment);
+      return pool.land({ root: "0x00", nullifier: "0x00", commitments: ["0x00", "0x00"] } as never).catch(() => "0x01" as Hex);
+    },
+    submitTransferBatch: async (parts) => {
+      const ts = parts.map((p) => ({ root: p.root, nullifier: p.nullifier, commitments: p.commitments, ...(p.memo ? { memo: p.memo } : {}) }));
+      log.batches.push({ parts: ts });
+      return sendAll(ts);
+    },
+    batchRefused: refused,
+  };
+}
+async function threeNotes(pool: Pool, me: Address, tag: string) {
+  await fund(pool, me, 10_000n, `${tag}-10`);
+  await fund(pool, me, 7_000n, `${tag}-7`);
+  await fund(pool, me, 4_000n, `${tag}-4`);
+}
+
+await test("in one transaction: $20 from $10, $7 and $4 as one batch, every part with its message, all settled from one receipt", async () => {
+  const pool = mockPool();
+  const me = payer();
+  await threeNotes(pool, me, "bt");
+  const run = payRun(me, [10_000n, 7_000n, 3_000n], "Rent");
+  await saveBatch(run);
+  const log = { batches: [] as BatchSent[], singles: [] as Transfer[], memos: [] as Hex[] };
+  const done = await runPayroll(run, batchDeps(pool, (ts) => pool.landAll(ts), log));
+  assert.equal(done.status, "done");
+  assert.deepEqual(done.rows.map((r) => r.status), ["paid", "paid", "paid"]);
+  assert.equal(log.batches.length, 1, "one transaction");
+  assert.equal(log.singles.length, 0, "no part went on its own");
+  assert.equal(log.memos.length, 0, "no message went on its own");
+  const parts = log.batches[0]!.parts;
+  assert.equal(parts.length, 3);
+  assert.ok(parts.every((p) => p.memo && p.memo.length > 2), "every part carries its message");
+  assert.equal(new Set(parts.map((p) => lc(p.root))).size, 1, "every part proven against one vault root");
+  assert.equal(new Set(parts.map((p) => lc(p.nullifier))).size, 3, "each spends its own note");
+  assert.deepEqual(done.rows.map((r) => r.spendNoteId), ["bt-10", "bt-7", "bt-4"], "each part from its planned note");
+  assert.ok(done.rows.every((r) => r.memoPosted === true), "every message counts as posted");
+  assert.equal(new Set(done.rows.map((r) => r.txHash)).size, 1, "one hash for all");
+  const left = counted(me);
+  assert.equal(left.length, 1);
+  assert.equal(left[0]![1], "1000", "$1 of change back");
+});
+
+await test("a batch that may have gone out holds every part, and resuming settles them from the chain, nothing sent again", async () => {
+  const pool = mockPool();
+  const me = payer();
+  await threeNotes(pool, me, "bm");
+  const run = payRun(me, [10_000n, 7_000n, 3_000n]);
+  await saveBatch(run);
+  const log = { batches: [] as BatchSent[], singles: [] as Transfer[], memos: [] as Hex[] };
+  let held: Hex | undefined;
+  // the relay took it and the reply was lost
+  await runPayroll(
+    run,
+    batchDeps(pool, (ts) => {
+      held = pool.holdAll(ts);
+      throw new Error("Could not reach the relay. Check your connection.");
+    }, log)
+  );
+  assert.equal(run.status, "paused");
+  assert.deepEqual(run.rows.map((r) => r.status), ["unconfirmed", "unconfirmed", "unconfirmed"]);
+  assert.ok(run.rows.every((r) => r.spendNullifier && r.paymentCommitment), "every part keeps its payment");
+  await pool.mineAll(held!);
+  const later = await storedLater(run.id);
+  const log2 = { batches: [] as BatchSent[], singles: [] as Transfer[], memos: [] as Hex[] };
+  const done = await runPayroll(later, batchDeps(pool, (ts) => pool.landAll(ts), log2));
+  assert.equal(done.status, "done");
+  assert.deepEqual(done.rows.map((r) => r.status), ["paid", "paid", "paid"]);
+  assert.equal(log2.batches.length + log2.singles.length, 0, "nothing sent again");
+  assert.equal(log2.memos.length, 0, "the messages went with the batch, not again");
+  assert.ok(done.rows.every((r) => r.memoPosted === true));
+});
+
+await test("a batch refused with nothing sent goes part by part, each with its message after it lands", async () => {
+  const pool = mockPool();
+  const me = payer();
+  await threeNotes(pool, me, "br");
+  const run = payRun(me, [10_000n, 7_000n, 3_000n]);
+  await saveBatch(run);
+  const log = { batches: [] as BatchSent[], singles: [] as Transfer[], memos: [] as Hex[] };
+  const refusal = new Error("This payment is too big to send in one go here.");
+  const done = await runPayroll(
+    run,
+    batchDeps(pool, () => {
+      throw refusal;
+    }, log, (e) => e === refusal)
+  );
+  assert.equal(done.status, "done");
+  assert.deepEqual(done.rows.map((r) => r.status), ["paid", "paid", "paid"]);
+  assert.equal(log.batches.length, 1, "the batch was tried once");
+  assert.equal(log.singles.length, 3, "then each part on its own");
+  assert.equal(log.memos.length, 3, "each message after its part lands");
+  assert.ok(done.rows.every((r) => !r.memoInBatch));
+  assert.equal(counted(me).length, 1, "one change note, no leftover from the refused try");
+});
+
+await test("a batch that reverts lands nothing, and each part goes again on its own as that same payment", async () => {
+  const pool = mockPool();
+  const me = payer();
+  await threeNotes(pool, me, "bv");
+  const run = payRun(me, [10_000n, 7_000n, 3_000n]);
+  await saveBatch(run);
+  const log = { batches: [] as BatchSent[], singles: [] as Transfer[], memos: [] as Hex[] };
+  const done = await runPayroll(run, batchDeps(pool, () => pool.revert(), log));
+  assert.equal(done.status, "done");
+  assert.deepEqual(done.rows.map((r) => r.status), ["paid", "paid", "paid"]);
+  assert.equal(log.batches.length, 1);
+  assert.equal(log.singles.length, 3, "each part again, on its own");
+  assert.deepEqual(log.singles.map((t) => lc(t.nullifier)), log.batches[0]!.parts.map((p) => lc(p.nullifier)), "the very same payments, never new ones");
+  assert.deepEqual(log.singles.map((t) => t.commitments.map(lc)), log.batches[0]!.parts.map((p) => p.commitments.map(lc)));
+  assert.equal(log.memos.length, 3, "messages go after, since the batch's never landed");
 });
 
 console.log(`\n${passed} pay-across checks passed`);

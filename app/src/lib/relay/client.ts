@@ -2,6 +2,7 @@
  * Gloam relay, browser side. See lib/relay/server.ts for what the relay will
  * and will not do. Everything here degrades to "send from your wallet".
  */
+import type { BatchPart } from "./batch";
 import type { Address, Hex, PublicClient } from "viem";
 import { getRhPublicClient } from "@/lib/rhClient";
 import { readDemo } from "@/lib/demoFlag";
@@ -143,6 +144,18 @@ export async function relayTransfer(p: {
   keepMemoTicket(p.commitments[0], memoTicket);
   return hash;
 }
+
+/**
+ * A payment in parts as one transaction (lib/relay/batch): every part's transfer and its
+ * message, all landing or none. Refused with nothing sent where it can't go in one
+ * (code batch_big, batch_parts): the caller sends the parts one by one instead.
+ */
+export async function relayTransferBatch(p: { chainId: number; parts: readonly BatchPart[] }): Promise<Hex> {
+  return (await post({ action: "transferBatch", chainId: p.chainId, parts: p.parts })).hash;
+}
+
+/** A batch the relay refused before sending: the parts can still go one by one. */
+export const BATCH_REFUSED_CODES: ReadonlySet<string> = new Set(["batch_big", "batch_parts", "batch_repeat", "no_memo", "memo_sent", "gas_most"]);
 
 export async function relayUnshield(p: {
   chainId: number;

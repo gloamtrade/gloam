@@ -114,6 +114,8 @@ export type PayrollRow = {
   /** When the payment was handed to the wallet or the relay. */
   sentAt?: number;
   memoPosted?: boolean;
+  /** Its message went in the same transaction as the payment (sendInOne): landed with it, or not at all. */
+  memoInBatch?: boolean;
   // kept for the payroll total proof (sealed with the batch, never exported)
   /** The secret of the note this row paid them (the payer creates it). */
   paymentSecret?: Hex;
@@ -590,11 +592,23 @@ export type SubmitTransfer = (args: {
 
 export type SubmitMemo = (args: { paymentCommitment: Hex; memo: Hex }) => Promise<Hex>;
 
+/** Every part of a pay run in one transaction (lib/relay/batch), each with its message. */
+export type SubmitTransferBatch = (
+  parts: { proof: Hex; root: Hex; nullifier: Hex; commitments: readonly [Hex, Hex]; memo?: Hex }[]
+) => Promise<Hex>;
+
 export type PayrollEngineDeps = {
   client: PublicClient;
   submitTransfer: SubmitTransfer;
   /** null when no memo board is live on this network */
   submitMemo: SubmitMemo | null;
+  /**
+   * A pay run's parts in one transaction, where the network allows (lib/relay/batch).
+   * Left out, each part goes on its own. `batchRefused` says a refusal surely sent
+   * nothing, so the parts may go one by one instead.
+   */
+  submitTransferBatch?: SubmitTransferBatch;
+  batchRefused?: (e: unknown) => boolean;
   waitForTx: (hash: Hex) => Promise<"success" | "reverted">;
   onUpdate: (batch: PayrollBatch) => void;
   shouldStop: () => boolean;
@@ -751,8 +765,8 @@ async function runHeld(batch: PayrollBatch, deps: PayrollEngineDeps): Promise<Pa
   // before anything is read: a resume checks its sent payments on the run's own chain
   const wrongNetwork = runNetworkProblem(batch, client);
   if (wrongNetwork) throw new Error(wrongNetwork);
-  /** The row being paid now: this copy's state of it is the truth until it settles. */
-  let current: string | null = null;
+  /** The rows being paid now: this copy's state of them is the truth until they settle. */
+  const current = new Set<string>();
   const emit = async () => {
     // A row the stored run has moved on (stopped with Stop the rest, or settled
     // elsewhere) keeps its stored state: saving this copy never writes over it.
@@ -761,7 +775,7 @@ async function runHeld(batch: PayrollBatch, deps: PayrollEngineDeps): Promise<Pa
     if (stored) {
       const byId = new Map(stored.rows.map((r) => [r.id, r]));
       for (const row of batch.rows) {
-        if (row.id === current) continue;
+        if (current.has(row.id)) continue;
         const s = byId.get(row.id);
         if (s && movedOn(row, s)) takeStored(row, s);
       }
@@ -782,13 +796,16 @@ async function runHeld(batch: PayrollBatch, deps: PayrollEngineDeps): Promise<Pa
   await emit();
 
   try {
+    // a pay run's parts go in one transaction where they can (sendInOne); what is left goes part by part
+    if (batch.purpose === "pay" && deps.submitTransferBatch) await sendInOne(batch, deps, emit, current);
     for (const row of batch.rows) {
       // Read again before each person, in case another tab got past the lock.
       const now = (await loadStoredRun(batch.id))?.rows.find((r) => r.id === row.id);
       if (now && movedOn(row, now)) takeStored(row, now);
       if (row.status === "paid" || row.status === "failed") continue;
       if (deps.shouldStop()) throw new PayrollStop();
-      current = row.id;
+      current.clear();
+      current.add(row.id);
 
       // Resume: a payment on record landed, can never land, or may still land.
       if (row.spendNullifier) {
@@ -805,9 +822,9 @@ async function runHeld(batch: PayrollBatch, deps: PayrollEngineDeps): Promise<Pa
       }
 
       await payRow(batch, row, deps, emit);
-      current = null;
+      current.clear();
     }
-    current = null;
+    current.clear();
     batch.status = "done";
   } catch (e) {
     if (e instanceof PayrollStop) {
@@ -1010,6 +1027,192 @@ async function unspentNote(batch: PayrollBatch, client: PublicClient, notes: Loc
   return undefined;
 }
 
+/**
+ * A pay run's parts in one transaction (lib/relay/batch). Only for a run whose
+ * unsettled parts are all fresh (nothing sent yet): each part gets its own note
+ * (its planned one first, never one another part took), is proven against the same
+ * vault root, and is saved with its change and code before anything is sent, as
+ * payRow does. Then one call sends them all, each with its message.
+ *  - landed: every part settles from the one receipt
+ *  - refused with nothing sent (deps.batchRefused): the parts are dropped unsent and
+ *    the run goes on part by part
+ *  - reverted: nothing landed; each part keeps its payment and goes again on its own
+ *    (payRow sends that same payment)
+ *  - no answer, or it may have gone out: every part is held until the chain settles it
+ * A part that can't be prepared (no note, a failed proof) leaves the whole run to go
+ * part by part, with nothing sent here.
+ */
+async function sendInOne(batch: PayrollBatch, deps: PayrollEngineDeps, emit: () => Promise<void>, current: Set<string>): Promise<void> {
+  const open = batch.rows.filter((r) => r.status !== "paid" && r.status !== "failed");
+  const fresh = open.filter((r) => !r.spendNullifier && r.kind === "gloam");
+  if (fresh.length < 2 || fresh.length !== open.length || !deps.submitTransferBatch) return;
+  if (deps.shouldStop()) throw new PayrollStop();
+  if (noteNetworkProblem(batch, getActiveNetwork())) return;
+  const tree = await syncUntil(deps, batch);
+  if (!tree) return;
+
+  type Prepared = { row: PayrollRow; proof: Hex; root: Hex; change: Hex };
+  const prepared: Prepared[] = [];
+  // nothing was sent: the parts go part by part, as fresh payments
+  const dropAll = async () => {
+    for (const p of prepared) {
+      discardPending(p.row);
+      p.row.memoInBatch = undefined;
+      p.row.status = "queued";
+    }
+    // saved while still this copy's own, or the stored "sending" copies would win back
+    await emit();
+    current.clear();
+  };
+  const used = new Set<string>();
+  const notes = fundingNotes(batch.employer, batch.asset, tree, batch);
+  try {
+    for (const row of fresh) {
+      const amount = BigInt(row.amount);
+      const covering = notes
+        .filter((n) => !used.has(n.id) && BigInt(n.amountWei) >= amount)
+        .sort((a, b) => (BigInt(a.amountWei) < BigInt(b.amountWei) ? -1 : 1));
+      const planned = row.planNoteId ? covering.filter((n) => n.id === row.planNoteId) : [];
+      const note = await unspentNote(batch, deps.client, [...planned, ...covering.filter((n) => n.id !== row.planNoteId)]);
+      if (!note || noteNetworkProblem(note, batch) || note.leafIndex == null) return await dropAll();
+      used.add(note.id);
+      const path = (await tree.pathForLeaf(note.leafIndex)) as PoseidonMerklePath | null;
+      if (!path) return await dropAll();
+      const w = await buildTransferWitness({
+        secretHex: note.secret,
+        amountIn: BigInt(note.amountWei),
+        amountPay: amount,
+        asset: batch.asset,
+        path,
+        paySeed: randomNoteSeed().seed,
+      });
+      if (w.blocker) return await dropAll();
+      const { proofBytes } = deps.prove ? await deps.prove(w.circomInput) : await proveTransferInBrowser(w.circomInput);
+      const pack = buildNotePackage({
+        pool: batch.pool,
+        asset: batch.asset,
+        amountWei: w.paymentNote.amountWei,
+        secret: w.paymentNote.secret,
+        commitment: w.paymentNote.commitment,
+        note: row.note,
+        chainId: batch.chainId,
+        seed: w.paymentNote.seed,
+      });
+      const ticket = await encryptTicketForTag(encodeNotePackage(pack), row.recipient);
+      // Saved before anything is sent (crash safety), exactly as payRow does.
+      const spendNullifier = fieldToBytes32(w.publicInputs.nullifier);
+      let changeNoteId: string | undefined;
+      if (BigInt(w.changeNote.amountWei) > 0n) {
+        changeNoteId = `chg-pr-${row.id}-${Date.now()}`;
+        await saveLocalNote({
+          id: changeNoteId,
+          chainId: batch.chainId,
+          pool: batch.pool,
+          asset: batch.asset,
+          amountWei: w.changeNote.amountWei,
+          commitment: w.changeNote.commitment,
+          secret: w.changeNote.secret,
+          nullifier: w.changeNote.nullifier,
+          bound: true,
+          scheme: "poseidon",
+          from: batch.employer,
+          createdAt: Date.now(),
+          status: "open",
+          source: "local",
+          sweptFrom: { id: note.id, nullifier: spendNullifier },
+          sweepPending: true,
+        });
+      }
+      row.attempts = (row.attempts ?? 0) + 1;
+      row.spendNoteId = note.id;
+      row.spendNullifier = spendNullifier;
+      row.changeNoteId = changeNoteId;
+      row.paymentCommitment = fieldToBytes32(w.publicInputs.newCommitment0);
+      row.changeSecret = w.changeNote.secret;
+      row.changeCommitment = w.changeNote.commitment;
+      row.ticket = ticket;
+      row.paymentSecret = w.paymentNote.secret;
+      row.spendSecret = note.secret;
+      row.spendAmount = note.amountWei;
+      row.memoInBatch = Boolean(deps.submitMemo);
+      row.status = "preparing";
+      row.error = undefined;
+      current.add(row.id);
+      prepared.push({ row, proof: proofBytes, root: fieldToBytes32(w.publicInputs.root), change: fieldToBytes32(w.publicInputs.newCommitment1) });
+      await emit();
+    }
+  } catch (e) {
+    if (e instanceof PayrollStop) throw e;
+    // a proof or a read failed: nothing was sent, so the run goes part by part
+    return await dropAll();
+  }
+
+  for (const p of prepared) {
+    p.row.status = "sending";
+    p.row.sentAt = Date.now();
+    p.row.txHash = undefined;
+  }
+  await emit();
+
+  let hash: Hex;
+  try {
+    hash = await deps.submitTransferBatch(
+      prepared.map((p) => ({
+        proof: p.proof,
+        root: p.root,
+        nullifier: p.row.spendNullifier!,
+        commitments: [p.row.paymentCommitment!, p.change] as const,
+        ...(p.row.memoInBatch ? { memo: ticketToMemoBytes(p.row.ticket!) } : {}),
+      }))
+    );
+  } catch (e) {
+    if (deps.batchRefused?.(e)) return await dropAll();
+    // it may have gone out: every part keeps its payment, and the chain settles it
+    for (const p of prepared) {
+      p.row.status = "unconfirmed";
+      p.row.error = STILL_CONFIRMING;
+    }
+    await emit();
+    throw new PayrollStop();
+  }
+  for (const p of prepared) {
+    p.row.txHash = hash;
+    p.row.status = "confirming";
+  }
+  await emit();
+
+  const outcome = await deps.waitForTx(hash).catch(() => null);
+  if (outcome === "reverted") {
+    // nothing landed: each part goes again on its own, as that same payment
+    for (const p of prepared) {
+      p.row.memoInBatch = undefined;
+      p.row.status = "queued";
+      p.row.error = undefined;
+    }
+    await emit();
+    current.clear();
+    return;
+  }
+  let held = outcome !== "success";
+  if (!held) {
+    for (const p of prepared) {
+      // paid means the pool holds this part's own payment, as for any part
+      if (await confirmLanded(deps.client, batch.pool, p.row)) await settlePaid(batch, p.row, deps, emit);
+      else held = true;
+    }
+  }
+  if (held) {
+    for (const p of prepared) {
+      if (p.row.status === "paid") continue;
+      p.row.status = "unconfirmed";
+      p.row.error = STILL_CONFIRMING;
+    }
+    await emit();
+    throw new PayrollStop();
+  }
+  current.clear();
+}
+
 async function payRow(
   batch: PayrollBatch,
   row: PayrollRow,
@@ -1136,6 +1339,8 @@ async function payRow(
         row.spendAmount = note.amountWei;
       }
       const lastSend = { sentAt: row.sentAt, txHash: row.txHash };
+      // sent on its own: its message goes after it lands (notify), not with an earlier batch
+      row.memoInBatch = undefined;
       row.status = "sending";
       row.sentAt = Date.now();
       row.txHash = undefined;
@@ -1210,6 +1415,10 @@ async function payRow(
 
 /** The row's own payment is in the pool: book it, let a Gloam-address payee know, mark it paid. */
 async function settlePaid(batch: PayrollBatch, row: PayrollRow, deps: PayrollEngineDeps, emit: () => Promise<void>) {
+  // Still marked as sent with its message in one transaction: nothing else ever sent this
+  // payment (a part sent on its own drops the mark first), so the payment landed in that
+  // transaction, and its message with it. True even when the relay's reply was lost.
+  if (row.memoInBatch) row.memoPosted = true;
   await finalizeTransfer(batch, row, deps);
   await notify(batch, row, deps, emit);
   row.status = "paid";

@@ -12,7 +12,9 @@ import { isPayRun, payRunPaid, payRunProgress, payRunTotal, startPayRun, stopPay
 import { isPayMemoLive } from "@/lib/payMemo";
 import { runNetwork, runPayroll, type PayrollBatch } from "@/lib/payroll";
 import { loadBatches } from "@/lib/payrollStore";
-import { relayMemo, relayTransfer, waitForTx } from "@/lib/relay/client";
+import { relayMemo, relayTransfer, relayTransferBatch, waitForTx } from "@/lib/relay/client";
+import { batchesOn } from "@/lib/relay/batch";
+import { splitMaybeSent } from "@/lib/cashOutSplit";
 import { publicClientFor } from "@/lib/rhClient";
 import { formatAssetLabel } from "@/lib/shield";
 import { walletErrorForPeople } from "@/lib/walletErrors";
@@ -77,6 +79,14 @@ export function usePayAcross(address: Address | undefined, network: GloamNetwork
         // always through the relay: one tap, never a wallet prompt per part
         submitTransfer: (a) => relayTransfer({ chainId: r.chainId, ...a }),
         submitMemo: isPayMemoLive() ? (m) => relayMemo({ chainId: r.chainId, ...m }) : null,
+        // every part in one transaction where the network has Multicall3 (lib/relay/batch);
+        // a batch the relay surely didn't send leaves the parts to go one by one
+        ...(batchesOn(r.chainId)
+          ? {
+              submitTransferBatch: (parts) => relayTransferBatch({ chainId: r.chainId, parts }),
+              batchRefused: (e: unknown) => !splitMaybeSent(e, true),
+            }
+          : {}),
         waitForTx: (h: Hex) => waitForTx(h, undefined, client),
         onUpdate: (b) => setRun(b),
         shouldStop: () => stop.current,

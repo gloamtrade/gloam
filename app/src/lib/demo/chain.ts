@@ -69,7 +69,12 @@ export async function demoRelay(body: Record<string, unknown>): Promise<Hex> {
   // A transfer's two notes take leaves, as the pool gives them: the payment's
   // (so its claim link can be claimed) and the change (so a split's change can
   // be split again before this tab saves its leaf).
-  const sent = body.action === "transfer" ? [...(body.commitments as readonly Hex[])] : [];
+  const sent =
+    body.action === "transfer"
+      ? [...(body.commitments as readonly Hex[])]
+      : body.action === "transferBatch"
+        ? (body.parts as { commitments: readonly Hex[] }[]).flatMap((p) => [...p.commitments])
+        : [];
   return submitDemoTx(Number(body.chainId), { wallet, sent });
 }
 
