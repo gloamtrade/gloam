@@ -150,7 +150,7 @@ export function ContestForm({ closed }: { closed: boolean }) {
         </p>
       </Row>
 
-      <Row label="Email" optional htmlFor="c-email" hint="Only used to reach you if you win." error={fieldError("email")}>
+      <Row label="Email" optional htmlFor="c-email" hint="To reach you if you win, and for Gloam updates. Unsubscribe any time." error={fieldError("email")}>
         <input
           id="c-email"
           name="email"
