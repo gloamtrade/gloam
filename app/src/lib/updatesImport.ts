@@ -19,6 +19,8 @@ export type ContestImport = {
   added: number;
   /** On the list already. */
   already: number;
+  /** Left the list before (unsubscribed, bounced or marked spam): kept off. */
+  suppressed: number;
   /** Entry emails that weren't valid, left out. */
   skipped: number;
 };
@@ -34,8 +36,11 @@ export async function addContestEmailsToUpdates(now = Date.now()): Promise<Conte
     else skipped++;
   }
   let added = 0;
+  let suppressed = 0;
   for (const email of emails) {
-    if ((await subscribeToUpdates(email, "contest", now)).added) added++;
+    const r = await subscribeToUpdates(email, "contest", now);
+    if (r.added) added++;
+    else if (r.suppressed) suppressed++;
   }
-  return { found: emails.size, added, already: emails.size - added, skipped };
+  return { found: emails.size, added, already: emails.size - added - suppressed, suppressed, skipped };
 }

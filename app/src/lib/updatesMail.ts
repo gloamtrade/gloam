@@ -224,6 +224,11 @@ async function ensureListed(id: string) {
   if (!(Array.isArray(ids) && ids.map(String).includes(id))) await kv([["LPUSH", MAILS, id]]);
 }
 
+/** The listed ids, newest first, each once: two starts at the same moment can both push one. */
+function listedIds(raw: unknown): string[] {
+  return Array.isArray(raw) ? [...new Set(raw.map(String))] : [];
+}
+
 /** Every step of starting an update, again: a start that died halfway is finished by the next. */
 async function finishStart(rec: UpdateRecord, now: number): Promise<UpdateRecord> {
   await ensureAudience(rec, now);
@@ -365,7 +370,9 @@ export async function resendBatch(
     if (name === "concurrent_idempotent_requests") return { kind: "busy" };
     return { kind: "conflict", message };
   }
-  if (res.status === 422) return { kind: "invalid", message };
+  // Resend answers a bad field (an address it won't take) with 422 or 400 validation_error:
+  // nothing went out, so the batch is split to find it rather than stopping the send
+  if (res.status === 422 || (res.status === 400 && name === "validation_error")) return { kind: "invalid", message };
   if (res.status === 400 || res.status === 401 || res.status === 403) return { kind: "refused", status: res.status, message };
   return { kind: "unsure", message };
 }
@@ -713,7 +720,7 @@ export type AdminUpdate = Omit<SendProgress, "busy" | "stopped"> & {
 /** Every update, newest first, with its counts. For the admin. */
 export async function listUpdatesForAdmin(): Promise<AdminUpdate[]> {
   const [idsRaw] = await kv([["LRANGE", MAILS, 0, -1]]);
-  const ids = Array.isArray(idsRaw) ? idsRaw.map(String) : [];
+  const ids = listedIds(idsRaw);
   const out: AdminUpdate[] = [];
   for (const id of ids) {
     const [raw, note] = await kv([["GET", recKey(id)], ["GET", noteKey(id)]]);
@@ -756,7 +763,7 @@ export async function getPublishedUpdate(id: string): Promise<PublicUpdate | nul
 /** Every update that went out, newest first. */
 export async function listPublishedUpdates(): Promise<PublicUpdate[]> {
   const [idsRaw] = await kv([["LRANGE", MAILS, 0, -1]]);
-  const ids = Array.isArray(idsRaw) ? idsRaw.map(String) : [];
+  const ids = listedIds(idsRaw);
   if (ids.length === 0) return [];
   const raws = await kv(ids.map((id) => ["GET", recKey(id)]));
   return raws

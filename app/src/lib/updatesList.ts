@@ -26,6 +26,19 @@ const PREFIX = UPDATES_PREFIX;
 /** The set of everyone on the list, by id. */
 export const UPDATES_IDS = `${PREFIX}ids`;
 const IDS = UPDATES_IDS;
+/**
+ * Everyone who left the list, by id, with why ("unsubscribed", "bounced",
+ * "complained", "removed") and the UTC day. Only the id is kept, never the address.
+ *  - the contest import never adds a suppressed address back;
+ *  - a sign-up form can bring back someone who unsubscribed or was removed
+ *    (they asked again), never an address that bounced or marked us as spam.
+ * A cleared entry reads "resubscribed".
+ */
+export const UPDATES_SUPPRESSED = `${PREFIX}suppressed`;
+export type SuppressReason = "unsubscribed" | "bounced" | "complained" | "removed";
+/** Left the list for good: a form can't bring these back. */
+const FOR_GOOD: ReadonlySet<string> = new Set(["bounced", "complained"]);
+
 /** A ceiling, so a flood of made-up addresses can't fill the store. */
 export const MAX_SUBSCRIBERS = 50_000;
 
@@ -67,13 +80,18 @@ export async function subscribeToUpdates(
   rawEmail: string,
   source: UpdatesSource,
   now = Date.now(),
-): Promise<{ added: boolean }> {
+): Promise<{ added: boolean; suppressed?: true }> {
   const email = normalizeEmail(rawEmail);
   if (!email) throw new Error("not an email");
   const id = idFor(email);
 
-  const [count, existing] = await kv([["SCARD", IDS], ["EXISTS", subKey(id)]]);
+  const [count, existing, gone] = await kv([["SCARD", IDS], ["EXISTS", subKey(id)], ["HGET", UPDATES_SUPPRESSED, id]]);
   if (Number(existing) > 0) return { added: false };
+  const left = jsonOf<{ reason?: string }>(gone)?.reason;
+  if (left && left !== "resubscribed") {
+    // the import never brings anyone back; a form only someone who unsubscribed
+    if (source === "contest" || FOR_GOOD.has(left)) return { added: false, suppressed: true };
+  }
   if (Number(count) >= MAX_SUBSCRIBERS) throw new UpdatesListFullError();
 
   const sub: UpdatesSubscriber = { email, day: utcDay(now), source, token: randomBytes(24).toString("base64url") };
@@ -82,6 +100,7 @@ export async function subscribeToUpdates(
     ["SET", tokenKey(sub.token), id],
     ["SET", subKey(id), JSON.stringify(sub), "NX"],
     ["SADD", IDS, id],
+    ...(left && left !== "resubscribed" ? [["HSET", UPDATES_SUPPRESSED, id, JSON.stringify({ reason: "resubscribed", day: utcDay(now) })]] : []),
   ]);
   if (claimed === null) {
     // someone else saved this email a moment ago: theirs stays, this token goes
@@ -91,12 +110,14 @@ export async function subscribeToUpdates(
   return { added: true };
 }
 
-async function removeId(id: string): Promise<boolean> {
+async function removeId(id: string, reason: SuppressReason, now = Date.now()): Promise<boolean> {
   const [raw] = await kv([["GET", subKey(id)]]);
   const sub = jsonOf<UpdatesSubscriber>(raw);
   const cmds: (string | number)[][] = [
     ["DEL", subKey(id)],
     ["SREM", IDS, id],
+    // remembered, so no import or form puts them back
+    ["HSET", UPDATES_SUPPRESSED, id, JSON.stringify({ reason, day: utcDay(now) })],
   ];
   if (sub?.token) cmds.push(["DEL", tokenKey(sub.token)]);
   await kv(cmds);
@@ -107,10 +128,10 @@ async function removeId(id: string): Promise<boolean> {
  * Takes an email off the list. True when it was on it. Never wire this to a
  * public route: anyone can type anyone's email. api/updates takes the link token.
  */
-export async function unsubscribeEmail(rawEmail: string): Promise<boolean> {
+export async function unsubscribeEmail(rawEmail: string, reason: SuppressReason = "removed"): Promise<boolean> {
   const email = normalizeEmail(rawEmail);
   if (!email) return false;
-  return removeId(idFor(email));
+  return removeId(idFor(email), reason);
 }
 
 /** Takes the email behind an unsubscribe link off the list. True when the link was live. */
@@ -124,7 +145,7 @@ export async function unsubscribeToken(token: string): Promise<boolean> {
     await kv([["DEL", tokenKey(token)]]);
     return false;
   }
-  return removeId(id);
+  return removeId(id, "unsubscribed");
 }
 
 /** Everyone on the list, newest day first, then by email. */
