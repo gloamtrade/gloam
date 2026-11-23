@@ -10,7 +10,9 @@
  *    the enclave itself sees the witness.
  *  - Adding money: the main wallet signs and sends a deposit to the private
  *    account. Rebuilt as a version 0 transaction with compute-budget
- *    instructions, which every wallet signs (the SDK builds version 1).
+ *    instructions, which every wallet signs (the SDK builds version 1). A
+ *    wallet with no SOL for the fee adding a token signs only, and Gloam's
+ *    relay pays the fee and sends it (relayPolicy's one version 0 shape).
  *  - Registering, paying and cashing out: the private account signs, and
  *    Gloam's relay (/api/solana/relay) adds its signature as fee payer and
  *    sends. The private account never holds SOL.
@@ -48,23 +50,25 @@ import type { LocalKeys, ShieldedKeypair, Wallet } from "@heliuslabs/spr";
 import type { SprClient } from "@heliuslabs/spr/client";
 import { accountFromSeed, accountMessage, deriveAccount, isPlainSignature } from "./account";
 import { SNAPSHOT_PREFIX } from "./opened";
-import { ringsAssets, ringsBalancesFrom, ringsUrls, SOLANA_RINGS_NETWORK, walletChain, type RingsAsset, type RingsNetwork } from "./config";
+import { addFeePayer, ringsAssets, ringsBalancesFrom, ringsUrls, SOLANA_RINGS_NETWORK, walletChain, type RingsAsset, type RingsNetwork } from "./config";
 import {
   awaitLanding,
   blockhashOfMessage,
   blockhashOfWire,
   computeUnitsOf,
+  feeLamportsOfWire,
   landWithOneResend,
   priorityFeeFor,
   REGISTER_COMPUTE_UNITS,
   RELAY_PRIORITY_FEE_FLOOR,
+  relayUnitPrice,
   signatureOfWire,
   sigStatusFrom,
   withPriorityFee,
   type Landing,
   type LandingDeps,
 } from "./landing";
-import { signOrSendSolana, signSolanaMessage, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
+import { canSignOnly, signOnlySolana, signOrSendSolana, signSolanaMessage, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
 
 const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111" as Address;
 // Public Solana program ids (SPL Token, Token-2022), not secrets.
@@ -566,9 +570,10 @@ function u64le(n: bigint): Uint8Array {
 /**
  * The SDK's version 1 transaction rebuilt as version 0: the same instructions,
  * with its compute limit as a ComputeBudget instruction and a small priority
- * fee. Wallets sign version 0; the main wallet pays.
+ * fee (`unitPrice` for that limit, micro-lamports a unit). Wallets sign
+ * version 0; `feePayer` pays: the main wallet, or Gloam's relay.
  */
-async function asVersion0(s: RingsSession, built: Transaction, feePayer: Address): Promise<Uint8Array> {
+async function asVersion0(s: RingsSession, built: Transaction, feePayer: Address, unitPrice: (units: number) => bigint = () => DEPOSIT_CU_PRICE): Promise<Uint8Array> {
   const compiled = getCompiledTransactionMessageDecoder().decode(built.messageBytes);
   const message = decompileTransactionMessage(compiled as never) as unknown as {
     instructions: readonly Instruction[];
@@ -578,7 +583,7 @@ async function asVersion0(s: RingsSession, built: Transaction, feePayer: Address
   const lifetime = await s.client.getLatestBlockhash();
   const budget: Instruction[] = [
     { programAddress: COMPUTE_BUDGET, data: Uint8Array.of(2, ...u32le(units)) },
-    { programAddress: COMPUTE_BUDGET, data: Uint8Array.of(3, ...u64le(DEPOSIT_CU_PRICE)) },
+    { programAddress: COMPUTE_BUDGET, data: Uint8Array.of(3, ...u64le(unitPrice(units))) },
   ];
   const v0 = pipe(
     createTransactionMessage({ version: 0 }),
@@ -595,9 +600,18 @@ function tokenProgram(a: RingsAsset): Address {
 
 /**
  * The deposit of `amount` of `asset` from `from` (the main wallet by default)
- * into the private account, as an unsigned version 0 transaction.
+ * into the private account, as an unsigned version 0 transaction. `from` pays
+ * the fee, or with `relay`, Gloam's relay does (its address as fee payer, the
+ * priority fee from Helius's price within the relay's cap): the one version 0
+ * shape the relay pays for (lib/solanaRings/relayPolicy).
  */
-export async function buildAddTransaction(s: RingsSession, asset: RingsAsset, amount: bigint, from?: Address): Promise<Uint8Array> {
+export async function buildAddTransaction(
+  s: RingsSession,
+  asset: RingsAsset,
+  amount: bigint,
+  from?: Address,
+  relay?: { address: Address; price: number | null }
+): Promise<Uint8Array> {
   const [{ buildDepositTransaction }, { getAssociatedTokenAddress }] = await Promise.all([
     import("@heliuslabs/spr/wallet"),
     import("@heliuslabs/spr/addresses"),
@@ -614,30 +628,103 @@ export async function buildAddTransaction(s: RingsSession, asset: RingsAsset, am
     : {};
   const built = await buildDepositTransaction({
     client: s.client,
-    feePayer: main,
+    feePayer: relay?.address ?? main,
     depositor: main,
     recipient: s.keypair.shieldedAddress(),
     amount,
     ...spl,
   });
-  return asVersion0(s, built, main);
+  return relay ? asVersion0(s, built, relay.address, (units) => relayUnitPrice(relay.price, units)) : asVersion0(s, built, main);
 }
 
 export const ADD_FAILED = "That didn't go through on Solana, and nothing moved. Try again.";
 export const ADD_NOT_CONFIRMED = "Solana hasn't confirmed it yet. Check your balance in a minute before you add again.";
 export const ADD_DIDNT_LAND = "Solana didn't take it, twice, and nothing moved. Try again in a minute.";
+export const ADD_NEEDS_SOL = "Your wallet needs a little SOL for the network fee. Add some SOL to it and try again.";
+export const ADD_RELAY_BUSY = "Gloam can't pay the network fee right now, and nothing moved. Add a little SOL to your wallet for the fee, or try again later.";
+
+/** Relay refusals that mean it can't pay a fee now (nothing was sent): the wallet's own SOL is the way through. */
+const RELAY_CANT_PAY = new Set(["relay_off", "relay_empty", "relay_unavailable", "rate_limited"]);
+
+/** An add as built, and who pays its fee. */
+export type BuiltAdd = { wire: Uint8Array; via: "wallet" | "relay" };
+
+/**
+ * Build the add and pick who pays its fee, from the wallet's SOL read through
+ * Gloam's RPC proxy just before: the wallet whenever it can pay the exact fee
+ * of the add built and be left empty or rent-exempt (config walletPaysFee);
+ * else, for a token, Gloam's relay (built again with the relay as fee payer).
+ * SOL itself, or a balance that can't be read: the wallet, as before. Rejects
+ * with ADD_NEEDS_SOL when neither can pay.
+ */
+export async function buildAddFor(s: RingsSession, asset: RingsAsset, amount: bigint): Promise<BuiltAdd> {
+  const main = s.main.account.address as Address;
+  const [wire, lamports] = await Promise.all([
+    buildAddTransaction(s, asset, amount),
+    asset.mint
+      ? proxyRpc<{ value?: unknown }>("getBalance", [main, { commitment: "confirmed" }]).then(
+          (r) => (typeof r.value === "number" && Number.isSafeInteger(r.value) && r.value >= 0 ? BigInt(r.value) : null),
+          () => null
+        )
+      : null,
+  ]);
+  const fee = feeLamportsOfWire(wire) ?? undefined;
+  const pick = (relay: RelayStatus | null) => addFeePayer({ asset, walletLamports: lamports, ...(fee === undefined ? {} : { fee }), relay, signOnly: canSignOnly(s.main.wallet) });
+  if (pick(null) === "wallet") return { wire, via: "wallet" };
+  const st = await relayStatus();
+  if (pick(st) !== "relay" || !st.relayer) throw new Error(ADD_NEEDS_SOL);
+  return { wire: await buildAddTransaction(s, asset, amount, undefined, { address: st.relayer as Address, price: st.priorityMicroLamports }), via: "relay" };
+}
+
+/**
+ * An add Gloam's relay pays the fee for: the main wallet signs only (never
+ * sends it: the relay signs last, as fee payer), the relay checks, signs and
+ * sends it, and the page waits as on every relayed send. A relay answer lost
+ * after a send can't be told apart from here, so it ends as not confirmed yet
+ * ("unknown"), never sent again on its own.
+ */
+export async function relayPaidAdd(s: RingsSession, wire: Uint8Array, opts: StepOptions = {}): Promise<{ signature: string; landing: Landing }> {
+  const signed = await signOnlySolana(s.main.wallet, s.main.account, wire, walletChain(s.network));
+  // The wallet signs what was built, nothing else: a changed transaction is one the relay won't pay for.
+  let same = false;
+  try {
+    const [a, b] = [getTransactionDecoder().decode(wire).messageBytes, getTransactionDecoder().decode(signed).messageBytes];
+    same = a.length === b.length && a.every((x, i) => x === b[i]);
+  } catch {
+    same = false;
+  }
+  if (!same) throw new Error(`${s.main.wallet.name} changed the transaction, so Gloam can't pay its fee. ${ADD_NEEDS_SOL}`);
+  tell(opts, "sending");
+  let sent: Sent;
+  try {
+    sent = await relay(signed);
+  } catch (e) {
+    if (!(e instanceof RingsRelayError)) throw e;
+    if (e.maybeSent) return { signature: "", landing: { state: "unknown" } };
+    throw new Error(RELAY_CANT_PAY.has(e.code) ? ADD_RELAY_BUSY : e.message);
+  }
+  tell(opts, "waiting");
+  return { signature: sent.signature, landing: await waitForSent(sent, blockhashOfWire(signed)) };
+}
 
 /**
  * Add money: the main wallet deposits `amount` of `asset` into the private
- * account. Public on chain: the main wallet, the asset and the amount. One
- * Solana dropped (its blockhash expired, never seen) is built again and the
- * wallet asked once more; it could never land, so nothing is added twice.
+ * account. Public on chain: the main wallet, the asset and the amount (and
+ * Gloam's relay as fee payer, when the wallet has no SOL for the fee:
+ * buildAddFor). One Solana dropped (its blockhash expired, never seen) is
+ * built again and the wallet asked once more; it could never land, so nothing
+ * is added twice.
  */
 export async function addToPrivate(s: RingsSession, asset: RingsAsset, amount: bigint, opts: StepOptions = {}): Promise<string> {
   let signature = "";
-  const r = await landWithOneResend<Uint8Array>({
-    build: () => buildAddTransaction(s, asset, amount),
-    sendAndWait: async (wire) => {
+  const r = await landWithOneResend<BuiltAdd>({
+    build: () => buildAddFor(s, asset, amount),
+    sendAndWait: async ({ wire, via }) => {
+      if (via === "relay") {
+        const paid = await relayPaidAdd(s, wire, opts);
+        signature = paid.signature;
+        return paid.landing;
+      }
       const out = await signOrSendSolana(s.main.wallet, s.main.account, wire, walletChain(s.network));
       let deps: LandingDeps;
       if ("sent" in out) {

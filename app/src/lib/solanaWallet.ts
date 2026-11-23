@@ -194,6 +194,27 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 /**
+ * Whether this wallet can sign a transaction without sending it: what lets
+ * another signer (Gloam's Solana relay, as fee payer) sign after it and send.
+ */
+export function canSignOnly(w: SolanaWallet): boolean {
+  return Boolean(w.wallet?.features?.["solana:signTransaction"]);
+}
+
+/**
+ * The wallet's signature on `transaction`, on `chain`, handed back and never
+ * sent by the wallet: for a transaction someone else signs after it (its fee
+ * payer). Rejects when the wallet can only sign and send.
+ */
+export async function signOnlySolana(w: SolanaWallet, a: SolanaAccount, transaction: Uint8Array, chain: string): Promise<Uint8Array> {
+  const signFeature = w.wallet.features["solana:signTransaction"];
+  if (!signFeature) throw new Error(`${w.name} can't sign this.`);
+  const [signed] = await signFeature.signTransaction({ account: a.account, chain, transaction });
+  if (!signed?.signedTransaction) throw new Error(`${w.name} didn't sign it.`);
+  return new Uint8Array(signed.signedTransaction);
+}
+
+/**
  * Sign `transaction` with the wallet and send it, on `chain`. Returns the 64-byte
  * signature when the wallet sent it, or the signed transaction for the caller to
  * send when the wallet only signs.
@@ -211,9 +232,5 @@ export async function signOrSendSolana(
     if (!(first?.signature instanceof Uint8Array) || first.signature.length !== 64) throw new Error(`${w.name} didn't send it.`);
     return { sent: first.signature };
   }
-  const signFeature = w.wallet.features["solana:signTransaction"];
-  if (!signFeature) throw new Error(`${w.name} can't sign this.`);
-  const [signed] = await signFeature.signTransaction({ account: a.account, chain, transaction });
-  if (!signed?.signedTransaction) throw new Error(`${w.name} didn't sign it.`);
-  return { signed: signed.signedTransaction };
+  return { signed: await signOnlySolana(w, a, transaction, chain) };
 }
