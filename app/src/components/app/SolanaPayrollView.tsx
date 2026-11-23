@@ -82,6 +82,16 @@ function UploadGlyph({ className = "h-6 w-6" }: { className?: string }) {
   );
 }
 
+/** The clipboard on "Paste a list", as EVM Payroll draws it. */
+function PasteGlyph() {
+  return (
+    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="6" y="5" width="12" height="15" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M9.5 5V4a1 1 0 011-1h3a1 1 0 011 1v1M9.5 11h5M9.5 14.5h3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function DownloadGlyph() {
   return (
     <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -568,6 +578,7 @@ export function SolanaPayrollView(props: {
                   Choose a file
                 </button>
                 <button type="button" onClick={() => setPasteOpen(true)} className="btn btn-quiet btn-sm h-10" aria-expanded={pasteOpen}>
+                  <PasteGlyph />
                   Paste a list
                 </button>
               </div>
@@ -675,6 +686,10 @@ export function SolanaPayrollView(props: {
               "Pay privately"
             )}
           </button>
+          {/* why it is greyed out, in the words EVM Payroll uses */}
+          {rows.length === 0 && starting === null && (
+            <p className="mt-2.5 text-center text-[12.5px] text-mute">Add your team first, from a CSV or a pasted list.</p>
+          )}
           {starting !== null && (
             <SolanaSteps className="mt-4" task={{ kind: "pay", steps: ["Reading your private balance", "Saving the run", "Paying in batches of up to 15"], at: starting }} />
           )}

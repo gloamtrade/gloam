@@ -2716,6 +2716,18 @@ export function MoveView() {
         <div id="pay-card" className="gl-card min-w-0 scroll-mt-24 p-5 sm:p-7 [&>*:first-child]:mt-0">
           <DevKeysBanner compact />
 
+          {/* A title and one line, like Add, Swap and Public send here and Pay and Cash out on Solana. Receive titles its own parts. */}
+          {mode !== "receive" && (
+            <div className="min-w-0">
+              <h2 className="t-title text-foreground">{mode === "cashout" ? "Cash out" : "Pay privately"}</h2>
+              <p className="mt-1 text-[14px] leading-relaxed text-mute">
+                {mode === "cashout"
+                  ? "From your private balance back to any wallet."
+                  : "Send from your private balance to a Gloam address or a claim link."}
+              </p>
+            </div>
+          )}
+
           {!poseidonMode && (
             <p className="mt-5 rounded-xl bg-warn-soft px-4 py-3 text-[13.5px] leading-relaxed text-warn">
               The private vault is not connected right now. Try again shortly.
@@ -3202,6 +3214,9 @@ export function MoveView() {
                         "Syncing your balance…"
                       ) : payStyle === "bearer" ? (
                         "Make the claim link"
+                      ) : !recipientTag.trim() ? (
+                        // greyed out for one reason only: say it, as Solana's Pay does
+                        "Enter who to pay"
                       ) : (
                         "Send privately"
                       )}
@@ -3800,7 +3815,7 @@ export function MoveView() {
                         void rotateReceiveIdentity().then(setMyIdentity);
                       }}
                       title="Makes a new address to share. Payments to your earlier addresses still open in this browser."
-                      className="btn btn-quiet btn-sm -mr-2 text-mute"
+                      className="btn btn-quiet btn-sm -my-2 -mr-2 text-mute"
                     >
                       New address
                     </button>
@@ -3968,6 +3983,8 @@ export function MoveView() {
                           <Spinner />
                           <span className="truncate">Opening the payment…</span>
                         </>
+                      ) : !importText.trim() ? (
+                        "Paste a link or code to claim"
                       ) : (
                         "Claim and secure"
                       )}

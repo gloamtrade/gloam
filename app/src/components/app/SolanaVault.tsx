@@ -36,6 +36,7 @@ import {
   usd,
 } from "./SolanaParts";
 import { formatSolAmount, parseSolAmount, shortSol, useSolana } from "./SolanaAccount";
+import { displayAmountText, typedAmount } from "@/lib/amountShort";
 import { SolanaArrivals, SolanaBridgeIn } from "./SolanaBridgeIn";
 import { solanaBridgeVisible } from "@/lib/solanaRings/bridgeIn";
 
@@ -122,7 +123,7 @@ export function SolanaVaultHome({ missing }: { missing?: string | null }) {
               badge="Only you"
               rows={privateRows}
               loading={!balances}
-              empty="0"
+              empty={displayAmountText("0")}
               note={hasPrivate ? "Read and decrypted on this device." : "Nothing here yet. Only you will see this number."}
             />
             <BalancePane
@@ -131,8 +132,8 @@ export function SolanaVaultHome({ missing }: { missing?: string | null }) {
               badge={null}
               rows={walletRows}
               loading={!walletBalances}
-              empty="0"
-              note={walletBalances && !walletRows.length ? `No ${symbols} in this wallet.` : "Anyone can see this on the explorer."}
+              empty={displayAmountText("0")}
+              note="Anyone can see this on the explorer."
             />
           </div>
           <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7" aria-live="polite">
@@ -288,7 +289,7 @@ export function SolanaAddView() {
               </span>
             </div>
             <p className="tnum mt-3 truncate text-[28px] font-light leading-none tracking-[-0.02em] text-foreground">
-              {value !== null ? amount.trim() : "0"} <span className="text-[15px] tracking-normal text-mute">{asset.symbol}</span>
+              {value !== null ? typedAmount(amount) : displayAmountText("0")} <span className="text-[15px] tracking-normal text-mute">{asset.symbol}</span>
             </p>
           </div>
         </div>
@@ -583,14 +584,16 @@ function SolanaReceiveView() {
           </div>
         </div>
 
-        <div>
+        {/* stacked on a phone: a hairline above, as EVM's Receive sets off its second part */}
+        <div className="max-lg:border-t max-lg:border-line max-lg:pt-6">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-[15px] font-medium text-foreground">Payments to you</h3>
-            <button type="button" aria-busy={refreshing || undefined} onClick={() => !sol.task && void sol.refresh()} className="btn btn-ghost btn-sm h-10">
+            {/* -my-2: the button doesn't push this title below the one beside it */}
+            <button type="button" aria-busy={refreshing || undefined} onClick={() => !sol.task && void sol.refresh()} className="btn btn-ghost btn-sm -my-2 h-10">
               Check now
             </button>
           </div>
-          <p className="mt-2 text-[13.5px] leading-relaxed text-mute">Payments to your private address land in your balance on their own.</p>
+          <p className="mt-2 text-[13px] leading-relaxed text-mute">Payments to your private address land in your balance on their own.</p>
           <ul className="mt-4 divide-y divide-line border-y border-line">
             {assets.map((a) => (
               <li key={a.id} className="flex min-h-[56px] items-center justify-between gap-3 py-2.5">

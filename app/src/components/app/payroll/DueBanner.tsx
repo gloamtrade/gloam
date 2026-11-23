@@ -71,7 +71,7 @@ export function DueBanner({
           </p>
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-2 max-sm:pl-[60px]">
+      <div className="flex shrink-0 items-center gap-2 max-sm:pl-9">
         <button type="button" onClick={() => onRun(s)} className="btn btn-ink">
           Run now
         </button>

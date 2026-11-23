@@ -404,7 +404,7 @@ export function SolanaBridgeIn({
   return (
     <div className="grid gap-4">
       <ArrivalsNotice list={others} network={session.network} busy={notice.busy} errors={notice.errors} onMake={(a) => void notice.make(a)} />
-      <div className="gl-card p-5">
+      <div className="gl-card p-5 sm:p-7">
         <p className="text-[13px] text-mute">Money on another chain?</p>
         <div className="mt-3 flex items-center">
           {featured.map((id, i) => (

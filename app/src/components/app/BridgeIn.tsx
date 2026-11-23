@@ -180,7 +180,7 @@ export function BridgeInCard({
   if (!dest) return null;
 
   return (
-    <div className="gl-card p-5">
+    <div className="gl-card p-5 sm:p-7">
       <p className="text-[13px] text-mute">Money on another chain?</p>
       <div className="mt-3 flex items-center">
         {featured.map((id, i) => (

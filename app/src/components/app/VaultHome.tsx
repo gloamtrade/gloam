@@ -259,11 +259,8 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
             rows={wallet}
             loading={walletLoading}
             empty={balancesVisible ? displayAmount(BigInt(0), 0) : null}
-            note={
-              balancesVisible && !wallet.length && !walletLoading
-                ? `No ${listOr(tokens.map((t) => t.symbol))} in this wallet.`
-                : "Anyone can see this on the explorer."
-            }
+            // what Gloam takes is said once, in the line under both panes
+            note="Anyone can see this on the explorer."
           />
         </div>
 
@@ -543,11 +540,5 @@ function LockGlyph() {
 function listAnd(items: string[]): string {
   if (items.length <= 1) return items[0] ?? "";
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-}
-
-/** "USDG", "USDG or GLOAM". */
-function listOr(items: string[]): string {
-  if (items.length <= 1) return items[0] ?? "";
-  return `${items.slice(0, -1).join(", ")} or ${items[items.length - 1]}`;
 }
 

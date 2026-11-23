@@ -595,34 +595,37 @@ export function PortfolioView() {
                 Only you
               </span>
             </div>
-            <div className="-mr-2 flex items-center gap-0.5">
+            <div className="-mr-2 flex min-h-10 items-center gap-0.5">
               <NetworkPulse />
               {balancesVisible && <AmountToggle />}
-              <button
-                type="button"
-                onClick={() => void refreshAll()}
-                disabled={refreshing || !isConnected}
-                aria-label="Refresh balances"
-                title="Refresh balances"
-                className="grid h-10 w-10 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground disabled:opacity-60"
-              >
-                <svg
-                  aria-hidden
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  className={refreshing || syncing ? "animate-spin motion-reduce:animate-none" : undefined}
+              {/* Nothing to refresh before a wallet is in: no control then, rather than a dead one. */}
+              {isConnected && (
+                <button
+                  type="button"
+                  onClick={() => void refreshAll()}
+                  disabled={refreshing}
+                  aria-label="Refresh balances"
+                  title="Refresh balances"
+                  className="grid h-10 w-10 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground disabled:opacity-60"
                 >
-                  <path
-                    d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4.5h-4.5"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
+                  <svg
+                    aria-hidden
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    className={refreshing || syncing ? "animate-spin motion-reduce:animate-none" : undefined}
+                  >
+                    <path
+                      d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4.5h-4.5"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              )}
             </div>
           </div>
 
@@ -851,7 +854,8 @@ export function PortfolioView() {
               {/* What a private balance is for, one tap from each. */}
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line py-3 max-sm:px-5 sm:px-6">
                 <p className="text-[13px] text-mute">Pay from it privately, or cash out to any wallet.</p>
-                <div className="flex gap-1">
+                {/* quiet links: their words line up with the text above and the Pay buttons' edge, not their padding */}
+                <div className="-mx-4 flex gap-1">
                   <IntentLink href="/app/vault?tab=move" className="btn btn-quiet btn-sm h-10">
                     Pay privately
                   </IntentLink>

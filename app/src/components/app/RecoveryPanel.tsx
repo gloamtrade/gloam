@@ -285,7 +285,7 @@ export function RecoverySettingsCard() {
       </header>
       <div className="mt-2 divide-y divide-line pb-1 max-sm:px-5 max-sm:pb-4 sm:px-6 sm:pb-5">
         {!r.active ? (
-          <Choice label="Recovery" hint="Connect a wallet to set up recovery.">
+          <Choice label="Off" hint="Connect a wallet to set up recovery.">
             {null}
           </Choice>
         ) : state.on ? (

@@ -99,7 +99,10 @@ function Row({
         <p className="text-[14px] text-foreground">{label}</p>
         {hint && <p className="mt-0.5 text-[13px] leading-relaxed text-mute">{hint}</p>}
       </div>
-      {children && <div className="flex min-w-0 max-w-full shrink-0 flex-wrap items-center gap-2">{children}</div>}
+      {/* a lone quiet link lines up by its words: with the card's right edge, or under the label once it wraps on a phone */}
+      {children && (
+        <div className="flex min-w-0 max-w-full shrink-0 flex-wrap items-center gap-2 [&>.btn-quiet:only-child]:-mx-4">{children}</div>
+      )}
     </div>
   );
 }
@@ -312,7 +315,7 @@ function PasskeyCard({ demo }: { demo: boolean }) {
       flush
     >
       {demo ? (
-        <Row label="Passkey lock" hint="Off in the demo." />
+        <Row label="Off in the demo" />
       ) : vault.protected ? (
         <>
           <Row
@@ -353,7 +356,7 @@ function PasskeyCard({ demo }: { demo: boolean }) {
           </Row>
         </>
       ) : support === "no" ? (
-        <Row label="Passkey lock" hint={NO_PRF_MESSAGE} />
+        <Row label="Not on this browser" hint={NO_PRF_MESSAGE} />
       ) : (
         <Row
           label="Protect with a passkey"

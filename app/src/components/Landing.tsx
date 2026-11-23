@@ -305,7 +305,7 @@ export function Landing() {
               team, your business and your agents.
             </p>
           </div>
-          <div className="-mx-4 mt-10 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-3 [&::-webkit-scrollbar]:hidden">
+          <div className="-mx-4 mt-10 flex snap-x snap-mandatory scroll-px-4 gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-3 [&::-webkit-scrollbar]:hidden">
             {USES.map((u) => {
               const To = u.href.startsWith("/app") ? AppLink : Link;
               return (
@@ -315,7 +315,7 @@ export function Landing() {
                   className="gl-tile group flex min-h-[220px] w-[78%] shrink-0 snap-start flex-col p-6 transition-colors hover:bg-surface-2 sm:w-auto"
                 >
                   {u.icon}
-                  <div className="mt-auto">
+                  <div className="mt-16">
                     <p className="text-[19px] leading-snug tracking-[-0.01em] text-foreground">
                       {u.title}
                     </p>
@@ -341,15 +341,15 @@ export function Landing() {
               </div>
               <div className="mt-10">
                 <ul className="divide-y divide-line border-y border-line text-[15px]">
-                  <li className="flex justify-between gap-6 py-4">
+                  <li className="flex flex-col gap-1 py-4 sm:flex-row sm:justify-between sm:gap-6">
                     <span>Upload a CSV</span>
                     <span className="text-mute">Name, Gloam address, amount</span>
                   </li>
-                  <li className="flex justify-between gap-6 py-4">
+                  <li className="flex flex-col gap-1 py-4 sm:flex-row sm:justify-between sm:gap-6">
                     <span>Check what the public sees</span>
                     <span className="text-mute">No names, no amounts</span>
                   </li>
-                  <li className="flex justify-between gap-6 py-4">
+                  <li className="flex flex-col gap-1 py-4 sm:flex-row sm:justify-between sm:gap-6">
                     <span>Pay everyone</span>
                     <span className="text-mute">About 8 seconds each</span>
                   </li>

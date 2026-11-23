@@ -219,7 +219,8 @@ export function VaultHub() {
 /**
  * The row of actions on every action page. On a phone the five main ones sit
  * side by side, each a mark and a short name; from a tablet up it is one
- * track of names, with Agent top-ups, Trade and Public send after them.
+ * track of the same short names, with Agent top-ups, Trade and Public send
+ * after them, that scrolls rather than run past the page if it ever can't fit.
  * One tab stop for the row (the open action); the arrows, Home and End move
  * along it, and Enter or Space opens one.
  */
@@ -273,7 +274,7 @@ function ActionRow({
         ref={row}
         role="tablist"
         aria-label="Vault actions"
-        className={`grid w-full gap-1 rounded-[20px] bg-surface-2 p-1 sm:inline-flex sm:w-auto sm:max-w-full sm:rounded-full dark:bg-panel dark:ring-1 dark:ring-line ${colsClass}`}
+        className={`grid w-full gap-1 rounded-[20px] bg-surface-2 p-1 sm:inline-flex sm:w-auto sm:max-w-full sm:overflow-x-auto sm:rounded-full sm:[scrollbar-width:none] dark:bg-panel dark:ring-1 dark:ring-line sm:[&::-webkit-scrollbar]:hidden ${colsClass}`}
       >
         {actions.map((a, i) => {
           const active = a.id === current;
@@ -288,9 +289,10 @@ function ActionRow({
               aria-controls="vault-panel"
               tabIndex={active ? 0 : -1}
               title={a.line}
+              aria-label={a.label}
               onClick={() => onSelect(a.id)}
               onKeyDown={onKey}
-              className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-[16px] px-1 text-[12px] leading-tight transition-colors duration-200 max-sm:h-[60px] max-sm:px-0 sm:h-10 sm:flex-row sm:whitespace-nowrap sm:rounded-full sm:px-4 sm:text-[14px] ${
+              className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-[16px] px-1 text-[12px] leading-tight transition-colors duration-200 max-sm:h-[60px] max-sm:px-0 sm:h-10 sm:shrink-0 sm:flex-row sm:whitespace-nowrap sm:rounded-full sm:px-4 sm:text-[14px] ${
                 a.extra && !active ? "max-sm:hidden" : ""
               } ${extraStart ? "sm:ml-2" : ""} ${
                 active
@@ -301,8 +303,7 @@ function ActionRow({
               <span className="sm:hidden">
                 <VaultActionIcon id={a.id} size={18} />
               </span>
-              <span className="max-w-full text-center md:hidden">{a.short}</span>
-              <span className="hidden md:inline">{a.label}</span>
+              <span className="max-w-full text-center">{a.short}</span>
             </button>
           );
         })}
