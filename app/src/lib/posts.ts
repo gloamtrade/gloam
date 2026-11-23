@@ -6,7 +6,7 @@
 
 import { SOLANA_RINGS_ENABLED } from "./solanaRings/config";
 
-export type PostCoverId = "acp" | "agents" | "build" | "mainnet" | "operator" | "tempo";
+export type PostCoverId = "acp" | "agents" | "build" | "mainnet" | "operator" | "solana" | "tempo";
 
 export type Post = {
   slug: string;
@@ -41,7 +41,7 @@ const SOLANA_POST: Post = {
   dateLabel: "November 23, 2026",
   kind: "Announcement",
   minutes: 3,
-  cover: "mainnet",
+  cover: "solana",
 };
 
 export const POSTS: Post[] = [
