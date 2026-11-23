@@ -61,6 +61,7 @@ import { useHideAmounts } from "@/lib/hideAmounts";
 import { ActivityFeed } from "./ActivityFeed";
 import { AddressChip } from "./AddressChip";
 import { FirstPaymentCard } from "./FirstPaymentCard";
+import { NameOfferCard } from "./NameOfferCard";
 import { RecoveryNudge } from "./RecoveryPanel";
 import { OnboardingCard } from "./OnboardingCard";
 import { PaymentNoteLine } from "./PaymentNote";
@@ -732,6 +733,9 @@ export function PortfolioView() {
       {balancesVisible && hasShield && shieldLive && (
         <FirstPaymentCard open={shieldNotes} all={allNotes} chainId={network.chainId} />
       )}
+
+      {/* A signed-in account with no Gloam name yet: offer one, until it has one or says not now. */}
+      <NameOfferCard />
 
       {/* Main split: vault + holdings, with the public feed alongside */}
       <div className="grid gap-5 lg:grid-cols-12">
