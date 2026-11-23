@@ -74,6 +74,26 @@ export async function prfSalt(): Promise<Uint8Array> {
   return new Uint8Array(await subtle().digest("SHA-256", buf(enc.encode(PRF_SALT_TEXT))));
 }
 
+/* ---------------------------------------------------------------- which way, in the setup card */
+
+/** What the setup card was asked for: `auto` lets it pick; the rest are the person's choice. */
+export type GloamOpenMode = "auto" | "passkey" | "code-new" | "code-show" | "code-enter";
+/** What the setup card shows (components/app/GloamAccountParts GloamAccountOpen). */
+export type GloamOpenView = "kept" | "passkey" | "code-new" | "code-show" | "code-enter";
+
+/**
+ * The setup card's view. Left to pick, a browser that keeps a backup code opens with
+ * it, a passkey opens next, and someone back with neither enters their code. What the
+ * person picks wins, so a kept code never hides the passkey or another code.
+ */
+export function gloamOpenView(s: { mode: GloamOpenMode; known: boolean; passkey: boolean; returning: boolean; fresh: boolean }): GloamOpenView {
+  if (s.mode === "auto" && s.known) return "kept";
+  if (s.mode === "code-show" && s.fresh) return "code-show";
+  if (s.mode === "code-enter" || (s.mode === "auto" && !s.passkey && s.returning)) return "code-enter";
+  if (s.passkey && (s.mode === "auto" || s.mode === "passkey")) return "passkey";
+  return "code-new";
+}
+
 /* ---------------------------------------------------------------- passkey */
 
 export const NO_PRF_TEXT =

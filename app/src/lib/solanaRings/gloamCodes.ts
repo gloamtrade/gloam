@@ -16,7 +16,7 @@
  */
 import { scopedKey, writableKey } from "../accountSlot";
 import { openJson, sealJson } from "../noteVault";
-import { CODE_SECRET_BYTES } from "./gloamRoot";
+import { CODE_SECRET_BYTES, GloamRootError } from "./gloamRoot";
 
 export const STORE_KEY = "gloam.solana-codes.v1";
 const UNREADABLE_KEY = "gloam.solana-codes.unreadable.v1";
@@ -99,6 +99,29 @@ export function keepCodeSecret(owner: string, secret: Uint8Array): Promise<Uint8
     if (kept[owner]) return { next: null, out: fromHex(kept[owner]) };
     return { next: { ...kept, [owner]: toHex(secret) }, out: secret.slice() };
   });
+}
+
+/**
+ * The backup-code secret that opens `owner`'s private account now (a copy: wipe it when done).
+ *  - `secret` null: the one this browser keeps.
+ *  - a code just made here: kept first, never over another; refused when this browser
+ *    already keeps another (a screen from before it was kept).
+ *  - a code the person typed (`typed`): kept when none is; when this browser keeps
+ *    another, it still opens with the typed one, and the kept one stays (it may open
+ *    a private account of its own). A browser that keeps one code never locks the
+ *    person out of the account another code opens.
+ */
+export async function codeRootFor(owner: string, secret: Uint8Array | null, typed = false): Promise<Uint8Array> {
+  if (!secret) {
+    const kept = await keptCodeSecret(owner);
+    if (!kept) throw new GloamRootError("This browser no longer holds your backup code. Enter it to open your private account.", "badcode");
+    return kept;
+  }
+  const kept = await keepCodeSecret(owner, secret);
+  if (kept.length === secret.length && kept.every((b, i) => b === secret[i])) return kept;
+  kept.fill(0);
+  if (typed) return secret.slice();
+  throw new GloamRootError("This browser holds another backup code for this account. Reload the page to open with it.", "badcode");
 }
 
 /** What the recovery backup carries: every secret kept for the signed-in account. */
