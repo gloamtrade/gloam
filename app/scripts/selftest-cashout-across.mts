@@ -25,6 +25,19 @@
  *  - one start at a time per account and vault; Stop the rest only when no part
  *    is on its way, from the stored run, and nothing goes after it
  *
+ * Through the relay, every part in one transaction (deps.submitTogether):
+ *  - $20 from $10, $7 and $4 is one set-aside, then ONE send for all three parts;
+ *    every part's nullifier and block are saved as sent before it goes
+ *  - crash mid-batch: may have gone out and landed, settled from the chain on
+ *    resume, nothing sent again; didn't land, waits for the resend window, then
+ *    goes once more; sent with no answer yet, settled from the chain
+ *  - a note something else spent while the batch might have gone out is moved,
+ *    not paid; the rest go together
+ *  - refused with nothing sent (an older relay): one by one in the same run, with
+ *    the proofs already made; reverted: one by one, proven afresh
+ *  - a fee that went up stops the run with nothing sent, never one by one
+ *  - from the wallet, always one by one
+ *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-cashout-across.mts
  */
 import assert from "node:assert/strict";
@@ -149,8 +162,51 @@ function world(notes: LocalNote[]) {
     load: deps.load,
     save: deps.save,
   };
+  /**
+   * What the next send together does: "land" (every part, or none if any note is spent),
+   * "maybe" (may have gone out, nothing landed), "maybe-landed", "unclear" (landed, no
+   * receipt seen yet), "revert" (nothing landed), "refuse" (an older relay: nothing sent,
+   * may go one by one), "fee" (the fee went up: nothing sent, not one by one).
+   */
+  const togetherPlan: ("land" | "maybe" | "maybe-landed" | "unclear" | "revert" | "refuse" | "fee")[] = [];
+  const togetherSends: Hex[][] = [];
+  const together: Deps = {
+    ...deps,
+    submitTogether: async (calls) => {
+      const how = togetherPlan.shift() ?? "land";
+      togetherSends.push(calls.map((c) => c.nullifier));
+      if (how === "refuse") throw Object.assign(new Error("Unknown action."), { refused: true });
+      if (how === "fee") throw new Error("The cash-out fee went up to 0.6% after you confirmed, so nothing more was cashed out.");
+      const h = hex(7000 + togetherSends.length);
+      const landAll = () => {
+        // all or nothing, as aggregate3 with allowFailure false
+        if (how === "revert" || calls.some((c) => spent.has(c.nullifier.toLowerCase()))) {
+          txs.set(h, "reverted");
+          return;
+        }
+        block++;
+        for (const c of calls) {
+          spent.add(c.nullifier.toLowerCase());
+          paidOut.push({ to: c.to, amount: c.amount, nullifier: c.nullifier, block });
+        }
+        txs.set(h, how === "unclear" ? null : "success");
+      };
+      if (how === "maybe") throw Object.assign(new Error("maybe sent"), { maybe: true });
+      if (how === "maybe-landed") {
+        landAll();
+        throw Object.assign(new Error("maybe sent"), { maybe: true });
+      }
+      landAll();
+      return h;
+    },
+    togetherRefused: (e) => Boolean((e as { refused?: boolean }).refused),
+  };
   return {
     deps,
+    together,
+    togetherPlan,
+    togetherSends,
+    txs,
     store,
     byId,
     runs,
@@ -398,6 +454,204 @@ await test("one start at a time; Stop the rest only with nothing on its way, and
   await withRunLock(c.id, async () => {
     await assert.rejects(C.stopCashOutRest({ id: c.id }, w.store), (e: Error) => e.message === RUN_ELSEWHERE);
   });
+});
+
+// ---------------------------------------------------------------- every part in one transaction
+const toTO = (w: ReturnType<typeof world>) => w.paidOut.filter((x) => x.to === TO).reduce((s, x) => s + x.amount, 0n);
+
+await test("through the relay, $20 from $10, $7 and $4 is one set-aside and ONE send for all three, every nullifier saved first", async () => {
+  const ten = note($(10)), seven = note($(7)), four = note($(4));
+  const w = world([ten, seven, four]);
+  const run = runFor(w, $(20), [ten, seven, four]);
+  await w.store.save(run);
+  let storedAtSend: Run | undefined;
+  const deps: Deps = {
+    ...w.together,
+    submitTogether: async (calls) => {
+      storedAtSend = (await w.store.load(run.id))!;
+      return w.together.submitTogether!(calls);
+    },
+  };
+  const done = await C.runCashOutAcross(run, deps);
+  assert.equal(done.status, "done");
+  assert.deepEqual(done.parts.map((p) => p.status), ["paid", "paid", "paid"]);
+  assert.equal(w.splits(), 1, "the set-aside goes first, on its own");
+  assert.equal(w.togetherSends.length, 1, "one send for every cash out");
+  assert.equal(w.togetherSends[0]!.length, 3);
+  assert.equal(w.submits.length, 0, "no part went on its own");
+  assert.equal(new Set(done.parts.map((p) => p.txHash)).size, 1, "every part settled from the one transaction");
+  assert.equal(toTO(w), $(20), "exactly $20 to the wallet");
+  assert.equal(new Set(w.paidOut.map((x) => x.nullifier)).size, 3, "each note paid out once");
+  // crash safety: before the send, every part was on record as sent, with its nullifier and block
+  assert.ok(storedAtSend);
+  for (const p of storedAtSend!.parts) {
+    assert.equal(p.status, "sent");
+    assert.ok(p.nullifier && p.sentBlock && p.sentAt != null, "nullifier, block and time saved before it went");
+  }
+  assert.deepEqual(storedAtSend!.parts.map((p) => p.nullifier), w.togetherSends[0], "the nullifiers saved are the ones sent");
+});
+
+await test("crash mid-batch, it went out and landed: resume settles every part from the chain, nothing goes again", async () => {
+  const ten = note($(10)), seven = note($(7)), four = note($(4));
+  const w = world([ten, seven, four]);
+  const run = runFor(w, $(20), [ten, seven, four]);
+  await w.store.save(run);
+  w.togetherPlan.push("maybe-landed");
+  const first = await C.runCashOutAcross(run, w.together);
+  assert.equal(first.status, "running");
+  assert.deepEqual(first.parts.map((p) => p.status), ["sent", "sent", "sent"]);
+  assert.ok(first.parts.every((p) => p.error === C.CASHOUT_MAYBE_SENT));
+  // the tab closed here; a new one resumes from the stored run
+  const done = await C.runCashOutAcross(run, w.together);
+  assert.equal(done.status, "done");
+  assert.deepEqual(done.parts.map((p) => p.status), ["paid", "paid", "paid"]);
+  assert.equal(w.togetherSends.length, 1, "never sent again");
+  assert.equal(w.submits.length, 0);
+  assert.equal(toTO(w), $(20), "$20, not $40");
+});
+
+await test("crash mid-batch, it never landed: waits, then after the resend window goes again together, once", async () => {
+  const ten = note($(10)), seven = note($(7));
+  const w = world([ten, seven]);
+  const run = runFor(w, $(17), [ten, seven]);
+  await w.store.save(run);
+  w.togetherPlan.push("maybe");
+  const first = await C.runCashOutAcross(run, w.together);
+  assert.deepEqual(first.parts.map((p) => p.status), ["sent", "sent"]);
+  w.tick(60_000);
+  const wait = await C.runCashOutAcross(run, w.together);
+  assert.deepEqual(wait.parts.map((p) => p.status), ["sent", "sent"], "a minute on, unspent and no hash: still waiting");
+  assert.equal(wait.parts[0]!.error, C.CASHOUT_WAITING);
+  assert.equal(w.togetherSends.length, 1, "nothing sent while it may still land");
+  w.tick(C.CASHOUT_RESEND_AFTER_MS);
+  const done = await C.runCashOutAcross(run, w.together);
+  assert.equal(done.status, "done");
+  assert.equal(w.togetherSends.length, 2, "sent together once more");
+  assert.equal(w.paidOut.length, 2, "and each note paid out once");
+  assert.equal(toTO(w), $(17));
+});
+
+await test("batch sent with no receipt seen yet: held, then settled from the chain", async () => {
+  const ten = note($(10)), seven = note($(7));
+  const w = world([ten, seven]);
+  const run = runFor(w, $(17), [ten, seven]);
+  await w.store.save(run);
+  w.togetherPlan.push("unclear");
+  const first = await C.runCashOutAcross(run, w.together);
+  assert.deepEqual(first.parts.map((p) => p.status), ["sent", "sent"]);
+  assert.ok(first.parts.every((p) => p.txHash && p.error === C.CASHOUT_WAITING), "kept with its hash");
+  const done = await C.runCashOutAcross(run, w.together);
+  assert.deepEqual(done.parts.map((p) => p.status), ["paid", "paid"], "the vault's log shows this cash out paid both");
+  assert.equal(w.togetherSends.length, 1);
+  assert.equal(w.submits.length, 0);
+});
+
+await test("a note something else spent while the batch might have gone out is moved, not paid; the rest go together", async () => {
+  const ten = note($(10)), seven = note($(7)), four = note($(4));
+  const w = world([ten, seven, four]);
+  const run = runFor(w, $(20), [ten, seven, four]);
+  await w.store.save(run);
+  w.togetherPlan.push("maybe");
+  await C.runCashOutAcross(run, w.together);
+  const OTHER = "0x3333333333333333333333333333333333333333" as Address;
+  w.spendElsewhere(seven.nullifier!, OTHER, $(7));
+  w.tick(C.CASHOUT_RESEND_AFTER_MS + 1);
+  const done = await C.runCashOutAcross(run, w.together);
+  assert.equal(done.status, "done");
+  assert.deepEqual(done.parts.map((p) => p.status), ["paid", "failed", "paid"]);
+  assert.equal(done.parts[1]!.error, C.CASHOUT_MOVED);
+  assert.deepEqual(w.togetherSends[1]!.length, 2, "the other two went together");
+  assert.equal(C.cashOutPaid(done), $(13), "only what reached the wallet counts");
+  assert.equal(toTO(w), $(13));
+});
+
+await test("refused with nothing sent (an older relay): one by one in the same run, with the proofs already made", async () => {
+  const ten = note($(10)), seven = note($(7)), four = note($(4));
+  const w = world([ten, seven, four]);
+  const run = runFor(w, $(20), [ten, seven, four]);
+  await w.store.save(run);
+  w.togetherPlan.push("refuse");
+  let proofs = 0;
+  const deps: Deps = { ...w.together, prove: async (n, to) => (proofs++, w.together.prove(n, to)) };
+  const done = await C.runCashOutAcross(run, deps);
+  assert.equal(done.status, "done", "not an error");
+  assert.deepEqual(done.parts.map((p) => p.status), ["paid", "paid", "paid"]);
+  assert.equal(w.togetherSends.length, 1);
+  assert.equal(w.submits.length, 3, "then one by one");
+  assert.equal(proofs, 3, "each part proven once");
+  assert.equal(toTO(w), $(20));
+});
+
+await test("reverted with nothing landed: each part goes again on its own, proven afresh", async () => {
+  const ten = note($(10)), seven = note($(7));
+  const w = world([ten, seven]);
+  const run = runFor(w, $(17), [ten, seven]);
+  await w.store.save(run);
+  w.togetherPlan.push("revert");
+  const done = await C.runCashOutAcross(run, w.together);
+  assert.equal(done.status, "done");
+  assert.equal(w.togetherSends.length, 1);
+  assert.equal(w.submits.length, 2);
+  assert.equal(w.paidOut.length, 2, "each note paid out once");
+  assert.notEqual(done.parts[0]!.txHash, done.parts[1]!.txHash, "each from its own send");
+});
+
+await test("a fee that went up stops the run with nothing sent, never one by one; Stop the rest still works", async () => {
+  const ten = note($(10)), seven = note($(7));
+  const w = world([ten, seven]);
+  const run = runFor(w, $(17), [ten, seven]);
+  await w.store.save(run);
+  w.togetherPlan.push("fee");
+  await assert.rejects(C.runCashOutAcross(run, w.together), /fee went up/);
+  const stored = (await w.store.load(run.id))!;
+  assert.deepEqual(stored.parts.map((p) => p.status), ["ready", "ready"], "nothing on its way");
+  assert.match(String(stored.parts[0]!.error), /fee went up/);
+  assert.equal(w.submits.length, 0, "not sent one by one at the new fee");
+  assert.equal(w.paidOut.length, 0);
+  const stopped = await C.stopCashOutRest({ id: run.id }, w.store);
+  assert.ok(stopped && stopped.status === "done", "the rest can be stopped: the money stays private");
+});
+
+await test("from the wallet (Hide my wallet off), the parts always go one by one", async () => {
+  const ten = note($(10)), seven = note($(7)), four = note($(4));
+  const w = world([ten, seven, four]);
+  const plan = C.planCashOutFrom($(20), [ten, seven, four]);
+  assert.ok(plan.ok);
+  const amounts = Object.fromEntries([ten, seven, four].map((n) => [n.id, n.amountWei]));
+  const run = C.newCashOutRun({ chainId: 8453, pool: POOL, asset: ASSET, owner: OWNER, to: TO, relay: false, feeBps: 50, parts: plan.parts, noteIds: plan.noteIds, noteAmounts: amounts });
+  assert.equal(run.feeBps, 50, "the fee confirmed is kept with the run");
+  await w.store.save(run);
+  const done = await C.runCashOutAcross(run, w.together);
+  assert.equal(done.status, "done");
+  assert.equal(w.togetherSends.length, 0);
+  assert.equal(w.submits.length, 3);
+});
+
+await test("after a part went on its own, the two left go together", async () => {
+  const ten = note($(10)), seven = note($(7)), four = note($(4));
+  const w = world([ten, seven, four]);
+  const run = runFor(w, $(21), [ten, seven, four]);
+  await w.store.save(run);
+  // the first part was sent before this run could send together (an older tab), and landed
+  await C.runCashOutAcross(run, { ...w.deps, shouldStop: (() => { let n = 0; return () => n++ > 0; })() });
+  assert.equal((await w.store.load(run.id))!.parts[0]!.status, "paid");
+  const done = await C.runCashOutAcross(run, w.together);
+  assert.equal(done.status, "done");
+  assert.equal(w.submits.length, 1);
+  assert.deepEqual(w.togetherSends.map((x) => x.length), [2]);
+  assert.equal(toTO(w), $(21));
+});
+
+await test("the app's rule: an older relay or a clear refusal goes one by one; a fee that went up or a maybe-sent never does", async () => {
+  const { cashOutTogetherRefused } = await import("../src/lib/cashOutSplit");
+  const { RelaySubmitError } = await import("../src/lib/relay/client");
+  // an older relay answers an action it doesn't know with 400 bad_request "Unknown action."
+  for (const code of ["bad_request", "batch_big", "batch_network", "batch_parts", "batch_pool", "gas_most", "busy", "rate_limit", "check_failed", "AlreadySpent"]) {
+    assert.equal(cashOutTogetherRefused(new RelaySubmitError("x", code)), true, code);
+  }
+  for (const code of ["fee_moved", "maybe_sent", "rpc", "network", "error", "internal", "in_flight"]) {
+    assert.equal(cashOutTogetherRefused(new RelaySubmitError("x", code)), false, code);
+  }
 });
 
 console.log(`\n${passed} cash-out-across checks passed`);
