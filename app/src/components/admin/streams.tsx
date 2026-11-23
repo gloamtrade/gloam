@@ -5,7 +5,9 @@
  * Relay, and product events. Each mark is one real event, newest on the
  * right; red is only ever a failure.
  */
-import { getNetwork, isNetworkKey } from "@/lib/networks";
+import { getNetwork, isNetworkKey, solanaSlot } from "@/lib/networks";
+import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
+import type { SolanaMetrics } from "@/lib/solanaRings/metrics";
 import { relayChainName } from "@/lib/bridge";
 import type { RecentRow } from "@/lib/onchainMetrics";
 import type { StoredEvent } from "@/lib/tractionStore";
@@ -25,9 +27,31 @@ const KIND_WORD: Record<RecentRow["kind"], string> = {
 
 const perDay = (v: number) => `${nShort(v)} a day`;
 
+/** Solana's row of marks: deposits, private payments and cash-outs (accounts opened are not vault transactions). */
+function SolanaTicks({ sol }: { sol: SolanaMetrics }) {
+  const marks: Mark[] = sol.recent
+    .filter((r) => r.kind !== "opened")
+    .sort((a, b) => a.ts - b.ts || Number(a.block) - Number(b.block))
+    .map((r) => ({
+      tone: r.kind === "transfer" ? "private" : "public",
+      title: `${r.title}${r.kind === "deposit" || r.kind === "cashout" ? `, ${fmtAmountLabel(r.detail)}` : ""}${r.ts ? `, ${agoMs(r.ts * 1000)}` : `, slot ${r.block}`}`,
+    }));
+  return (
+    <TickRow
+      label={sol.label}
+      marks={marks}
+      right={sol.error && !sol.lastActivity ? "read failed" : sol.lastActivity ? agoMs(sol.lastActivity * 1000) : "none yet"}
+      rightTone={sol.error ? "danger" : "mute"}
+    />
+  );
+}
+
 /** On-chain vault transactions, one row per network. */
 export function VaultStream({ side }: { side: Side }) {
   const { agg, nets, oc } = side;
+  const sol = SOLANA_RINGS_ENABLED ? side.solana : null;
+  const solAt = sol ? solanaSlot(nets.map((m) => m.key)) : nets.length;
+  const networks = nets.length + (sol ? 1 : 0);
   // Transactions a day: the money days (30) when read, else the chain's 14.
   const money = sideRevenueDays(side);
   const chainDays = side.isMain && agg?.sinceLaunch?.length ? agg.sinceLaunch.slice(-30) : (agg?.daily ?? []).filter((d) => !side.isMain || d.day >= MAINNET_DAY);
@@ -38,7 +62,7 @@ export function VaultStream({ side }: { side: Side }) {
         return { label: fmtDay(d.day), axis: dayOfMonth(d.day), value: v, display: `${n(v)} transactions` };
       });
   const total = agg ? agg.deposits + agg.transfers + agg.cashouts + agg.trades : 0;
-  const readFailed = nets.filter((m) => m.error).length;
+  const readFailed = nets.filter((m) => m.error).length + (sol?.error ? 1 : 0);
   const windowTotal = points.reduce((a, p) => a + p.value, 0);
 
   if (!oc || !agg) {
@@ -52,7 +76,7 @@ export function VaultStream({ side }: { side: Side }) {
     <StreamCard
       icon={<StreamIcon kind="vault" />}
       title="Vault activity"
-      sub={`${nets.length} ${nets.length === 1 ? "network" : "networks"} · chain read ${fmtAge(oc.ageSec)}`}
+      sub={`${networks} ${networks === 1 ? "network" : "networks"} · chain read ${fmtAge(oc.ageSec)}`}
       elapsed={agg.lastActivity ? agoMs(agg.lastActivity * 1000) : "None yet"}
       tally={[
         { value: total, word: "landed" },
@@ -74,7 +98,7 @@ export function VaultStream({ side }: { side: Side }) {
         </div>
       }
     >
-      {nets.map((m) => {
+      {nets.map((m, i) => {
         const net = getNetwork(m.key);
         const marks: Mark[] = [...m.recent]
           .sort((a, b) => a.ts - b.ts || Number(a.block) - Number(b.block))
@@ -82,7 +106,7 @@ export function VaultStream({ side }: { side: Side }) {
             tone: r.kind === "transfer" || r.kind === "trade" ? "private" : "public",
             title: `${KIND_WORD[r.kind]}${r.kind === "deposit" || r.kind === "cashout" ? `, ${fmtAmountLabel(r.detail)}` : ""}${r.ts ? `, ${agoMs(r.ts * 1000)}` : `, block ${r.block}`}`,
           }));
-        return (
+        const row = (
           <TickRow
             key={m.key}
             label={adminName(net)}
@@ -91,7 +115,10 @@ export function VaultStream({ side }: { side: Side }) {
             rightTone={m.error ? "danger" : "mute"}
           />
         );
+        // Solana's row right after Base, as in the network menu
+        return sol && i === solAt - 1 ? [row, <SolanaTicks key="solana" sol={sol} />] : row;
       })}
+      {sol && solAt === 0 && <SolanaTicks sol={sol} />}
     </StreamCard>
   );
 }

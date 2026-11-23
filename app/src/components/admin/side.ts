@@ -7,8 +7,9 @@
 import { useMemo } from "react";
 import { getNetwork } from "@/lib/networks";
 import type { CreatorFees } from "@/lib/creatorFees";
-import type { CombinedMetrics, CombinedRevenue, DayRow, NetworkMetrics, OnchainMetrics, RecentRow } from "@/lib/onchainMetrics";
+import type { CombinedMetrics, CombinedRevenue, DayRow, NetworkMetrics, OnchainMetrics } from "@/lib/onchainMetrics";
 import type { RelayVolume } from "@/lib/relayVolume";
+import { withSolana, type FeedRow, type SolanaMetrics } from "@/lib/solanaRings/metrics";
 import {
   MAINNET_DAY,
   NEW_EVENTS,
@@ -38,12 +39,14 @@ export type Side = {
   data: MetricsPayload | null;
   oc: OnchainMetrics | null;
   ocError: string | null;
-  /** This side's totals; undefined on a snapshot cached before the split. */
+  /** This side's totals, Solana's in on mainnet; undefined on a snapshot cached before the split. */
   agg: CombinedMetrics | undefined;
   rev: CombinedRevenue | undefined;
   revenue: RevenueTotals | null;
-  /** This side's networks only. */
+  /** This side's EVM networks only. */
   nets: NetworkMetrics[];
+  /** Gloam on Solana, on mainnet while it is on: kept apart from `nets`, added into `agg`. */
+  solana: SolanaMetrics | null;
   nameOf: (m: NetworkMetrics) => string;
   prod: SideProduct;
   claim: {
@@ -62,8 +65,8 @@ export type Side = {
   creator: CreatorFees | null;
   relay: MetricsPayload["relay"];
   liveRelay: LiveRelay | null;
-  /** This side's newest vault transactions, newest first. */
-  recentTx: RecentRow[];
+  /** This side's newest vault transactions, Solana's included, newest first. */
+  recentTx: FeedRow[];
   /** Assets moved with no dollar price, named next to the dollar figures. */
   noPrice: string;
   heldNoPrice: string;
@@ -75,7 +78,10 @@ export function useSide(data: MetricsPayload | null, env: Env): Side {
   const oc = data?.onchain && "networks" in data.onchain ? data.onchain : null;
   const ocError = data?.onchain && !("networks" in data.onchain) ? data.onchain.error : null;
   const isMain = env === "mainnet";
-  const agg = oc ? (isMain ? oc.mainnet : oc.testnet) : undefined;
+  const solana = isMain && oc?.solana ? oc.solana : null;
+  const evmAgg = oc ? (isMain ? oc.mainnet : oc.testnet) : undefined;
+  // Solana is one more mainnet: its money, counts, wallets and days go into the totals.
+  const agg = useMemo(() => (evmAgg && solana ? withSolana(evmAgg, solana) : evmAgg), [evmAgg, solana]);
   const counters = prod.counters;
 
   const funnel = useMemo(() => {
@@ -186,8 +192,7 @@ export function useSide(data: MetricsPayload | null, env: Env): Side {
   const liveRelay = relay && "enabled" in relay && relay.enabled ? relay : null;
   // This side's own newest rows: the combined list keeps only the newest few
   // across every network, so a busy side would push the other one out of it.
-  const recentTx = nets
-    .flatMap((m) => m.recent)
+  const recentTx: FeedRow[] = [...nets.flatMap((m) => m.recent), ...(solana?.recent ?? [])]
     .sort((a, b) => b.ts - a.ts || Number(b.block) - Number(a.block))
     .slice(0, 25);
 
@@ -202,6 +207,7 @@ export function useSide(data: MetricsPayload | null, env: Env): Side {
     rev,
     revenue: rev ? revenueTotals(rev) : null,
     nets,
+    solana,
     nameOf,
     prod,
     claim,
@@ -214,7 +220,7 @@ export function useSide(data: MetricsPayload | null, env: Env): Side {
     relay,
     liveRelay,
     recentTx,
-    noPrice: notInDollars(nets, nameOf),
+    noPrice: [notInDollars(nets, nameOf), ...(solana?.revenue.unpriced ?? []).map((sym) => `${sym} (${solana!.label})`)].filter(Boolean).join(", "),
     heldNoPrice: [...new Set(nets.flatMap((m) => (m.unpriced ?? []).map((sym) => `${sym} (${nameOf(m)})`)))].join(", "),
   };
 }

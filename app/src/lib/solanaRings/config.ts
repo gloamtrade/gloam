@@ -26,6 +26,9 @@ export function walletChain(network: RingsNetwork = SOLANA_RINGS_NETWORK): strin
 /** Gloam's proxy paths. Absolute URLs are made from the page's origin (ringsUrls). */
 export const RINGS_PROXY_PATHS = { rpc: "/api/solana/rpc", spr: "/api/solana/spr", relay: "/api/solana/relay" } as const;
 
+/** Where the app reports a wallet add that landed, for /admin's counts (app/api/solana/added). */
+export const RINGS_ADDED_PATH = "/api/solana/added";
+
 export function ringsUrls(origin: string): { rpc: string; spr: string; relay: string } {
   const o = origin.replace(/\/+$/, "");
   return { rpc: o + RINGS_PROXY_PATHS.rpc, spr: o + RINGS_PROXY_PATHS.spr, relay: o + RINGS_PROXY_PATHS.relay };
