@@ -2,6 +2,7 @@ import { NextResponse, after } from "next/server";
 import { logSafe } from "@/lib/logSafe";
 import { clientIp } from "@/lib/mcpRemote/rateLimit";
 import { afterRelaySend, bindRelaySpend, relayFlowOf, unbindRelaySpend, type BoundSpend } from "@/lib/partnerAttribution";
+import { BATCH_MAX_PARTS } from "@/lib/relay/batch";
 import {
   RelayError,
   checkChainRateLimit,
@@ -13,6 +14,7 @@ import {
   relayNameClaim,
   relayStatus,
   relayTransfer,
+  relayTransferBatch,
   relayUnshield,
   relayVaultSwap,
   relayVaultSwapExit,
@@ -33,7 +35,10 @@ export async function GET() {
 
 /**
  * Submit an already-proven private action through the Gloam relay.
- * Body: { chainId, action: "transfer" | "unshield" | "memo" | "swap" | "swapExit" | "nameClaim", ...args }
+ * Body: { chainId, action: "transfer" | "transferBatch" | "unshield" | "memo" | "swap" | "swapExit" | "nameClaim", ...args }
+ * "transferBatch" takes { parts: [{ proof, root, nullifier, commitments, memo? }] }: one
+ * payment in parts, sent as one transaction (lib/relay/batch). Each part counts against
+ * the rate limits as the send it replaces. It carries no partner code.
  * Returns { ok: true, hash } as soon as the transaction is sent; the client
  * waits for the receipt itself. A transfer also returns `memoTicket` for its
  * payment (commitments[0]), null when the relay has no memo secret: sent back
@@ -62,6 +67,13 @@ export async function POST(req: Request) {
     await checkRateLimit(requester);
     // payment messages have budgets of their own (lib/relay/server holdMemoSlot)
     if (body.action !== "memo") await checkChainRateLimit(net, requester);
+    // a payment in parts counts each part as the send it replaces
+    if (body.action === "transferBatch" && Array.isArray(body.parts)) {
+      for (let i = 1; i < Math.min(body.parts.length, BATCH_MAX_PARTS); i++) {
+        await checkRateLimit(requester);
+        await checkChainRateLimit(net, requester);
+      }
+    }
     // bound only once the relay's checks, dry run and holds passed (beforeBroadcast), never waited on
     const flow = partnerCode !== undefined ? relayFlowOf(body) : null;
     let bound: Promise<BoundSpend | null> | undefined;
@@ -88,6 +100,9 @@ export async function POST(req: Request) {
         const payment = (body.commitments as string[])[0]!;
         return NextResponse.json({ ok: true, hash, memoTicket: memoTicket(net.chainId, payment) });
       }
+      case "transferBatch":
+        hash = await relayTransferBatch(net, body, requester);
+        break;
       case "unshield":
         hash = await relayUnshield(net, body, requester, hooks);
         break;

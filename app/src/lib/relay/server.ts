@@ -68,6 +68,7 @@
  * signs the memo tickets; unset, no tickets go out and every payment message
  * but a partner key's shares the small allowance.
  */
+import { BATCH_MAX_PARTS, BATCH_MIN_PARTS, MULTICALL3, batchCalls, batchCalldata, multicall3Abi, type BatchPart } from "./batch";
 import {
   BaseError,
   ContractFunctionRevertedError,
@@ -734,6 +735,21 @@ export function sendGasMost(chainId: number, kind: Call["kind"]): bigint | null 
   return most * (GAS_MOST_FACTOR[chainId] ?? 1n);
 }
 
+/**
+ * What a batch may use: each part's transfer and message within its own room, summed.
+ * One transfer with its tree insert is about 1.7M on Base (sim-pay-across-fork), a
+ * message about 60k. Like sendGasMost: none on Tempo, room for the parent chain where
+ * GAS_MOST_FACTOR says.
+ */
+export const BATCH_TRANSFER_GAS_MOST = 2_200_000n;
+export const BATCH_MEMO_GAS_MOST = 200_000n;
+export function batchGasMost(chainId: number, parts: readonly Pick<BatchPart, "memo">[]): bigint | null {
+  if (isTempoChain(chainId)) return null;
+  const memos = parts.filter((p) => p.memo).length;
+  return (BigInt(parts.length) * BATCH_TRANSFER_GAS_MOST + BigInt(memos) * BATCH_MEMO_GAS_MOST) * (GAS_MOST_FACTOR[chainId] ?? 1n);
+}
+export const BATCH_TOO_BIG_MESSAGE = "This payment is too big to send in one go here. It goes in parts instead.";
+
 function padGas(est: bigint) {
   const padded = (est * 13n) / 10n;
   return padded > GAS_CAP ? GAS_CAP : padded;
@@ -755,7 +771,9 @@ export type Call =
   | { kind: "swap"; router: Address; args: readonly [SwapSpend, SwapDeposit, SwapDeposit, Hex] }
   | { kind: "swapV3"; router: Address; args: readonly [SwapSpend, SwapDeposit, SwapDeposit, Hex, Address, bigint] }
   | { kind: "swapExit"; router: Address; args: readonly [Address, Required<EscrowKey>, Address, Hex] }
-  | { kind: "nameClaim"; registrar: Address; args: ReturnType<typeof claimArgs> };
+  | { kind: "nameClaim"; registrar: Address; args: ReturnType<typeof claimArgs> }
+  /** A payment in parts: each part's transfer, then its message, in one Multicall3 call (lib/relay/batch). */
+  | { kind: "batch"; parts: readonly BatchPart[] };
 
 /** Public addresses a call pays out to: a cash out's and a swap exit's. */
 function publicRecipients(call: Call): Address[] {
@@ -899,6 +917,8 @@ function callTx(net: GloamNetwork, call: Call): { to: Address; data: Hex } | nul
       return { to: call.router, data: encodeFunctionData({ abi: swapV3CallAbi, functionName: "swap", args: call.args }) };
     case "nameClaim":
       return { to: call.registrar, data: encodeFunctionData({ abi: nameClaimCallAbi, functionName: "claim", args: call.args }) };
+    case "batch":
+      return { to: MULTICALL3, data: batchCalldata(net.pool!, net.payMemo?.address ?? null, call.parts) };
     default:
       return null;
   }
@@ -1094,6 +1114,8 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
         return pub.estimateContractGas({ address: call.router, abi: swapV3CallAbi, functionName: "exit", args: call.args, account });
       case "nameClaim":
         return pub.estimateContractGas({ address: call.registrar, abi: nameClaimCallAbi, functionName: "claim", args: call.args, account });
+      case "batch":
+        return pub.estimateContractGas({ address: MULTICALL3, abi: multicall3Abi, functionName: "aggregate3", args: [batchCalls(pool, net.payMemo?.address ?? null, call.parts)], account });
     }
   };
   let fees: FeeCap | undefined;
@@ -1118,6 +1140,8 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
         return wallet.writeContract({ address: call.router, abi: swapV3CallAbi, functionName: "exit", args: call.args, gas, nonce, chain: net.chain, account: from, ...fees });
       case "nameClaim":
         return wallet.writeContract({ address: call.registrar, abi: nameClaimCallAbi, functionName: "claim", args: call.args, gas, nonce, chain: net.chain, account: from, ...fees });
+      case "batch":
+        return wallet.writeContract({ address: MULTICALL3, abi: multicall3Abi, functionName: "aggregate3", args: [batchCalls(pool, net.payMemo?.address ?? null, call.parts)], gas, nonce, chain: net.chain, account: from, ...fees });
     }
   };
 
@@ -1132,8 +1156,10 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
   if ((call.kind === "make" || call.kind === "pump") && gas > STATION_MAX_ESTIMATE) {
     throw new RelayError(STATION_ESTIMATE_MESSAGE, 422, "station_gas");
   }
-  const most = sendGasMost(net.chainId, call.kind);
-  if (most !== null && gas > most) throw new RelayError(GAS_TOO_MUCH_MESSAGE, 422, "gas_most");
+  const most = call.kind === "batch" ? batchGasMost(net.chainId, call.parts) : sendGasMost(net.chainId, call.kind);
+  if (most !== null && gas > most) throw new RelayError(call.kind === "batch" ? BATCH_TOO_BIG_MESSAGE : GAS_TOO_MUCH_MESSAGE, 422, call.kind === "batch" ? "batch_big" : "gas_most");
+  // a batch padded past what one transaction may carry goes in parts instead, never short of gas
+  if (call.kind === "batch" && (gas * 13n) / 10n > GAS_CAP) throw new RelayError(BATCH_TOO_BIG_MESSAGE, 422, "batch_big");
 
   const holds: Hold[] = [];
   let mayBeOut = false;
@@ -1151,7 +1177,15 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
         senders: sendersOf(opts.sender?.()),
       }))
     );
-    holds.push(await (call.kind === "memo" ? holdMemoSlot(net, call.budget) : holdNetworkSlot(net)));
+    if (call.kind === "batch") {
+      // each part counts as the send it would have been, and each message as the payer's own
+      for (const part of call.parts) {
+        holds.push(await holdNetworkSlot(net));
+        if (part.memo) holds.push(await holdMemoSlot(net, "paid"));
+      }
+    } else {
+      holds.push(await (call.kind === "memo" ? holdMemoSlot(net, call.budget) : holdNetworkSlot(net)));
+    }
     notSent = startBeforeBroadcast(net, call, opts.beforeBroadcast);
 
     // one send at a time per relay account and chain, each with the next nonce; with
@@ -1404,6 +1438,99 @@ export async function relayTransfer(net: GloamNetwork, body: Record<string, unkn
     { kind: "transfer", args: [proof, root, nullifier, [c0, c1]] },
     { sender: () => sender, beforeBroadcast: hooks.beforeBroadcast, onEnd: hooks.onEnd }
   );
+}
+
+/**
+ * A payment in parts, sent as one transaction (lib/relay/batch): BATCH_MIN_PARTS to
+ * BATCH_MAX_PARTS proven transfers, each with an optional message for its own payment,
+ * in one Multicall3 aggregate3 call that fails whole if any call fails. As strict as
+ * the single paths, part by part:
+ *   - only this network's vault (transfer) and memo board (postMemo), no value, nothing
+ *     else: the calls are built here, a request never names a target or a function
+ *   - every part's nullifier locked (lib/relay/inflight) before anything is read, all or
+ *     none; a part whose earlier send may still land refuses the whole batch
+ *   - every part's note unspent and root known, and no nullifier or new note twice
+ *   - a message only for its own part's payment, which the transfer before it puts in
+ *     the vault in the same call; it counts against that payment's own few messages
+ *   - the dry run, the gas ceiling, the spend cap and a slot per part (and per message)
+ *     as if each had gone alone; batchGasMost caps the gas
+ * Anything the batch can't do here (too big, a part the vault refuses) is refused with
+ * nothing sent, and the app sends the parts one by one instead.
+ */
+export async function relayTransferBatch(net: GloamNetwork, body: Record<string, unknown>, sender?: Sender): Promise<Hex> {
+  const raw = body.parts;
+  if (!Array.isArray(raw) || raw.length < BATCH_MIN_PARTS || raw.length > BATCH_MAX_PARTS) {
+    throw new RelayError(`A payment in one go has ${BATCH_MIN_PARTS} to ${BATCH_MAX_PARTS} parts.`, 400, "batch_parts");
+  }
+  const parts: BatchPart[] = raw.map((r) => {
+    const p = (r ?? {}) as Record<string, unknown>;
+    const commitments = p.commitments;
+    if (!Array.isArray(commitments) || commitments.length !== 2) throw new RelayError("Invalid commitments.");
+    const part: BatchPart = {
+      proof: asProof(p.proof),
+      root: asBytes32(p.root, "root"),
+      nullifier: asBytes32(p.nullifier, "nullifier"),
+      commitments: [asBytes32(commitments[0], "commitment"), asBytes32(commitments[1], "commitment")],
+    };
+    if (p.memo !== undefined && p.memo !== null) {
+      if (!net.payMemo) throw new RelayError("Payment messages are not live on this network yet.", 400, "no_memo");
+      part.memo = asMemo(p.memo);
+    }
+    return part;
+  });
+  const nullifiers = parts.map((p) => p.nullifier.toLowerCase());
+  const outputs = parts.flatMap((p) => p.commitments.map((c) => c.toLowerCase()));
+  if (new Set(nullifiers).size !== nullifiers.length) throw new RelayError("A part is in this payment twice.", 400, "batch_repeat");
+  if (new Set(outputs).size !== outputs.length) throw new RelayError("A new note is in this payment twice.", 400, "batch_repeat");
+
+  // every part's lock, all or none, before anything is read from the chain
+  const keys = parts.map((p) => inflightKey(net.chainId, p.nullifier));
+  const locks: InflightLock[] = [];
+  const releaseAll = async () => {
+    await Promise.all(locks.map((l) => l.release()));
+  };
+  try {
+    for (const key of keys) {
+      const lock = await takeInflight(key, inflightTtlSec(net.chainId));
+      if (!lock) throw new RelayError(IN_FLIGHT_MESSAGE, 409, "in_flight");
+      locks.push(lock);
+    }
+  } catch (e) {
+    await releaseAll();
+    if (e instanceof LockStoreDown) throw relayOff();
+    throw e;
+  }
+  const lock: InflightLock = { key: keys.join(","), store: locks[0]!.store, release: releaseAll };
+  let keep = false;
+  try {
+    for (const key of keys) await assertEarlierSendSettled(net, key);
+    for (const p of parts) await precheckSpend(net, p.root, p.nullifier);
+    // each message is the payer's own, against its payment's few
+    for (const p of parts) {
+      if (!p.memo) continue;
+      const hit = await relayCount(`memo|${net.chainId}|${p.commitments[0].toLowerCase()}|payer`, "relay-memo", MEMOS_PER_PAYMENT, Date.now(), 86_400);
+      if (!hit.allowed) throw new RelayError("A message for this payment was already sent.", 409, "memo_sent");
+    }
+    const hash = await submit(
+      net,
+      { kind: "batch", parts },
+      {
+        onMaybeSent: () => {
+          keep = true;
+        },
+        sender: () => sender,
+        lock,
+        // every part's spend is on record with this one transaction
+        onSent: async (sent) => {
+          await Promise.all(keys.map((k) => recordSent(k, sent)));
+        },
+      }
+    );
+    keep = true;
+    return hash;
+  } finally {
+    if (!keep) await releaseAll();
+  }
 }
 
 type UnshieldCall = Extract<Call, { kind: "unshield" }>;

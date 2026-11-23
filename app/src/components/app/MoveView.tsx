@@ -81,6 +81,7 @@ import {
   setRelayPreferred,
   type RelayNetworkStatus,
 } from "@/lib/relay/client";
+import { batchesOn } from "@/lib/relay/batch";
 import { gasHighMessage } from "@/lib/relay/gasCeiling";
 import { RelayGasNotice } from "./RelayGasNotice";
 import { PaymentRequestBanner, RequestPaymentCard } from "./PaymentRequest";
@@ -3170,7 +3171,7 @@ export function MoveView() {
                     {acrossPlan && selected && (
                       <p aria-live="polite" className={`mt-2 text-[12.5px] leading-relaxed ${acrossPlan.ok ? "text-mute" : "text-danger"}`}>
                         {acrossPlan.ok
-                          ? `Sent as ${acrossPlan.parts.length} private payments from your balance.${relayOn ? "" : " Turn on Hide my wallet to send them in one go."}`
+                          ? `Sent as ${acrossPlan.parts.length} private payments from your balance${batchesOn(network.chainId) ? ", in one transaction" : ""}.${relayOn ? "" : " Turn on Hide my wallet to send them in one go."}`
                           : acrossPlan.reason === "over_total"
                             ? `That's more than your private balance in ${assetLabel(selected.asset)}. You can send up to ${formatAssetLabel(acrossPlan.most, selected.asset)}.`
                             : `That needs too many payments at once. Send up to ${formatAssetLabel(acrossPlan.most, selected.asset)} now, then the rest.`}

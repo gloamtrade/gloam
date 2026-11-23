@@ -14,6 +14,9 @@
  *     board, and secures one with lib/claimSweep (a real transfer proof)
  *  4. a second payment is stopped after its first part and resumed: no part goes
  *     out twice
+ *  5. a third payment goes in ONE transaction (lib/relay/batch): every part and its
+ *     message through Multicall3's aggregate3, as the relay sends it, all or nothing;
+ *     its gas is set against steps 2 and 4, which went part by part
  * Checked: the parts add up, the change, every spent nullifier, the vault's
  * USDC accounting unchanged by private transfers, one submit per part.
  *
@@ -63,6 +66,7 @@ const auto = await import("../src/lib/autoReceive");
 const sweep = await import("../src/lib/claimSweep");
 const treeSync = await import("../src/lib/treeSync");
 const memo = await import("../src/lib/payMemo");
+const relayBatch = await import("../src/lib/relay/batch");
 const { circuitArtifactsFor } = await import("../src/lib/circuitArtifacts");
 type LocalNote = import("../src/lib/shield").LocalNote;
 type PayrollBatch = import("../src/lib/payroll").PayrollBatch;
@@ -337,7 +341,55 @@ try {
   assert.equal(landed2.reduce((s, p) => s + BigInt(p.amountWei), 0n), usd(9), "the person paid gets exactly $9 more");
   ok(`4. stopped after ${fmt(usd(5))}, resumed: ${resumed.rows.map((r) => fmt(BigInt(r.amount))).join(" + ")} = $9, 3 transfers in all, the first not resent, the person paid found ${landed2.length} more parts`);
 
-  console.log(`\n${results.length} of 5 checks passed. Fork at Base block ${forkBlock}; every transaction went to the local anvil.`);
+  // ---------------------------------------------------------------- 5. one transaction
+  console.log("5. a third payment, every part and its message in one transaction through Multicall3");
+  const mcCode = await client.getCode({ address: relayBatch.MULTICALL3 });
+  assert.equal(keccak256(mcCode!), relayBatch.MULTICALL3_CODEHASH, "Multicall3 on Base is the canonical one");
+  await giveUsdc(SENDER, usd(40));
+  await send(SENDER, USDC, erc20, "approve", [POOL, usd(40)]);
+  for (const a of [6, 5, 4]) await deposit(usd(a));
+  const notes3 = shield.activeSpendableNotes(shield.loadLocalNotes(SENDER, NET)).filter((n) => n.asset.toLowerCase() === USDC.toLowerCase());
+  const plan3 = across.planPayFrom(usd(14), notes3);
+  assert.ok(plan3.ok);
+  assert.deepEqual(plan3.parts, [usd(6), usd(5), usd(3)]);
+  const run3 = across.newPayRun({ chainId: NET.chainId, pool: POOL, asset: USDC, payer: SENDER, tag, label: "@forktest", parts: plan3.parts, noteIds: plan3.noteIds, note: "One go" });
+  await payroll.saveBatch(run3);
+  const singles3: Submitted[] = [];
+  const batches3: Hex[] = [];
+  const vaultUsdc3 = await readVault<bigint>("deposited", [USDC]);
+  const t3 = performance.now();
+  const done3 = await payroll.runPayroll(run3, {
+    ...engineDeps(singles3),
+    // the relay's batch, with an impersonated account in place of its HTTP: the same aggregate3 call it makes
+    submitTransferBatch: async (parts) => {
+      const hash = await send(RELAY, relayBatch.MULTICALL3, relayBatch.multicall3Abi, "aggregate3", [relayBatch.batchCalls(POOL, BOARD, parts)]);
+      batches3.push(hash);
+      return hash;
+    },
+    batchRefused: () => false,
+  });
+  const secs3 = ((performance.now() - t3) / 1000).toFixed(0);
+  assert.equal(done3.status, "done", `the run finished (rows: ${done3.rows.map((r) => `${r.status}${r.error ? ` ${r.error}` : ""}`).join(", ")})`);
+  assert.equal(batches3.length, 1, "one transaction");
+  assert.equal(singles3.length, 0, "no part went on its own");
+  const r3 = await client.getTransactionReceipt({ hash: batches3[0]! });
+  assert.equal(r3.status, "success");
+  const memoLogs = r3.logs.filter((l) => l.address.toLowerCase() === BOARD.toLowerCase());
+  assert.equal(memoLogs.length, 3, "three payment messages in the same transaction");
+  for (const r of done3.rows) {
+    assert.equal(r.txHash, batches3[0], "every part settled from the one transaction");
+    assert.equal(await readVault<boolean>("isSpent", [r.spendNullifier!]), true);
+    assert.equal(await readVault<boolean>("commitmentSeen", [r.paymentCommitment!]), true);
+    assert.equal(r.memoPosted, true);
+  }
+  assert.equal(await readVault<bigint>("deposited", [USDC]), vaultUsdc3, "the vault's USDC accounting unchanged");
+  const landed3 = await auto.receiveWaitingPayments(NET, RECIPIENT, { client, force: true });
+  assert.equal(landed3.reduce((s, p) => s + BigInt(p.amountWei), 0n), usd(14), "the person paid gets exactly $14");
+  const batchGas = gasOf.get(batches3[0]!)!;
+  const partGas2 = transferGas.reduce((a, b) => a + b, 0n) + memoGas.reduce((a, b) => a + b, 0n);
+  ok(`5. $14 as ${done3.rows.map((r) => fmt(BigInt(r.amount))).join(" + ")} in ONE transaction in ${secs3} s: gas ${batchGas} for 3 transfers + 3 messages, against ${partGas2} for step 2's 6 separate transactions (${(Number(batchGas) / Number(partGas2) * 100).toFixed(1)}%); the person paid found ${landed3.length} parts`);
+
+  console.log(`\n${results.length} of 6 checks passed. Fork at Base block ${forkBlock}; every transaction went to the local anvil.`);
   stopAnvil();
   process.exit(0);
 } catch (e) {
