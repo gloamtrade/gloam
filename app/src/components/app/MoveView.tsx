@@ -2716,6 +2716,18 @@ export function MoveView() {
         <div id="pay-card" className="gl-card min-w-0 scroll-mt-24 p-5 sm:p-7 [&>*:first-child]:mt-0">
           <DevKeysBanner compact />
 
+          {/* A title and one line, like Add, Swap and Public send here and Pay and Cash out on Solana. Receive titles its own parts. */}
+          {mode !== "receive" && (
+            <div className="min-w-0">
+              <h2 className="t-title text-foreground">{mode === "cashout" ? "Cash out" : "Pay privately"}</h2>
+              <p className="mt-1 text-[14px] leading-relaxed text-mute">
+                {mode === "cashout"
+                  ? "From your private balance back to any wallet."
+                  : "Send from your private balance to a Gloam address or a claim link."}
+              </p>
+            </div>
+          )}
+
           {!poseidonMode && (
             <p className="mt-5 rounded-xl bg-warn-soft px-4 py-3 text-[13.5px] leading-relaxed text-warn">
               The private vault is not connected right now. Try again shortly.
