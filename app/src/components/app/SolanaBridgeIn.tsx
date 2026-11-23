@@ -876,7 +876,7 @@ function BridgeSheet({
             )}
 
             {!picking && (flow.kind === "form" || flow.kind === "quoting") && (
-              <form onSubmit={walletPays ? startWallet : getAddress} className="mt-5 grid gap-4">
+              <form onSubmit={walletPays ? startWallet : getAddress} className="mt-5 grid grid-cols-[minmax(0,1fr)] gap-4">
                 <div>
                   <p className="text-[13px] text-mute">From</p>
                   <button
@@ -1030,7 +1030,11 @@ function BridgeSheet({
                   </p>
                 )}
 
-                <button type="submit" disabled={!canAsk} className={`btn ${route === "connect" ? "btn-ghost" : "btn-ink"} btn-lg btn-block`}>
+                <button
+                  type="submit"
+                  disabled={!canAsk}
+                  className={`btn ${route === "connect" ? "btn-ghost" : "btn-ink"} btn-lg btn-block h-auto min-h-12 whitespace-normal py-3 text-center leading-snug`}
+                >
                   {button.label}
                 </button>
                 {walletPays ? (
