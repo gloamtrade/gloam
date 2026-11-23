@@ -7,14 +7,15 @@ import { embeddedNeedsWallet, onEmbeddedNeedsWallet } from "@/lib/turnkeyBridge"
 import {
   GLOAM_SOLANA_ACCOUNT,
   createSolanaErrorText,
+  endGloamSolanaWallet,
   gloamSolanaRetries,
   gloamSolanaSignedOut,
-  makeGloamSolanaWallet,
+  gloamSolanaWalletFor,
   onGloamSolanaRetry,
   registerStandardWallet,
   setGloamSolana,
+  setGloamSolanaSigner,
   solanaAccountPlan,
-  turnkeyEd25519Signer,
   type RawPayloadClient,
 } from "@/lib/turnkeySolana";
 import { useNetwork } from "./NetworkProvider";
@@ -31,7 +32,8 @@ import { useNetwork } from "./NetworkProvider";
  * - Once it is there, it is announced on the page as the Solana wallet "Gloam
  *   account", signing through Turnkey with the session's own key, as the
  *   Ethereum account does (TurnkeyWagmiSync). Signing out takes it away, and
- *   Solana leaves it too (GloamSolanaAutoConnect).
+ *   Solana leaves it too (GloamSolanaAutoConnect). Leaving the app's pages only
+ *   takes it off the page: the same wallet comes back with the kit.
  */
 export function TurnkeySolanaSync() {
   const { authState, wallets, httpClient, session, createWalletAccounts, refreshWallets } = useTurnkey();
@@ -42,11 +44,11 @@ export function TurnkeySolanaSync() {
   const needsWallet = useSyncExternalStore(onEmbeddedNeedsWallet, embeddedNeedsWallet, () => false);
   const retries = useSyncExternalStore(onGloamSolanaRetry, gloamSolanaRetries, () => 0);
 
-  // The latest client values, read when something is signed.
-  const latest = useRef({ client: httpClient as unknown as RawPayloadClient | undefined, organizationId });
+  // The latest client values, read when something is signed (lib/turnkeySolana).
   useEffect(() => {
-    latest.current = { client: httpClient as unknown as RawPayloadClient | undefined, organizationId };
+    setGloamSolanaSigner({ client: httpClient as unknown as RawPayloadClient | undefined, organizationId });
   });
+  useEffect(() => () => setGloamSolanaSigner(null), []);
 
   // Signed in and then not, while the page is open: a sign-out, or the session ended.
   const wasSignedIn = useRef(false);
@@ -54,6 +56,7 @@ export function TurnkeySolanaSync() {
     if (signedIn) wasSignedIn.current = true;
     else if (wasSignedIn.current) {
       wasSignedIn.current = false;
+      endGloamSolanaWallet();
       gloamSolanaSignedOut();
     }
   }, [signedIn]);
@@ -101,15 +104,11 @@ export function TurnkeySolanaSync() {
 
   // Announce it as a Solana wallet while signed in.
   const address = plan.kind === "ready" ? plan.address : null;
+  // The same wallet object each time (gloamSolanaWalletFor): one the account layer
+  // kept while the kit was away signs again once the kit is back.
   useEffect(() => {
     if (!address || !organizationId) return;
-    const sign = turnkeyEd25519Signer(() => latest.current, address);
-    const wallet = makeGloamSolanaWallet({ address, sign });
-    const undo = registerStandardWallet(wallet, window);
-    return () => {
-      wallet.end();
-      undo();
-    };
+    return registerStandardWallet(gloamSolanaWalletFor(address), window);
   }, [address, organizationId]);
 
   // What the rest of the app reads (the wallet menu, Solana's connect card).

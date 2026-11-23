@@ -38,8 +38,10 @@ export function GloamSolanaAutoConnect() {
   const main = sol?.main ?? null;
   const usingGloam = main ? isGloamAccount(main.wallet) : false;
   const busy = Boolean(sol?.task);
-  // Reconnecting a wallet this device stayed signed in with (when the account layer does that).
-  const restoring = Boolean(sol && "restoring" in sol && sol.restoring === true);
+  // Reconnecting the wallet this device stayed signed in with (SolanaAccount): it decides first.
+  const restoring = Boolean(sol?.restoring);
+  // Connected to a Gloam account other than the signed-in one's (another person signed in since).
+  const otherAccount = Boolean(usingGloam && main && gloam.status === "ready" && gloam.address && main.account.address !== gloam.address);
 
   // The latest values, for the sign-out listener.
   const latest = useRef({ sol, usingGloam });
@@ -47,7 +49,7 @@ export function GloamSolanaAutoConnect() {
     latest.current = { sol, usingGloam };
   });
 
-  // Signed out of the Gloam wallet: its Solana account goes too (not a choice against it).
+  // Signed out of the Gloam wallet, or someone else signed in: its Solana account goes too (not a choice against it).
   const leaving = useRef(false);
   const tried = useRef<string | null>(null);
   useEffect(
@@ -75,13 +77,15 @@ export function GloamSolanaAutoConnect() {
   }, [mainKey]);
 
   useEffect(() => {
-    if (!leaving.current || !sol) return;
+    if (!sol) return;
+    if (otherAccount) leaving.current = true;
+    if (!leaving.current) return;
     if (!usingGloam) {
       leaving.current = false;
       return;
     }
     if (!busy) sol.disconnect();
-  }, [sol, usingGloam, busy, gloam.status]);
+  }, [sol, usingGloam, busy, gloam.status, otherAccount]);
 
   // Connect it once Solana is picked and nothing else is connected.
   useEffect(() => {

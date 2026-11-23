@@ -377,6 +377,40 @@ export function makeGloamSolanaWallet(opts: { address: string; sign: Ed25519Sign
   };
 }
 
+/* ---------------------------------------------------------------- the page's Gloam account */
+
+type SignerSource = { client: RawPayloadClient | null | undefined; organizationId: string | null | undefined };
+const NO_SIGNER: SignerSource = { client: null, organizationId: null };
+let source: SignerSource = NO_SIGNER;
+let current: { address: string; wallet: GloamSolanaWallet } | null = null;
+
+/** The kit's client and the session's organization, set by the kit while it runs (null when it stops). */
+export function setGloamSolanaSigner(next: SignerSource | null) {
+  source = next ?? NO_SIGNER;
+}
+
+/**
+ * The Gloam account for `address`, one wallet object for the page's life: the
+ * Solana account layer keeps the wallet it connected while the app's pages come
+ * and go (and the kit with them), so the kit hands the same one back when it
+ * starts again, signing through whatever client it runs with then. Another
+ * address (another person signed in) ends the old one.
+ */
+export function gloamSolanaWalletFor(address: string): GloamSolanaWallet {
+  if (current && current.address === address) return current.wallet;
+  current?.wallet.end();
+  const wallet = makeGloamSolanaWallet({ address, sign: turnkeyEd25519Signer(() => source, address) });
+  current = { address, wallet };
+  return wallet;
+}
+
+/** Signed out of the Gloam wallet: its Solana account signs nothing more. */
+export function endGloamSolanaWallet() {
+  current?.wallet.end();
+  current = null;
+  source = NO_SIGNER;
+}
+
 /** Whether a wallet the page found (lib/solanaWallet) is a Gloam account. */
 export function isGloamAccount(w: { name: string; wallet?: unknown } | null | undefined): boolean {
   const inner = w?.wallet as { gloamAccount?: unknown } | null | undefined;

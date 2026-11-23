@@ -21,7 +21,9 @@
  *    is refused
  *  - it is found the way a wallet extension is (Wallet Standard register-wallet and
  *    app-ready), passes lib/solanaWallet's checks, and leaves every app on sign-out,
- *    where signing stops and listeners hear the account go
+ *    where signing stops and listeners hear the account go; one wallet object per
+ *    page, so the one the Solana account layer kept while the kit was away signs
+ *    again when it is back
  *  - connecting on its own: when, and what a change of wallet says
  *  - Turnkey's answers and failures read in plain words
  *
@@ -66,14 +68,17 @@ import {
   createSolanaErrorText,
   declinedAfter,
   ed25519FromParts,
+  endGloamSolanaWallet,
   gloamAccountDeclined,
   gloamSolana,
+  gloamSolanaWalletFor,
   isGloamAccount,
   makeGloamSolanaWallet,
   onGloamSolana,
   registerStandardWallet,
   setGloamAccountDeclined,
   setGloamSolana,
+  setGloamSolanaSigner,
   shouldAutoConnect,
   signErrorText,
   solanaAccountPlan,
@@ -406,6 +411,44 @@ await test("it is found the way a wallet extension is, passes lib/solanaWallet's
   await assert.rejects(signSolanaMessage(d.found, { address: solA.address, account: { address: solA.address, chains: [] } }, accountMessage(0)), /Sign in to your Gloam wallet/);
   assert.equal(d.calls.length, calls, "nothing reached Turnkey after sign-out");
   await assert.rejects(connectSolana(d.found), /didn't share an account/);
+});
+
+await test("one Gloam account per page: the account layer's wallet signs again when the kit comes back; another person or a sign-out ends it", async () => {
+  const solB = solanaKey();
+  const keys = new Map([
+    [solA.address, solA.key],
+    [solB.address, solB.key],
+  ]);
+  const msg = accountMessage(0);
+  const kept = gloamSolanaWalletFor(solA.address);
+  const keptFound = asFound(kept);
+  const account = await connectSolana(keptFound);
+  // the kit not running (the person is on another page of the site): nothing signs
+  setGloamSolanaSigner(null);
+  await assert.rejects(signSolanaMessage(keptFound, account, msg), /Sign in to your Gloam wallet/);
+  // the kit back, with a new client: the same wallet object, signing again
+  const first = fakeTurnkey(keys);
+  setGloamSolanaSigner({ client: first.client, organizationId: ORG });
+  assert.equal(gloamSolanaWalletFor(solA.address), kept, "the same wallet object for the same account");
+  const sig = await signSolanaMessage(keptFound, account, msg);
+  const second = fakeTurnkey(keys);
+  setGloamSolanaSigner({ client: second.client, organizationId: ORG });
+  assert.ok(same(await signSolanaMessage(keptFound, account, msg), sig));
+  assert.equal(second.calls.length, 2, "signed with the client the kit runs with now");
+  // someone else signs in: the old account ends, the new one signs
+  const other = gloamSolanaWalletFor(solB.address);
+  assert.notEqual(other, kept);
+  assert.deepEqual(kept.accounts, []);
+  await assert.rejects(signSolanaMessage(keptFound, account, msg), /Sign in to your Gloam wallet/);
+  const otherFound = asFound(other);
+  await signSolanaMessage(otherFound, await connectSolana(otherFound), msg);
+  // a sign-out ends it, and drops the client
+  endGloamSolanaWallet();
+  assert.deepEqual(other.accounts, []);
+  const fresh = gloamSolanaWalletFor(solB.address);
+  assert.notEqual(fresh, other, "signing in again makes a new one");
+  await assert.rejects(signSolanaMessage(asFound(fresh), { address: solB.address, account: { address: solB.address, chains: [] } }, msg), /Sign in to your Gloam wallet/);
+  endGloamSolanaWallet();
 });
 
 /* ---------------------------------------------------------------- bytes */
