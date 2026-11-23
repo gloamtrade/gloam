@@ -121,8 +121,12 @@ resetMemoryKv();
   const all = await list.listUpdatesSubscribers();
   assert.equal(all.length, 3);
   assert.equal(all.find((s) => s.email === "cy@example.net")?.source, "site", "no source reads as the site");
-  assert.deepEqual(list.updatesSummary(all), { count: 3, bySource: { "sign-in": 1, settings: 1, site: 1 } });
-  n += 7;
+  assert.deepEqual(list.updatesSummary(all), { count: 3, bySource: { "sign-in": 1, settings: 1, site: 1, contest: 0 } });
+  // "contest" is the admin import's source; the public form can't claim it
+  await call("POST", { email: "dee@example.com", source: "contest" }, "203.0.113.3");
+  assert.equal((await list.listUpdatesSubscribers()).find((s) => s.email === "dee@example.com")?.source, "site", "a form can't say it came from a contest");
+  await list.unsubscribeEmail("dee@example.com");
+  n += 8;
 }
 
 // ------------------------------------------------------------ no wallet data, ever
@@ -275,6 +279,55 @@ resetMemoryKv();
   assert.equal(list.updatesCsv([{ email: "=cmd@example.com", day: "2026-11-05", source: "site", token: "t".repeat(32) }]).split("\r\n")[1]?.startsWith(`"'=cmd`), true, "a formula-looking cell is quoted as text");
   g.__testCookies = {};
   n += 14;
+}
+
+// ------------------------------------------------------------ add the contest entrants
+{
+  const imp = await import("../src/app/api/updates/import/route");
+  const { addContestEmailsToUpdates } = await import("../src/lib/updatesImport");
+  const { saveContestEntry } = await import("../src/lib/contestEntries");
+  const { saveWritingEntry } = await import("../src/lib/writingEntries");
+  const before = await list.listUpdatesSubscribers();
+  const onList = before[0]!;
+  const video = (handle: string, email: string | null) =>
+    ({ name: handle, handle, postUrl: `https://x.com/${handle}/status/1${handle.length}`, postUser: handle, postId: `1${handle.length}`, note: null, email, network: "robinhood" }) as never;
+  const writing = (handle: string, email: string | null) =>
+    ({ name: handle, handle, postUrl: `https://x.com/${handle}/status/2${handle.length}`, postUser: handle, postId: `2${handle.length}`, kind: "thread", title: null, email }) as never;
+  await saveContestEntry(video("vidone", "Vid.One@Example.com "));
+  await saveContestEntry(video("vidtwo", null));
+  await saveContestEntry(video("vidthree", "not an email"));
+  await saveContestEntry(video("vidfour", onList.email.toUpperCase()));
+  await saveWritingEntry(writing("writeone", "write.one@example.org"));
+  await saveWritingEntry(writing("writetwo", "vid.one@example.com"));
+
+  const post = (body: unknown, headers: Record<string, string> = { "Content-Type": "application/json", Origin: "https://www.gloam.trade" }) =>
+    imp.POST(new Request("https://www.gloam.trade/api/updates/import", { method: "POST", headers: { "x-forwarded-host": "www.gloam.trade", ...headers }, body: JSON.stringify(body) }));
+  g.__testCookies = {};
+  assert.equal((await post({ from: "contests" })).status, 401, "no admin session, nobody added");
+  g.__testCookies = { [ADMIN_COOKIE]: createAdminSession()! };
+  assert.equal((await post({ from: "contests" }, { "Content-Type": "text/plain", Origin: "https://www.gloam.trade" })).status, 403, "JSON only");
+  assert.equal((await post({ from: "contests" }, { "Content-Type": "application/json", Origin: "https://evil.example" })).status, 403, "another site can't call it");
+  assert.equal((await post({ emails: ["x@example.com"] })).status, 400, "no list of emails from the browser");
+  assert.equal((await list.listUpdatesSubscribers()).length, before.length, "nothing added by a refused call");
+
+  const res = await post({ from: "contests" });
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { ok: boolean; data: { found: number; added: number; already: number; skipped: number } };
+  assert.deepEqual(body.data, { found: 3, added: 2, already: 1, skipped: 1 }, "two new, one already on the list, one not an email, one entry without");
+  assert.ok(!JSON.stringify(body).includes("@"), "counts only, never an email");
+  const after = await list.listUpdatesSubscribers();
+  assert.equal(after.length, before.length + 2);
+  const vid = after.find((s) => s.email === "vid.one@example.com")!;
+  assert.equal(vid.source, "contest", "marked as from a contest");
+  assert.match(vid.token, list.UNSUBSCRIBE_TOKEN, "with their own unsubscribe link");
+  assert.equal(after.find((s) => s.email === "write.one@example.org")?.source, "contest");
+  assert.deepEqual(after.find((s) => s.email === onList.email), onList, "someone already on the list keeps their day, source and link");
+  assert.deepEqual(await addContestEmailsToUpdates(), { found: 3, added: 0, already: 3, skipped: 1 }, "running it again adds nobody");
+  assert.equal(list.updatesSummary(after).bySource.contest, 2);
+  assert.equal(await list.unsubscribeToken(vid.token), true, "a contest entrant can unsubscribe like anyone");
+  await list.unsubscribeEmail("write.one@example.org");
+  g.__testCookies = {};
+  n += 17;
 }
 
 // ------------------------------------------------------------ the browser helper

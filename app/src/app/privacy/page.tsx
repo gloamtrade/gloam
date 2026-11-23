@@ -281,8 +281,9 @@ export default function PrivacyPage() {
         entered, when you last changed your entry, and when you agreed that
         Gloam may use your video for marketing with credit to you. We use it to
         judge the contest, to reach and pay winners, and to show we have your
-        permission when we use a video, and for nothing else. Only the Gloam
-        team can read it. Your IP address is not kept with your entry; the
+        permission when we use a video. If you gave an email, we also add it to
+        the Gloam updates list; every update has a link to unsubscribe. Only
+        the Gloam team can read it. Your IP address is not kept with your entry; the
         rate limit holds a hashed copy for up to two hours. We delete entries
         90 days after winners are paid, except the name, handle, post link and
         consent time for a video we use, which we keep while we use it. Ask at{" "}

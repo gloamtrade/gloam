@@ -7,9 +7,15 @@
  * it was typed, and the route refuses any other field.
  */
 
-/** Where someone asked for updates. */
-export const UPDATES_SOURCES = ["sign-in", "settings", "site"] as const;
+/**
+ * Where someone joined: a form ("sign-in", "settings", "site"), or "contest"
+ * when the admin added the video and writing contest entrants' emails
+ * (api/updates/import). Only the forms' sources come in from the public route.
+ */
+export const UPDATES_SOURCES = ["sign-in", "settings", "site", "contest"] as const;
 export type UpdatesSource = (typeof UPDATES_SOURCES)[number];
+export const FORM_UPDATES_SOURCES = ["sign-in", "settings", "site"] as const satisfies readonly UpdatesSource[];
+export type FormUpdatesSource = (typeof FORM_UPDATES_SOURCES)[number];
 
 export const EMAIL_MAX = 254;
 
@@ -37,4 +43,9 @@ export function normalizeEmail(raw: unknown): string | null {
 
 export function isUpdatesSource(v: unknown): v is UpdatesSource {
   return typeof v === "string" && (UPDATES_SOURCES as readonly string[]).includes(v);
+}
+
+/** A source the public sign-up forms may give. "contest" is the admin's import only. */
+export function isFormUpdatesSource(v: unknown): v is FormUpdatesSource {
+  return typeof v === "string" && (FORM_UPDATES_SOURCES as readonly string[]).includes(v);
 }

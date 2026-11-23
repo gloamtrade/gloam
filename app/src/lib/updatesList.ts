@@ -144,7 +144,7 @@ export async function listUpdatesSubscribers(): Promise<UpdatesSubscriber[]> {
 
 /** How many are on the list, and from where. */
 export function updatesSummary(subs: UpdatesSubscriber[]): { count: number; bySource: Record<UpdatesSource, number> } {
-  const bySource: Record<UpdatesSource, number> = { "sign-in": 0, settings: 0, site: 0 };
+  const bySource: Record<UpdatesSource, number> = { "sign-in": 0, settings: 0, site: 0, contest: 0 };
   for (const s of subs) if (s.source in bySource) bySource[s.source]++;
   return { count: subs.length, bySource };
 }

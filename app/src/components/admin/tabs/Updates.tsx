@@ -9,7 +9,52 @@ import { useAdminResource } from "../data";
 import { n } from "../format";
 import { CsvLink, DataTable, Note, Notice, Panel, PanelSkeleton, StatStrip } from "../ui";
 
-type UpdatesData = { backend: string; count: number; bySource: { "sign-in": number; settings: number; site: number } };
+type UpdatesData = { backend: string; count: number; bySource: { "sign-in": number; settings: number; site: number; contest?: number } };
+type ContestImport = { found: number; added: number; already: number; skipped: number };
+
+/** Adds every video and writing contest entrant's email to the list (api/updates/import). */
+function AddContestEmails({ onDone }: { onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const go = async () => {
+    if (busy) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await fetch("/api/updates/import", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: "contests" }),
+      });
+      const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: ContestImport; error?: { message?: string } } | null;
+      if (!res.ok || !json?.ok || !json.data) throw new Error(json?.error?.message ?? `That didn't work (${res.status}).`);
+      const d = json.data;
+      setNote({
+        ok: true,
+        text: `Added ${n(d.added)} new from the contests. ${n(d.already)} were on the list already.${d.skipped ? ` ${n(d.skipped)} weren't valid emails.` : ""}`,
+      });
+      onDone();
+    } catch (e) {
+      setNote({ ok: false, text: e instanceof Error ? e.message : "That didn't work." });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mt-4">
+      <button type="button" className="btn btn-ghost btn-sm h-10" disabled={busy} aria-busy={busy} onClick={() => void go()}>
+        <BusyLabel busy={busy}>Add contest entrants</BusyLabel>
+      </button>
+      {note && (
+        <p className={`mt-2 text-[13px] ${note.ok ? "text-soft" : "text-danger"}`} role={note.ok ? "status" : "alert"}>
+          {note.text}
+        </p>
+      )}
+    </div>
+  );
+}
 type MailData = {
   mail: { on: boolean; reason: string | null; from: string; replyTo: string };
   backend: string;
@@ -438,7 +483,9 @@ export function UpdatesTab() {
           { label: "From sign-in", value: n(src["sign-in"]), sub: "Gloam wallet sign-in" },
           { label: "From Settings", value: n(src.settings), sub: "in the app" },
           { label: "From the site", value: n(src.site), sub: "footer field" },
+          { label: "From contests", value: n(src.contest ?? 0), sub: "video and writing" },
         ]}
+        cols={5}
       />
       {mail.err && !mail.data && <Notice tone="danger">{mail.err}</Notice>}
       {mail.data && <Compose data={mail.data} runner={runner} />}
@@ -453,6 +500,7 @@ export function UpdatesTab() {
               { key: "sign-in", label: "Sign-in", value: src["sign-in"], display: n(src["sign-in"]) },
               { key: "settings", label: "Settings", value: src.settings, display: n(src.settings) },
               { key: "site", label: "Site", value: src.site, display: n(src.site) },
+              { key: "contest", label: "Contests", value: src.contest ?? 0, display: n(src.contest ?? 0) },
             ].filter((s) => s.value > 0)}
           />
         </Panel>
@@ -460,7 +508,11 @@ export function UpdatesTab() {
           <p className="text-[14px] leading-relaxed text-soft">
             The CSV has each email, the day it joined and where, plus its unsubscribe link.
           </p>
-          <Note>Emails are kept alone: no wallet, address or IP is stored with them. Store: {data.backend}.</Note>
+          <AddContestEmails onDone={res.reload} />
+          <Note>
+            Add contest entrants puts every video and writing contest email on the list, marked Contests; anyone on it already stays as they
+            were. Each gets their own unsubscribe link. Emails are kept alone: no wallet, address or IP is stored with them. Store: {data.backend}.
+          </Note>
         </Panel>
       </div>
     </>

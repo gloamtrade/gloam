@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/adminAuth";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { KvUnavailableError, kvBackend } from "@/lib/partnersKv";
-import { isUpdatesSource, normalizeEmail } from "@/lib/updatesEmail";
+import { isFormUpdatesSource, normalizeEmail } from "@/lib/updatesEmail";
 import {
   UpdatesListFullError,
   listUpdatesSubscribers,
@@ -78,7 +78,7 @@ export async function POST(req: Request) {
 
   const email = normalizeEmail(body.email);
   if (!email) return fail(400, "That email doesn't look right. Check it and try again.");
-  const source = isUpdatesSource(body.source) ? body.source : "site";
+  const source = isFormUpdatesSource(body.source) ? body.source : "site";
 
   const hourly = await hitRateLimit(clientIp(req), "updates-subscribe", SUBSCRIBES_PER_HOUR, Date.now(), 3600);
   if (!hourly.allowed) {
