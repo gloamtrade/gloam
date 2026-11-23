@@ -762,7 +762,7 @@ export function TransparencyView() {
         </section>
 
         {/* the vault, live */}
-        <section id="ledger" className="mx-auto max-w-[1240px] scroll-mt-20 px-4 py-20 sm:px-6 sm:py-28">
+        <section id="ledger" className="mx-auto max-w-[1400px] scroll-mt-20 px-4 py-20 sm:px-7 sm:py-28">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-[640px]">
               <h2 className="t-display-l">The vault, live</h2>
