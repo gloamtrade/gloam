@@ -569,7 +569,13 @@ ok(!/\u2014/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /public/.test(bridgeIn
   const WALLET = "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8";
   const base = { route: "wallet" as const, busy: false, onMainnet: true, landingReady: true, amount: "25", stable: true, symbol: "USDG", overSource: false, refund: "", refundOk: true, addressName: "Robinhood Chain" };
   const b = (o: Partial<Parameters<typeof bridgeButton>[0]>) => bridgeButton({ ...base, ...o });
-  ok(b({}).ready && b({}).label === "Bridge 25.00 USDG from your wallet", "wallet ready: one button that bridges from it, amount in two places");
+  ok(b({}).ready && b({}).label === "Bridge 25 USDG from your wallet", "wallet ready: one button that bridges from it, the amount as typed");
+  ok(
+    b({ amount: "0.001", stable: false, symbol: "ETH" }).label === "Bridge 0.001 ETH from your wallet" &&
+      b({ amount: "1250.123456", stable: false, symbol: "ETH" }).label === "Bridge 1,250.123456 ETH from your wallet" &&
+      !/<0\.01/.test(b({ amount: "0.000001", stable: false, symbol: "ETH" }).label),
+    "the button says back exactly what was typed (0.001 ETH, never <0.01 ETH): two places is for balances and quotes"
+  );
   ok(!b({ amount: "" }).ready && b({ amount: "" }).label === "Enter an amount" && b({ amount: "0" }).label === "Enter an amount" && b({ amount: "0." }).label === "Enter an amount", "no amount: says to enter one");
   ok(b({ amount: "abc" }).label === "Check the amount" && b({ amount: "." }).label === "Check the amount" && !b({ amount: "1.2.3" }).ready, "an amount that isn't one: says so");
   ok(b({ amount: "0.5" }).label === "Enter at least 1.00 USDG" && b({ amount: "25001" }).label === "Enter at most 25,000.00 USDG", "the limits, in words");
@@ -588,6 +594,24 @@ ok(!/\u2014/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /public/.test(bridgeIn
   ok(b({ route: "connect", refund: WALLET }).ready && b({ route: "connect", refund: WALLET }).label === "Get a deposit address", "an address given: the deposit address");
   ok(b({ route: "address", overSource: true, refund: WALLET }).ready, "over the wallet's balance never blocks a deposit address (an exchange pays)");
   ok([b({}), b({ amount: "" }), b({ route: "connect", refundOk: false }), b({ overSource: true })].every((x) => !/—|happy to/i.test(x.label)), "no em dash, no stock phrases");
+
+  // Relay's refusals, said with the reason.
+  const { relayRefusal, PREVIEW_STAND_IN } = bridgeIn;
+  const { validRefundAddress } = await import("../src/lib/bridge");
+  const r = (code: string, message = "") => relayRefusal({ code, message }, { symbol: "ETH", chain: "Robinhood Chain", lands: "USDC" });
+  ok(/under Relay's minimum for ETH on Robinhood Chain/.test(r("AMOUNT_TOO_LOW") ?? "") && /minimum/.test(r("", "Amount is too low") ?? ""), "under Relay's minimum: says so, with the token and chain");
+  ok(/no route from ETH on Robinhood Chain to USDC on Solana/.test(r("NO_SWAP_ROUTES_FOUND", "no routes found") ?? "") && r("UNSUPPORTED_CHAIN") !== null && r("", "Origin chain 81457 not supported") !== null, "no route right now: says which route");
+  ok(/smaller amount/.test(r("INSUFFICIENT_LIQUIDITY") ?? "") && /smaller amount/.test(r("SWAP_IMPACT_TOO_HIGH") ?? ""), "too large for the liquidity there: says to try less");
+  ok(/doesn't hold enough ETH on Robinhood Chain/.test(r("INSUFFICIENT_FUNDS") ?? ""), "a wallet short of the amount: says so");
+  ok(r("UNKNOWN_ERROR", "something odd") === null && r("", "") === null, "no reason worth naming: null, the caller says try again");
+  ok(
+    [r("AMOUNT_TOO_LOW"), r("NO_QUOTES"), r("INSUFFICIENT_LIQUIDITY"), r("INSUFFICIENT_FUNDS")].every((x) => x && !/\u2014|happy to/i.test(x)),
+    "refusals: no em dash, no stock phrases"
+  );
+  ok(
+    validRefundAddress("evm", PREVIEW_STAND_IN.evm) && validRefundAddress("tvm", PREVIEW_STAND_IN.tvm) && validRefundAddress("bvm", PREVIEW_STAND_IN.bvm),
+    "a price's stand-in address is well formed for each kind of chain Relay is asked about"
+  );
 
   // The refund address used last time, per private account and kind of chain.
   const mem = new Map<string, string>();
@@ -717,6 +741,13 @@ ok(!/\u2014/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /public/.test(bridgeIn
   ok(/openSignInSheet\(/.test(sheet) && /<WalletConnectSheet/.test(sheet), "connecting uses the app's own sign-in: a Gloam wallet, a browser wallet or a wallet app");
   ok(/stableMax\(srcBalance, token\.decimals\)/.test(sheet) && /<SourceBalance/.test(sheet), "the wallet's balance with Max (exact, up to the limit)");
   ok(!/—/.test(sheet) && !/happy to/i.test(sheet), "no em dash, no stock phrases in the sheet");
+  ok(
+    /preview: true/.test(sheet) && /<LivePrice/.test(sheet) && /LIVE_PRICE_DEBOUNCE_MS/.test(sheet) && /LIVE_PRICE_REFRESH_MS/.test(sheet) && /You get about/.test(sheet) && /in your private balance/.test(sheet),
+    "the live price shows under the amount as soon as one is typed, after a pause, refreshed"
+  );
+  ok(/Getting a price…/.test(sheet) && /Try again/.test(sheet) && /<CostWarning quote=\{quote\}/.test(sheet) && /feeRows\(quote, "Relay fee"\)/.test(sheet), "loading, an error with Try again, the fee lines and the cost warning");
+  ok(/typedAmount\(flow\.quote\.send\.amount\)/.test(sheet) && /typedAmount\(q\.send\.amount\)/.test(sheet), "the review and the Sent line say back the amount as typed");
+  ok(/typedAmount\(amount\)/.test(evmSheet) && /typedAmount\(q\.send\.amount\)/.test(evmSheet) && !/Bridge \$\{displayAmountText\(amount\)\}/.test(evmSheet), "BridgeIn's button and review say back the amount as typed too");
 }
 
 // ---------------------------------------------------------------- the quote route, Relay faked
@@ -789,6 +820,51 @@ ok(!/\u2014/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /public/.test(bridgeIn
   res = await post({ ...base, refundTo: undefined, sender });
   ok(res.status === 502, "a token deposit that would send ETH along is refused, never handed to the wallet");
   relayReply = addressReply;
+
+  // The live price: the same order shape, nothing to act on comes back, no refund address needed yet.
+  {
+    res = await post({ ...base, refundTo: undefined, preview: true });
+    json = (await res.json()) as typeof json;
+    const pa = asked as unknown as Record<string, unknown>;
+    ok(res.status === 200 && json.ok && json.data?.depositAddress === "" && json.data.evmTxs === null && json.data.receive.amount === "19.842157", "a price: what lands, no deposit address, nothing to sign");
+    ok(pa.useDepositAddress === true && pa.refundTo === bridgeIn.PREVIEW_STAND_IN.evm && json.data?.refundTo === "", "priced as a deposit address would be, with a stand-in refund that never comes back");
+    res = await post({ ...base, refundTo: undefined, sender, preview: true });
+    json = (await res.json()) as typeof json;
+    const pw = asked as unknown as Record<string, unknown>;
+    ok(res.status === 200 && json.data?.evmTxs === null && pw.user === sender && pw.useDepositAddress === false, "a wallet's price: asked as that wallet paying, still nothing to sign back");
+    res = await post({ ...base, chainId: 728126428, symbol: "USDT", refundTo: undefined, preview: true });
+    ok(res.status === 200 && (asked as unknown as Record<string, unknown>).user === bridgeIn.PREVIEW_STAND_IN.tvm, "Tron priced before an address is typed");
+    res = await post({ ...base, refundTo: "", preview: false });
+    ok(res.status === 400, "a real order still needs the refund address");
+    relayReply = (b) => ({ ...addressReply(b), details: { ...addressReply(b).details, currencyIn: { amountUsd: "0.18", amount: b.amount } } });
+    res = await post({ ...base, chainId: 4663, symbol: "ETH", amount: "0.0001", refundTo: undefined, preview: true });
+    json = (await res.json()) as typeof json;
+    ok(res.status === 400 && /about \$0\.18, under the \$1 minimum/.test(json.error?.message ?? ""), "under the dollar floor: says how much it is and the minimum");
+    relayReply = addressReply;
+  }
+
+  // Relay says no: logged with its code, said with the reason.
+  {
+    const warned: unknown[][] = [];
+    const warn = console.warn;
+    console.warn = (...args: unknown[]) => void warned.push(args);
+    relayReply = () => ({ message: "no routes found", errorCode: "NO_SWAP_ROUTES_FOUND" });
+    res = await post({ ...base, chainId: 4663, symbol: "ETH", amount: "0.000000001", refundTo: undefined, preview: true });
+    json = (await res.json()) as typeof json;
+    ok(res.status === 400 && /no route from ETH on Robinhood Chain to USDC on Solana/.test(json.error?.message ?? ""), "no route: the reason, with the route");
+    const logged = JSON.stringify(warned.at(-1) ?? []);
+    ok(/NO_SWAP_ROUTES_FOUND/.test(logged) && /no routes found/.test(logged) && !logged.includes(owner.address) && !/0\.000000001/.test(logged), "the Relay error is logged (code and words, the route), never an address or the amount");
+    relayReply = () => ({ message: "Amount too low", errorCode: "AMOUNT_TOO_LOW" });
+    res = await post(base);
+    json = (await res.json()) as typeof json;
+    ok(/under Relay's minimum/.test(json.error?.message ?? ""), "under Relay's minimum: says so");
+    relayReply = () => ({ message: "Internal error" });
+    res = await post(base);
+    json = (await res.json()) as typeof json;
+    ok(res.status === 502 && /couldn't make a route right now/.test(json.error?.message ?? ""), "no reason given: try again");
+    console.warn = warn;
+    relayReply = addressReply;
+  }
 
   for (const [what, body, status] of [
     ["Solana itself as the source", { ...base, chainId: 792703809 }, 400],

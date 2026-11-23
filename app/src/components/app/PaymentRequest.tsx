@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { getNetwork, networkName, type NetworkKey } from "@/lib/networks";
 import { amountTextError } from "@/lib/amountText";
-import { displayAmountText } from "@/lib/amountShort";
+import { typedAmount } from "@/lib/amountShort";
 import { shortAddress } from "@/lib/chain";
 import {
   REQUEST_NAME_MAX,
@@ -87,7 +87,7 @@ export function RequestPaymentCard({ tag }: { tag: string }) {
       net: network.key,
       tag,
       label: r.value ? `${formatRequestAmount(r.value)} ${asset.symbol}` : `any amount of ${asset.symbol}`,
-      shown: r.value ? `${displayAmountText(r.value)} ${asset.symbol}` : `any amount of ${asset.symbol}`,
+      shown: r.value ? `${typedAmount(r.value)} ${asset.symbol}` : `any amount of ${asset.symbol}`,
       note: cleanRequestText(note, REQUEST_NOTE_MAX),
     });
     void import("@/lib/track").then(({ track }) => {
@@ -368,7 +368,7 @@ export function PaymentRequestBanner({
 }) {
   const who = contactLabel ?? request.name;
   const amount = request.amount
-    ? `${displayAmountText(request.amount)}${request.asset ? ` ${request.asset.symbol}` : ""}`
+    ? `${typedAmount(request.amount)}${request.asset ? ` ${request.asset.symbol}` : ""}`
     : null;
   const wrongNet = request.network && request.network !== currentNetwork ? getNetwork(request.network) : null;
   // A 0x address or an ENS name is paid through Cash out (lib/paymentRequest).

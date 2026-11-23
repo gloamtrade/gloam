@@ -31,7 +31,7 @@
  * about 19.84 USDC.
  */
 import { BRIDGE_CHAINS, BRIDGE_MAX_USD, BRIDGE_MIN_USD, validRefundAddress, type BridgeAppFee, type BridgeChain, type BridgeChainKind, type BridgeStage, type BridgeToken } from "../bridge";
-import { displayAmountNumber, displayAmountText } from "../amountShort";
+import { displayAmountNumber, typedAmount } from "../amountShort";
 import { RELAYED_DEPOSIT_MIN } from "./relayPolicy";
 import { ringsAssets, RINGS_SOL_MINT, SOLANA_RINGS_NETWORK, type RingsAsset, type RingsNetwork } from "./config";
 
@@ -239,7 +239,8 @@ export function bridgeButton(s: {
   if (s.stable && n > BRIDGE_MAX_USD) return no(`Enter at most ${displayAmountNumber(BRIDGE_MAX_USD)} ${s.symbol}`);
   if (!s.landingReady) return no("Pick what it lands as");
   if (s.route === "wallet") {
-    return s.overSource ? no(`Not enough ${s.symbol} in your wallet`) : { label: `Bridge ${displayAmountText(text)} ${s.symbol} from your wallet`, ready: true };
+    // The amount as typed, every decimal: two places is for balances and quotes (lib/amountShort typedAmount).
+    return s.overSource ? no(`Not enough ${s.symbol} in your wallet`) : { label: `Bridge ${typedAmount(text)} ${s.symbol} from your wallet`, ready: true };
   }
   if (!s.refundOk) {
     if (s.refund.trim()) return no(`Check your ${s.addressName} address`);
@@ -249,6 +250,56 @@ export function bridgeButton(s: {
 }
 
 /** Refund addresses this browser used for a private account, one per kind of chain, so the next transfer starts with them. */
+// ---------------------------------------------------------------- the live price
+
+/**
+ * Who a price-only quote is asked for when the person hasn't said yet (no
+ * wallet connected, no refund address typed): Relay needs a well-formed
+ * address of the source chain's kind. A preview never gets a deposit address
+ * or anything to sign, so nothing can be sent to or from these.
+ */
+export const PREVIEW_STAND_IN: Record<BridgeChainKind, string> = {
+  evm: "0x000000000000000000000000000000000000dEaD",
+  tvm: "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb",
+  bvm: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
+  svm: "11111111111111111111111111111111",
+};
+
+/** How often the live price is asked again while the amount stays put, as BridgeIn's swap price. */
+export const LIVE_PRICE_REFRESH_MS = 20_000;
+/** How long typing pauses before the live price is asked. */
+export const LIVE_PRICE_DEBOUNCE_MS = 450;
+
+/**
+ * Relay's refusal of a quote in words that say why: under its minimum, no
+ * route right now, too large for the liquidity there, or the wallet short.
+ * Null when Relay gave no reason worth naming (the caller says "try again").
+ * Read from Relay's errorCode first, its message second.
+ */
+export function relayRefusal(
+  r: { code: string; message: string },
+  route: { symbol: string; chain: string; lands: string }
+): string | null {
+  const code = r.code.toUpperCase();
+  const msg = r.message.toLowerCase();
+  if (code === "AMOUNT_TOO_LOW" || /amount.{0,20}(too )?(low|small)|too (low|small)|below.{0,20}min/.test(msg)) {
+    return `That amount is under Relay's minimum for ${route.symbol} on ${route.chain}. Try a little more.`;
+  }
+  if (code === "INSUFFICIENT_FUNDS" || /insufficient (funds|balance)/.test(msg)) {
+    return `Your wallet doesn't hold enough ${route.symbol} on ${route.chain} for this and its network fee.`;
+  }
+  if (code === "INSUFFICIENT_LIQUIDITY" || code === "SWAP_IMPACT_TOO_HIGH" || /liquidity|impact too high/.test(msg)) {
+    return `Relay can't fill that much ${route.symbol} into ${route.lands} right now. Try a smaller amount.`;
+  }
+  if (
+    /^(NO_SWAP_ROUTES_FOUND|NO_INTERNAL_SWAP_ROUTES_FOUND|NO_QUOTES|UNSUPPORTED_ROUTE|UNSUPPORTED_CHAIN|UNSUPPORTED_CURRENCY|CHAIN_DISABLED|ROUTE_TEMPORARILY_RESTRICTED|SWAP_QUOTE_FAILED)$/.test(code) ||
+    /no (swap )?routes? found|not supported|no quotes/.test(msg)
+  ) {
+    return `Relay has no route from ${route.symbol} on ${route.chain} to ${route.lands} on Solana right now. A larger amount, another token or landing as another asset may work.`;
+  }
+  return null;
+}
+
 export const refundKey = (network: RingsNetwork, account: string) => `gloam:solana-bridge:refund:v1:${network}:${account}`;
 
 export type RememberedRefunds = Partial<Record<BridgeChainKind, string>>;

@@ -11,6 +11,10 @@
  * copied, CSV exports and a receipt's checked fields keep every unit (lib/shield
  * formatAssetAmountExact, or the raw units). Dollar values are not token
  * amounts and keep their own format.
+ *
+ * Two places is for balances and quotes. Saying back what the person typed (a
+ * button, a review line, "Sending") shows it as typed (typedAmount): someone
+ * who typed 0.001 ETH reads "Bridge 0.001 ETH", never "Bridge <0.01 ETH".
  */
 import { formatUnits } from "viem";
 
@@ -80,4 +84,22 @@ export function displayAmountNumber(n: number): string {
   if (/e-/i.test(s)) s = a > 0 ? "0.000000001" : "0";
   else if (/e\+/i.test(s)) s = BigInt(Math.trunc(a)).toString();
   return displayAmountText(n < 0 && a > 0 ? `-${s}` : s);
+}
+
+/**
+ * An amount the person typed, said back exactly as typed: every decimal kept,
+ * only the whole part grouped by thousands. "0.001" reads "0.001", "1250.5"
+ * reads "1,250.5", "007" reads "7", ".5" reads "0.5", "5." reads "5". For
+ * buttons and review lines that repeat the amount field, never for a balance
+ * or a quote (displayAmount). Anything that isn't a plain decimal is shown as
+ * it came.
+ */
+export function typedAmount(text: string): string {
+  const t = text.trim().replace(/,(?=\d{3}(?:\D|$))/g, "");
+  const m = /^(\d*)(?:\.(\d*))?$/.exec(t);
+  if (!m || t === "" || t === ".") return text.trim();
+  const whole = (m[1] || "0").replace(/^0+(?=\d)/, "");
+  const frac = m[2] ?? "";
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return frac ? `${grouped}.${frac}` : grouped;
 }

@@ -20,7 +20,7 @@ import { erc20Abi } from "@/lib/dex";
 import { estimateMaxNativeSend, type MaxNativeSend } from "@/lib/nativeSend";
 import { NATIVE_CHOICE, hasNativeCoin, maxTokenSend, pickedToken, publicSendTargetProblem, publicSendTokens } from "@/lib/publicSend";
 import { getRhPublicClient } from "@/lib/rhClient";
-import { displayAmount, displayAmountText } from "@/lib/amountShort";
+import { displayAmount, typedAmount } from "@/lib/amountShort";
 import { isDollarStable } from "@/lib/tokens";
 import { amountTextError } from "@/lib/amountText";
 import { hasCoingeckoMarks, useCoingeckoMarks } from "@/hooks/useCoingeckoMarks";
@@ -362,7 +362,7 @@ export function SendView() {
               <div className="flex min-h-11 items-center justify-between gap-4 py-2">
                 <dt className="text-mute">Sending</dt>
                 <dd className="tnum text-right text-foreground">
-                  {displayAmountText(amount)} {symbol}
+                  {typedAmount(amount)} {symbol}
                   {usdHint ? <span className="text-mute">, {usdHint}</span> : null}
                 </dd>
               </div>
@@ -462,7 +462,7 @@ export function SendView() {
               <div className="flex h-11 items-center justify-between gap-3">
                 <dt className="text-mute">Amount</dt>
                 <dd className="tnum truncate text-foreground">
-                  {amtNum > 0 ? `${displayAmountText(amount)} ${symbol}` : "The full amount"}
+                  {amtNum > 0 ? `${typedAmount(amount)} ${symbol}` : "The full amount"}
                 </dd>
               </div>
             </dl>
@@ -515,7 +515,7 @@ export function SendView() {
                 <div className="flex min-h-12 items-center justify-between gap-4 py-2">
                   <dt className="text-mute">Amount</dt>
                   <dd className="tnum text-right text-foreground">
-                    {displayAmountText(amount)} {symbol}
+                    {typedAmount(amount)} {symbol}
                     {usdHint ? <span className="ml-1 text-mute">({usdHint})</span> : null}
                   </dd>
                 </div>
