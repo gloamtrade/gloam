@@ -192,6 +192,12 @@ let policyChecked = false;
 if (existsSync(policyFile)) {
   let policy = null;
   try {
+    // The app's own source imports its siblings without an extension (its bundler
+    // resolves them); let Node find "./config" as "./config.ts" for this check.
+    const { register } = await import("node:module");
+    register(
+      "data:text/javascript,export async function resolve(s,c,n){try{return await n(s,c)}catch(e){if(s.startsWith('.')&&!/\\.[a-z]+$/.test(s)){return n(s+'.ts',c)}throw e}}"
+    );
     policy = await import(pathToFileURL(policyFile).href);
   } catch (e) {
     if (canStrip) throw e;
