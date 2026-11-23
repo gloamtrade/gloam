@@ -1051,31 +1051,26 @@ export default function DocsNetworksPage() {
         <>
           <h2 id="solana">{SOLANA_NAME}</h2>
           <p>
-            On Solana, Gloam has no vault of its own. It runs through Helius
-            Privacy Rings, on the open Default Ring, with Gloam&apos;s account
-            layer on top: your private account is its own key, opened by a
-            signature from your main wallet, so the main wallet stays out of
-            your payments. {RINGS_PRIVACY_NOTE}
+            Gloam has no vault of its own here. It runs through Helius Privacy
+            Rings, on the open Default Ring, with Gloam&apos;s account layer on
+            top: your private account is its own key, opened by a signature
+            from your main wallet, so the main wallet stays out of your
+            payments. {RINGS_PRIVACY_NOTE}
           </p>
           <ul>
             <li>
               <strong>Network</strong>, Solana {SOLANA_RINGS_NETWORK === "devnet" ? "devnet" : "mainnet"}
             </li>
             <li>
-              <strong>Assets</strong>,{" "}
-              {ringsAssets().map((a, i, all) => (
-                <span key={a.id}>
-                  {i > 0 ? (i === all.length - 1 ? " and " : ", ") : ""}
-                  {a.symbol}
-                  {a.mint ? (
-                    <>
-                      {" "}
-                      (<code>{a.mint}</code>)
-                    </>
-                  ) : null}
-                </span>
-              ))}
+              <strong>Assets</strong>, {joinNames(ringsAssets().map((a) => a.symbol))}
             </li>
+            {ringsAssets()
+              .filter((a) => a.mint)
+              .map((a) => (
+                <li key={a.id}>
+                  <strong>{a.symbol} mint</strong>, <code>{a.mint}</code>
+                </li>
+              ))}
             <li>
               <strong>What shows</strong>, adding money shows your wallet, the
               token and the amount. A private payment shows the two private
@@ -1083,7 +1078,7 @@ export default function DocsNetworksPage() {
               out shows the address it goes to, the token and the amount.
             </li>
             <li>
-              <strong>Payroll</strong>, {RINGS_PAYROLL_NOTE}
+              <strong>Payroll.</strong> {RINGS_PAYROLL_NOTE}
             </li>
             <li>
               <strong>Fees</strong>, Gloam&apos;s relay pays the Solana network
