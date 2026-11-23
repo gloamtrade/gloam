@@ -126,7 +126,7 @@ const snapshot: OnchainMetrics = {
 const pub = toPublicStats(snapshot);
 
 check("only the mainnets, in the app's order", () => {
-  const order = ["robinhood-mainnet", "tempo-mainnet", "base-mainnet"];
+  const order = ["robinhood-mainnet", "base-mainnet", "tempo-mainnet"];
   assert.deepEqual(pub.networks.map((n) => n.key), order);
 });
 

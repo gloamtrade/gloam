@@ -31,7 +31,7 @@
  */
 import "server-only";
 import { createPublicClient, formatUnits, parseAbi, type Address, type PublicClient } from "viem";
-import { isNetworkWritable, networkName, shownNetworks, type GloamNetwork } from "@/lib/networks";
+import { isNetworkWritable, networkName, shownNetworks, solanaSlot, type GloamNetwork } from "@/lib/networks";
 import { readRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { kv, kvBackend } from "@/lib/partnersKv";
 import { maxGasPriceWei } from "@/lib/relay/gasCeiling";
@@ -46,7 +46,7 @@ import {
 import { NEW_SEND_SHARE_PCT, hourlySpendWei } from "@/lib/relay/spendCap";
 import { rpcProxyChainIds } from "@/lib/rpcProxy";
 import { serverTransport } from "@/lib/serverRpc";
-import { RINGS_PROXY_PATHS, RINGS_RELAY_LOW_LAMPORTS, SOLANA_NAME, SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
+import { RINGS_PROXY_PATHS, RINGS_RELAY_LOW_LAMPORTS, SOLANA_NAME, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK } from "@/lib/solanaRings/config";
 import {
   formatLatency,
   joinNames,
@@ -126,17 +126,26 @@ export const relayPartId = (chainId: number) => `relay:${chainId}`;
 export const SOLANA_RELAY_PART = "relay:solana";
 export const SOLANA_NETWORK_PART = "network:solana";
 
-/** Every part the page lists, in its order within each group (the groups' order is lib/status/model GROUPS). */
+/**
+ * Every part the page lists, in its order within each group (the groups' order
+ * is lib/status/model GROUPS). Solana's relay and network sit in the app's
+ * menu order: right after Base on mainnet (lib/networks solanaSlot), last on
+ * devnet.
+ */
 export function statusParts(): StatusPart[] {
   const nets = statusNetworks();
   const proxied = proxiedNetworks();
+  const at = SOLANA_RINGS_NETWORK === "devnet" ? nets.length : solanaSlot(nets.map((n) => n.key));
+  const withSolana = <T,>(evm: T[], solana: T): T[] => (SOLANA_RINGS_ENABLED ? [...evm.slice(0, at), solana, ...evm.slice(at)] : evm);
   return [
-    ...nets.map((n) => ({ id: relayPartId(n.chainId), name: `Relay on ${networkName(n)}`, group: "payments" as const, chainId: n.chainId })),
-    ...(SOLANA_RINGS_ENABLED
-      ? [{ id: SOLANA_RELAY_PART, name: `Relay on ${SOLANA_NAME}`, group: "payments" as const, note: "Pays the fees of private accounts" }]
-      : []),
-    ...nets.map((n) => ({ id: networkPartId(n.chainId), name: networkName(n), group: "networks" as const, chainId: n.chainId })),
-    ...(SOLANA_RINGS_ENABLED ? [{ id: SOLANA_NETWORK_PART, name: SOLANA_NAME, group: "networks" as const, note: "Helius Privacy Rings" }] : []),
+    ...withSolana<StatusPart>(
+      nets.map((n) => ({ id: relayPartId(n.chainId), name: `Relay on ${networkName(n)}`, group: "payments" as const, chainId: n.chainId })),
+      { id: SOLANA_RELAY_PART, name: `Relay on ${SOLANA_NAME}`, group: "payments", note: "Pays the fees of private accounts" }
+    ),
+    ...withSolana<StatusPart>(
+      nets.map((n) => ({ id: networkPartId(n.chainId), name: networkName(n), group: "networks" as const, chainId: n.chainId })),
+      { id: SOLANA_NETWORK_PART, name: SOLANA_NAME, group: "networks", note: "Helius Privacy Rings" }
+    ),
     { id: "bridge", name: "Relay bridge", group: "api", note: "relay.link" },
     { id: "leaves", name: "Vault leaves", group: "api", note: "What claims, payments and balances read" },
     ...(proxied.length

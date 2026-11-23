@@ -5,7 +5,8 @@
  * places and shapes: the foot of the sidebar (`sidebar`) and the phone's top
  * bar (`compact`). Not connected, it lists the Solana wallets in this browser;
  * connected, the wallet and its address, with Portfolio, Pay privately,
- * Settings and Disconnect.
+ * Settings and Sign out (which ends staying signed in on this device:
+ * lib/solanaRings/keep).
  */
 import { useEffect, useRef, useState } from "react";
 import { IntentLink } from "@/components/IntentLink";
@@ -211,7 +212,7 @@ export function SolanaWalletMenu({ variant }: { variant?: "sidebar" | "compact" 
               <svg {...glyph}>
                 <path d="M14 5.5H7A1.5 1.5 0 0 0 5.5 7v10A1.5 1.5 0 0 0 7 18.5h7M11 12h9M17 9l3 3-3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              Disconnect
+              Sign out
             </button>
           </div>
         </div>

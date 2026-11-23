@@ -7,7 +7,20 @@
  * public balances, and every money move with the step it is on. Portfolio,
  * the Vault's actions and Payroll all read it while Solana is the network
  * picked (NetworkProvider `solana`), so moving between them keeps the account
- * open. The private account's keys live only in this tab.
+ * open. The open account is held in memory for the whole visit (`kept`, below),
+ * the way the EVM side keeps its unlocked notes: leaving the app pages and
+ * coming back does not ask again; a full reload does. The private account's
+ * keys live only in this tab, never in storage, and the signature that derives
+ * them is wiped as soon as they are made.
+ *
+ * A wallet that opened a private account here before (lib/solanaRings/opened:
+ * its address and account index, nothing secret) is asked to open it, not to
+ * set one up, and reopens the same index.
+ *
+ * Signed in, it stays signed in on this device (lib/solanaRings/keep): the
+ * main wallet reconnects on load with no prompt, and the open account reopens
+ * from its sealed seed for KEEP_DAYS after the signature, with no new one.
+ * Sign out (or Disconnect, or switching the wallet's account) clears both.
  *
  * Nothing here loads the Solana SDK until Solana is picked. In the recording
  * demo (lib/demoFlag, local only) a pretend wallet and balance play every step
@@ -21,7 +34,18 @@ import { RINGS_PROXY_PATHS, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAss
 import type { RelayStatus, RingsSession } from "@/lib/solanaRings/client";
 import type { PayrollDeps } from "@/lib/solanaRings/payroll";
 import type { PayrollStore } from "@/lib/solanaRings/payrollStore";
-import { canSignMessage, connectSolana, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
+import { browserStorage, openedBefore, rememberOpened } from "@/lib/solanaRings/opened";
+import { browserKeepDb, forgetAccount, forgetWallet, keepAccount, keepWallet, keptAccount, keptWallet } from "@/lib/solanaRings/keep";
+import {
+  canSignMessage,
+  connectSolana,
+  disconnectSolana,
+  reconnectSolana,
+  useSolanaWallets,
+  watchSolanaAccount,
+  type SolanaAccount,
+  type SolanaWallet,
+} from "@/lib/solanaWallet";
 
 const lib = () => import("@/lib/solanaRings/client");
 
@@ -63,6 +87,13 @@ type SolanaCtx = {
   /** Which assets are set up on chain, by asset id. */
   ready: Record<string, boolean>;
   main: Main | null;
+  /**
+   * The main wallet opened a private account here before (or the account it
+   * opened turned out to be set up already): the screen says "open", not "set up".
+   */
+  returning: boolean;
+  /** Reconnecting the wallet this device stayed signed in with, and reopening its account. */
+  restoring: boolean;
   /** The private account's address, once it is open. */
   address: string | null;
   /** The open private account (none in the demo): money that arrived at its address is made private from it (SolanaBridgeIn). */
@@ -75,6 +106,7 @@ type SolanaCtx = {
   error: { kind: SolanaTaskKind; message: string } | null;
   connect(w: SolanaWallet): Promise<boolean>;
   setUp(): Promise<boolean>;
+  /** Sign out: close the account, forget the wallet and the kept account on this device. */
   disconnect(): void;
   refresh(): Promise<boolean>;
   add(asset: RingsAsset, amount: bigint): Promise<string | null>;
@@ -226,6 +258,23 @@ function demoStore(start: Record<string, bigint>): DemoStore {
 const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 const demoSig = () => Array.from({ length: 88 }, () => "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"[Math.floor(Math.random() * 58)]).join("");
 
+// ---------------------------------------------------------------- the visit's account
+
+/**
+ * The open account for the rest of this visit, outside React: the provider
+ * starts from it and writes back to it, so the account stays open while the app
+ * pages come and go (to the docs and back, say). Memory only: a reload starts
+ * empty, and the wallet signs once more.
+ */
+type Kept = {
+  main: Main | null;
+  session: RingsSession | null;
+  demoOpen: boolean;
+  balances: Record<string, bigint> | null;
+  walletBalances: Record<string, bigint> | null;
+};
+const kept: Kept = { main: null, session: null, demoOpen: false, balances: null, walletBalances: null };
+
 // ---------------------------------------------------------------- the provider
 
 export function SolanaAccountProvider({ children }: { children: ReactNode }) {
@@ -236,13 +285,17 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
   const found = useSolanaWallets();
   const [relay, setRelay] = useState<RelayStatus | null>(null);
   const [ready, setReady] = useState<Record<string, boolean>>({ sol: true });
-  const [main, setMain] = useState<Main | null>(null);
-  const [session, setSession] = useState<RingsSession | null>(null);
-  const [demoOpen, setDemoOpen] = useState(false);
-  const [balances, setBalancesState] = useState<Record<string, bigint> | null>(null);
-  const [walletBalances, setWalletBalances] = useState<Record<string, bigint> | null>(null);
+  const [main, setMain] = useState<Main | null>(() => kept.main);
+  const [session, setSession] = useState<RingsSession | null>(() => kept.session);
+  const [demoOpen, setDemoOpen] = useState(() => kept.demoOpen);
+  const [balances, setBalancesState] = useState<Record<string, bigint> | null>(() => kept.balances);
+  const [walletBalances, setWalletBalances] = useState<Record<string, bigint> | null>(() => kept.walletBalances);
+  // Seen before, by this wallet: read when it connects; set too once its account turns out to be set up already.
+  const [seen, setSeen] = useState<{ owner: string; index: number; seen: boolean } | null>(null);
   const [task, setTask] = useState<SolanaTask | null>(null);
   const [error, setError] = useState<{ kind: SolanaTaskKind; message: string } | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const restoreTried = useRef(false);
   const hook = useRef<{ ask?: () => void; answer?: () => void }>({});
   const busy = useRef(false);
   const sessionRef = useRef<RingsSession | null>(null);
@@ -251,6 +304,21 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
   }, [session]);
   // The pretend balance the demo moves, kept for the life of the provider.
   const [demoBal] = useState(() => demoStore(demoBalances(network)));
+
+  // The visit's account follows every change, so the next mount starts where this one is.
+  useEffect(() => {
+    Object.assign(kept, { main, session, demoOpen, balances, walletBalances });
+  }, [main, session, demoOpen, balances, walletBalances]);
+
+  // Whether the connected wallet opened a private account here before (the demo's never has).
+  const owner = main?.account.address ?? null;
+  useEffect(() => {
+    if (!owner) return;
+    const was = demo ? { seen: false, index: 0 } : openedBefore(browserStorage(), network, owner);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the record lives only in this browser's storage; read once the wallet connects
+    setSeen({ owner, ...was });
+  }, [owner, demo, network]);
+  const returning = Boolean(owner && seen?.owner === owner && seen.seen);
 
   const wallets = useMemo(
     () => (demo ? [{ name: "Demo wallet", icon: DEMO_ICON, wallet: null as unknown as SolanaWallet["wallet"] }] : found.filter(canSignMessage)),
@@ -274,12 +342,8 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
     };
   }, [on, relay, demo, network]);
 
-  // The open account closes with the tab (or when this provider goes).
-  useEffect(() => {
-    return () => {
-      if (session) void lib().then((l) => l.closeRingsAccount(session));
-    };
-  }, [session]);
+  // The open account closes with the tab, or on Disconnect. Not when this
+  // provider goes: the next one picks it up from `kept`.
 
   // The main wallet's public balances: read when it connects, and again after a move.
   const readPublic = useCallback(async () => {
@@ -305,7 +369,11 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
 
   /** Run one wait, with its steps; returns its result, or null with the error kept. */
   const run = useCallback(
-    async <T,>(kind: SolanaTaskKind, steps: string[], fn: (step: (i: number) => void, detail: (text: string) => void) => Promise<T>): Promise<T | null> => {
+    async <T,>(
+      kind: SolanaTaskKind,
+      steps: string[],
+      fn: (step: (i: number) => void, detail: (text: string) => void, restep: (steps: string[], at: number) => void) => Promise<T>
+    ): Promise<T | null> => {
       if (busy.current) return null;
       busy.current = true;
       setError(null);
@@ -320,8 +388,13 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
         current = { ...current, detail: text };
         setTask(current);
       };
+      // The steps ahead, once the wait knows them (an account already set up skips getting it ready).
+      const restep = (next: string[], at: number) => {
+        current = { kind, steps: next, at: Math.min(at, next.length - 1) };
+        setTask(current);
+      };
       try {
-        return await fn(step, detail);
+        return await fn(step, detail, restep);
       } catch (e) {
         if (process.env.NODE_ENV !== "production") console.error("solana:", e);
         const message = demo ? "Something went wrong. Try again." : (await lib()).ringsErrorMessage(e);
@@ -336,73 +409,212 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
     [demo]
   );
 
+  /**
+   * Reopen `m`'s account from the seed this device kept (lib/solanaRings/keep),
+   * with no signature. False when none is kept for this wallet and account, or
+   * it ended; the person then signs to open it.
+   */
+  const reopenKept = useCallback(
+    async (m: Main): Promise<boolean> => {
+      const db = browserKeepDb();
+      if (demo || !db) return false;
+      const owner = m.account.address;
+      const { index } = openedBefore(browserStorage(), network, owner);
+      const seed = await keptAccount(db, { network, owner, index }).catch(() => null);
+      if (!seed) return false;
+      try {
+        const ok = await run("setup", ["Opening your private account", "Reading your private balance"], async (step) => {
+          const l = await lib();
+          let s: RingsSession;
+          try {
+            s = await l.reopenRingsAccount({ wallet: watchedWallet(m.wallet, hook), account: m.account, index, network, seed });
+          } catch {
+            // A kept seed that no longer opens: forget it, and the wallet signs as usual.
+            await forgetAccount(db).catch(() => {});
+            return false;
+          }
+          step(1);
+          try {
+            await l.syncRings(s);
+            setBalancesState(l.ringsBalances(s));
+          } catch (e) {
+            l.closeRingsAccount(s);
+            throw e;
+          }
+          setSession(s);
+          return true;
+        });
+        return Boolean(ok);
+      } finally {
+        seed.fill(0);
+      }
+    },
+    [demo, network, run]
+  );
+
+  /** Remember `account` of wallet `w` as the one to reconnect; another account than the last one's drops what was kept for it. */
+  const keepMain = useCallback(
+    async (w: SolanaWallet, account: SolanaAccount) => {
+      const storage = browserStorage();
+      const last = keptWallet(storage);
+      const db = browserKeepDb();
+      if (db && last && last.address !== account.address) await forgetAccount(db).catch(() => {});
+      keepWallet(storage, { name: w.name, address: account.address });
+    },
+    []
+  );
+
   const connect = useCallback(
     async (w: SolanaWallet) => {
-      const ok = await run("connect", [`Open ${w.name} and connect`], async () => {
+      const m = await run("connect", [`Open ${w.name} and connect`], async () => {
         if (demo) {
           await sleep(700);
           setMain({ wallet: w, account: { address: DEMO_WALLET_ADDRESS, account: { address: DEMO_WALLET_ADDRESS, chains: [] } } });
           setWalletBalances(demoWalletBalances(network));
-          return true;
+          return null;
         }
         const account = await connectSolana(w);
-        setMain({ wallet: w, account });
-        return true;
+        await keepMain(w, account);
+        const next = { wallet: w, account };
+        setMain(next);
+        return next;
       });
-      return Boolean(ok);
+      // Signed in on this device before: the account opens with no new signature.
+      if (m) await reopenKept(m);
+      return demo || Boolean(m);
     },
-    [run, demo, network]
+    [run, demo, network, keepMain, reopenKept]
   );
+
+  // On load, the wallet this device stayed signed in with reconnects with no
+  // prompt, and its account reopens (until Sign out). Only while Solana is picked.
+  useEffect(() => {
+    if (!on || demo || restoreTried.current) return;
+    const saved = main ? null : keptWallet(browserStorage());
+    if (!saved) {
+      restoreTried.current = true;
+      return;
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the wallet to reconnect lives only in this browser's storage
+    setRestoring(true);
+    const w = wallets.find((x) => x.name === saved.name);
+    if (!w) {
+      // Wallets announce themselves as they load: give this one a moment, then show the usual connect.
+      const t = setTimeout(() => {
+        restoreTried.current = true;
+        setRestoring(false);
+      }, 2500);
+      return () => clearTimeout(t);
+    }
+    restoreTried.current = true;
+    void (async () => {
+      try {
+        const account = await reconnectSolana(w);
+        if (!account) return;
+        await keepMain(w, account);
+        const m = { wallet: w, account };
+        setMain(m);
+        await reopenKept(m);
+      } finally {
+        setRestoring(false);
+      }
+    })();
+  }, [on, demo, main, wallets, keepMain, reopenKept]);
 
   const setUp = useCallback(async () => {
     const m = main;
     if (!m) return false;
-    const ok = await run(
-      "setup",
-      [`Sign the message in ${m.wallet.name}`, "Opening your private account", "Getting it ready on Solana", "Reading your private balance"],
-      async (step, detail) => {
-        if (demo) {
-          for (const [i, ms] of [[0, 1200], [1, 900], [2, 1400], [3, 900]] as const) {
-            step(i);
-            await sleep(ms);
-          }
-          setDemoOpen(true);
-          setBalancesState({ ...demoBal.get() });
-          return true;
+    const owner = m.account.address;
+    const index = seen?.owner === owner ? seen.index : 0;
+    const sign = `Sign the message in ${m.wallet.name}`;
+    const opening = "Opening your private account";
+    const ready = "Getting it ready on Solana";
+    const reading = "Reading your private balance";
+    // A wallet seen before opens its account; a new one sets it up. Solana has the last word once the account is known.
+    const opened = [sign, opening, reading];
+    const fresh = [sign, opening, ready, reading];
+    const ok = await run("setup", returning ? opened : fresh, async (step, detail, restep) => {
+      if (demo) {
+        for (const [i, ms] of [[0, 1200], [1, 900], [2, 1400], [3, 900]] as const) {
+          step(i);
+          await sleep(ms);
         }
-        const l = await lib();
-        hook.current = { answer: () => step(1) };
-        const watched = watchedWallet(m.wallet, hook);
-        const s = await l.openRingsAccount({ wallet: watched, account: m.account });
+        setDemoOpen(true);
+        setBalancesState({ ...demoBal.get() });
+        return true;
+      }
+      const l = await lib();
+      hook.current = { answer: () => step(1) };
+      const watched = watchedWallet(m.wallet, hook);
+      // A copy of the account's seed, sealed on this device once the account is open (lib/solanaRings/keep), then wiped.
+      const held: { seed: Uint8Array | null } = { seed: null };
+      let s: RingsSession;
+      try {
+        s = await l.openRingsAccount({ wallet: watched, account: m.account, index, network, onSeed: (x) => void (held.seed = x.slice()) });
         hook.current = {};
         try {
-          step(2);
-          await l.ensureRegistered(s, { onStep: (_step, label) => detail(label) });
-          step(3);
+          const registered = await l.isRegistered(s).catch(() => false);
+          if (registered) {
+            // Set up already (on another device, or before this browser kept a record): nothing new is made.
+            restep(opened, 2);
+            rememberOpened(browserStorage(), network, owner, index);
+            setSeen({ owner, index, seen: true });
+          } else {
+            restep(fresh, 2);
+            await l.ensureRegistered(s, { onStep: (_step, label) => detail(label) });
+            rememberOpened(browserStorage(), network, owner, index);
+            step(3);
+          }
           await l.syncRings(s);
           setBalancesState(l.ringsBalances(s));
+          // Stay signed in on this device: the next visit reopens it with no signature (until Sign out).
+          const db = browserKeepDb();
+          if (db && held.seed) await keepAccount(db, { network, owner, index, seed: held.seed }).catch(() => {});
         } catch (e) {
           l.closeRingsAccount(s);
           throw e;
         }
-        setSession(s);
-        return true;
+      } finally {
+        held.seed?.fill(0);
       }
-    );
+      setSession(s);
+      return true;
+    });
     return Boolean(ok);
-  }, [main, run, demo, demoBal]);
+  }, [main, seen, returning, run, demo, demoBal, network]);
 
-  const disconnect = useCallback(() => {
+  /** Close the account and forget this device's sign-in: the kept wallet and the kept account. */
+  const signOut = useCallback((tellWallet: boolean) => {
     if (busy.current) return;
     const s = sessionRef.current;
     if (s) void lib().then((l) => l.closeRingsAccount(s));
+    const w = kept.main?.wallet;
+    if (tellWallet && w) void disconnectSolana(w);
+    forgetWallet(browserStorage());
+    const db = browserKeepDb();
+    if (db) void forgetAccount(db).catch(() => {});
+    restoreTried.current = true;
     setSession(null);
     setDemoOpen(false);
     setMain(null);
     setBalancesState(null);
     setWalletBalances(null);
     setError(null);
+    setSeen(null);
+    setRestoring(false);
+    Object.assign(kept, { main: null, session: null, demoOpen: false, balances: null, walletBalances: null });
   }, []);
+
+  const disconnect = useCallback(() => signOut(true), [signOut]);
+
+  // The wallet switching to another account signs this one out: its kept account is not the new one's.
+  useEffect(() => {
+    if (!main || demo) return;
+    const mine = main.account.address;
+    return watchSolanaAccount(main.wallet, (address) => {
+      if (address && address !== mine) signOut(false);
+    });
+  }, [main, demo, signOut]);
 
   const refresh = useCallback(async () => {
     const ok = await run("refresh", ["Reading your private balance"], async () => {
@@ -438,7 +650,7 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
           return demoSig();
         }
         const s = sessionRef.current;
-        if (!s) throw new Error("Set up your private account first.");
+        if (!s) throw new Error("Open your private account first.");
         const l = await lib();
         hook.current = { ask: () => step(1), answer: () => step(2) };
         const sig = await l.addToPrivate(s, asset, amount, { onStep: (_step, label) => detail(label) });
@@ -466,7 +678,7 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
           return demoSig();
         }
         const s = sessionRef.current;
-        if (!s) throw new Error("Set up your private account first.");
+        if (!s) throw new Error("Open your private account first.");
         const l = await lib();
         if (kind === "pay" && !(await l.isRegistered(s, to))) {
           throw new Error("That address has no Gloam private account. Use Cash out to pay any Solana address.");
@@ -510,6 +722,8 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
       relay: demo ? DEMO_RELAY : relay,
       ready: demo ? DEMO_READY : ready,
       main,
+      returning,
+      restoring,
       address,
       session: demo ? null : session,
       balances: address ? balances : null,
@@ -527,7 +741,7 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
       setBalances,
       payroll,
     }),
-    [on, demo, network, wallets, relay, ready, main, address, session, balances, walletBalances, task, error, connect, setUp, disconnect, refresh, add, pay, cashOut, setBalances, payroll]
+    [on, demo, network, wallets, relay, ready, main, returning, restoring, address, session, balances, walletBalances, task, error, connect, setUp, disconnect, refresh, add, pay, cashOut, setBalances, payroll]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

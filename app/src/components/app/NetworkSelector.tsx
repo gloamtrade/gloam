@@ -10,13 +10,14 @@
  * its container: the sidebar on desktop (where the list flies out to the right
  * so the notes have room), the sheet on mobile (where it drops down).
  *
- * Solana (lib/solanaRings) is listed after BNB Chain while it is on. It is not
+ * Solana (lib/solanaRings) is listed right after Base while it is on (lib/networks
+ * solanaSlot): Robinhood Chain, Base, Solana, BNB Chain, then the rest. It is not
  * an EVM network: picking it sets NetworkProvider's `solana` and keeps the
  * EVM network as it was, and the app's pages show their Solana side.
  */
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { MAINNET_ENABLED, isNetworkWritable, shownNetworks } from "@/lib/networks";
+import { MAINNET_ENABLED, isNetworkWritable, shownNetworks, solanaSlot } from "@/lib/networks";
 import { SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAssets } from "@/lib/solanaRings/config";
 import { useNetwork } from "./NetworkProvider";
 import { TokenLogo } from "./TokenLogo";
@@ -33,6 +34,13 @@ const SOLANA_PAGES = new Set(["/app", "/app/vault", "/app/payroll", "/app/settin
 
 /** Solana's row sits in the mainnet list on a mainnet build, with the testnets on a devnet one. */
 const SOLANA_GROUP = SOLANA_RINGS_NETWORK === "devnet" ? "Testnet" : "Mainnet";
+
+/** A group's rows: its networks, with Solana's row in its place (after Base on mainnet, last with the testnets). */
+function groupRows(title: string, list: GloamNetwork[]): (GloamNetwork | "solana")[] {
+  if (!SOLANA_RINGS_ENABLED || title !== SOLANA_GROUP) return list;
+  const at = SOLANA_GROUP === "Mainnet" ? solanaSlot(list.map((n) => n.key)) : list.length;
+  return [...list.slice(0, at), "solana", ...list.slice(at)];
+}
 
 /** One short line per network: what it holds. Same length and shape for every row. */
 function assetLine(n: GloamNetwork): string {
@@ -162,7 +170,30 @@ export function NetworkSelector() {
                 <span className="t-eyebrow">{group.title}</span>
                 {group.hint && <span className="text-[11.5px] text-mute">{group.hint}</span>}
               </p>
-              {group.list.map((n) => {
+              {groupRows(group.title, group.list).map((n) => {
+                if (n === "solana")
+                  return (
+                    <button
+                      key="solana"
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={solana}
+                      aria-label={`Solana ${SOLANA_RINGS_NETWORK}`}
+                      onClick={pickSolana}
+                      className={`flex h-[52px] w-full items-center gap-3 rounded-xl px-2.5 text-left transition-colors hover:bg-surface ${solana ? "bg-surface" : ""}`}
+                    >
+                      <TokenLogo id="solana" symbol="Solana" size={30} network />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-medium leading-tight text-foreground">Solana</span>
+                        <span className="mt-0.5 block truncate text-[12px] leading-tight text-mute">{solanaAssetLine()}</span>
+                      </span>
+                      {solana && (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden className="shrink-0 text-foreground">
+                          <path d="m5.5 12.5 4 4 9-9" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </button>
+                  );
                 const active = !solana && n.key === network.key;
                 const writable = isNetworkWritable(n);
                 return (
@@ -198,27 +229,6 @@ export function NetworkSelector() {
                   </button>
                 );
               })}
-              {SOLANA_RINGS_ENABLED && group.title === SOLANA_GROUP && (
-                <button
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={solana}
-                  aria-label={`Solana ${SOLANA_RINGS_NETWORK}`}
-                  onClick={pickSolana}
-                  className={`flex h-[52px] w-full items-center gap-3 rounded-xl px-2.5 text-left transition-colors hover:bg-surface ${solana ? "bg-surface" : ""}`}
-                >
-                  <TokenLogo id="solana" symbol="Solana" size={30} network />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[14px] font-medium leading-tight text-foreground">Solana</span>
-                    <span className="mt-0.5 block truncate text-[12px] leading-tight text-mute">{solanaAssetLine()}</span>
-                  </span>
-                  {solana && (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden className="shrink-0 text-foreground">
-                      <path d="m5.5 12.5 4 4 9-9" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  )}
-                </button>
-              )}
             </div>
           ))}
         </div>

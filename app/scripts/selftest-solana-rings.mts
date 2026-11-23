@@ -144,6 +144,16 @@ const derivedPub = new Uint8Array(
   createPublicKey(seedPub).export({ format: "der", type: "spki" }).subarray(-32)
 );
 ok(getAddressDecoder().decode(derivedPub) === addr0, "the private account's address is the Ed25519 key of the seed");
+// a kept seed (lib/solanaRings/keep) reopens the same account with no signature
+let seen: Uint8Array | null = null;
+const a0seen = await account.deriveAccount(sig0, 0, (x) => void (seen = x.slice()));
+ok(seen !== null && Buffer.from(seen).equals(Buffer.from(seed0)), "the seed handed out to keep is the account's seed");
+const a0kept = await account.accountFromSeed(seed0);
+ok(a0kept.toSolanaSigner().address === addr0, "the kept seed reopens the same private account");
+await assert.rejects(account.accountFromSeed(new Uint8Array(31)));
+n++;
+a0seen.destroy();
+a0kept.destroy();
 a0again.destroy();
 a1.destroy();
 

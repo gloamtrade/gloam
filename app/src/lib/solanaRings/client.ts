@@ -46,7 +46,8 @@ import {
 } from "@solana/kit";
 import type { LocalKeys, ShieldedKeypair, Wallet } from "@heliuslabs/spr";
 import type { SprClient } from "@heliuslabs/spr/client";
-import { accountMessage, deriveAccount, isPlainSignature } from "./account";
+import { accountFromSeed, accountMessage, deriveAccount, isPlainSignature } from "./account";
+import { SNAPSHOT_PREFIX } from "./opened";
 import { ringsAssets, ringsBalancesFrom, ringsUrls, SOLANA_RINGS_NETWORK, walletChain, type RingsAsset, type RingsNetwork } from "./config";
 import {
   awaitLanding,
@@ -184,7 +185,7 @@ export type RingsSession = {
   client: SprClient;
 };
 
-const storeKey = (network: RingsNetwork, owner: string) => `gloam:solana-rings:v1:${network}:${owner}`;
+const storeKey = (network: RingsNetwork, owner: string) => `${SNAPSHOT_PREFIX}${network}:${owner}`;
 
 function snapshotStore(network: RingsNetwork, owner: string) {
   const key = storeKey(network, owner);
@@ -209,16 +210,17 @@ function snapshotStore(network: RingsNetwork, owner: string) {
 /**
  * Open private account `index` of the connected main wallet: one signature,
  * nothing stored but the sealed balance snapshot. The same wallet reopens the
- * same account on any device.
+ * same account on any device. `onSeed` sees the account's seed before it is
+ * wiped, for a caller that keeps it sealed on this device (lib/solanaRings/keep).
  */
 export async function openRingsAccount(input: {
   wallet: SolanaWallet;
   account: SolanaAccount;
   index?: number;
   network?: RingsNetwork;
+  onSeed?: (seed: Uint8Array) => void;
 }): Promise<RingsSession> {
   const index = input.index ?? 0;
-  const network = input.network ?? SOLANA_RINGS_NETWORK;
   const message = accountMessage(index);
   const signature = await signSolanaMessage(input.wallet, input.account, message);
   try {
@@ -226,24 +228,44 @@ export async function openRingsAccount(input: {
     if (!(await isPlainSignature(publicKey, message, signature))) {
       throw new Error(`${input.wallet.name} signs messages in a way that can't open a private account. Try another wallet.`);
     }
-    const keypair = await deriveAccount(signature, index);
-    const [client, spr] = await Promise.all([ringsClient(network), import("@heliuslabs/spr")]);
-    const address = keypair.toSolanaSigner().address;
-    const keys = spr.LocalKeys.fromKeypair(keypair, client.proofService);
-    const store = snapshotStore(network, address);
-    let saved: Wallet | undefined;
-    try {
-      saved = await spr.loadPersistedWallet({ store, cipher: spr.walletSnapshotCipher(keypair) });
-    } catch {
-      saved = undefined; // a snapshot this account can't open: start over
-    }
-    const wallet = saved ?? new spr.Wallet({ identity: keypair.shieldedAddress() });
-    const session: RingsSession = { network, index, main: { wallet: input.wallet, account: input.account }, address, keypair, keys, wallet, client };
-    await knowAssets(session);
-    return session;
+    const keypair = await deriveAccount(signature, index, input.onSeed);
+    return await sessionFor(input, index, keypair);
   } finally {
     signature.fill(0);
   }
+}
+
+/** Open private account `index` again from its kept seed (lib/solanaRings/keep): no signature. */
+export async function reopenRingsAccount(input: {
+  wallet: SolanaWallet;
+  account: SolanaAccount;
+  index: number;
+  network?: RingsNetwork;
+  seed: Uint8Array;
+}): Promise<RingsSession> {
+  return sessionFor(input, input.index, await accountFromSeed(input.seed));
+}
+
+async function sessionFor(
+  input: { wallet: SolanaWallet; account: SolanaAccount; network?: RingsNetwork },
+  index: number,
+  keypair: ShieldedKeypair
+): Promise<RingsSession> {
+  const network = input.network ?? SOLANA_RINGS_NETWORK;
+  const [client, spr] = await Promise.all([ringsClient(network), import("@heliuslabs/spr")]);
+  const address = keypair.toSolanaSigner().address;
+  const keys = spr.LocalKeys.fromKeypair(keypair, client.proofService);
+  const store = snapshotStore(network, address);
+  let saved: Wallet | undefined;
+  try {
+    saved = await spr.loadPersistedWallet({ store, cipher: spr.walletSnapshotCipher(keypair) });
+  } catch {
+    saved = undefined; // a snapshot this account can't open: start over
+  }
+  const wallet = saved ?? new spr.Wallet({ identity: keypair.shieldedAddress() });
+  const session: RingsSession = { network, index, main: { wallet: input.wallet, account: input.account }, address, keypair, keys, wallet, client };
+  await knowAssets(session);
+  return session;
 }
 
 /** Forget the keys in memory. The account reopens with the same signature. */

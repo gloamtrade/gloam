@@ -15,7 +15,9 @@ const CHAIN = "solana:mainnet";
 type StandardAccount = { address: string; chains: readonly string[] };
 type TxInput = { account: StandardAccount; chain: string; transaction: Uint8Array };
 type StandardFeatures = {
-  "standard:connect"?: { connect(): Promise<{ accounts?: readonly StandardAccount[] } | undefined> };
+  "standard:connect"?: { connect(input?: { silent?: boolean }): Promise<{ accounts?: readonly StandardAccount[] } | undefined> };
+  "standard:disconnect"?: { disconnect(): Promise<void> };
+  "standard:events"?: { on(event: "change", listener: (props: { accounts?: readonly StandardAccount[] }) => void): () => void };
   "solana:signAndSendTransaction"?: { signAndSendTransaction(input: TxInput): Promise<unknown> };
   "solana:signTransaction"?: { signTransaction(input: TxInput): Promise<readonly { signedTransaction: Uint8Array }[]> };
   "solana:signMessage"?: {
@@ -95,10 +97,53 @@ export async function connectSolana(w: SolanaWallet): Promise<SolanaAccount> {
   const connect = w.wallet.features["standard:connect"];
   if (!connect) throw new Error(`${w.name} can't connect here.`);
   const out = await connect.connect();
-  const accounts = out?.accounts?.length ? out.accounts : w.wallet.accounts;
-  const account = accounts.find((a) => a.chains?.includes(CHAIN)) ?? accounts[0];
+  const account = pickAccount(out?.accounts?.length ? out.accounts : w.wallet.accounts);
   if (!account) throw new Error(`${w.name} didn't share an account.`);
   return { address: account.address, account };
+}
+
+function pickAccount(accounts: readonly StandardAccount[]): StandardAccount | undefined {
+  return accounts.find((a) => a.chains?.includes(CHAIN)) ?? accounts[0];
+}
+
+/**
+ * Reconnect a wallet this site connected before, with no prompt: the Wallet
+ * Standard's silent connect (a wallet's "only if trusted"). Null when the
+ * wallet would have to ask, or can't connect quietly.
+ */
+export async function reconnectSolana(w: SolanaWallet): Promise<SolanaAccount | null> {
+  const connect = w.wallet.features["standard:connect"];
+  if (!connect) return null;
+  try {
+    const out = await connect.connect({ silent: true });
+    const account = pickAccount(out?.accounts ?? []) ?? pickAccount(w.wallet.accounts);
+    return account ? { address: account.address, account } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Tell the wallet this site is done with it, where it listens. Never throws. */
+export async function disconnectSolana(w: SolanaWallet): Promise<void> {
+  try {
+    await w.wallet.features["standard:disconnect"]?.disconnect();
+  } catch {
+    /* the wallet keeps its own list; nothing here depends on it */
+  }
+}
+
+/** Call `onChange` with the wallet's account when it switches (or null when it disconnects). Returns the unsubscribe. */
+export function watchSolanaAccount(w: SolanaWallet, onChange: (address: string | null) => void): () => void {
+  const events = w.wallet.features["standard:events"];
+  if (!events) return () => {};
+  try {
+    return events.on("change", (props) => {
+      if (!props.accounts) return;
+      onChange(pickAccount(props.accounts)?.address ?? null);
+    });
+  } catch {
+    return () => {};
+  }
 }
 
 const fromBase64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));

@@ -216,9 +216,9 @@ if (MODE !== "on") {
 } else {
   ok(bnb.BNB?.chainId === CHAIN_ID && bnb.BNB.pool === POOL, "on: BNB Chain is on with its pool");
   const mk = mainnetKeys();
-  ok(mk[mk.length - 1] === "bnb-mainnet", "on: the last mainnet");
+  ok(mk.indexOf("bnb-mainnet") === mk.indexOf("base-mainnet") + 1, "on: the mainnet right after Base");
   const shown = nets.shownNetworks().filter((n) => !n.testnet);
-  ok(shown[shown.length - 1]?.key === "bnb-mainnet", "on: shown last among the mainnets (SHOWN_NETWORK_KEYS)");
+  ok(shown[shown.findIndex((n) => n.key === "base-mainnet") + 1]?.key === "bnb-mainnet", "on: shown right after Base among the mainnets (SHOWN_NETWORK_KEYS)");
   ok(mainnet.MAINNET_CHAINS[mainnet.MAINNET_CHAINS.length - 1]?.name === "BNB Chain", "on: last in MAINNET_CHAINS");
   ok(mainnet.liveMainnetNames().endsWith("and BNB Chain"), "on: last in the live mainnet names");
   ok(mainnet.liveMainnetsSinceText().endsWith("BNB Chain since 21 November 2026"), "on: in the since-when line");

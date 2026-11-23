@@ -305,9 +305,9 @@ if (!CONFIGURED) {
 // ---------------------------------------------------------------- with the pools filled in
 
 if (CONFIGURED) {
-  check("configured: Base mainnet joins, after the other mainnets", () => {
+  check("configured: Base mainnet joins, right after Robinhood Chain", () => {
     const keys = nets.NETWORK_KEYS;
-    assert.ok(keys.indexOf("base-mainnet") > keys.indexOf("tempo-mainnet"));
+    assert.equal(keys.indexOf("base-mainnet"), keys.indexOf("robinhood-mainnet") + 1);
     assert.ok(keys.indexOf("base-mainnet") < keys.indexOf("robinhood"));
     assert.equal(keys.filter((k) => k !== "ethereum").pop(), "base");
     assert.equal(nets.isNetworkKey("base-mainnet"), true);

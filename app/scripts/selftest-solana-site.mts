@@ -120,10 +120,15 @@ if (ON) {
   const net = parts.find((p) => p.id === statusChecks.SOLANA_NETWORK_PART)!;
   ok(relay.group === "payments" && relay.name === `Relay on ${NAME}`, `${MODE}: "Relay on ${NAME}" sits with the other relays`);
   ok(net.group === "networks" && net.name === NAME && net.chainId === undefined, `${MODE}: "${NAME}" sits with the networks, with no chain id`);
-  // after the other relays and networks, in each group
+  // in the app menu's order: right after Base on mainnet, last in its group on devnet
   const ids = parts.map((p) => p.id);
-  const lastOf = (g: string, except: string) => Math.max(...parts.filter((p) => p.group === g && p.id !== except).map((p) => ids.indexOf(p.id)));
-  ok(ids.indexOf(relay.id) > lastOf("payments", relay.id) && ids.indexOf(net.id) > lastOf("networks", net.id), `${MODE}: each comes last in its group`);
+  const before = (g: string, id: string) => parts.filter((p) => p.group === g)[parts.filter((p) => p.group === g).findIndex((p) => p.id === id) - 1];
+  if (NAME === "Solana") {
+    ok(before("payments", relay.id)?.name === "Relay on Base" && before("networks", net.id)?.name === "Base", `${MODE}: each comes right after Base in its group`);
+  } else {
+    const lastOf = (g: string, except: string) => Math.max(...parts.filter((p) => p.group === g && p.id !== except).map((p) => ids.indexOf(p.id)));
+    ok(ids.indexOf(relay.id) > lastOf("payments", relay.id) && ids.indexOf(net.id) > lastOf("networks", net.id), `${MODE}: each comes last in its group`);
+  }
 
   const run = async () => {
     const s = await statusChecks.runStatusChecks();
