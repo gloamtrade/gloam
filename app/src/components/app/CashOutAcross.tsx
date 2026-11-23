@@ -22,11 +22,11 @@ import {
 } from "@/lib/cashOutAcross";
 import { loadCashOutRun, loadCashOutRuns, saveCashOutRun } from "@/lib/cashOutAcrossStore";
 import { proveCashOut, type CashOutCall } from "@/lib/cashOutProof";
-import { freshPath, splitForCashOut, splitMaybeSent, type TransferArgs } from "@/lib/cashOutSplit";
+import { cashOutTogetherRefused, freshPath, splitForCashOut, splitMaybeSent, type TransferArgs } from "@/lib/cashOutSplit";
 import { getLogsSafe } from "@/lib/logRange";
 import { getAllNotes } from "@/lib/noteVault";
-import { RelaySubmitError, relayUnshield, relayUnshieldBatch, waitForTx } from "@/lib/relay/client";
-import { FEE_MOVED_CODE, batchesOn } from "@/lib/relay/batch";
+import { relayUnshield, relayUnshieldBatch, waitForTx } from "@/lib/relay/client";
+import { batchesOn } from "@/lib/relay/batch";
 import { publicClientFor } from "@/lib/rhClient";
 import { formatAssetLabel, shieldPoolAbi, updateLocalNote } from "@/lib/shield";
 import { walletErrorForPeople } from "@/lib/walletErrors";
@@ -136,7 +136,7 @@ export function useCashOutAcross(
                   setStatus("Sending every part together through the Gloam relay…");
                   return relayUnshieldBatch({ chainId: r.chainId, pool: r.pool, feeBps: r.feeBps!, parts: calls });
                 },
-                togetherRefused: (e: unknown) => !splitMaybeSent(e, true) && !(e instanceof RelaySubmitError && e.code === FEE_MOVED_CODE),
+                togetherRefused: cashOutTogetherRefused,
               }
             : {}),
           maybeSent: (e) => splitMaybeSent(e, r.relay),
