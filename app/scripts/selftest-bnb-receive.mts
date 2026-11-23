@@ -17,7 +17,9 @@
  * Against fake RPCs: publicnode keeps logs for the last 220,000 blocks only,
  * the dataseed refuses log reads, and the proxy keeps every log but takes at
  * most 10,000 blocks a read (the message gloam.trade's proxy gives on BNB):
- *  - the board's memos are read from its deploy block, old ones from the proxy
+ *  - the board's memos are read from its deploy block: blocks older than half a
+ *    day straight from the proxy, 10,000 a read (through publicnode first, the
+ *    first pass took 860 s live), the newest from publicnode
  *  - payments in USDT and USDC (18 decimals), BNB and BDX (9) to a fresh Gloam
  *    address land in one pass, with the cursor written at the head
  *  - the next pass reads on from the cursor on publicnode alone
@@ -228,8 +230,13 @@ await test("a fresh browser reads BNB Chain's board from its deploy block, old l
   assert.ok(reads.some((r) => r.host.endsWith("(proxy)")), "older blocks were read from the proxy");
   assert.ok(!reads.some((r) => r.host.includes("dataseed")), "never from the dataseed, which refuses logs");
   const proxied = reads.filter((r) => r.host.endsWith("(proxy)"));
-  assert.ok(proxied.some((r) => r.refused), "the proxy refused a read over 10,000 blocks");
-  assert.ok(proxied.filter((r) => !r.refused).every((r) => r.to! - r.from! + 1n <= PROXY_RANGE), "and the walk split it to fit");
+  const split = HEAD - memo.PUBLIC_LOG_BLOCKS;
+  assert.ok(proxied.every((r) => !r.refused && r.to! - r.from! + 1n <= PROXY_RANGE), "in reads the proxy takes (10,000 blocks)");
+  assert.ok(proxied.every((r) => r.to! < split), "only blocks older than half a day go to the proxy");
+  const pub = reads.filter((r) => r.host === "bsc-rpc.publicnode.com");
+  assert.ok(pub.length > 0 && pub.every((r) => r.from! >= split), "publicnode is asked only for the newest blocks");
+  const oldBlocks = Number(split - NET.payMemo!.deployBlock);
+  assert.ok(proxied.length <= Math.ceil(oldBlocks / Number(PROXY_RANGE)) + 1, `one read per 10,000 old blocks (${proxied.length})`);
 });
 
 await test("USDT, USDC, BNB and BDX paid to a fresh Gloam address land in one pass, cursor at the head", async () => {

@@ -6,7 +6,8 @@
  * caches one client per chain.
  */
 
-import { createPublicClient, type PublicClient } from "viem";
+import { guardPrunedLogs } from "@gloamtrade/sdk";
+import { createPublicClient, http, type PublicClient } from "viem";
 import { BNB_BROWSER_ARCHIVE_RPC, isBnbChainId } from "./bnb";
 import { getActiveNetwork, type GloamNetwork } from "./networks";
 import { readTransport } from "./readTransport";
@@ -55,6 +56,36 @@ export function publicClientFor(net: Pick<GloamNetwork, "chainId" | "chain" | "h
     batch: { multicall: true },
   });
   cache.set(net.chainId, client);
+  return client;
+}
+
+const archiveCache = new Map<number, PublicClient>();
+
+/**
+ * A client that reads logs from the network's archive alone (the archive RPC,
+ * else gloam.trade's proxy), for blocks its public RPCs no longer keep. Null
+ * for a network without a logCanary, and on the server. Its answers still go
+ * through the pruned-logs check, against its own canary, so an archive that
+ * dropped logs fails loudly too.
+ *
+ * Why: through publicClientFor, every old range is asked of publicnode first,
+ * then the canary, then the proxy, and the proxy takes 10,000 (at times 5,000)
+ * blocks a read, so each split asks publicnode again. A fresh browser's walk
+ * of BNB Chain's payment board from its deploy block (850,000 blocks on 23 Nov)
+ * took 860 s that way; asked of the proxy directly it is about a third of the reads.
+ */
+export function archiveLogClientFor(net: Pick<GloamNetwork, "chainId" | "chain" | "logCanary">): PublicClient | null {
+  if (!net.logCanary) return null;
+  const existing = archiveCache.get(net.chainId);
+  if (existing) return existing;
+  const { proxy, archive } = archiveOptionsFor(net);
+  const url = archive ?? proxy;
+  if (!url) return null;
+  const client = createPublicClient({
+    chain: net.chain,
+    transport: guardPrunedLogs(http(url, { timeout: 25_000, retryCount: 2 }), net.logCanary),
+  });
+  archiveCache.set(net.chainId, client);
   return client;
 }
 
