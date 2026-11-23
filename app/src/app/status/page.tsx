@@ -150,15 +150,16 @@ export default async function StatusPage() {
       <AutoRefresh />
       {/* status.gloam.trade shows this page at "/", where the site's announcement would show too */}
       <style>{"[data-announcement]{display:none}"}</style>
-      <header className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-5 sm:px-7">
-        <div className="flex items-center gap-3">
+      {/* tighter gaps on a phone, so "Open Gloam" stays on one line inside the gutter */}
+      <header className="mx-auto flex max-w-[1400px] items-center justify-between gap-2 px-4 py-5 sm:gap-4 sm:px-7">
+        <div className="flex items-center gap-2 sm:gap-3">
           <Logo href={SITE} />
-          <span className="text-[19px] leading-none text-mute">Status</span>
+          <span className="text-[17px] leading-none text-mute sm:text-[19px]">Status</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           <RefreshButton className="h-10 w-10" />
           <ThemeToggle className="h-10 w-10" />
-          <a href={SITE} className="gl-arrowlink min-h-10 text-[14px]">
+          <a href={SITE} className="gl-arrowlink min-h-10 whitespace-nowrap text-[14px]">
             Open Gloam <span aria-hidden>→</span>
           </a>
         </div>
