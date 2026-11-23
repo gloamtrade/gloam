@@ -10,7 +10,7 @@ import "server-only";
  *    secret key or a JSON array of 64 numbers (a Solana CLI keypair file's
  *    contents). Unset: the relay is off and says so.
  */
-import { createKeyPairSignerFromBytes, getBase58Encoder, type KeyPairSigner } from "@solana/kit";
+import { createKeyPairSignerFromBytes, getAddressEncoder, getBase58Encoder, type Address, type KeyPairSigner } from "@solana/kit";
 import { SharedCountUnavailable, addRateCount, clientIp } from "@/lib/mcpRemote/rateLimit";
 import { SOLANA_RINGS_NETWORK, type RingsNetwork } from "./config";
 import { heliusHost } from "./proxyPolicy";
@@ -89,6 +89,11 @@ export async function ringsProxyRate(req: Request, calls: number, now = Date.now
  * base fee and the 50,000 lamport priority fee cap; rebroadcasts cost nothing
  * more, a transaction pays once) and 1.1 SOL on rent.
  *
+ * A deposit (money at a private account's own address made private, or a
+ * wallet with no SOL adding a token) counts as a payment, and also by its
+ * depositor (ringsDepositorRate): one wallet moving between IPs still gets the
+ * relay's fee paid only so many times a day.
+ *
  * On mainnet the daily counts fail closed: without the shared count (Redis)
  * the relay pays nothing and says it is unavailable, never "too many". On
  * devnet, where the SOL is free, they fall back to this instance's own count,
@@ -97,6 +102,7 @@ export async function ringsProxyRate(req: Request, calls: number, now = Date.now
 export const RINGS_RELAY_LIMITS = {
   rent: { perIpPerDay: 5, allPerDay: 300 },
   transact: { perIpPerMin: 10, perIpPerDay: 200, allPerMin: 120, allPerDay: 5_000 },
+  deposit: { perDepositorPerDay: 20 },
 } as const;
 
 const DAY = 86_400;
@@ -130,6 +136,32 @@ export async function ringsRelayRate(
     if ((await addRateCount(ip, "sol-relay-tx-day", 1, now, DAY, strict)) > t.perIpPerDay) return "limited";
     if ((await addRateCount("all", "sol-relay-tx-all", 1, now)) > t.allPerMin) return "limited";
     return (await addRateCount("all", "sol-relay-tx-all-day", 1, now, DAY, strict)) <= t.allPerDay ? "ok" : "limited";
+  } catch (e) {
+    return e instanceof SharedCountUnavailable ? "unavailable" : "limited";
+  }
+}
+
+/**
+ * One more relayed deposit by `depositor` today, and whether the relay pays
+ * for it: RINGS_RELAY_LIMITS.deposit a day per depositor, on top of the
+ * per-IP and overall limits. Counted by the address's 32 bytes in hex (the
+ * rate keys lower-case their subject, and base58 is case-sensitive). Fails
+ * closed on mainnet like the other daily counts.
+ */
+export async function ringsDepositorRate(
+  depositor: string,
+  now = ringsRelayClock.now(),
+  network: RingsNetwork = SOLANA_RINGS_NETWORK
+): Promise<RelayRate> {
+  let subject: string;
+  try {
+    subject = Buffer.from(getAddressEncoder().encode(depositor as Address)).toString("hex");
+  } catch {
+    return "limited";
+  }
+  try {
+    const n = await addRateCount(subject, "sol-relay-depositor-day", 1, now, DAY, { failClosed: network === "mainnet" });
+    return n <= RINGS_RELAY_LIMITS.deposit.perDepositorPerDay ? "ok" : "limited";
   } catch (e) {
     return e instanceof SharedCountUnavailable ? "unavailable" : "limited";
   }

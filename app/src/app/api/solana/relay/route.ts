@@ -3,7 +3,7 @@ import { getBase64Decoder, getBase64Encoder, getTransactionDecoder, getTransacti
 import { RINGS_RELAY_LOW_LAMPORTS, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK } from "@/lib/solanaRings/config";
 import { RELAY_CALL_TIMEOUT_MS, RINGS_TREE, relayBroadcast, signatureOfWire, sigStatusFrom } from "@/lib/solanaRings/landing";
 import { SHIELDED_POOL_PROGRAM, USER_REGISTRY_PROGRAM, checkSponsoredTransaction } from "@/lib/solanaRings/relayPolicy";
-import { heliusRpcUrl, relayerSigner, ringsRelayRate } from "@/lib/solanaRings/server";
+import { heliusRpcUrl, relayerSigner, ringsDepositorRate, ringsRelayRate } from "@/lib/solanaRings/server";
 import { screenOtherChainAddresses } from "@/lib/screeningServer";
 
 export const runtime = "nodejs";
@@ -21,8 +21,10 @@ const refuse = (status: number, code: string, message: string) =>
  * Gloam's Solana fee sponsor: a private Solana account never holds SOL, so it
  * never needs any from its owner's main wallet. GET says whether the relay is
  * on and names its address (the fee payer the SDK builds against). POST takes a
- * version 1 Privacy Rings transaction the private account has already signed,
- * checks it against lib/solanaRings/relayPolicy, screens the accounts it names,
+ * version 1 Privacy Rings transaction the private account has already signed
+ * (or the one version 0 shape: a main wallet with no SOL for the fee adding a
+ * token, signed by that wallet), checks it against lib/solanaRings/relayPolicy,
+ * counts it (a deposit also by its depositor), screens the accounts it names,
  * simulates it, adds the relay's signature as fee payer and sends it, then
  * sends the same signed transaction again every two seconds for a few seconds
  * until Solana has seen it (lib/solanaRings/landing). It answers with the
@@ -136,6 +138,12 @@ export async function POST(req: Request) {
   const rate = await ringsRelayRate(req, paysRent ? "rent" : "transact");
   if (rate === "unavailable") return refuse(503, "relay_unavailable", "Gloam's Solana relay is paused for a moment. Try again shortly.");
   if (rate === "limited") return refuse(429, "rate_limited", "Too many requests. Try again in a little while.");
+  if (verdict.kind === "deposit") {
+    // No rent, so counted as a payment above; and by who deposits, so one wallet can't spread its adds over many IPs.
+    const mine = verdict.depositor ? await ringsDepositorRate(verdict.depositor) : "limited";
+    if (mine === "unavailable") return refuse(503, "relay_unavailable", "Gloam's Solana relay is paused for a moment. Try again shortly.");
+    if (mine === "limited") return refuse(429, "rate_limited", "Too many requests. Try again in a little while.");
+  }
   if (!(await screenOtherChainAddresses(verdict.accounts))) return refuse(403, "screened", "This transaction can't go through Gloam.");
 
   let signedBase64: string;
