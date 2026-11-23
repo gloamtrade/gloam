@@ -48,6 +48,7 @@ import type { LocalKeys, ShieldedKeypair, Wallet } from "@heliuslabs/spr";
 import type { SprClient } from "@heliuslabs/spr/client";
 import { accountFromSeed, accountMessage, deriveAccount, isPlainSignature } from "./account";
 import { SNAPSHOT_PREFIX } from "./opened";
+import { noteWalletAdd } from "./addReport";
 import { ringsAssets, ringsBalancesFrom, ringsUrls, SOLANA_RINGS_NETWORK, walletChain, type RingsAsset, type RingsNetwork } from "./config";
 import {
   awaitLanding,
@@ -658,6 +659,7 @@ export async function addToPrivate(s: RingsSession, asset: RingsAsset, amount: b
     onResend: () => tell(opts, "confirm_again", s.main.wallet.name),
   });
   if (r.state === "landed") {
+    noteWalletAdd(signature);
     await syncRings(s, r.slot);
     return signature;
   }
