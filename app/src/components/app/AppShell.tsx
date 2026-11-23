@@ -12,6 +12,7 @@ import { PasskeyGate } from "./PasskeyGate";
 import { NetworkSelector } from "./NetworkSelector";
 import { useNetwork } from "./NetworkProvider";
 import { FeeRiseNotice } from "./FeeRiseNotice";
+import { ReceivedNotice } from "./ReceivedNotice";
 import { TestFundsNotice } from "./TestFundsNotice";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { VaultNavGroup, VaultNavGroupStatic, navActiveFill } from "./VaultNavGroup";
@@ -357,6 +358,7 @@ export function AppShell({
 
       <div className="gl-tabbar-space flex flex-1 flex-col lg:pl-[272px]">
         <main className="mx-auto w-full max-w-[1120px] flex-1 px-4 pb-16 pt-5 sm:px-8 sm:pt-7">
+          <ReceivedNotice />
           <FeeRiseNotice />
           <TestFundsNotice />
           {/* in the first paint, hidden or shown before the app's JavaScript runs: nothing below it moves */}

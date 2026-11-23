@@ -119,7 +119,8 @@ Robin,gloamr1.3mPz...c4Ta,4200`}</code>
       <ul>
         <li>
           <strong>Gloam address</strong> (starts with <code>gloamr1.</code>):
-          they are paid directly and the payment shows up in their app.
+          they are paid directly, and the payment lands in their private
+          balance on its own the next time their app is open.
         </li>
         <li>
           <strong>Gloam name</strong> (like <code>@ada</code>): looked up when

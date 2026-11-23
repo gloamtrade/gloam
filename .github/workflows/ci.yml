@@ -71,7 +71,9 @@ jobs:
       # evidence only, backups stay per account. In-memory storage and a stand-in backup service.
       - name: App account self-tests
         working-directory: app
-        run: ../mcp/node_modules/.bin/tsx scripts/selftest-account-scope.mts
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-account-scope.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-auto-receive.mts
 
       # BNB Chain (off by default): off, no pool, on, and bad values; the pruned-logs check
       # end to end through the app's own transports. Fake RPCs only, nothing reaches a host.

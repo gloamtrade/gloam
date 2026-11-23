@@ -36,7 +36,8 @@ import {
 } from "@/lib/shield";
 import { useNetwork } from "@/components/app/NetworkProvider";
 import { useShownAccount } from "@/components/app/AccountScope";
-import type { GloamNetwork } from "@/lib/networks";
+import { shownNetworks, type GloamNetwork } from "@/lib/networks";
+import { receiveOnOtherNetworks, receiveWaitingPayments } from "@/lib/autoReceive";
 
 /**
  * How often the page syncs while a note a reverted swap left behind waits to
@@ -128,9 +129,16 @@ export function useLocalShieldNotes(address?: string | null) {
       // cash-out splits whose move landed (or never can) since last time.
       if ((await reconcileUnfunded().catch(() => false)) && still()) setLocal(loadWalletNotes(address, net));
       if ((await reconcileClaims().catch(() => false)) && still()) setLocal(loadWalletNotes(address, net));
+      // Payments to this account's Gloam address land in the balance on their own (lib/autoReceive):
+      // this network first, then the others, so a payment on another network is there when you switch.
+      const landed = await receiveWaitingPayments(net, address as Address, { client: publicClient }).catch(() => []);
+      if (landed.length && still()) setLocal(loadWalletNotes(address, net));
       // Claimed payments the payer can still take back: secured through the relay with no one
       // asking, once any move already sent has been settled above (never sent twice). Not waited on.
       void secureClaimsInBackground().catch(() => undefined);
+      void receiveOnOtherNetworks(net, address as Address, shownNetworks())
+        .then((more) => (more.length ? secureClaimsInBackground() : undefined))
+        .catch(() => undefined);
       // once per vault: ETH notes an older sync wrongly marked spent, reopened while the vault still holds them
       if ((await reopenGhostEthNotes().catch(() => false)) && still()) setLocal(loadWalletNotes(address, net));
       // Spent checks only ask about notes with a secret, which chain rows never

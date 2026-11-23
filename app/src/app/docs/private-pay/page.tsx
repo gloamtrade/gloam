@@ -52,12 +52,12 @@ export default function DocsPrivatePayPage() {
           {
             n: "3",
             title: "Encrypted package",
-            body: "Ticket sealed to their tag (gloam2t). Optional, where the network has a memo board: post as on-chain memo for Scan inbox.",
+            body: "Ticket sealed to their tag (gloam2t), posted on the network's memo board, where only their app can open it.",
           },
           {
             n: "4",
-            title: "Claim",
-            body: "Recipient opens it with their tag key (or the claim link) and saves the note in their browser.",
+            title: "Lands",
+            body: "Their app finds it on its own, on any network, opens it with their tag key and adds it to their private balance. A claim link is pasted instead.",
           },
           {
             n: "5",
