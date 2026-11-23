@@ -3,11 +3,12 @@ import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
 import { PoolPicture } from "@/components/docs/FlowDiagram";
-import { liveMainnetNames, mainnetPool } from "@/lib/mainnet";
+import { joinNames, liveMainnetNames, mainnetPool } from "@/lib/mainnet";
 import { ELYSIUM_ENABLED } from "@/lib/elysium";
 import { BNB_ENABLED } from "@/lib/bnb";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
+import { RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED, ringsAssets } from "@/lib/solanaRings/config";
 
 /** The mainnets with a pool in, as words: "Robinhood Chain and Tempo" until Base and Ethereum are in. */
 const MAINNETS = liveMainnetNames();
@@ -44,6 +45,12 @@ export default function DocsOverviewPage() {
         else holds a key. See{" "}
         <Link href="/docs/compare">how Gloam compares</Link>.
       </p>
+      {SOLANA_RINGS_ENABLED && (
+        <p>
+          Gloam is on <strong>{SOLANA_NAME}</strong> too, through Helius Privacy
+          Rings. {RINGS_PRIVACY_NOTE} See <Link href="/docs/chain#solana">{SOLANA_NAME}</Link>.
+        </p>
+      )}
       <p>
         Mainnet is <strong>live</strong>. It uses
         the final keys from a 13-contributor trusted setup, and deposit
@@ -110,6 +117,13 @@ export default function DocsOverviewPage() {
           Pay privately to a Gloam address, or by claim link with an optional
           passphrase
         </li>
+        {SOLANA_RINGS_ENABLED && (
+          <li>
+            <AppLink href="/app/solana">{SOLANA_NAME}</AppLink>: add, pay, run payroll
+            and cash out {joinNames(ringsAssets().map((a) => a.symbol))}, with the
+            token and the amount of each private payment hidden
+          </li>
+        )}
         <li>Cash out to any wallet, with a real proof made in your browser</li>
         <li>
           <Link href="/docs/private-swaps">Private swaps</Link> on Robinhood

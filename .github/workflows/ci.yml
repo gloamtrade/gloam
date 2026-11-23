@@ -58,13 +58,15 @@ jobs:
           NEXT_PUBLIC_BNB_ENABLED=1 NEXT_PUBLIC_BNB_POOL=0x89d3042390204f57b8b4F8949D3c2203E4002164 NEXT_PUBLIC_BNB_DEPLOY_BLOCK=134300000 NEXT_PUBLIC_BNB_LIVE_SINCE="21 November 2026" ../mcp/node_modules/.bin/tsx scripts/selftest-claim-csp.mts
 
       # Solana (off by default): account derivation, the proxy allowlist and the relay
-      # policy; payroll's list checks, pacing and resume against a fake chain. No network.
+      # policy; payroll's list checks, pacing and resume against a fake chain; the
+      # public site's Solana copy and status checks, off and on. No network.
       - name: App Solana self-tests
         working-directory: app
         run: |
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-rings.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-payroll.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-payroll-csv.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-site.mts
 
       # Each sign-in's own private account in a browser: signed out shows nothing, a second
       # wallet sees and spends none of the first's, the first account goes to its owner on
