@@ -121,7 +121,7 @@ import {
   type CashOutWindow,
 } from "@/lib/cashOutLater";
 import { freshPath, networkOfNote, roundDownToWhole, spendPlanFor, spendWaitMessage, splitForCashOut } from "@/lib/cashOutSplit";
-import { CASH_OUT_EMPTY_HELP, readCashOutAmount } from "@/lib/cashOutAmount";
+import { CASH_OUT_EMPTY_HELP, readCashOutAmount, readTypedAmount } from "@/lib/cashOutAmount";
 import {
   findCashOutLink,
   linkMessage,
@@ -153,6 +153,8 @@ import { cashOutPrivacyWarnings, depositWallets } from "@/lib/cashOutPrivacy";
 import { CashOutPercentChips, CashOutWarnings } from "./CashOutPrivacy";
 import { BalancePicker } from "./BalancePicker";
 import { PayAcrossPanel, usePayAcross } from "./PayAcross";
+import { CashOutAcrossPanel, useCashOutAcross } from "./CashOutAcross";
+import { cashOutAcrossEligible, cashOutAcrossReceived, newCashOutRun, planCashOutFrom } from "@/lib/cashOutAcross";
 import { newPayRun, planPayFrom } from "@/lib/payAcross";
 import { PrivacyCard } from "./PrivacyCard";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
@@ -484,6 +486,29 @@ export function MoveView() {
     void refreshTree();
   }, [refreshNotes, refreshTree]);
   const across = usePayAcross(address, network, { signedIn: Boolean(shownAccount), onSettled: onAcrossSettled });
+  // A cash out of more than one balance holds (lib/cashOutAcross): a few public withdrawals to one wallet.
+  const cashAcross = useCashOutAcross(address, network, {
+    signedIn: Boolean(shownAccount),
+    onSettled: onAcrossSettled,
+    walletUnshield: (call) =>
+      writeContractNow(wagmiConfig, {
+        address: network.pool!,
+        abi: shieldPoolAbi,
+        functionName: "unshield",
+        args: [call.proof, call.root, call.nullifier, call.asset, call.to, call.amount],
+        gas: gasFor(network.chainId, SHIELD_GAS_LIMIT),
+        chainId: network.chainId as never,
+      }),
+    walletTransfer: (t) =>
+      writeContractNow(wagmiConfig, {
+        address: network.pool!,
+        abi: shieldPoolAbi,
+        functionName: "transfer",
+        args: [t.proof, t.root, t.nullifier, [t.commitments[0], t.commitments[1]]],
+        gas: gasFor(network.chainId, TRANSFER_GAS_LIMIT),
+        chainId: network.chainId as never,
+      }),
+  });
 
   // Drop the nudge's suggestion from the URL once read (it is already in the
   // form), so a refresh or a tab switch does not fill it in again.
@@ -1262,6 +1287,23 @@ export function MoveView() {
   const sweepSays = sweepVerdict(sweepNow, { ownGloamWallet: ownGloamWallet(cashOutTo) });
   const sweepHold = sweepSays === "swept" && sweepOkFor !== sweepKey;
 
+  // More than the picked balance holds, cashed out now on this network: a few public
+  // withdrawals to the same wallet, one per balance (lib/cashOutAcross).
+  const cashOutTyped = mode === "cashout" && selected && cashOutInput != null ? readTypedAmount(cashOutInput, assetDecimals(selected.asset)) : null;
+  // cheap enough to work out each render: a few notes at most
+  const cashOutAcrossPlan = (() => {
+    if (readDemo() || mode !== "cashout" || !selected || cashOutTyped == null || cashOutTyped <= noteWei) return null;
+    // later, in private pieces, or to another chain: one balance at a time
+    if (xActive || planActive || cashOutWhen !== "now") return null;
+    const same = activeSpendableNotes(notes).filter(
+      (n) => n.asset.toLowerCase() === selected.asset.toLowerCase() && cashOutAcrossEligible(n) && !spendWaitMessage(n) && n.leafIndex != null
+    );
+    return planCashOutFrom(cashOutTyped, same);
+  })();
+  const acrossFeeOf = (amount: bigint) => withdrawFeeOf(amount, cashOutFeeBps);
+  const acrossReceived = cashOutAcrossPlan?.ok ? cashOutAcrossReceived(cashOutAcrossPlan.parts, acrossFeeOf) : 0n;
+  const acrossFee = cashOutAcrossPlan?.ok ? cashOutAcrossPlan.parts.reduce((s, p) => s + acrossFeeOf(p), 0n) : 0n;
+
   /** What Round it starts from and gives: the amount (or the whole balance) down to whole units. */
   const roundFrom = cashOutAmountInvalid ? noteWei : cashOutAmount;
   const roundsTo = selected ? roundDownToWhole(roundFrom, assetDecimals(selected.asset)) : 0n;
@@ -1302,11 +1344,60 @@ export function MoveView() {
     cashOutGate.current = true;
     setCashOutChecking(true);
     try {
-      await (planActive ? onPrivateCashOut() : onCashOut());
+      await (cashOutAcrossPlan?.ok ? onCashOutAcross(cashOutAcrossPlan.parts, cashOutAcrossPlan.noteIds) : planActive ? onPrivateCashOut() : onCashOut());
     } finally {
       cashOutGate.current = false;
       setCashOutChecking(false);
     }
+  }
+
+  /** Cash out more than one balance holds: the parts in cashOutAcrossPlan, one after another, to one wallet. */
+  async function onCashOutAcross(parts: bigint[], noteIds: string[]) {
+    if (!selected || !address || !network.pool || !poseidonMode || cashAcross.running) return;
+    const wrongNetwork = noteNetworkProblem(selected, network);
+    if (wrongNetwork) {
+      setError(wrongNetwork);
+      return;
+    }
+    setError(null);
+    const to = cashOutTo;
+    if (!to) {
+      setError("Paste the address to cash out to.");
+      return;
+    }
+    if (relayOn && gasHigh) {
+      setError(gasHighMessage(network.label));
+      return;
+    }
+    const total = parts.reduce((s, p) => s + p, 0n);
+    if (poolForCashOut != null && poolForCashOut < total) {
+      setError(
+        `Not enough in the shared vault to cash out right now (${formatAssetLabel(poolForCashOut, selected.asset)} available, ${formatAssetLabel(total, selected.asset)} needed). It opens up once more of this asset is added.`
+      );
+      return;
+    }
+    if (!(await checkCashOutTargets([to], selected.asset, to, { sweep: true }))) return;
+    const feeNote = await feeMoved(network, liveFeeBps);
+    if (feeNote) {
+      setError(feeNote);
+      void refetchFee();
+      return;
+    }
+    const amounts: Record<string, string> = {};
+    for (const n of notes) amounts[n.id] = n.amountWei;
+    const run = newCashOutRun({
+      chainId: network.chainId,
+      pool: network.pool,
+      asset: selected.asset as Address,
+      owner: address as Address,
+      to,
+      relay: relayOn,
+      parts,
+      noteIds,
+      noteAmounts: amounts,
+    });
+    setCashOutInput(null);
+    await cashAcross.start(run);
   }
 
   async function onCashOut() {
@@ -3301,6 +3392,7 @@ export function MoveView() {
 
               {mode === "cashout" && (
                 <div className="mt-6 space-y-4">
+                  <CashOutAcrossPanel across={cashAcross} networkKey={network.key} />
 
                   {returnedRows.map((n) => (
                     <div key={n.id} className="rounded-[16px] bg-surface px-4 py-3.5 text-[13px] leading-relaxed">
@@ -3355,8 +3447,14 @@ export function MoveView() {
                         />
                         <span className="shrink-0 text-[15px] text-mute">{assetLabel(selected.asset)}</span>
                       </div>
-                      <p id="cashout-amt-help" className={`mt-1 text-[12.5px] leading-relaxed ${cashOutRead.invalid ? "text-warn" : "text-mute"}`}>
-                        {cashOutRead.empty
+                      <p id="cashout-amt-help" className={`mt-1 text-[12.5px] leading-relaxed ${cashOutAcrossPlan ? (cashOutAcrossPlan.ok ? "text-mute" : "text-warn") : cashOutRead.invalid ? "text-warn" : "text-mute"}`}>
+                        {cashOutAcrossPlan
+                          ? cashOutAcrossPlan.ok
+                            ? `Cashed out as ${cashOutAcrossPlan.parts.length} public withdrawals to the same wallet. Each shows its amount on the chain.`
+                            : cashOutAcrossPlan.reason === "over_total"
+                              ? `That's more than your private balance in ${assetLabel(selected.asset)}. You can cash out up to ${formatAssetLabel(cashOutAcrossPlan.most, selected.asset)}.`
+                              : `That needs too many withdrawals at once. Cash out up to ${formatAssetLabel(cashOutAcrossPlan.most, selected.asset)} now, then the rest.`
+                          : cashOutRead.empty
                           ? CASH_OUT_EMPTY_HELP
                           : cashOutRead.invalid
                           ? (amountTextError(cashOutText, assetDecimals(selected.asset)) ??
@@ -3439,12 +3537,14 @@ export function MoveView() {
                       <div className="mt-4 border-t border-line pt-3">
                         <p className="text-[13px] text-mute">You get</p>
                         <p className="tnum mt-1.5 truncate text-[22px] font-light leading-tight text-foreground">
-                          {formatAssetAmount(cashOutAmount - outFee, selected.asset)}{" "}
+                          {formatAssetAmount(cashOutAcrossPlan?.ok ? acrossReceived : cashOutAmount - outFee, selected.asset)}{" "}
                           <span className="text-[14px] text-mute">{assetLabel(selected.asset)}</span>
                         </p>
                         {cashOutFeeBps > 0 && (
                           <p className="tnum mt-1 text-[12.5px] text-mute">
-                            {formatFeePercent(cashOutFeeBps)} fee{planActive ? " in total" : ""}: {formatAssetLabel(outFee, selected.asset)}
+                            {cashOutAcrossPlan?.ok
+                              ? `${formatFeePercent(cashOutFeeBps)} fee on each, ${formatAssetLabel(acrossFee, selected.asset)} in total`
+                              : `${formatFeePercent(cashOutFeeBps)} fee${planActive ? " in total" : ""}: ${formatAssetLabel(outFee, selected.asset)}`}
                           </p>
                         )}
                       </div>
@@ -3699,7 +3799,8 @@ export function MoveView() {
                         selected?.leafIndex == null ||
                         cashOutInventoryShort ||
                         cashOutFeeUnknown ||
-                        cashOutAmountInvalid ||
+                        cashAcross.running ||
+                        (cashOutAmountInvalid && !cashOutAcrossPlan?.ok) ||
                         (xActive ? !xPrice : !cashOutTo) ||
                         sweepHold ||
                         (planActive ? !piecesReady : cashOutWhen !== "now" && !relayAvailable)
@@ -3723,6 +3824,8 @@ export function MoveView() {
                         "Loading the cash-out fee…"
                       ) : sweepHold ? (
                         "Check the address first"
+                      ) : cashOutAcrossPlan?.ok ? (
+                        `Cash out in ${cashOutAcrossPlan.parts.length} parts`
                       ) : xActive && xDestination ? (
                         xPrice ? `Cash out to ${xDestination.chain}` : "Waiting for the price"
                       ) : planActive ? (

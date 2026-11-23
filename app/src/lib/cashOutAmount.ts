@@ -32,6 +32,10 @@ export type CashOutAmountRead = {
 };
 
 /** Typed text as raw units, refused the way lib/amountText refuses it ("1,25", "-1", too many decimals). */
+export function readTypedAmount(text: string, decimals: number): bigint | null {
+  return parseTyped(text.trim(), decimals);
+}
+
 function parseTyped(text: string, decimals: number): bigint | null {
   const read = readAmountText(text, decimals);
   if (!read.ok || !read.text) return null;
