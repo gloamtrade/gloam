@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0 (23 November 2026)
+
+**Solana**, through Helius Solana Privacy Rings (the permissionless Default Ring), at the new subpath `@gloamtrade/sdk/solana`. It runs in Node and browsers and needs `@heliuslabs/spr` (0.9.0-alpha) and `@solana/kit` installed next to the SDK (optional peer dependencies; EVM users need neither).
+
+- `openSolanaAccount({ wallet, index })` opens the same private account the Gloam app opens for that wallet: an Ed25519 key derived by HKDF-SHA256 from the wallet's signature over a fixed text (`solanaAccountMessage`, `solanaAccountSeed`). The wallet is any signer that signs a message and a transaction; `solanaKeypairWallet(secret)` makes one from a keypair.
+- `registerSolanaAccount`, `solanaBalances`, `addToSolanaPrivate`, `paySolanaPrivately`, `cashOutSolana`, `isSolanaAccountRegistered`, `buildSolanaRegistration`, `solanaRelayStatus`, `closeSolanaAccount`.
+- `solanaTxStatus` and `waitForSolanaTx`: landed, failed, dropped (its blockhash expired unseen, safe to resend) or pending, and a wait never runs past its deadline. Sends return `pending` with their signature and blockhash instead of waiting forever. `SolanaRelayError.maybeSent` says whether a refused send may still land.
+- Every call goes to Gloam's endpoints (`https://www.gloam.trade/api/solana/*`, or `baseUrl`). Gloam's relay pays the fees of registering, paying and cashing out; adding money is paid by the main wallet. Those endpoints answer servers and gloam.trade's own pages; a page on another site needs its own server in between.
+- The root export gains the facts with no dependencies: `solanaNetworkInfo()`, `SOLANA_ASSETS` (SOL, USDC, USDT), `SOLANA_PRIVACY_NOTE`, `SOLANA_PRIVACY`, `SOLANA_MAINNET_CHAIN_ID`, `isSolanaAddress`, the account derivation, and `networkName(792703809)` = "Solana".
+- What Solana hides, said plainly in the docs and the facts: the asset and the amount of a private payment. The two private accounts a payment moves between are visible, adding money shows the wallet it came from, a cash out shows its destination, asset and amount, and proofs are made by Helius's prover.
+
 ## 0.8.2 (21 November 2026)
 
 - **Circuit hashes for `funds` and `payroll_total`.** `GloamCircuit` and `CIRCUIT_SHA256` now cover both (wasm, dev zkey and ceremony-final zkey), so a headless prover for proofs of holdings or a payroll run's total can fetch them with `circuitArtifactUrls` / `circuitArtifactFiles` and check them before proving.
