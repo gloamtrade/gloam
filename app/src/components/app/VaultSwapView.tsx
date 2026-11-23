@@ -300,9 +300,12 @@ export function VaultSwapView() {
   // The link's token to pay with stays picked with no private balance in it, so
   // the person sees what to add; a token picked by hand needs a balance.
   const [payPinned, setPayPinned] = useState(() => Boolean(link?.from));
+  const [busy, setBusy] = useState(false);
   const offered = (a: Address) => assets.some((x) => same(x, a));
+  // Mid-swap the balance it spends can leave the list before the new one lands (a split, a
+  // sync): the tokens picked when it started stay picked until it is over.
   const payAsset: Address | null =
-    (payPick && offered(payPick) && (payPinned || holdings.has(payPick.toLowerCase())) ? payPick : null) ??
+    (payPick && offered(payPick) && (payPinned || busy || holdings.has(payPick.toLowerCase())) ? payPick : null) ??
     // The first held token in the list's order (the dollar first), not the
     // largest raw amount: 18-decimal GLOAM would always outrank 6-decimal USDG.
     assets.find((a) => holdings.has(a.toLowerCase())) ??
@@ -392,7 +395,6 @@ export function VaultSwapView() {
   const [quoteError, setQuoteError] = useState<string | null>(null);
   // About the most of the note a refused quote would take: the error line names it.
   const [quoteFits, setQuoteFits] = useState<bigint | null>(null);
-  const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -556,6 +558,8 @@ export function VaultSwapView() {
     const partnerCode = link?.partnerCode ?? null;
     const chainId = network.chainId;
     setBusy(true);
+    setPayPick(from);
+    setToPick(into);
     setError(null);
     setDone(null);
     setReceipt(null);
@@ -1003,7 +1007,7 @@ export function VaultSwapView() {
               </div>
             )}
 
-            {((!notes.length && linkStep?.kind !== "add") ||
+            {((!notes.length && !busy && linkStep?.kind !== "add") ||
               priceError ||
               overRoom ||
               relayOk === false ||
@@ -1015,7 +1019,7 @@ export function VaultSwapView() {
               (note && amount !== null && amount < BigInt(note.amountWei))) && (
               <div className="gl-settle mt-4 space-y-2.5 px-1 text-[12.5px] leading-[1.6]">
                 {/* a swap link's banner already says what to add */}
-                {!notes.length && addable.length > 0 && linkStep?.kind !== "add" && (
+                {!notes.length && !busy && addable.length > 0 && linkStep?.kind !== "add" && (
                   <p className="text-mute">
                     You can check prices now. To swap, add {listOr(addable.map(assetLabel))} to your private balance
                     first.{" "}
