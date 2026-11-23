@@ -46,7 +46,7 @@ export default function DocsPayrollPage() {
           {
             n: "1",
             title: "Add your team",
-            body: "Upload a CSV: name, Gloam address, amount. No address means that person gets a claim link.",
+            body: "Upload a CSV: name, Gloam address or @name, amount. No address means that person gets a claim link.",
           },
           {
             n: "2",
@@ -120,6 +120,12 @@ Robin,gloamr1.3mPz...c4Ta,4200`}</code>
         <li>
           <strong>Gloam address</strong> (starts with <code>gloamr1.</code>):
           they are paid directly and the payment shows up in their app.
+        </li>
+        <li>
+          <strong>Gloam name</strong> (like <code>@ada</code>): looked up when
+          you load the list, then paid like their Gloam address. Each row shows
+          the address the name points to, and a name nobody holds is flagged
+          before anything is sent.
         </li>
         <li>
           <strong>Blank</strong>: they get a claim link after the run. Anyone
