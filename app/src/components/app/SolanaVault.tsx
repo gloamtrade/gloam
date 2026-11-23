@@ -36,6 +36,7 @@ import {
   usd,
 } from "./SolanaParts";
 import { formatSolAmount, parseSolAmount, shortSol, useSolana } from "./SolanaAccount";
+import { displayAmountText, typedAmount } from "@/lib/amountShort";
 import { SolanaArrivals, SolanaBridgeIn } from "./SolanaBridgeIn";
 import { solanaBridgeVisible } from "@/lib/solanaRings/bridgeIn";
 
@@ -122,7 +123,7 @@ export function SolanaVaultHome({ missing }: { missing?: string | null }) {
               badge="Only you"
               rows={privateRows}
               loading={!balances}
-              empty="0"
+              empty={displayAmountText("0")}
               note={hasPrivate ? "Read and decrypted on this device." : "Nothing here yet. Only you will see this number."}
             />
             <BalancePane
@@ -131,8 +132,8 @@ export function SolanaVaultHome({ missing }: { missing?: string | null }) {
               badge={null}
               rows={walletRows}
               loading={!walletBalances}
-              empty="0"
-              note={walletBalances && !walletRows.length ? `No ${symbols} in this wallet.` : "Anyone can see this on the explorer."}
+              empty={displayAmountText("0")}
+              note="Anyone can see this on the explorer."
             />
           </div>
           <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7" aria-live="polite">
@@ -288,7 +289,7 @@ export function SolanaAddView() {
               </span>
             </div>
             <p className="tnum mt-3 truncate text-[28px] font-light leading-none tracking-[-0.02em] text-foreground">
-              {value !== null ? amount.trim() : "0"} <span className="text-[15px] tracking-normal text-mute">{asset.symbol}</span>
+              {value !== null ? typedAmount(amount) : displayAmountText("0")} <span className="text-[15px] tracking-normal text-mute">{asset.symbol}</span>
             </p>
           </div>
         </div>
