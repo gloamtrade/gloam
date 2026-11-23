@@ -173,6 +173,7 @@ import {
   requoteStillFine,
   type CrossChainQuote,
 } from "@/lib/cashOutCrossChain";
+import { rememberBridgeCashOut } from "@/lib/cashOutBridge";
 import { checkSweep, sweepVerdict, type SweepCheck, type SweepReader } from "@/lib/sweepCheck";
 import { EMBEDDED_CONNECTOR_ID, EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
 import { embeddedAvailability, onEmbeddedAvailability } from "@/lib/turnkeyBridge";
@@ -1457,6 +1458,15 @@ export function MoveView() {
           refundTo: address,
         });
         if (problem) throw new Error(problem);
+        // for its receipt: on chain this cash out only shows Relay's address
+        if (target.nullifier) {
+          rememberBridgeCashOut(target.nullifier, {
+            chain: xOrder.destination.chain,
+            chainId: xOrder.destination.chainId,
+            symbol: xOrder.destination.symbol,
+            recipient: xOrder.recipient,
+          });
+        }
       }
       // From a partner's link to the request's own wallet: bound to the link's code before anything is sent.
       const fromLink = requestPartner(to);
@@ -4190,7 +4200,7 @@ export function MoveView() {
               <AddTokenToWallet chainId={network.chainId} asset={cashedOut.asset} to={cashedOut.to} />
               {txHash && (
                 <Link
-                  href={`/app/disclose?mode=cashout&tx=${txHash}`}
+                  href={`/app/disclose?mode=cashout&tx=${txHash}&net=${network.key}`}
                   className="mt-3 inline-flex min-h-10 items-center text-[13.5px] font-medium text-foreground underline underline-offset-4"
                 >
                   Get a receipt

@@ -1,17 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Hex } from "viem";
 import { useAppAccount } from "@/lib/demo";
 import { shortAddress } from "@/lib/chain";
-import { findCashOuts, isTxHash, readCashOutReceipt, type CashOutReceipt, type FoundCashOut } from "@/lib/cashOutReceipt";
-import { getAllNotes } from "@/lib/noteVault";
+import { cashOutMarkers, findCashOuts, isTxHash, readCashOutReceipt, type CashOutReceipt, type FoundCashOut } from "@/lib/cashOutReceipt";
+import { bridgeMarkFor } from "@/lib/cashOutBridge";
+import { getNetwork, isNetworkKey, type GloamNetwork } from "@/lib/networks";
+import { getAllNotes, onNotesSaved, unlockNoteVault } from "@/lib/noteVault";
 import { publicClientFor } from "@/lib/rhClient";
 import { assetLabel, formatAssetAmountExact, notesForWallet } from "@/lib/shield";
+import { useShownAccount } from "../AccountScope";
 import { useNetwork } from "../NetworkProvider";
 import { CashOutReceiptSheet } from "../CashOutReceiptSheet";
 import { EmptyCard, Notice, ProveLayout, Spinner } from "./ProofParts";
+
 
 type Row = FoundCashOut & { time?: number };
 
@@ -31,8 +35,36 @@ const PENDING_GAP_MS = 4_000;
 export function CashOutReceipts() {
   const { address } = useAppAccount();
   const { network } = useNetwork();
+  const shownAccount = useShownAccount();
   const sp = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const txParam = sp.get("tx");
+  const netParam = sp.get("net");
+
+  // this account's notes, read once they are open, and again when they change
+  const [notesVersion, setNotesVersion] = useState(0);
+  useEffect(() => {
+    if (!shownAccount) return;
+    let live = true;
+    void unlockNoteVault().then(() => {
+      if (live) setNotesVersion((v) => v + 1);
+    });
+    const off = onNotesSaved(() => setNotesVersion((v) => v + 1));
+    return () => {
+      live = false;
+      off();
+    };
+  }, [shownAccount]);
+  // the markers to ask about, as one key: a save that changes none of them reads nothing again
+  const markers = useMemo(
+    () =>
+      address && shownAccount && notesVersion > 0 && network.pool
+        ? cashOutMarkers(notesForWallet(getAllNotes(), address), network.chainId, network.pool)
+        : null,
+    [address, shownAccount, notesVersion, network]
+  );
+  const markersKey = markers ? markers.join(",") : null;
 
   // the list is the network's it was read on: another network's never shows
   const [list, setList] = useState<{ key: string; rows: Row[] } | null>(null);
@@ -47,15 +79,13 @@ export function CashOutReceipts() {
   const openedParam = useRef<string | null>(null);
 
   const scan = useCallback(async () => {
-    if (!address || !network.pool) return;
+    // not before the signed-in account's notes are open: an empty list then would say "no cash outs"
+    if (!address || !network.pool || markersKey === null) return;
     const mine = ++run.current;
     setLoading(true);
     setListError(null);
     try {
-      const pool = network.pool.toLowerCase();
-      const nullifiers = notesForWallet(getAllNotes(), address)
-        .filter((n) => n.chainId === network.chainId && n.pool.toLowerCase() === pool && n.nullifier)
-        .map((n) => n.nullifier as Hex);
+      const nullifiers = markersKey ? (markersKey.split(",") as Hex[]) : [];
       const client = publicClientFor(network);
       const found = await findCashOuts(client, network, nullifiers);
       const dated: Row[] = await Promise.all(
@@ -71,21 +101,22 @@ export function CashOutReceipts() {
     } finally {
       if (mine === run.current) setLoading(false);
     }
-  }, [address, network]);
+  }, [address, network, markersKey]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- opening the tab (or a switch of network or account) reads the vault's logs, which marks the read as running
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- opening the tab, a switch of network or account, or new notes read the vault's logs, which marks the read as running
     void scan();
   }, [scan]);
 
   const openReceipt = useCallback(
-    async (hash: string, nullifier?: Hex) => {
+    async (hash: string, nullifier?: Hex, on: GloamNetwork = network) => {
       setNotice(null);
       setOpening(hash);
       try {
-        const client = publicClientFor(network);
+        // read on the network it was made on, even if the app switches while it waits
+        const client = publicClientFor(on);
         for (let i = 0; i < PENDING_TRIES; i++) {
-          const r = await readCashOutReceipt(client, network, hash, { nullifier });
+          const r = await readCashOutReceipt(client, on, hash, { nullifier });
           if (r.ok) {
             setOpen(r.receipt);
             return;
@@ -103,12 +134,19 @@ export function CashOutReceipts() {
     [network]
   );
 
-  // the link after a cash out: open its receipt once
+  // the link after a cash out: open its receipt once, on the network it names, then
+  // take it out of the address so closing and coming back doesn't open it again
   useEffect(() => {
     if (!txParam || !isTxHash(txParam) || openedParam.current === txParam) return;
     openedParam.current = txParam;
-    void openReceipt(txParam);
-  }, [txParam, openReceipt]);
+    const on = isNetworkKey(netParam) ? getNetwork(netParam) : network;
+    void openReceipt(txParam, undefined, on);
+    const params = new URLSearchParams(Array.from(sp.entries()));
+    params.delete("tx");
+    params.delete("net");
+    const q = params.toString();
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+  }, [txParam, netParam, network, openReceipt, sp, router, pathname]);
 
   if (!network.pool) {
     return <EmptyCard title="No vault on this network" body="Switch to a network Gloam runs on to see your cash outs." />;
@@ -217,13 +255,7 @@ export function CashOutReceipts() {
       </section>
 
       {open && (
-        <CashOutReceiptSheet
-          receipt={open}
-          testnet={network.testnet}
-          explorerTx={network.explorerTx}
-          explorerAddress={network.explorerAddress}
-          onClose={() => setOpen(null)}
-        />
+        <CashOutReceiptSheet receipt={open} bridge={bridgeMarkFor(open.nullifier)} onClose={() => setOpen(null)} />
       )}
     </ProveLayout>
   );

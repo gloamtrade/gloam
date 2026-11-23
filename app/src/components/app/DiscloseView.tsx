@@ -37,6 +37,9 @@ export function DiscloseView() {
 
   function select(id: ModeId) {
     const params = new URLSearchParams(Array.from(sp.entries()));
+    // a receipt link opens once: switching tabs drops it
+    params.delete("tx");
+    params.delete("net");
     if (id === "exact") params.delete("mode");
     else params.set("mode", id);
     const q = params.toString();

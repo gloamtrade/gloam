@@ -14,6 +14,14 @@
  *    holds, from this network's vault, newest first, each once, asking in chunks
  *  - receipt numbers and hash checks
  *
+ * Bug sweep, 23 Nov 2026 (findings 1, 3, 5 and 6):
+ *  - a private swap and a name purchase pay out of the vault too, and got a
+ *    "Verified on-chain" cash-out receipt: now refused. A real Robinhood Chain
+ *    swap (fixture) is refused and a real Base cash out (fixture) still reads
+ *  - the list skips notes a swap or a name spent, and payouts to Gloam's routers
+ *  - a receipt names its own chain's network and token, never the one shown
+ *  - a cross-chain cash out is remembered as "Relay, bridging to <chain>"
+ *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-cashout-receipt.mts
  */
 import assert from "node:assert/strict";
@@ -29,6 +37,8 @@ import {
 } from "viem";
 
 const r = await import("../src/lib/cashOutReceipt");
+const bridgeLib = await import("../src/lib/cashOutBridge");
+const { readFileSync } = await import("node:fs");
 
 let passed = 0;
 async function test(name: string, fn: () => Promise<void> | void) {
@@ -196,6 +206,119 @@ await test("receipt numbers and hash checks", () => {
   assert.ok(r.isTxHash(hash(1)));
   assert.ok(!r.isTxHash("0x1234"));
   assert.ok(!r.isTxHash(TO), "an address isn't a transaction");
+});
+
+// ------------------------------------------------------------ only a plain cash out (bug sweep 23 Nov)
+type Fixture = { chainId: number; hash: Hex; status: "success" | "reverted"; blockNumber: string; timestamp: string; to: Address; from: Address; logs: { address: Address; topics: Hex[]; data: Hex; logIndex: number }[] };
+const fixture = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8")) as Fixture;
+const fixtureClient = (f: Fixture) =>
+  ({
+    getTransactionReceipt: async () => ({
+      status: f.status,
+      blockNumber: BigInt(f.blockNumber),
+      logs: f.logs.map((l) => ({ ...l, blockNumber: BigInt(f.blockNumber), transactionHash: f.hash, blockHash: `0x${"00".repeat(32)}`, transactionIndex: 0, removed: false })),
+    }),
+    getTransaction: async () => ({ to: f.to, from: f.from }),
+    getBlock: async () => ({ timestamp: BigInt(f.timestamp) }),
+  }) as never;
+
+await test("a real private swap on Robinhood Chain gets no cash-out receipt", async () => {
+  const f = fixture("receipt-rh-private-swap.json");
+  const net = { chainId: 4663, pool: POOL, label: "Robinhood Chain" };
+  const out = await r.readCashOutReceipt(fixtureClient(f), net, f.hash);
+  assert.ok(!out.ok && out.reason === "not_cash_out", "refused: the money went to an escrow and came back into the vault");
+  assert.match(out.ok ? "" : out.message, /inside Gloam/);
+  assert.ok(r.receiptGuardFor(4663).notTo.includes(f.to.toLowerCase()), "the swap router is one of Gloam's");
+});
+
+await test("a real Base cash out still reads, and what the wallet got matches the token transfer", async () => {
+  const f = fixture("receipt-base-cash-out.json");
+  const net = { chainId: 8453, pool: POOL, label: "Base" };
+  const out = await r.readCashOutReceipt(fixtureClient(f), net, f.hash);
+  assert.ok(out.ok);
+  const x = out.receipt;
+  const transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+  const toWallet = f.logs.find((l) => l.topics[0] === transferTopic && `0x${l.topics[2]!.slice(26)}`.toLowerCase() === x.to.toLowerCase());
+  assert.ok(toWallet, "the token moved to the receipt's wallet");
+  assert.equal(x.delivered, BigInt(toWallet!.data), "received = the transfer to that wallet");
+  assert.ok(x.fee > 0n && x.amount === x.delivered + x.fee);
+});
+
+await test("a name purchase, a payout to a router, or a note put back in the vault is refused", async () => {
+  const REGISTRAR = getAddress("0x2B28b693EA3A880085fe582E55B7f0EEC86d3EDB");
+  const REGISTRY = getAddress("0x62c435CE6886fa91e3b0e91500c6dC9219723457");
+  const ROUTER = getAddress("0xfCa1887e77f738ef9C5751974b3f3873d029F2DC");
+  const guard = { notTo: [REGISTRAR, REGISTRY, ROUTER].map((a) => a.toLowerCase()), noLogsFrom: [REGISTRY.toLowerCase()] };
+  const g = { ...NET, guard };
+  const local = new Map<string, { to: Address; logs: Log[] }>();
+  const c = {
+    getTransactionReceipt: async ({ hash: h }: { hash: Hex }) => ({ status: "success", blockNumber: 900n, logs: local.get(h.toLowerCase())!.logs }),
+    getTransaction: async ({ hash: h }: { hash: Hex }) => ({ to: local.get(h.toLowerCase())!.to, from: RELAY }),
+    getBlock: async () => ({ timestamp: 1_795_400_900n }),
+  } as never;
+  // sent to the registrar
+  local.set(hash(20).toLowerCase(), { to: REGISTRAR, logs: [unshieldLog(POOL, nul(20), 5_000_000n, 900n, hash(20))] });
+  // a names registry log in the transaction
+  const reg = { ...unshieldLog(REGISTRY, nul(21), 1n, 900n, hash(21)) } as Log;
+  local.set(hash(21).toLowerCase(), { to: POOL, logs: [unshieldLog(POOL, nul(21), 5_000_000n, 900n, hash(21)), reg] });
+  // a note put back in the vault in the same transaction (a swap's return leg)
+  const shielded = {
+    address: POOL,
+    topics: encodeEventTopics({
+      abi: [{ type: "event", name: "Shielded", inputs: [{ name: "commitment", type: "bytes32", indexed: true }, { name: "asset", type: "address", indexed: true }, { name: "amount", type: "uint256", indexed: false }, { name: "leafIndex", type: "uint256", indexed: false }, { name: "from", type: "address", indexed: true }] }],
+      eventName: "Shielded",
+      args: { commitment: nul(99), asset: USDC, from: OTHER },
+    }) as [Hex, ...Hex[]],
+    data: encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], [1n, 7n]),
+    blockNumber: 900n,
+    blockHash: `0x${"cd".repeat(32)}`,
+    transactionHash: hash(22),
+    transactionIndex: 0,
+    logIndex: 99,
+    removed: false,
+  } as Log;
+  local.set(hash(22).toLowerCase(), { to: POOL, logs: [unshieldLog(POOL, nul(22), 5_000_000n, 900n, hash(22)), shielded] });
+  // a plain cash out with the same guard reads
+  local.set(hash(23).toLowerCase(), { to: POOL, logs: [unshieldLog(POOL, nul(23), 5_000_000n, 900n, hash(23))] });
+  for (const n of [20, 21, 22]) {
+    const o = await r.readCashOutReceipt(c, g, hash(n));
+    assert.ok(!o.ok && o.reason === "not_cash_out", `tx ${n} refused`);
+  }
+  const fine = await r.readCashOutReceipt(c, g, hash(23));
+  assert.ok(fine.ok, "a plain cash out still gets its receipt");
+});
+
+await test("the list skips notes a swap or a name spent, and other networks' notes", () => {
+  const base = { chainId: 1, pool: POOL };
+  const notes = [
+    { ...base, id: "a", nullifier: nul(31) },
+    { ...base, id: "b", nullifier: nul(32), swapProofAt: 5 },
+    { ...base, id: "c", nullifier: nul(33) },
+    { ...base, id: "refund", nullifier: nul(34), vaultSwap: {} as never, sweptFrom: { id: "c", nullifier: nul(33) } },
+    { ...base, id: "d", nullifier: nul(35) },
+    { ...base, id: "name-refund", nullifier: nul(36), nameClaim: {} as never, sweptFrom: { id: "d", nullifier: nul(35) } },
+    { chainId: 8453, pool: POOL, id: "e", nullifier: nul(37) },
+  ] as never[];
+  assert.deepEqual(r.cashOutMarkers(notes, 1, POOL), [nul(31), nul(34), nul(36)], "swap-spent, swap-refunded and name-spent notes are left out");
+});
+
+await test("a receipt is drawn with its own chain's network and token", () => {
+  assert.equal(r.receiptNetworkOf(8453)?.label, "Base");
+  assert.equal(r.receiptNetworkOf(1)?.label, "Ethereum");
+  const usdcBase = r.receiptToken(8453, "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
+  assert.deepEqual(usdcBase, { symbol: "USDC", decimals: 6 }, "Base USDC, whatever network the app shows");
+  assert.equal(r.receiptToken(1, "0x0000000000000000000000000000000000000000").symbol, "ETH");
+  assert.equal(r.receiptNetworkOf(424242), null, "an unknown chain is no network");
+});
+
+await test("a cross-chain cash out is remembered for its receipt", () => {
+  bridgeLib.rememberBridgeCashOut(nul(40), { chain: "Base", chainId: 8453, symbol: "USDC", recipient: TO }, 1000);
+  const m = bridgeLib.bridgeMarkFor(nul(40).toUpperCase().replace("0X", "0x"));
+  assert.deepEqual(m, { chain: "Base", chainId: 8453, symbol: "USDC", recipient: TO, at: 1000 }, "found by its spend marker, any case");
+  assert.equal(bridgeLib.bridgeMarkFor(nul(41)), null);
+  for (let i = 0; i < 205; i++) bridgeLib.rememberBridgeCashOut(nul(500 + i), { chain: "Base", chainId: 8453, symbol: "USDC", recipient: TO }, 2000 + i);
+  assert.equal(bridgeLib.bridgeMarkFor(nul(40)), null, "only the newest 200 are kept");
+  assert.ok(bridgeLib.bridgeMarkFor(nul(704)));
 });
 
 console.log(`\n${passed} cash-out receipt checks passed`);
