@@ -26,8 +26,13 @@ const lib = () => import("@/lib/solanaRings/client");
 
 export type SolanaTaskKind = "connect" | "setup" | "add" | "pay" | "cashout" | "refresh";
 
-/** A wait, named step by step: what it is doing now, and what comes after. */
-export type SolanaTask = { kind: SolanaTaskKind; steps: string[]; at: number };
+/**
+ * A wait, named step by step: what it is doing now, and what comes after.
+ * `detail` is where a send stands within the current step, in the client's
+ * own words (lib/solanaRings/client ringsStepLabel): sending, waiting for
+ * Solana, sending again, checking.
+ */
+export type SolanaTask = { kind: SolanaTaskKind; steps: string[]; at: number; detail?: string };
 
 /** What a payroll run needs from the account (components/app/SolanaPayrollView). */
 export type SolanaPayrollEngine = {
@@ -208,7 +213,7 @@ function demoWalletBalances(network: RingsNetwork): Record<string, bigint> {
   return out;
 }
 
-const DEMO_RELAY: RelayStatus = { on: true, funded: true, relayer: null, network: SOLANA_RINGS_NETWORK };
+const DEMO_RELAY: RelayStatus = { on: true, funded: true, relayer: null, network: SOLANA_RINGS_NETWORK, priorityMicroLamports: null };
 const DEMO_READY: Record<string, boolean> = Object.fromEntries(ringsAssets().map((a) => [a.id, true]));
 
 /** The demo's pretend private balance: read and replaced whole. */
@@ -300,24 +305,23 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
 
   /** Run one wait, with its steps; returns its result, or null with the error kept. */
   const run = useCallback(
-    async <T,>(kind: SolanaTaskKind, steps: string[], fn: (step: (i: number) => void, label: (i: number, text: string) => void) => Promise<T>): Promise<T | null> => {
+    async <T,>(kind: SolanaTaskKind, steps: string[], fn: (step: (i: number) => void, detail: (text: string) => void) => Promise<T>): Promise<T | null> => {
       if (busy.current) return null;
       busy.current = true;
       setError(null);
       let current: SolanaTask = { kind, steps, at: 0 };
       setTask(current);
       const step = (i: number) => {
-        current = { ...current, at: Math.max(current.at, Math.min(i, current.steps.length - 1)) };
+        const at = Math.max(current.at, Math.min(i, current.steps.length - 1));
+        current = { ...current, at, detail: at === current.at ? current.detail : undefined };
         setTask(current);
       };
-      const label = (i: number, text: string) => {
-        const next = [...current.steps];
-        next[i] = text;
-        current = { ...current, steps: next };
+      const detail = (text: string) => {
+        current = { ...current, detail: text };
         setTask(current);
       };
       try {
-        return await fn(step, label);
+        return await fn(step, detail);
       } catch (e) {
         if (process.env.NODE_ENV !== "production") console.error("solana:", e);
         const message = demo ? "Something went wrong. Try again." : (await lib()).ringsErrorMessage(e);
@@ -356,7 +360,7 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
     const ok = await run(
       "setup",
       [`Sign the message in ${m.wallet.name}`, "Opening your private account", "Getting it ready on Solana", "Reading your private balance"],
-      async (step) => {
+      async (step, detail) => {
         if (demo) {
           for (const [i, ms] of [[0, 1200], [1, 900], [2, 1400], [3, 900]] as const) {
             step(i);
@@ -373,7 +377,7 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
         hook.current = {};
         try {
           step(2);
-          await l.ensureRegistered(s);
+          await l.ensureRegistered(s, { onStep: (_step, label) => detail(label) });
           step(3);
           await l.syncRings(s);
           setBalancesState(l.ringsBalances(s));
@@ -421,7 +425,7 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
   const add = useCallback(
     (asset: RingsAsset, amount: bigint) => {
       const name = main?.wallet.name ?? "your wallet";
-      return run("add", ["Getting it ready", `Confirm in ${name}`, "Adding to your private balance"], async (step) => {
+      return run("add", ["Getting it ready", `Confirm in ${name}`, "Adding to your private balance"], async (step, detail) => {
         if (demo) {
           await sleep(800);
           step(1);
@@ -437,7 +441,7 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
         if (!s) throw new Error("Set up your private account first.");
         const l = await lib();
         hook.current = { ask: () => step(1), answer: () => step(2) };
-        const sig = await l.addToPrivate(s, asset, amount);
+        const sig = await l.addToPrivate(s, asset, amount, { onStep: (_step, label) => detail(label) });
         setBalancesState(l.ringsBalances(s));
         void readPublic();
         return sig;
@@ -449,7 +453,7 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
   const spend = useCallback(
     (kind: "pay" | "cashout", to: string, asset: RingsAsset, amount: bigint) => {
       const first = kind === "pay" ? "Paying privately" : "Cashing out";
-      return run(kind, [first, "Updating your private balance"], async (step, label) => {
+      return run(kind, [first, "Updating your private balance"], async (step, detail) => {
         if (demo) {
           await sleep(2600);
           step(1);
@@ -467,7 +471,7 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
         if (kind === "pay" && !(await l.isRegistered(s, to))) {
           throw new Error("That address has no Gloam private account. Use Cash out to pay any Solana address.");
         }
-        const opts = { onChecking: () => label(0, "Checking on Solana whether it went through") };
+        const opts = { onStep: (_step: unknown, label: string) => detail(label) };
         const sig = kind === "pay" ? await l.payPrivately(s, to, asset, amount, opts) : await l.cashOut(s, to, asset, amount, opts);
         step(1);
         setBalancesState(l.ringsBalances(s));

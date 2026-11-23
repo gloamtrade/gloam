@@ -76,23 +76,29 @@ export function SolanaSteps({ task, className = "" }: { task: SolanaTask | null;
             <li
               key={i}
               aria-current={i === task.at ? "step" : undefined}
-              className={`flex items-center gap-2.5 text-[13.5px] leading-snug ${
+              className={`flex items-start gap-2.5 text-[13.5px] leading-snug ${
                 i < task.at ? "text-mute" : i === task.at ? "text-foreground" : "text-faint"
               }`}
             >
-              <span className="grid h-4 w-4 shrink-0 place-items-center">
+              <span className="grid h-[18px] w-4 shrink-0 place-items-center">
                 {i < task.at ? <CheckGlyph /> : i === task.at ? <Spinner /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
               </span>
-              {s}
+              <span className="min-w-0">
+                {s}
+                {i === task.at && task.detail && <span className="mt-0.5 block text-[12.5px] text-mute">{task.detail}</span>}
+              </span>
             </li>
           ))}
         </ol>
       ) : (
-        <p className="flex items-center gap-2.5 text-[13.5px] leading-snug text-foreground">
-          <span className="grid h-4 w-4 shrink-0 place-items-center">
+        <p className="flex items-start gap-2.5 text-[13.5px] leading-snug text-foreground">
+          <span className="grid h-[18px] w-4 shrink-0 place-items-center">
             <Spinner />
           </span>
-          {task.steps[0]}
+          <span className="min-w-0">
+            {task.steps[0]}
+            {task.detail && <span className="mt-0.5 block text-[12.5px] text-mute">{task.detail}</span>}
+          </span>
         </p>
       )}
       <p className="mt-2.5 pl-[26px] text-[12px] text-mute">Keep this tab open.</p>
