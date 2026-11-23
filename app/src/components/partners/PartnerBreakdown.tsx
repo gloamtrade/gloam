@@ -4,6 +4,7 @@ import { HowItWorks } from "@/components/ui/HowItWorks";
 import type { ReactNode } from "react";
 import { getNetwork, networkName, type NetworkKey } from "@/lib/networks";
 import type { ActivityKind, ActivitySource, PartnerStats } from "@/lib/partners";
+import { displayAmountText } from "@/lib/amountShort";
 
 /**
  * One partner's figures for one tier (mainnet or testnet, never added together),
@@ -42,9 +43,9 @@ function fmtUsd(n: number | null | undefined): string {
   return usd.format(n);
 }
 
+/** A token amount as text, two places, cut down (lib/amountShort). */
 function fmtTokens(v: string): string {
-  const n = Number(v);
-  return Number.isFinite(n) ? n.toLocaleString("en-US", { maximumFractionDigits: 6 }) : v;
+  return displayAmountText(v);
 }
 
 function fmtDay(day: string): string {

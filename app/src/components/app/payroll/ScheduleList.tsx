@@ -9,7 +9,7 @@ import {
   sortSchedules,
   type PayrollSchedule,
 } from "@/lib/payrollSchedule";
-import { formatAssetAmount, summaryDecimals } from "@/lib/shield";
+import { formatAssetAmount } from "@/lib/shield";
 import { ScheduleIcon, ScheduleStatusChip, SELF_CUSTODY_NOTE, type AssetOption } from "./scheduleUi";
 
 function people(n: number) {
@@ -101,8 +101,8 @@ export function ScheduleList({
                       {s.endsOn && st.status !== "ended" ? `, ends ${dayLabel(s.endsOn, today)}` : ""}
                     </p>
                     <p className="tnum mt-0.5 text-[12.5px] text-mute">
-                      {people(s.people.length)}, {formatAssetAmount(scheduleTotal(s), s.asset, summaryDecimals(s.asset))} {sym}
-                      <span className="text-faint"> · cap {formatAssetAmount(s.cap, s.asset, summaryDecimals(s.asset))}</span>
+                      {people(s.people.length)}, {formatAssetAmount(scheduleTotal(s), s.asset)} {sym}
+                      <span className="text-faint"> · cap {formatAssetAmount(s.cap, s.asset)}</span>
                     </p>
                     {st.owed > 1 && st.status !== "paused" && (
                       <p className="mt-1.5 text-[12.5px] leading-relaxed text-warn">

@@ -194,10 +194,11 @@ test("no dollar price: nothing estimated, no warning guessed", () => {
 
 const quoted = (extra: string | null, amount = "1000") => ({ extra, receive: { amount, symbol: "USDG" } });
 
-test("the row and the note round the leftover the same way", () => {
-  assert.equal(leftoverLabel(quoted("11.168129")), "about 11 USDG");
-  assert.equal(leftoverLabel(quoted("14.97")), "about 15 USDG");
-  assert.equal(leftoverLabel(quoted("1234.5")), "about 1,235 USDG");
+test("the row and the note cut the leftover the same way: two places, never rounded up", () => {
+  assert.equal(leftoverLabel(quoted("11.168129")), "about 11.16 USDG");
+  assert.equal(leftoverLabel(quoted("14.97")), "about 14.97 USDG");
+  assert.equal(leftoverLabel(quoted("14.999")), "about 14.99 USDG", "never rounded up to 15.00");
+  assert.equal(leftoverLabel(quoted("1234.5")), "about 1,234.50 USDG");
   assert.equal(leftoverLabel(quoted("5.49")), "about 5.49 USDG");
   assert.equal(leftoverLabel(quoted("0.03")), "about 0.03 USDG");
   assert.equal(leftoverLabel(quoted("0.01")), "about 0.01 USDG", "a cent shows");
@@ -208,9 +209,9 @@ test("the row and the note round the leftover the same way", () => {
 test("the note says what the wallet will show, in real values", () => {
   assert.equal(
     swapWalletNote(quoted("11.168129")),
-    "Your wallet will show about 11 USDG coming back. That's the leftover from the swap. The 1,000 USDG goes straight into your private balance, so your wallet won't list it."
+    "Your wallet will show about 11.16 USDG coming back. That's the leftover from the swap. The 1,000.00 USDG goes straight into your private balance, so your wallet won't list it."
   );
-  assert.match(swapWalletNote(quoted("0.03", "5")), /about 0\.03 USDG coming back.* The 5 USDG goes straight/);
+  assert.match(swapWalletNote(quoted("0.03", "5")), /about 0\.03 USDG coming back.* The 5\.00 USDG goes straight/);
   assert.match(swapWalletNote(quoted("5.49", "1250.5")), /The 1,250\.50 USDG goes straight/);
 });
 

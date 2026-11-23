@@ -19,6 +19,7 @@
  * browser.
  */
 import { parseUnits, zeroAddress } from "viem";
+import { displayAmountText } from "./amountShort";
 import { moneyInKind, whenLabel } from "./cashOutPlan";
 import type { LocalNote } from "./shield";
 import { knownTokens, nativeTokenFor } from "./tokens";
@@ -58,7 +59,7 @@ export function sameScope(n: Pick<PrivacyNote, "chainId" | "pool">, scope: CashO
 // ---------------------------------------------------------------- amounts
 
 export type PresetAmount = {
-  /** "1,000", "0.05". */
+  /** "1,000.00", "0.05": two places, as every amount shows (lib/amountShort). */
   label: string;
   /** What the input field gets: "1000", "0.05". */
   value: string;
@@ -91,7 +92,7 @@ export function presetAmounts(p: { chainId: number; asset: string; spendable: bi
   for (const value of values) {
     const wei = parseUnits(value, decimals);
     if (wei <= 0n || wei > p.spendable) continue;
-    out.push({ value, wei, label: Number(value).toLocaleString("en-US", { maximumFractionDigits: 6 }) });
+    out.push({ value, wei, label: displayAmountText(value) });
   }
   return out;
 }

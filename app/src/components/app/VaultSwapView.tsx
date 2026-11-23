@@ -33,8 +33,6 @@ import {
   assetLabel,
   formatAssetAmount,
   formatAssetLabel,
-  formatAssetShort,
-  formatAssetShortLabel,
   formatFeePercent,
   parseAssetAmount,
   shieldPoolAbi,
@@ -75,6 +73,7 @@ import {
   type SwapPlan,
 } from "@/lib/vaultSwap";
 import { amountTextError } from "@/lib/amountText";
+import { displayAmount, displayAmountNumber } from "@/lib/amountShort";
 import { SWAP_REFUNDED, runVaultSwap } from "@/lib/vaultSwapRun";
 import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
 import { countPerson } from "@/lib/people";
@@ -697,7 +696,7 @@ export function VaultSwapView() {
 
   const payUsd = payAsset && typed !== null && typed > 0n ? usdOf(typed, payAsset, marks) : null;
   const getUsd = shownPlan && toAsset ? usdOf(shownPlan.amountOut, toAsset, marks) : null;
-  const receiveText = shownPlan && toAsset ? formatAssetAmount(shownPlan.amountOut, toAsset) : "0";
+  const receiveText = shownPlan && toAsset ? formatAssetAmount(shownPlan.amountOut, toAsset) : displayAmount(0n, 0);
 
   // On a chain where gas is dear a swap's vault fee has to cover its gas (lib/relay/swapFloor), and the
   // relay counts a stablecoin at face value. The floor follows the route, each hop past the first costing
@@ -988,7 +987,7 @@ export function VaultSwapView() {
                 <div className="gl-collapse" data-open={showDetails} aria-hidden={!showDetails}>
                   <div>
                   <dl className="divide-y divide-line border-t border-line pb-1 text-[13px]">
-                    <Row term="You receive exactly">{formatAssetLabel(shownPlan.amountOut, toAsset)}</Row>
+                    <Row term="You receive">{formatAssetLabel(shownPlan.amountOut, toAsset)}</Row>
                     <Row term={`Vault fee (${formatFeePercent(feeBps ?? 0)})`}>
                       {formatAssetLabel(withdrawFeeOf(amount, feeBps ?? 0), payAsset)}
                     </Row>
@@ -1135,7 +1134,7 @@ export function VaultSwapView() {
         title="Swapped"
         body={
           receipt
-            ? `${formatAssetShortLabel(receipt.receiveAmount, receipt.receive)} is in your private balance.`
+            ? `${formatAssetLabel(receipt.receiveAmount, receipt.receive)} is in your private balance.`
             : ""
         }
         detail={
@@ -1176,9 +1175,9 @@ function SwapPair({
   const to = tokenFor(chainId, receive);
   const fromSymbol = from?.symbol ?? assetLabel(pay);
   const toSymbol = to?.symbol ?? assetLabel(receive);
-  // short, cut down (never rounded up), like the other success dialogs
-  const paid = formatAssetShort(payAmount, pay);
-  const got = formatAssetShort(receiveAmount, receive);
+  // two places, cut down (never rounded up), like every amount shown
+  const paid = formatAssetAmount(payAmount, pay);
+  const got = formatAssetAmount(receiveAmount, receive);
   return (
     <div
       className="flex items-center justify-center gap-2 rounded-[18px] bg-surface px-3 py-4 sm:gap-3 sm:px-4"
@@ -1211,14 +1210,13 @@ function usdOf(raw: bigint, asset: string, marks: Record<string, number | null>)
   return Number(formatUnits(raw, assetDecimals(asset))) * m;
 }
 
-/** "1 USDG ≈ 0.4446 GLOAM", what the swap gives for each unit paid (fees included). */
+/** "1 USDG ≈ 0.44 GLOAM", what the swap gives for each unit paid (fees included), two places, cut down. */
 function rateLine(amountIn: bigint, assetIn: string, amountOut: bigint, assetOut: string, inverse: boolean): string {
   const a = Number(formatUnits(amountIn, assetDecimals(assetIn)));
   const b = Number(formatUnits(amountOut, assetDecimals(assetOut)));
   if (!(a > 0) || !(b > 0)) return "";
   const [from, to, r] = inverse ? [assetOut, assetIn, a / b] : [assetIn, assetOut, b / a];
-  const digits = r >= 100 ? 2 : r >= 1 ? 4 : 6;
-  return `1 ${assetLabel(from)} ≈ ${r.toLocaleString("en-US", { maximumFractionDigits: digits })} ${assetLabel(to)}`;
+  return `1 ${assetLabel(from)} ≈ ${displayAmountNumber(r)} ${assetLabel(to)}`;
 }
 
 /**

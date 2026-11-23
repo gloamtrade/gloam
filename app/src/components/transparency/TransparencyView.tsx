@@ -30,6 +30,7 @@ import { NetworkPicker } from "./NetworkPicker";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
 import { swapTokenPrice } from "@/lib/vaultAssets";
 import { vaultSwapRouter } from "@/lib/vaultSwap";
+import { displayAmountNumber } from "@/lib/amountShort";
 
 /* ---------------------------------------------------------------- data */
 
@@ -184,10 +185,9 @@ function units(raw: string, decimals: number): number {
   }
 }
 
-function fmtAmount(n: number, stable: boolean): string {
-  if (n === 0) return "0";
-  if (n > 0 && n < 0.0001) return "<0.0001";
-  return n.toLocaleString("en-US", { maximumFractionDigits: stable ? 2 : 4 });
+/** A token amount, two places, cut down (lib/amountShort). */
+function fmtAmount(n: number): string {
+  return displayAmountNumber(n);
 }
 
 const usdFmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -398,7 +398,7 @@ function HoldingsCard({ ledger, prices, waiting }: { ledger: Ledger; prices: Pri
                 )}
                 <span className="min-w-0 flex-1">
                   <span className="tnum block truncate text-[15px] text-foreground">
-                    {fmtAmount(amount, h.stable)} <span className="text-mute">{h.symbol}</span>
+                    {fmtAmount(amount)} <span className="text-mute">{h.symbol}</span>
                   </span>
                 </span>
                 <span className="tnum shrink-0 text-right text-[14px] text-soft">
@@ -521,7 +521,7 @@ function ActivityCard({ ledger }: { ledger: Ledger }) {
                 <span className="tnum shrink-0 text-right text-[14px]">
                   {a && e.amount != null ? (
                     <span className="text-foreground">
-                      {fmtAmount(units(e.amount, a.decimals), a.stable)} <span className="text-mute">{a.symbol}</span>
+                      {fmtAmount(units(e.amount, a.decimals))} <span className="text-mute">{a.symbol}</span>
                     </span>
                   ) : (
                     <span className="inline-flex flex-col items-end gap-1">

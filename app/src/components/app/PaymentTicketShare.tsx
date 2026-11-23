@@ -17,18 +17,23 @@ import { isClaimLink } from "@/lib/funnel";
 export function PaymentTicketShare({
   code,
   amountLabel,
+  shareLabel,
   locked,
   stacked = false,
   onSaved,
 }: {
   code: string;
+  /** The amount as shown, two places ("12.50 USDG"). */
   amountLabel?: string | null;
+  /** The amount with every unit, for the text it is shared with and the file name; amountLabel when not given. */
+  shareLabel?: string | null;
   locked: boolean;
   /** QR above the text, for narrow spots like the success dialog. */
   stacked?: boolean;
   /** Called once the code is copied, downloaded or shared. */
   onSaved?: () => void;
 }) {
+  const sharedAmount = shareLabel ?? amountLabel;
   const [copied, setCopied] = useState(false);
   // The QR made for one text; a QR for an earlier code never shows for a new one.
   const [qr, setQr] = useState<{ text: string; url: string | null; error: string | null } | null>(null);
@@ -98,7 +103,7 @@ export function PaymentTicketShare({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `gloam-ticket-${amountLabel?.replace(/\s/g, "") ?? "pay"}.txt`;
+    a.download = `gloam-ticket-${sharedAmount?.replace(/\s/g, "") ?? "pay"}.txt`;
     a.click();
     URL.revokeObjectURL(url);
     onSaved?.();
@@ -112,8 +117,8 @@ export function PaymentTicketShare({
         text: code.startsWith("gloamr1.")
           ? `My Gloam address. Paste it in Gloam under Pay privately to send me money.\n\n${code}`
           : locked
-          ? `I sent you a private payment on Gloam${amountLabel ? ` (${amountLabel})` : ""}. It's locked: I'll send you the phrase separately. Tap to claim it:\n\n${link ?? shown}`
-          : `I sent you a private payment on Gloam${amountLabel ? ` (${amountLabel})` : ""}. Tap to claim it:\n\n${link ?? shown}`,
+          ? `I sent you a private payment on Gloam${sharedAmount ? ` (${sharedAmount})` : ""}. It's locked: I'll send you the phrase separately. Tap to claim it:\n\n${link ?? shown}`
+          : `I sent you a private payment on Gloam${sharedAmount ? ` (${sharedAmount})` : ""}. Tap to claim it:\n\n${link ?? shown}`,
       });
       onSaved?.();
       setShared(true);

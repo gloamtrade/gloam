@@ -6,8 +6,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useReadContracts } from "wagmi";
-import { formatUnits } from "viem";
 import { formatEth } from "@/lib/chain";
+import { displayAmount } from "@/lib/amountShort";
 import { useAppAccount, useAppBalance, useAppTokenBalances } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
 import { faucetFor } from "@/lib/faucet";
@@ -37,14 +37,12 @@ import { COINGECKO_MARKED, hasCoingeckoMarks, useCoingeckoMarks } from "@/hooks/
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
 import {
   privateHeadline,
-  tidyAmount,
   splitWalletRows,
   walletRowValue,
   walletTotal,
   type WalletHolding,
 } from "@/lib/portfolioValue";
 import {
-  assetDecimals,
   assetLabel,
   formatAssetAmount,
   isNativeAsset,
@@ -169,6 +167,9 @@ type WalletRow = WalletHolding & {
   /** Add takes it (the gas coin and the pool's tokens); a stock or swap token can't be added as it is. */
   addable: boolean;
 };
+
+/** An empty balance as every amount shows: two places (lib/amountShort). */
+const ZERO_SHOWN = displayAmount(BigInt(0), 0);
 
 const uiMultiplierAbi = [
   { type: "function", name: "uiMultiplier", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
@@ -520,7 +521,7 @@ export function PortfolioView() {
   const totalDisplay = !balancesVisible
     ? settings.showUsd
       ? formatUsd(0)
-      : `0 ${nativeSymbol}`
+      : `${formatEth(BigInt(0))} ${nativeSymbol}`
     : totalUsd != null && settings.showUsd
       ? formatUsdCompact(totalUsd)
       : `${formatEth(nativeWei + shieldedWei)} ${nativeSymbol}`;
@@ -533,14 +534,13 @@ export function PortfolioView() {
       : `${formatEth(balancesVisible ? nativeWei : BigInt(0))} ${nativeSymbol}, ${stockCount} ${stockCount === 1 ? "token" : "tokens"}`;
 
   // The hero number: what sits in the vault, only readable in this browser. What the
-  // dollars leave out is shown by amount: "$100 + 1,000 GLOAM" rather than "2 assets".
-  // A short amount: this is the big number, and the rows below keep every decimal.
-  const amountOfRow = (r: (typeof shieldRows)[number]) =>
-    `${tidyAmount(Number(formatUnits(r.amount, isNativeAsset(r.asset) ? 18 : assetDecimals(r.asset))))} ${r.label}`;
+  // dollars leave out is shown by amount: "$100 + 1,000.00 GLOAM" rather than "2 assets".
+  // Two places, cut down, like every amount (lib/amountShort), from the raw units.
+  const amountOfRow = (r: (typeof shieldRows)[number]) => `${formatAssetAmount(r.amount, r.asset)} ${r.label}`;
   const vaultValue = !balancesVisible
-    ? "0"
+    ? ZERO_SHOWN
     : !hasShield
-      ? "0"
+      ? ZERO_SHOWN
       : shieldRows.length === 1
         ? amountOfRow(shieldRows[0])
         : `${shieldRows.length} assets`;
@@ -548,7 +548,7 @@ export function PortfolioView() {
   const privateDisplay = !balancesVisible
     ? settings.showUsd
       ? formatUsd(0)
-      : "0"
+      : ZERO_SHOWN
     : privateHeadline({
         showUsd: settings.showUsd,
         sealedUsd,
@@ -648,7 +648,7 @@ export function PortfolioView() {
                   key: r.asset,
                   id: native ? nativeId : (tok?.id ?? null),
                   symbol: r.label,
-                  amount: tidyAmount(Number(formatUnits(r.amount, native ? 18 : assetDecimals(r.asset)))),
+                  amount: formatAssetAmount(r.amount, r.asset),
                 };
               })}
             />

@@ -17,8 +17,9 @@ import {
   useWaitForTransactionReceipt,
   useWriteContract,
 } from "wagmi";
-import { formatEther, formatUnits, type Address, type Hex } from "viem";
+import { type Address, type Hex } from "viem";
 import { formatEth } from "@/lib/chain";
+import { displayAmount } from "@/lib/amountShort";
 import { useNetwork } from "./NetworkProvider";
 import {
   DEX_ROUTER,
@@ -779,9 +780,7 @@ export function VaultTradePanel({
                               )}
                             </span>
                             <span className="tnum text-[15px] font-medium text-foreground">
-                              {isNativeAsset(n.asset)
-                                ? formatEth(BigInt(n.amountWei))
-                                : formatUnits(BigInt(n.amountWei), 18)}{" "}
+                              {displayAmount(BigInt(n.amountWei), 18)}{" "}
                               {assetLabel(n.asset)}
                             </span>
                           </span>
@@ -802,8 +801,8 @@ export function VaultTradePanel({
                   <span className="text-mute">You get (est.)</span>
                   <span className="tnum text-[15px] font-medium text-foreground">
                     {side === "buy"
-                      ? `${formatUnits(quoteOut, 18)} ${marketSymbol}`
-                      : `${formatEther(quoteOut)} ETH`}
+                      ? `${displayAmount(quoteOut, 18)} ${marketSymbol}`
+                      : `${formatEth(quoteOut)} ETH`}
                   </span>
                 </div>
                 <p className="mt-1.5 text-[12px] text-mute">

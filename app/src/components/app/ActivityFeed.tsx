@@ -1,21 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { formatEther, formatUnits } from "viem";
-import { formatEth, shortAddress } from "@/lib/chain";
+import { shortAddress } from "@/lib/chain";
+import { displayAmount } from "@/lib/amountShort";
 import { useAppAccount } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
 import { useActivity } from "@/hooks/useActivity";
 
 const PAGE_SIZE = 5;
-
-/** A token amount for a row: up to six decimals, trailing zeros dropped. */
-function tokenAmount(raw: bigint, decimals: number): string {
-  const [whole, frac = ""] = formatUnits(raw, decimals).split(".");
-  const f = frac.slice(0, 6).replace(/0+$/, "");
-  if (whole === "0" && !f) return raw > BigInt(0) ? "<0.000001" : "0";
-  return `${Number(whole).toLocaleString("en-US")}${f ? `.${f}` : ""}`;
-}
 
 function DirIcon({ kind }: { kind: "out" | "in" | "vault" }) {
   return (
@@ -139,14 +131,15 @@ export function ActivityFeed() {
           <ul className="min-h-0 flex-1 divide-y divide-line overflow-y-auto border-t border-line">
             {pageTxs.map((tx) => {
               const out = tx.from.toLowerCase() === address.toLowerCase();
-              let eth = "0";
+              let raw = BigInt(0);
               try {
-                eth = tx.token ? tokenAmount(BigInt(tx.valueWei), tx.token.decimals) : formatEth(BigInt(tx.valueWei), 5);
+                raw = BigInt(tx.valueWei);
               } catch {
-                eth = formatEther(BigInt(0));
+                /* not a number: the row reads as no amount */
               }
-              const zero =
-                tx.valueWei === "0" || tx.valueWei === "0x0" || eth === "0";
+              // two places, cut down, like every amount (lib/amountShort)
+              const eth = displayAmount(raw, tx.token ? tx.token.decimals : 18);
+              const zero = raw === BigInt(0);
               const sym = tx.token?.symbol ?? network.primaryAsset.symbol;
               const counterparty = out ? tx.to : tx.from;
               const isVault =

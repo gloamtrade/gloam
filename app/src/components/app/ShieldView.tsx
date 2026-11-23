@@ -12,7 +12,6 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { formatEth } from "@/lib/chain";
 import {
   useAppAccount,
   useAppBalance,
@@ -37,7 +36,7 @@ import { lacksGasFunds, surelyNotSent, walletErrorForPeople } from "@/lib/wallet
 import { publicClientFor } from "@/lib/rhClient";
 
 import { isNoLimit } from "@gloamtrade/sdk";
-import { APPROVE_GAS_LIMIT, gasFor, HASH_SCHEME, NATIVE_ASSET, SHIELD_GAS_LIMIT, SHIELD_BOUND_GAS_LIMIT, type LocalNote, assetLabel, dropUnsentNote, formatAssetAmount, isShieldDeployed, makeNoteMaterial, markAllNotesRecovered, nativeGasReserve, saveLocalNote, shieldPoolAbi } from "@/lib/shield";
+import { APPROVE_GAS_LIMIT, gasFor, HASH_SCHEME, NATIVE_ASSET, SHIELD_GAS_LIMIT, SHIELD_BOUND_GAS_LIMIT, type LocalNote, assetLabel, dropUnsentNote, isShieldDeployed, makeNoteMaterial, markAllNotesRecovered, nativeGasReserve, saveLocalNote, shieldPoolAbi } from "@/lib/shield";
 import { makeBoundNotePoseidon } from "@/lib/notePoseidon";
 import { createTxLog, depositAfterLostApproval, depositCall, networkMovedMessage, type DepositCall } from "@/lib/depositFlow";
 import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
@@ -47,7 +46,7 @@ import { WalletMenu } from "./WalletMenu";
 import { TokenLogo } from "./TokenLogo";
 import { Select } from "@/components/ui/Select";
 import { SuccessModal } from "./SuccessModal";
-import { shortAmount } from "@/lib/amountShort";
+import { displayAmount, displayAmountText } from "@/lib/amountShort";
 import { DevKeysBanner } from "./DevKeysBanner";
 import { BridgeInCard } from "./BridgeIn";
 import { RefreshIcon } from "./VaultHealth";
@@ -528,7 +527,7 @@ export function ShieldView() {
     countPerson("deposit", address, network.testnet);
     void import("@/lib/track").then(({ track }) => {
       track("shield_success", {
-        asset: sentLabel.replace(/[\d.]+/g, "").trim().slice(0, 16) || "asset",
+        asset: sentLabel.replace(/[<\d.,]+/g, "").trim().slice(0, 16) || "asset",
       });
     });
     setSuccessTitle("Added privately");
@@ -599,8 +598,7 @@ export function ShieldView() {
   const typedAdd = amount.trim() ? parseAmount() : null;
 
   function limitText(v: bigint): string {
-    const n = Number(formatUnits(v, decimals));
-    return `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${symbol}`;
+    return `${displayAmount(v, decimals)} ${symbol}`;
   }
 
   /** Why the vault's deposit limits refuse this amount, or null. */
@@ -818,8 +816,8 @@ export function ShieldView() {
     setApproved(false);
     handledHash.current = null;
     txLog.clear();
-    // the success dialog's amount: cents for a stablecoin, 4 places otherwise, never rounded up
-    setSentLabel(`${shortAmount(value, decimals, selectedToken?.kind === "stablecoin")} ${symbol}`);
+    // the success dialog's amount: two places, never rounded up
+    setSentLabel(`${displayAmount(value, decimals)} ${symbol}`);
     setSentMark(selectedToken ? { id: selectedToken.id, symbol: selectedToken.symbol } : { id: nativeToken.id, symbol: nativeToken.symbol });
     pendingShieldArgs.current = { value, commitment, note };
     // Proved while any approval is mined, so the deposit goes out as soon as it lands.
@@ -1031,13 +1029,6 @@ export function ShieldView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- executeShield reads this render's form; the effect runs once per lost receipt
   }, [receiptLost, hash, pendingKind, refetchAllow]);
 
-  const maxLabel =
-    walletBalance !== undefined
-      ? selectedToken
-        ? formatUnits(walletBalance, decimals)
-        : formatEth(walletBalance, 6)
-      : "0";
-
   const amtNum = Number(amount);
   // "1,25" or "-1" is refused out loud, never quietly turned into 125 or 1
   const amountProblem = amountTextError(amount, decimals);
@@ -1070,10 +1061,8 @@ export function ShieldView() {
     pendingKind === "shield" && !isPending && !confirming && !formError;
 
   const connectedOk = isConnected && onProduct;
-  const maxDisplay =
-    selectedToken && walletBalance !== undefined
-      ? formatAssetAmount(walletBalance, selectedToken.address)
-      : maxLabel;
+  // The wallet balance beside the field: two places, cut down. Max still writes every unit into the field.
+  const maxDisplay = displayAmount(isConnected ? (walletBalance ?? BigInt(0)) : BigInt(0), decimals);
 
 
   // What stops this deposit before the wallet is asked, said on the button
@@ -1165,7 +1154,7 @@ export function ShieldView() {
                 </button>
                 <span className="tnum -my-2 inline-flex min-h-10 min-w-0 items-center text-mute">
                   <span className="truncate">
-                    In wallet {isConnected ? maxDisplay : "0"} {symbol}
+                    In wallet {maxDisplay} {symbol}
                   </span>
                 </span>
                 </span>
@@ -1251,7 +1240,7 @@ export function ShieldView() {
                 </span>
               </div>
               <p className="tnum mt-3 truncate text-[28px] font-light leading-none tracking-[-0.02em] text-foreground">
-                {amtNum > 0 ? amount : "0"}{" "}
+                {displayAmountText(amtNum > 0 ? amount : "0")}{" "}
                 <span className="text-[15px] tracking-normal text-mute">{symbol}</span>
               </p>
             </div>
