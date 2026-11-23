@@ -81,13 +81,17 @@ let feeCache: { at: number; price: number | null } | null = null;
 async function recommendedPrice(url: string): Promise<number | null> {
   if (feeCache && Date.now() - feeCache.at < FEE_FRESH_MS) return feeCache.price;
   let price: number | null = null;
+  let why = "";
   try {
     const r = await rpc<{ priorityFeeEstimate?: unknown }>(url, "getPriorityFeeEstimate", [{ accountKeys: FEE_ACCOUNTS, options: { recommended: true } }], 4_000);
     const v = r.result?.priorityFeeEstimate;
     price = typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.ceil(v) : null;
-  } catch {
-    price = null;
+    if (price === null) why = String(r.error?.message ?? "no estimate").slice(0, 160);
+  } catch (e) {
+    why = e instanceof Error ? e.name : "failed";
   }
+  // the page then pays the floor; said once per read, never with the URL (it carries the key)
+  if (price === null) console.warn("solana_fee_estimate_unavailable", JSON.stringify({ network: SOLANA_RINGS_NETWORK, why }));
   feeCache = { at: Date.now(), price };
   return price;
 }
