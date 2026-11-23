@@ -46,6 +46,7 @@ const SHIELDED = parseAbiItem(
 );
 const UNSHIELDED = parseAbiItem("event Unshielded(bytes32 indexed nullifier, address indexed asset, address indexed to, uint256 amount)");
 const WITHDRAW_FEE = parseAbiItem("event WithdrawFee(bytes32 indexed nullifier, address indexed asset, uint256 fee)");
+const VAULT_EVENTS = [SHIELDED, UNSHIELDED, WITHDRAW_FEE] as const;
 
 /** The first read's window, in days back from the head. "Show older" adds as many again. */
 export const ACTIVITY_WINDOW_DAYS = 7;
@@ -88,6 +89,19 @@ const BLOCKS_PER_DAY: Record<number, number> = {
   99901: 864_000,
   99801: 864_000,
 };
+
+/**
+ * Blocks left for the next read at the head, where the transparency ledger's
+ * HEAD_LAG is too few: BNB Chain's publicnode balances across nodes that trail
+ * by more than 20 blocks at times and refuse a range "beyond current head"
+ * (seen 23 Nov 2026). 100 blocks is about 45 s.
+ */
+const ACTIVITY_HEAD_LAG: Record<number, bigint> = { 56: 100n };
+
+/** Blocks a read leaves at the head of a chain for the next one. */
+export function activityHeadLag(chainId: number): bigint {
+  return ACTIVITY_HEAD_LAG[chainId] ?? headLag(chainId);
+}
 
 /** Rows kept per wallet, newest first; the feed pages through them five at a time. */
 const KEEP = 200;
@@ -305,9 +319,20 @@ function startJob(key: NetworkKey, address: Address, k: string, c: ActivityClien
   let current: ActivityRead | null = null;
   const cached = loadCached(k);
   if (cached && (cached.rows.length > 0 || BigInt(cached.from) <= BigInt(cached.to))) {
-    // what an earlier read left, until this one adds to it
-    const complete = BigInt(cached.from) <= BigInt(cached.to) && BigInt(cached.from) <= getNetwork(key).deployBlock!;
-    current = { txs: cached.rows, scope: { days: cached.days, complete, reading: true, progress: 0, stalled: false } };
+    // what an earlier read left, until this one adds to it (a refresh of the head does not count as reading)
+    const [from, to, target] = [BigInt(cached.from), BigInt(cached.to), BigInt(cached.target)];
+    const any = from <= to;
+    const total = to - target + 1n;
+    current = {
+      txs: cached.rows,
+      scope: {
+        days: cached.days,
+        complete: any && from <= getNetwork(key).deployBlock!,
+        reading: !any || from > target,
+        progress: any && total > 0n ? Math.min(1, Number(((to - from + 1n) * 1000n) / total) / 1000) : 0,
+        stalled: false,
+      },
+    };
   }
   const emit = (r: ActivityRead) => {
     current = r;
@@ -328,7 +353,7 @@ async function runJob(key: NetworkKey, address: Address, k: string, c: ActivityC
   // A balanced RPC can answer from a node a few blocks behind the head, and
   // refuses ("beyond current head") or answers empty for blocks it lacks:
   // the last few blocks are left for the next read.
-  const lag = headLag(id);
+  const lag = activityHeadLag(id);
   const top = latest > lag ? latest - lag : latest;
 
   let prev = loadCached(k);
@@ -507,55 +532,53 @@ async function readSpan(
     if (!supportsNativeShield(id) || !n.paymentsPool || !n.pool) return;
     const pool = n.pool;
     const coin = { symbol: n.primaryAsset.symbol, decimals: n.primaryAsset.decimals };
-    const [ins, outs] = await Promise.all([
-      getLogsSafe(
-        (a, b) => call(() => c.getLogs({ address: pool, event: SHIELDED, args: { asset: zeroAddress, from: address }, fromBlock: a, toBlock: b })),
-        from,
-        to
-      ),
-      getLogsSafe(
-        (a, b) => call(() => c.getLogs({ address: pool, event: UNSHIELDED, args: { asset: zeroAddress, to: address }, fromBlock: a, toBlock: b })),
-        from,
-        to
-      ),
-    ]);
-    for (const l of ins) {
-      if (l.args.amount == null) continue;
-      rows.push({
-        id: `${l.transactionHash}:${l.logIndex}`,
-        hash: l.transactionHash ?? "",
-        from: address,
-        to: pool,
-        valueWei: l.args.amount.toString(),
-        timestamp: 0,
-        ok: true,
-        token: coin,
-        block: String(l.blockNumber ?? 0n),
-        logIndex: l.logIndex ?? 0,
-      });
+    // One query for the vault's deposits, cash-outs and fees, matched to this wallet
+    // here: the vault logs a few of each a day, and one read in place of three
+    // matters where a log read costs its whole range (BNB Chain).
+    const logs = await getLogsSafe(
+      (a, b) => call(() => c.getLogs({ address: pool, events: VAULT_EVENTS, fromBlock: a, toBlock: b })),
+      from,
+      to
+    );
+    const me = address.toLowerCase();
+    const fees = new Map<string, bigint>();
+    for (const l of logs) {
+      if (l.eventName === "WithdrawFee" && l.args.fee != null) fees.set(`${l.transactionHash}:${l.args.nullifier}`, l.args.fee);
     }
-    for (const l of outs) {
-      const { nullifier, amount } = l.args;
-      if (amount == null || !nullifier || l.blockNumber == null) continue;
-      // what reached the wallet: the amount less the vault's cash-out fee, from the same transaction
-      const fees = await getLogsSafe(
-        (a, b) => call(() => c.getLogs({ address: pool, event: WITHDRAW_FEE, args: { nullifier }, fromBlock: a, toBlock: b })),
-        l.blockNumber,
-        l.blockNumber
-      );
-      const fee = fees.find((f) => f.transactionHash === l.transactionHash)?.args.fee ?? 0n;
-      rows.push({
-        id: `${l.transactionHash}:${l.logIndex}`,
-        hash: l.transactionHash ?? "",
-        from: pool,
-        to: address,
-        valueWei: (amount - fee).toString(),
-        timestamp: 0,
-        ok: true,
-        token: coin,
-        block: String(l.blockNumber),
-        logIndex: l.logIndex ?? 0,
-      });
+    for (const l of logs) {
+      if (l.eventName === "Shielded") {
+        const { asset, from: src, amount } = l.args;
+        if (amount == null || asset?.toLowerCase() !== zeroAddress || src?.toLowerCase() !== me) continue;
+        rows.push({
+          id: `${l.transactionHash}:${l.logIndex}`,
+          hash: l.transactionHash ?? "",
+          from: address,
+          to: pool,
+          valueWei: amount.toString(),
+          timestamp: 0,
+          ok: true,
+          token: coin,
+          block: String(l.blockNumber ?? 0n),
+          logIndex: l.logIndex ?? 0,
+        });
+      } else if (l.eventName === "Unshielded") {
+        const { asset, to: dst, amount, nullifier } = l.args;
+        if (amount == null || !nullifier || asset?.toLowerCase() !== zeroAddress || dst?.toLowerCase() !== me) continue;
+        // what reached the wallet: the amount less the vault's cash-out fee, from the same transaction
+        const fee = fees.get(`${l.transactionHash}:${nullifier}`) ?? 0n;
+        rows.push({
+          id: `${l.transactionHash}:${l.logIndex}`,
+          hash: l.transactionHash ?? "",
+          from: pool,
+          to: address,
+          valueWei: (amount - fee).toString(),
+          timestamp: 0,
+          ok: true,
+          token: coin,
+          block: String(l.blockNumber ?? 0n),
+          logIndex: l.logIndex ?? 0,
+        });
+      }
     }
   };
 

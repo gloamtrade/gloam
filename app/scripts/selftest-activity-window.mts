@@ -30,8 +30,7 @@ globalThis.fetch = (async (url: unknown) => {
 
 const { getNetwork } = await import("../src/lib/networks");
 const { shieldTokensFor } = await import("../src/lib/tokens");
-const { headLag } = await import("../src/components/transparency/ledger");
-const { activityRefetchMs, activityView, activityWindowDays, readWalletActivity, widenWalletActivity } = await import(
+const { activityHeadLag, activityRefetchMs, activityView, activityWindowDays, readWalletActivity, widenWalletActivity } = await import(
   "../src/lib/walletActivity"
 );
 type ActivityRead = Awaited<ReturnType<typeof readWalletActivity>>;
@@ -42,7 +41,7 @@ assert.ok(NET.pool && NET.deployBlock != null, `${KEY} has a vault`);
 const TOKEN = shieldTokensFor(NET.chainId)[0];
 const DAY = 86_400n; // the stand-in makes one block a second
 const HEAD = NET.deployBlock! + 40n * DAY;
-const LAG = headLag(NET.chainId);
+const LAG = activityHeadLag(NET.chainId);
 const TOP = HEAD - LAG; // the last few blocks wait for the next read
 const DAYS = activityWindowDays(NET.chainId); // 7, or 1 on BNB Chain
 const WINDOW_START = TOP - BigInt(DAYS) * DAY + 1n;
@@ -64,7 +63,7 @@ const sent = (me: Address, back: bigint): FakeLog => ({
 });
 
 let headNow = HEAD;
-type Q = { address: Address | Address[]; event: { name: string }; args?: Record<string, unknown>; fromBlock: bigint; toBlock: bigint };
+type Q = { address: Address | Address[]; event?: { name: string }; events?: { name: string }[]; args?: Record<string, unknown>; fromBlock: bigint; toBlock: bigint };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** A stand-in chain. `slow(q)` answers a getLogs after that many ms; `fail(q)` makes it throw. */
@@ -79,9 +78,10 @@ function chain(logs: FakeLog[], opts: { slow?: (q: Q) => number; fail?: (q: Q) =
       if (ms) await sleep(ms);
       if (opts.fail?.(q)) throw new Error("upstream unavailable");
       const addrs = (Array.isArray(q.address) ? q.address : [q.address]).map(lc);
-      return logs.filter(
+      const names = q.events ? q.events.map((e) => e.name) : [q.event!.name];
+      return logs.map((l) => ({ ...l, eventName: l.event })).filter(
         (l) =>
-          l.event === q.event.name &&
+          names.includes(l.event) &&
           addrs.includes(lc(l.address)) &&
           l.blockNumber >= q.fromBlock &&
           l.blockNumber <= q.toBlock &&
@@ -203,7 +203,7 @@ await ok("a call answers at its time limit with the rows read so far; the read g
   assert.deepEqual(seen[0], blocksOf(first), "a call that joins sees the list so far at once");
   assert.deepEqual(blocksOf(second), [newest, mid].map((l) => String(l.blockNumber)));
   assert.equal(second.scope!.reading, false);
-  const ranges = slow.calls.map((q) => `${q.event.name}:${JSON.stringify(q.args)}:${q.fromBlock}-${q.toBlock}`);
+  const ranges = slow.calls.map((q) => `${q.event?.name ?? q.events?.map((e) => e.name).join("+")}:${JSON.stringify(q.args)}:${q.fromBlock}-${q.toBlock}`);
   assert.equal(new Set(ranges).size, ranges.length, "no block range is read twice");
 });
 
