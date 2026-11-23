@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.0 (23 November 2026)
+
+**Solana**, through Helius Solana Privacy Rings (the permissionless Default Ring).
+
+- New tools: `gloam_solana_info`, `gloam_solana_balance`, `gloam_solana_register`, `gloam_solana_add`, `gloam_solana_pay`, `gloam_solana_cash_out` and `gloam_solana_tx_status`. Set `GLOAM_AGENT_SOLANA_KEY` (a Solana keypair file's JSON array, or its base58 text) in the environment or `~/.gloam/agent.env`; it opens the same private account the Gloam app opens for that wallet (`GLOAM_SOLANA_ACCOUNT_INDEX`, default 0). The key never leaves the server and is never printed; a malformed one stops the server at start.
+- What Solana hides, in every answer: the asset and the amount of a private payment. The two private accounts a payment moves between are visible, adding money shows the wallet it came from, a cash out shows its destination, asset and amount, and proofs are made by Helius's prover.
+- Gloam's relay pays the fees of registering, paying and cashing out, so the private account never needs SOL. Adding money is paid by the agent's wallet.
+- Spending limits cover Solana: the network is `solana-mainnet` (SOL, and USDC and USDT named with that network, or `GLOAM_LIMIT_NETWORK=solana-mainnet`). Adding money counts as `shield`, paying and cashing out as `pay`. A cash out to the agent's own wallet needs no recipient entry. No limits still means no spending.
+- Sends never wait forever: each returns `landed`, or `pending` with its signature and blockhash after `timeoutMs` (default 120 s). A relay refusal says whether anything may have been sent; `gloam_solana_tx_status` tells landed, failed, dropped (safe to resend) and pending apart.
+- `gloam_info` and `gloam_privacy_status` list Solana with the line above.
+- Built with `@gloamtrade/sdk` 0.9.0. New dependencies: `@heliuslabs/spr` 0.9.0-alpha and `@solana/kit`.
+
 ## 0.10.1 (20 November 2026)
 
 - Built with `@gloamtrade/sdk` 0.8.1: on BNB Chain, BDX is Beldex's BEP-20 `0x9d10a1ec41Fe7878429BB457e31F9b050D38c633`, not the LayerZero OFT named BDX, which is not Beldex's (closed in every vault on 20 November 2026). A limit or payment naming BDX on `bnb-mainnet` now counts in that contract. No other change.
