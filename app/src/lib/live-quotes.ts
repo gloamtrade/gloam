@@ -224,7 +224,7 @@ export async function loadLiveMarkets() {
  * here left ETH, HYPE or BNB out of every dollar total ("no dollar price").
  * Null only when all three have nothing. Never another coin's price.
  */
-const BINANCE_PAIR: Record<string, string> = { ethereum: "ETHUSDT", hyperliquid: "HYPEUSDT", binancecoin: "BNBUSDT" };
+const BINANCE_PAIR: Record<string, string> = { ethereum: "ETHUSDT", hyperliquid: "HYPEUSDT", binancecoin: "BNBUSDT", solana: "SOLUSDT" };
 const LAST_GOOD_MS = 60 * 60_000;
 const lastGood = new Map<string, { mark: number; at: number }>();
 
@@ -269,6 +269,11 @@ export async function loadHypeUsd(): Promise<number | null> {
 /** BNB in USD: BNB Chain's gas coin. Null when unknown, never ETH's price. */
 export async function loadBnbUsd(): Promise<number | null> {
   return coinUsd("binancecoin");
+}
+
+/** SOL in USD: Solana's coin, for the Solana portfolio. Null when unknown. */
+export async function loadSolUsd(): Promise<number | null> {
+  return coinUsd("solana");
 }
 
 /** ETH in USD, for the portfolio's dollar figures. */

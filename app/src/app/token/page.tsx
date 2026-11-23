@@ -15,6 +15,7 @@ import { readTokenLive, type TokenLive, type VaultFee } from "@/lib/tokenLive";
 import { ELYSIUM } from "@/lib/elysium";
 import { BNB } from "@/lib/bnb";
 import { chainLogoSrc } from "@/lib/chainLogo";
+import { displayAmount } from "@/lib/amountShort";
 
 /**
  * The fees and the burn address are read from chain on the server
@@ -274,13 +275,9 @@ function PhaseList({ phases }: { phases: Phase[] }) {
 
 /* ---------- live numbers ---------- */
 
-const amountFmt = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-/** Base units as a token amount for display, to the nearest hundredth. The exact amount is in each row's title. */
+/** Base units as a token amount for display: two places, cut down (lib/amountShort). The exact amount is in each row's title. */
 function fmtUnits(units: bigint, decimals = 18): string {
-  const base = 10n ** BigInt(decimals);
-  const cents = (units * 100n + base / 2n) / base;
-  return amountFmt.format(Number(cents / 100n) + Number(cents % 100n) / 100);
+  return displayAmount(units, decimals);
 }
 
 /** "2026-10-31" -> "31 October 2026". */

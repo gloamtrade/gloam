@@ -37,7 +37,7 @@ import { relayUnshield, relayUnshieldBatch, waitForTx } from "@/lib/relay/client
 import { newLinkPayment, registerLinkSpend, settlePartnerTx } from "@/lib/partnerLinkClient";
 import { batchesOn } from "@/lib/relay/batch";
 import { publicClientFor } from "@/lib/rhClient";
-import { formatAssetLabel, shieldPoolAbi, updateLocalNote } from "@/lib/shield";
+import { assetLabel, formatAssetAmountExact, formatAssetLabel, shieldPoolAbi, updateLocalNote } from "@/lib/shield";
 import { walletErrorForPeople } from "@/lib/walletErrors";
 import type { GloamNetwork } from "@/lib/networks";
 
@@ -278,8 +278,11 @@ export function CashOutAcrossPanel({ across, networkKey }: { across: CashOutAcro
   const { run, running, error, status } = across;
   if (!run) return null;
   const p = cashOutProgress(run);
+  // how it ended and each part: two places, cut down, like every amount shown (lib/amountShort)
   const total = formatAssetLabel(cashOutTotal(run), run.asset);
   const paid = formatAssetLabel(cashOutPaid(run), run.asset);
+  // while it goes, or waits on Resume: the amount typed, every unit
+  const typed = `${formatAssetAmountExact(cashOutTotal(run), run.asset)} ${assetLabel(run.asset)}`;
   const cancelled = p.done && run.parts.some((x) => x.error === CASHOUT_CANCELLED);
   const sent = run.parts.filter((x) => x.status === "paid" && x.txHash);
   // parts sent together wait on the chain together
@@ -316,7 +319,7 @@ export function CashOutAcrossPanel({ across, networkKey }: { across: CashOutAcro
         <>
           <p className="flex items-center gap-2 text-foreground">
             {running && <Spinner />}
-            {running ? `Cashing out ${total}` : `Your cash out of ${total} isn't finished`}
+            {running ? `Cashing out ${typed}` : `Your cash out of ${typed} isn't finished`}
           </p>
           <p className="tnum mt-0.5 text-mute">
             {p.paid} of {p.parts} cashed out

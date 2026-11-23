@@ -118,7 +118,10 @@ check("an empty cash-out amount never cashes out the whole balance", () => {
   assert.ok(!/placeholder=\{maxEth\}/.test(view));
   assert.match(view, /const cashOutAmount = cashOutRead\.amount \?\? 0n;/);
   assert.match(view, /const cashOutAmountInvalid = cashOutRead\.amount === null;/);
-  assert.match(view, /cashOutFeeUnknown \|\|\s*\n\s*cashOutAmountInvalid \|\|/);
+  // the button stays off on no amount; only a typed amount over this balance that the other
+  // balances cover (cash out across, built from typed text only) turns it on
+  assert.match(view, /cashOutFeeUnknown \|\|\s*\n\s*cashAcross\.running \|\|\s*\n\s*\(cashOutAmountInvalid && !cashOutAcrossPlan\?\.ok\) \|\|/);
+  assert.match(view, /cashOutTyped == null \|\| cashOutTyped <= noteWei\) return null;/);
   // Max writes the whole balance back in, exactly
   assert.match(view, /onMax=\{\(\) => setCashOutInput\(null\)\}/);
 });

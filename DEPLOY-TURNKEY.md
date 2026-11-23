@@ -42,9 +42,24 @@ In the Turnkey dashboard, under **Embedded Wallets > Configuration**:
 
 Wallets are not created at sign-up. After the first sign-in the app reads the wallet
 list (a failed read is retried, never taken for "no wallet"), then asks for an optional
-name and creates one Ethereum wallet (`m/44'/60'/0'/0/0`), which signs on every chain
-Gloam runs on. It reads the list once more just before creating, and with more than one
-wallet it always signs with the oldest.
+name and creates one wallet with an Ethereum account (`m/44'/60'/0'/0/0`), which signs
+on every EVM chain Gloam runs on, and a Solana account (`m/44'/501'/0'/0'`). It reads the
+list once more just before creating, and with more than one wallet it always signs with
+the oldest.
+
+Solana (`lib/turnkeySolana`, only while `NEXT_PUBLIC_SOLANA_RINGS_ENABLED` is on): a
+wallet made before 23 November 2026 has no Solana account, so the app adds one to the
+same wallet (`createWalletAccounts`, Turnkey's first Solana path) the first time that
+person picks Solana. The account shows on the page as the Solana wallet "Gloam account",
+connects by itself when Solana is picked (a browser wallet can still be picked instead),
+and signs transactions only, with Turnkey's raw Ed25519 signing (`sign_raw_payload`, no
+hash), stamped by the session like every other request. It has no message signing: the
+person's private account on Solana never comes from a Turnkey signature (Turnkey keeps
+those, and Gloam's Turnkey account can read them). It opens from a secret Turnkey never
+sees (`lib/solanaRings/gloamRoot`): the WebAuthn PRF output of the passkey the person
+signs in with, or, for an email sign-in, a backup code made in the browser and shown once
+(kept sealed in the browser, `lib/solanaRings/gloamCodes`, and in a passkey-keyed recovery
+backup). No dashboard setting changes.
 
 ### Continue with Google (optional)
 

@@ -67,13 +67,20 @@ export async function isPlainSignature(publicKey: Uint8Array, message: Uint8Arra
 }
 
 /** The private account's keys (an SDK ShieldedKeypair). Destroy it when done. */
-export async function deriveAccount(walletSignature: Uint8Array, index: number) {
-  const { ShieldedKeypair, SigningKey, initializePoseidon } = await import("@heliuslabs/spr");
-  await initializePoseidon(); // the account's shielded address hashes with it
+export async function deriveAccount(walletSignature: Uint8Array, index: number, onSeed?: (seed: Uint8Array) => void) {
   const seed = await accountSeed(walletSignature, index);
   try {
-    return ShieldedKeypair.fromKeypair(SigningKey.fromEd25519Bytes(seed as never));
+    onSeed?.(seed);
+    return await accountFromSeed(seed);
   } finally {
     seed.fill(0);
   }
+}
+
+/** The account a seed from accountSeed makes (a kept seed reopens it with no signature: lib/solanaRings/keep). */
+export async function accountFromSeed(seed: Uint8Array) {
+  if (seed.length !== 32) throw new Error("An account seed is 32 bytes.");
+  const { ShieldedKeypair, SigningKey, initializePoseidon } = await import("@heliuslabs/spr");
+  await initializePoseidon(); // the account's shielded address hashes with it
+  return ShieldedKeypair.fromKeypair(SigningKey.fromEd25519Bytes(seed as never));
 }

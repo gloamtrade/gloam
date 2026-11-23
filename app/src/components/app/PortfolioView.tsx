@@ -6,8 +6,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useReadContracts } from "wagmi";
-import { formatUnits } from "viem";
 import { formatEth } from "@/lib/chain";
+import { displayAmount } from "@/lib/amountShort";
 import { useAppAccount, useAppBalance, useAppTokenBalances } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
 import { faucetFor } from "@/lib/faucet";
@@ -37,14 +37,12 @@ import { COINGECKO_MARKED, hasCoingeckoMarks, useCoingeckoMarks } from "@/hooks/
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
 import {
   privateHeadline,
-  tidyAmount,
   splitWalletRows,
   walletRowValue,
   walletTotal,
   type WalletHolding,
 } from "@/lib/portfolioValue";
 import {
-  assetDecimals,
   assetLabel,
   formatAssetAmount,
   isNativeAsset,
@@ -77,7 +75,7 @@ import { addAssetHref, pickAddAsset } from "@/lib/vaultHub";
 const SwapToStableButton = dynamic(() => import("./BridgeIn").then((m) => m.SwapToStableButton), { ssr: false });
 
 /* Small marks that carry the public / private duality. */
-function LockIcon({ className = "" }: { className?: string }) {
+export function LockIcon({ className = "" }: { className?: string }) {
   return (
     <svg className={className} width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
       <rect x="5" y="10.5" width="14" height="10" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
@@ -86,28 +84,28 @@ function LockIcon({ className = "" }: { className?: string }) {
   );
 }
 
-function AddIcon() {
+export function AddIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
-function SendIcon() {
+export function SendIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M7 17L17 7M9 7h8v8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
-function ReceiveIcon() {
+export function ReceiveIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M17 7L7 17M15 17H7V9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
-function CashOutIcon() {
+export function CashOutIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M12 4v10m0 0l-4-4m4 4l4-4M5 19h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -115,7 +113,7 @@ function CashOutIcon() {
   );
 }
 
-function QuickAction({
+export function QuickAction({
   href,
   label,
   short,
@@ -171,6 +169,9 @@ type WalletRow = WalletHolding & {
   /** Add takes it (the gas coin and the pool's tokens); a stock or swap token can't be added as it is. */
   addable: boolean;
 };
+
+/** An empty balance as every amount shows: two places (lib/amountShort). */
+const ZERO_SHOWN = displayAmount(BigInt(0), 0);
 
 const uiMultiplierAbi = [
   { type: "function", name: "uiMultiplier", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
@@ -522,7 +523,7 @@ export function PortfolioView() {
   const totalDisplay = !balancesVisible
     ? settings.showUsd
       ? formatUsd(0)
-      : `0 ${nativeSymbol}`
+      : `${formatEth(BigInt(0))} ${nativeSymbol}`
     : totalUsd != null && settings.showUsd
       ? formatUsdCompact(totalUsd)
       : `${formatEth(nativeWei + shieldedWei)} ${nativeSymbol}`;
@@ -535,14 +536,13 @@ export function PortfolioView() {
       : `${formatEth(balancesVisible ? nativeWei : BigInt(0))} ${nativeSymbol}, ${stockCount} ${stockCount === 1 ? "token" : "tokens"}`;
 
   // The hero number: what sits in the vault, only readable in this browser. What the
-  // dollars leave out is shown by amount: "$100 + 1,000 GLOAM" rather than "2 assets".
-  // A short amount: this is the big number, and the rows below keep every decimal.
-  const amountOfRow = (r: (typeof shieldRows)[number]) =>
-    `${tidyAmount(Number(formatUnits(r.amount, isNativeAsset(r.asset) ? 18 : assetDecimals(r.asset))))} ${r.label}`;
+  // dollars leave out is shown by amount: "$100 + 1,000.00 GLOAM" rather than "2 assets".
+  // Two places, cut down, like every amount (lib/amountShort), from the raw units.
+  const amountOfRow = (r: (typeof shieldRows)[number]) => `${formatAssetAmount(r.amount, r.asset)} ${r.label}`;
   const vaultValue = !balancesVisible
-    ? "0"
+    ? ZERO_SHOWN
     : !hasShield
-      ? "0"
+      ? ZERO_SHOWN
       : shieldRows.length === 1
         ? amountOfRow(shieldRows[0])
         : `${shieldRows.length} assets`;
@@ -550,7 +550,7 @@ export function PortfolioView() {
   const privateDisplay = !balancesVisible
     ? settings.showUsd
       ? formatUsd(0)
-      : "0"
+      : ZERO_SHOWN
     : privateHeadline({
         showUsd: settings.showUsd,
         sealedUsd,
@@ -650,7 +650,7 @@ export function PortfolioView() {
                   key: r.asset,
                   id: native ? nativeId : (tok?.id ?? null),
                   symbol: r.label,
-                  amount: tidyAmount(Number(formatUnits(r.amount, native ? 18 : assetDecimals(r.asset)))),
+                  amount: formatAssetAmount(r.amount, r.asset),
                 };
               })}
             />
@@ -1062,7 +1062,7 @@ export function PortfolioView() {
  * cents quieter, and a lone token amount ("0.00387 BNB") with its symbol small
  * beside it. Anything else ("$100 + 1,000 GLOAM", "3 assets") shows as is.
  */
-function HeroFigure({ text }: { text: string }) {
+export function HeroFigure({ text }: { text: string }) {
   const usd = /^(\$[\d,]+)(\.\d+)$/.exec(text);
   if (usd) {
     return (
@@ -1085,7 +1085,7 @@ function HeroFigure({ text }: { text: string }) {
 }
 
 /** What the private balance holds, one quiet chip per asset with its own mark; three at most, then "+2". */
-function VaultChips({ rows }: { rows: { key: string; id: string | null; symbol: string; amount: string }[] }) {
+export function VaultChips({ rows }: { rows: { key: string; id: string | null; symbol: string; amount: string }[] }) {
   if (rows.length === 0) return null;
   const shown = rows.slice(0, 3);
   const more = rows.length - shown.length;

@@ -46,6 +46,7 @@ Settings
                             (Elysium testnet) once a release has its pool.
                             A mainnet here also puts the Tempo access key on Tempo mainnet.
   GLOAM_AGENT_PRIVATE_KEY   The agent's key. Without it, tools read and plan but never execute.
+  GLOAM_AGENT_SOLANA_KEY    The agent's Solana keypair (JSON array or base58) for the gloam_solana_* tools.
   GLOAM_TEMPO_ACCOUNT       Owner's Tempo account. With it, the key is an access key on Tempo and the
                             protocol enforces the owner's limits on it.
   GLOAM_NOTE_KEY            Key for the encrypted note store (openssl rand -hex 32). Back it up.

@@ -1,7 +1,7 @@
 /**
  * Self-test: the wallet balance the bridge panel shows under the amount
- * (lib/bridge formatBridgeBalance). Rounded down, never up: two decimals for a
- * stablecoin, up to six significant digits for a chain's own coin. Also that
+ * (lib/bridge formatBridgeBalance). Cut down, never rounded up: two places for
+ * every token, stablecoin or a chain's own coin, "<0.01" for dust. Also that
  * the panel reads it from the source chain, keeps it to a note when the amount
  * is more, and shows Relay's logo in the footer.
  *
@@ -22,23 +22,25 @@ function test(name: string, fn: () => void) {
 const e = (n: number) => BigInt(10) ** BigInt(n);
 
 test("stablecoins: two decimals, rounded down, grouped", () => {
-  assert.equal(formatBridgeBalance(BigInt(727_493_821), 6, true), "727.49");
-  assert.equal(formatBridgeBalance(BigInt(290_000), 6, true), "0.29");
-  assert.equal(formatBridgeBalance(BigInt(999_999), 6, true), "0.99");
-  assert.equal(formatBridgeBalance(BigInt(0), 6, true), "0.00");
-  assert.equal(formatBridgeBalance(BigInt(1_234_567_890_000), 6, true), "1,234,567.89");
+  assert.equal(formatBridgeBalance(BigInt(727_493_821), 6), "727.49");
+  assert.equal(formatBridgeBalance(BigInt(290_000), 6), "0.29");
+  assert.equal(formatBridgeBalance(BigInt(999_999), 6), "0.99");
+  assert.equal(formatBridgeBalance(BigInt(0), 6), "0.00");
+  assert.equal(formatBridgeBalance(BigInt(1_234_567_890_000), 6), "1,234,567.89");
   // BNB Chain's USDC has 18 decimals
-  assert.equal(formatBridgeBalance(BigInt(72_749) * e(16), 18, true), "727.49");
+  assert.equal(formatBridgeBalance(BigInt(72_749) * e(16), 18), "727.49");
 });
 
-test("a chain's own coin: up to six significant digits, rounded down", () => {
-  assert.equal(formatBridgeBalance(BigInt("123456789012345678"), 18), "0.123456");
-  assert.equal(formatBridgeBalance(BigInt("12345678901234567890"), 18), "12.3456");
+test("a chain's own coin: two places too, cut down, dust under a cent", () => {
+  assert.equal(formatBridgeBalance(BigInt("123456789012345678"), 18), "0.12");
+  assert.equal(formatBridgeBalance(BigInt("12345678901234567890"), 18), "12.34");
   assert.equal(formatBridgeBalance(BigInt("1234567890123456789012"), 18), "1,234.56");
-  assert.equal(formatBridgeBalance(BigInt(15) * e(14), 18), "0.0015");
-  assert.equal(formatBridgeBalance(BigInt(1), 18), "0.000000000000000001");
-  assert.equal(formatBridgeBalance(BigInt(0), 18), "0");
-  assert.equal(formatBridgeBalance(e(18), 18), "1");
+  assert.equal(formatBridgeBalance(BigInt("999999999999999999"), 18), "0.99", "never rounded up to 1.00");
+  assert.equal(formatBridgeBalance(BigInt(15) * e(14), 18), "<0.01");
+  assert.equal(formatBridgeBalance(BigInt(1), 18), "<0.01");
+  assert.equal(formatBridgeBalance(BigInt(0), 18), "0.00");
+  assert.equal(formatBridgeBalance(e(18), 18), "1.00");
+  assert.equal(formatBridgeBalance(-e(18), 18), "0.00", "never below zero");
 });
 
 const view = readFileSync(new URL("../src/components/app/BridgeIn.tsx", import.meta.url), "utf8");

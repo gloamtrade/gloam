@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { formatEther, formatUnits, isAddress } from "viem";
-import { formatEth, shortAddress } from "@/lib/chain";
+import { shortAddress } from "@/lib/chain";
 import {
   useAppAccount,
   useAppBalance,
@@ -20,8 +20,7 @@ import { erc20Abi } from "@/lib/dex";
 import { estimateMaxNativeSend, type MaxNativeSend } from "@/lib/nativeSend";
 import { NATIVE_CHOICE, hasNativeCoin, maxTokenSend, pickedToken, publicSendTargetProblem, publicSendTokens } from "@/lib/publicSend";
 import { getRhPublicClient } from "@/lib/rhClient";
-import { formatAssetAmount } from "@/lib/shield";
-import { shortAmount } from "@/lib/amountShort";
+import { displayAmount, typedAmount } from "@/lib/amountShort";
 import { isDollarStable } from "@/lib/tokens";
 import { amountTextError } from "@/lib/amountText";
 import { hasCoingeckoMarks, useCoingeckoMarks } from "@/hooks/useCoingeckoMarks";
@@ -186,8 +185,8 @@ export function SendView() {
     tokenSend.reset();
     setShowSuccess(false);
     handledHash.current = null;
-    // the success dialog's amount: cents for a stablecoin, 4 places otherwise, never rounded up
-    setSentAmount(shortAmount(value, token?.decimals ?? 18, token?.kind === "stablecoin"));
+    // the success dialog's amount: two places, never rounded up
+    setSentAmount(displayAmount(value, decimals));
     setSentSymbol(symbol);
     setSentTo(to);
     if (token) {
@@ -231,13 +230,7 @@ export function SendView() {
   }
 
   // display only: Max reads the raw balance (lib/nativeSend, lib/publicSend), never this text
-  const balanceText = token
-    ? balance !== undefined
-      ? formatAssetAmount(balance, token.address)
-      : "0"
-    : bal
-      ? formatEth(bal.value, 6)
-      : "0";
+  const balanceText = displayAmount(isConnected && onProduct ? (balance ?? BigInt(0)) : BigInt(0), decimals);
   const amtNum = Number(amount);
   // "1,25" or "-1" is refused out loud, never quietly turned into 125 or 1
   const amountProblem = amountTextError(amount, decimals);
@@ -289,7 +282,7 @@ export function SendView() {
                 aria-busy={estimatingMax || undefined}
                 className="tnum -my-2 inline-flex min-h-10 items-center gap-1.5 text-mute transition-colors hover:text-foreground disabled:opacity-45"
               >
-                Balance {isConnected && onProduct ? balanceText : "0"} {symbol}
+                Balance {balanceText} {symbol}
                 <span className="font-medium text-foreground">{estimatingMax ? "Max…" : "Max"}</span>
               </button>
             </div>
@@ -369,7 +362,7 @@ export function SendView() {
               <div className="flex min-h-11 items-center justify-between gap-4 py-2">
                 <dt className="text-mute">Sending</dt>
                 <dd className="tnum text-right text-foreground">
-                  {amount} {symbol}
+                  {typedAmount(amount)} {symbol}
                   {usdHint ? <span className="text-mute">, {usdHint}</span> : null}
                 </dd>
               </div>
@@ -469,7 +462,7 @@ export function SendView() {
               <div className="flex h-11 items-center justify-between gap-3">
                 <dt className="text-mute">Amount</dt>
                 <dd className="tnum truncate text-foreground">
-                  {amtNum > 0 ? `${amount} ${symbol}` : "The full amount"}
+                  {amtNum > 0 ? `${typedAmount(amount)} ${symbol}` : "The full amount"}
                 </dd>
               </div>
             </dl>
@@ -522,7 +515,7 @@ export function SendView() {
                 <div className="flex min-h-12 items-center justify-between gap-4 py-2">
                   <dt className="text-mute">Amount</dt>
                   <dd className="tnum text-right text-foreground">
-                    {amount} {symbol}
+                    {typedAmount(amount)} {symbol}
                     {usdHint ? <span className="ml-1 text-mute">({usdHint})</span> : null}
                   </dd>
                 </div>
@@ -567,7 +560,7 @@ export function SendView() {
           <>
             <p>
               <span className="tnum font-medium text-foreground">
-                {sentAmount || "0"} {sentSymbol}
+                {sentAmount || displayAmount(BigInt(0), 0)} {sentSymbol}
               </span>{" "}
               to{" "}
               <span className="tnum text-foreground">

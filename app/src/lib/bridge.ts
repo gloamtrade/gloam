@@ -22,6 +22,7 @@
  * public/brand so a browser never calls a third party to draw them.
  */
 import { formatUnits, isAddress } from "viem";
+import { displayAmount, displayAmountText } from "./amountShort";
 import type { ChainFamily, GloamNetwork } from "./networks";
 import { ELYSIUM } from "./elysium";
 import { BNB } from "./bnb";
@@ -209,18 +210,12 @@ export function swapSource(network: Pick<GloamNetwork, "family" | "chainId">): B
 }
 
 /**
- * A wallet's balance of a bridge token, rounded down so it never claims more
- * than is there: two decimals for a stablecoin, up to six significant digits
- * for a chain's own coin ("727.49", "0.0123456").
+ * A wallet's balance of a bridge token on screen, cut down so it never claims
+ * more than is there: two places, whatever the token ("727.49", "0.01",
+ * "<0.01"), through lib/amountShort displayAmount.
  */
-export function formatBridgeBalance(value: bigint, decimals: number, stable = false): string {
-  // Cut as text, so no float rounding ever shows a cent that isn't there.
-  const [whole = "0", frac = ""] = formatUnits(value < BigInt(0) ? BigInt(0) : value, decimals).split(".");
-  const grouped = BigInt(whole).toLocaleString("en-US");
-  if (stable) return `${grouped}.${frac.padEnd(2, "0").slice(0, 2)}`;
-  const keep = whole !== "0" ? Math.max(0, 6 - whole.length) : (frac.match(/^0*/)?.[0].length ?? 0) + 6;
-  const f = frac.slice(0, keep).replace(/0+$/, "");
-  return f ? `${grouped}.${f}` : grouped;
+export function formatBridgeBalance(value: bigint, decimals: number): string {
+  return displayAmount(value < BigInt(0) ? BigInt(0) : value, decimals);
 }
 
 /** ETH kept back by Max, so the swap itself can still pay its network fee. */
@@ -463,12 +458,11 @@ export function swapLeftover(q: { out: bigint; amount: bigint; decimals: number;
   return Number(left) > 0 ? left : null;
 }
 
-/** "about 11 USDG", or null under a cent. Whole above ten: the figure moves with the price until the swap lands. */
+/** "about 11.42 USDG", or null under a cent: two places, cut down (lib/amountShort). */
 export function leftoverLabel(q: { extra: string | null; receive: { symbol: string } }): string | null {
   const n = Number(q.extra ?? 0);
   if (!(n >= 0.01)) return null;
-  const shown = n < 10 ? n.toFixed(2) : Math.round(n).toLocaleString("en-US");
-  return `about ${shown} ${q.receive.symbol}`;
+  return `about ${displayAmountText(q.extra!)} ${q.receive.symbol}`;
 }
 
 /**
@@ -477,8 +471,7 @@ export function leftoverLabel(q: { extra: string | null; receive: { symbol: stri
  * never see the deposit. Without a figure, it still may show some.
  */
 export function swapWalletNote(q: { extra: string | null; receive: { amount: string; symbol: string } }): string {
-  const n = Number(q.receive.amount);
-  const amount = n.toLocaleString("en-US", { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 });
+  const amount = displayAmountText(q.receive.amount);
   const back = leftoverLabel(q);
   return `Your wallet ${back ? `will show ${back}` : `may show a little ${q.receive.symbol}`} coming back. That's the leftover from the swap. The ${amount} ${q.receive.symbol} goes straight into your private balance, so your wallet won't list it.`;
 }

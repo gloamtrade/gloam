@@ -817,7 +817,7 @@ await test("a fee that rises after setup: each waiting job says what it pays now
   // proven before the app kept the fee: every vault charged 0.25% then
   const old = feeRise(waiting(), 50);
   assert.deepEqual(old, { shownBps: 25, liveBps: 50, shownGets: 49_875_000n, nowGets: 49_750_000n });
-  assert.equal(feeRiseLine(old!, ASSET), "Pays 49.75 USDG, not the 49.875 USDG it showed.");
+  assert.equal(feeRiseLine(old!, ASSET), "Pays 49.75 USDG, not the 49.87 USDG it showed.");
   assert.deepEqual(feeRise(waiting(25), 50), old, "a job that kept 0.25%");
   assert.deepEqual(feeRise(waiting(50), 100), { shownBps: 50, liveBps: 100, shownGets: 49_750_000n, nowGets: 49_500_000n }, "the next rise, from what it showed");
 

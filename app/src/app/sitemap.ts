@@ -34,6 +34,7 @@ const PAGES: { path: string; priority: number }[] = [
   { path: "/vote", priority: 0.5 },
   { path: "/xray", priority: 0.5 },
   { path: "/pitch", priority: 0.5 },
+  { path: "/blog/live-on-solana", priority: 0.6 },
   { path: "/blog/build-with-gloam-at-the-near-hackathon", priority: 0.6 },
   { path: "/blog/agents-should-not-do-business-in-public", priority: 0.6 },
   { path: "/blog/private-agent-payments", priority: 0.6 },

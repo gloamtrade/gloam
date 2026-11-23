@@ -40,6 +40,7 @@ import { connectSolana, paySolana, useSolanaWallets, type SolanaAccount, type So
 import { track } from "@/lib/track";
 import type { TrackEvent } from "@/lib/trackEvents";
 import { failedBeforeSend, solanaDeclined, solanaSurelyNotSent, surelyNotSent, walletDeclined, walletErrorText } from "@/lib/walletErrors";
+import { payRelayTxs, wagmiPayActions } from "@/lib/relayWalletPay";
 import { SealedField } from "@/components/ui/SealedField";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useNetwork } from "./NetworkProvider";
@@ -48,7 +49,7 @@ import { AmountProblem } from "./AmountProblem";
 import { BackupStep, useBackupGate } from "./RecoveryPanel";
 import { keepStorage } from "@/lib/backupGate";
 import { SuccessReceipt } from "./SuccessModal";
-import { stableTextDown } from "@/lib/amountShort";
+import { displayAmount, displayAmountNumber, displayAmountText, typedAmount } from "@/lib/amountShort";
 
 const noopSubscribe = () => () => {};
 const noop = () => {};
@@ -116,7 +117,7 @@ type WalletStage =
   | { kind: "sent"; quote: BridgeQuote; hash: Hex | null; unsure: boolean };
 
 /** A chain's logo, with its dark-theme version when Relay ships one. */
-function ChainLogo({ id, size = 24, className = "" }: { id: number; size?: number; className?: string }) {
+export function ChainLogo({ id, size = 24, className = "" }: { id: number; size?: number; className?: string }) {
   return (
     <span className={`relative inline-block shrink-0 overflow-hidden rounded-full ${className}`} style={{ width: size, height: size }}>
       {/* eslint-disable-next-line @next/next/no-img-element -- small local logos */}
@@ -127,7 +128,7 @@ function ChainLogo({ id, size = 24, className = "" }: { id: number; size?: numbe
   );
 }
 
-function TokenMark({ src, size = 20 }: { src: string; size?: number }) {
+export function TokenMark({ src, size = 20 }: { src: string; size?: number }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element -- small local logos
     <img src={src} alt="" width={size} height={size} className="shrink-0 rounded-full" style={{ width: size, height: size }} />
@@ -914,80 +915,21 @@ function BridgeSheet({
       return;
     }
     const at = quote === r.quote ? r.at : Date.now();
-    const txs = quote.evmTxs ?? [];
-    let hash: Hex | null = null;
-    let approved = false;
-    // Set once the last transaction (the deposit) is handed to the wallet.
-    let paying = false;
-    try {
-      for (let i = 0; i < txs.length; i++) {
-        const tx = txs[i]!;
-        const last = i === txs.length - 1;
-        const chainId = tx.chainId as GloamChainId;
-        setWallet({
-          kind: "review",
-          quote,
-          at,
-          signing: true,
-          error: null,
-          progress: txs.length > 1 ? (last ? "Now confirm the bridge in your wallet…" : "Approve in your wallet first (1 of 2)…") : null,
-        });
-        if (getAccount(config).chainId !== tx.chainId) {
-          if (tx.chainId !== network.chainId) switchedAway.current = true;
-          await switchChain(config, { chainId });
-        }
-        paying = last;
-        const sent = await sendTransaction(config, { to: tx.to as Address, data: tx.data as Hex, value: BigInt(tx.value), chainId });
-        if (last) {
-          hash = sent;
-        } else {
-          // wagmi throws on a reverted receipt, with a reason decoded from raw bytes: read it plainly then
-          const rec = await waitForTransactionReceipt(config, { hash: sent, chainId }).catch(async (e) => {
-            const plain = await getTransactionReceipt(config, { hash: sent, chainId }).catch(() => null);
-            if (plain) return plain;
-            throw e;
-          });
-          if (rec.status !== "success") throw new Error("The approval didn't go through.");
-          // Some wallets (OKX among them) let the approval be edited down. A bridge
-          // above what was approved fails in the wallet's own check, so stop here and
-          // say so instead of handing over a deposit that cannot go through.
-          if (tx.data.slice(0, 10).toLowerCase() === "0x095ea7b3") {
-            const spender = `0x${tx.data.slice(34, 74)}` as Address;
-            const needed = BigInt(`0x${tx.data.slice(74, 138)}`);
-            const allowed = await readContract(config, { address: tx.to as Address, abi: erc20Abi, functionName: "allowance", args: [getAccount(config).address as Address, spender], chainId }).catch(() => null);
-            if (allowed !== null && allowed < needed) {
-              throw new Error(`Your wallet approved less than this payment needs (${formatUnits(allowed, token.decimals)} of ${quote.send.amount} ${quote.send.symbol}). Try again and approve the amount shown, without editing it.`);
-            }
-          }
-          approved = true;
-          // Some wallets check the deposit against a node that hasn't seen the approval yet
-          // and call it a failed contract call: give the chain a few seconds first.
-          setWallet({ kind: "review", quote, at, signing: true, error: null, progress: "Approval done. Getting the bridge ready…" });
-          await new Promise((res) => window.setTimeout(res, 4000));
-        }
+    // The same path as the bridge into a private account on Solana (lib/relayWalletPay).
+    const paid = await payRelayTxs(
+      quote.evmTxs ?? [],
+      { amount: quote.send.amount, symbol: quote.send.symbol, chain: quote.send.chain, decimals: token.decimals },
+      wagmiPayActions(config),
+      (progress) => setWallet({ kind: "review", quote, at, signing: true, error: null, progress }),
+      (chainId) => {
+        if (chainId !== network.chainId) switchedAway.current = true;
       }
-    } catch (err) {
-      // Before the deposit, or a clear no from the wallet: nothing went out. A
-      // timeout or lost reply on the deposit may come after the wallet sent it:
-      // follow the order then, Relay says whether it arrived.
-      if (!paying || surelyNotSent(err)) {
-        setWallet({
-          kind: "review",
-          quote,
-          at,
-          signing: false,
-          progress: null,
-          error: walletDeclined(err)
-            ? approved
-              ? "You cancelled the bridge. Nothing moved; the approval can be used next time."
-              : "You cancelled it in your wallet. Nothing moved."
-            : failedBeforeSend(err) && /chain/i.test(walletErrorText(err))
-              ? `Switch your wallet to ${quote.send.chain} to bridge from there.`
-              : walletErrorText(err) || "It didn't send. Try again.",
-        });
-        return;
-      }
+    );
+    if (!paid.sent) {
+      setWallet({ kind: "review", quote, at, signing: false, progress: null, error: paid.error });
+      return;
     }
+    const hash = paid.hash;
     setStatus(null);
     setWallet({ kind: "sent", quote, hash, unsure: !hash });
     once(`wallet-sent:${quote.requestId}`, "bridge_wallet_sent", { source: quote.send.chain, token: quote.send.symbol });
@@ -1291,7 +1233,6 @@ function BridgeSheet({
                     loading={srcLoading}
                     decimals={token.decimals}
                     symbol={token.symbol}
-                    stable={token.stable}
                     over={overSource ? chain.name : null}
                     // The amount here is what lands, so Max leaves room for Relay's fee.
                     onMax={
@@ -1305,8 +1246,8 @@ function BridgeSheet({
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                     <span className="tnum text-[12px] text-mute">
                       {amountNum > 0 && /^\d+(\.\d+)?$/.test(amount)
-                        ? `About ${trimAmount(formatUnits((maxOut.wei * BigInt(Math.round(amountNum * 100))) / BigInt(Math.max(1, Math.round(maxOut.out * 100))), token.decimals))} ${token.symbol}`
-                        : `Your ${token.symbol} buys up to about ${Math.floor(maxOut.out * 100) / 100} ${dest.token.symbol}`}
+                        ? `About ${displayAmount((maxOut.wei * BigInt(Math.round(amountNum * 100))) / BigInt(Math.max(1, Math.round(maxOut.out * 100))), token.decimals)} ${token.symbol}`
+                        : `Your ${token.symbol} buys up to about ${displayAmountNumber(maxOut.out)} ${dest.token.symbol}`}
                     </span>
                     <button
                       type="button"
@@ -1321,7 +1262,7 @@ function BridgeSheet({
                   {swapping && `Type the ${dest.token.symbol} you want to add, not the ${token.symbol}. `}
                   Paid in {token.symbol}{" "}
                   {solWallet ? `from ${solWallet.name}` : swapping ? "from this wallet" : `from this wallet on ${chain.name}`}.
-                  {swapping && gasCoin != null && ` You hold ${trimAmount(formatUnits(gasCoin.value, token.decimals))} ${token.symbol}.`} You
+                  {swapping && gasCoin != null && ` You hold ${displayAmount(gasCoin.value, token.decimals)} ${token.symbol}.`} You
                   see the exact cost before you sign.
                 </p>
               </div>
@@ -1353,7 +1294,6 @@ function BridgeSheet({
                   loading={srcLoading}
                   decimals={token.decimals}
                   symbol={token.symbol}
-                  stable={token.stable}
                   over={overSource ? chain.name : null}
                   // Stablecoins only: a chain's own coin also pays the network fee to send it.
                   onMax={token.stable && srcBalance != null ? () => setAmount(stableMax(srcBalance, token.decimals)) : null}
@@ -1362,7 +1302,7 @@ function BridgeSheet({
               {swapping && gasCoin != null && (
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                   <span className="tnum text-[12px] text-mute">
-                    In your wallet: {trimAmount(formatUnits(gasCoin.value, token.decimals))} {token.symbol}
+                    In your wallet: {displayAmount(gasCoin.value, token.decimals)} {token.symbol}
                   </span>
                   <div role="group" aria-label="Amount shortcuts" className="flex gap-1.5">
                     {[25, 50, 75, 100].map((pct) => {
@@ -1387,7 +1327,7 @@ function BridgeSheet({
                 {overBalance
                   ? `That's more ${token.symbol} than this wallet holds.`
                   : token.stable
-                    ? `From ${BRIDGE_MIN_USD} to ${BRIDGE_MAX_USD.toLocaleString("en-US")} ${token.symbol}.`
+                    ? `From ${displayAmountNumber(BRIDGE_MIN_USD)} to ${displayAmountNumber(BRIDGE_MAX_USD)} ${token.symbol}.`
                     : swapping
                       ? `Keep a little ${token.symbol} for network fees. It arrives as ${dest.token.symbol} in this wallet.`
                       : `Up to about $${BRIDGE_MAX_USD.toLocaleString("en-US")} worth. It arrives as ${dest.token.symbol}.`}
@@ -1463,7 +1403,7 @@ function BridgeSheet({
                       ? "Review the swap"
                       : walletPays
                         ? amountNum > 0 && /^\d+(\.\d+)?$/.test(amount)
-                          ? `Bridge ${amount} ${token.symbol} from your wallet`
+                          ? `Bridge ${typedAmount(amount)} ${token.symbol} from your wallet`
                           : "Bridge from your wallet"
                         : "Get a deposit address")}
             </button>
@@ -1565,13 +1505,13 @@ function BridgeSheet({
                 <dt className="text-mute">Sent</dt>
                 <dd className="tnum flex items-center gap-1.5 text-right text-foreground">
                   <TokenMark src={wallet.quote.send.logo} size={18} />
-                  {wallet.quote.send.amount} {wallet.quote.send.symbol} on {wallet.quote.send.chain}
+                  {typedAmount(wallet.quote.send.amount)} {wallet.quote.send.symbol} on {wallet.quote.send.chain}
                 </dd>
               </div>
               <div className="flex min-h-11 items-center justify-between gap-3">
                 <dt className="text-mute">You get about</dt>
                 <dd className="tnum text-right text-foreground">
-                  {Number(wallet.quote.receive.amount).toFixed(2)} {wallet.quote.receive.symbol}
+                  {displayAmountText(wallet.quote.receive.amount)} {wallet.quote.receive.symbol}
                 </dd>
               </div>
               {wallet.hash && txLink(wallet.quote.send.chainId, wallet.hash) && (
@@ -1675,13 +1615,13 @@ function BridgeSheet({
                 <dt className="text-mute">You get about</dt>
                 <dd className="tnum flex items-center gap-1.5 text-right text-foreground">
                   <TokenMark src={stage.quote.receive.logo} size={18} />
-                  {Number(stage.quote.receive.amount).toFixed(2)} {stage.quote.receive.symbol}
+                  {displayAmountText(stage.quote.receive.amount)} {stage.quote.receive.symbol}
                 </dd>
               </div>
               <div className="flex min-h-11 items-center justify-between gap-3">
                 <dt className="text-mute">At least</dt>
                 <dd className="tnum text-right text-foreground">
-                  {Number(stage.quote.receive.minimum).toFixed(2)} {stage.quote.receive.symbol}
+                  {displayAmountText(stage.quote.receive.minimum)} {stage.quote.receive.symbol}
                 </dd>
               </div>
               {feeRows(stage.quote, "Bridge fee").map(([k, v]) => (
@@ -1799,7 +1739,7 @@ function WalletReview({
         Bridge
         <TokenMark src={q.send.logo} size={18} />
         <span className="tnum font-medium">
-          {q.send.amount} {q.send.symbol}
+          {typedAmount(q.send.amount)} {q.send.symbol}
         </span>
         from your wallet on
         <ChainLogo id={q.send.chainId} size={18} />
@@ -1814,13 +1754,13 @@ function WalletReview({
           <dt className="text-mute">You get about</dt>
           <dd className="tnum flex items-center gap-1.5 text-right text-foreground">
             <TokenMark src={q.receive.logo} size={18} />
-            {Number(q.receive.amount).toFixed(2)} {q.receive.symbol}
+            {displayAmountText(q.receive.amount)} {q.receive.symbol}
           </dd>
         </div>
         <div className="flex min-h-11 items-center justify-between gap-3">
           <dt className="text-mute">At least</dt>
           <dd className="tnum text-right text-foreground">
-            {Number(q.receive.minimum).toFixed(2)} {q.receive.symbol}
+            {displayAmountText(q.receive.minimum)} {q.receive.symbol}
           </dd>
         </div>
         <div className="flex min-h-11 items-center justify-between gap-3">
@@ -1927,7 +1867,7 @@ function PrivateReview({
   onReset: () => void;
 }) {
   const q = review.quote;
-  const pay = Number(q.send.amount).toLocaleString("en-US", { maximumFractionDigits: 6 });
+  const pay = displayAmountText(q.send.amount);
   const payer = review.wallet ? review.wallet.name : q.sameChain ? "this wallet" : `this wallet on ${q.send.chain}`;
   const steps = q.evmTxs?.length ?? 1;
   const confirm = review.wallet
@@ -1943,7 +1883,8 @@ function PrivateReview({
       "Added privately",
       <span key="a" className="flex items-center gap-1.5 font-medium">
         <TokenMark src={q.receive.logo} size={18} />
-        {fmtMoney(Number(q.receive.amount))} {q.receive.symbol}
+        {/* What lands is the amount typed (exact output), said back as typed. */}
+        {typedAmount(q.receive.amount)} {q.receive.symbol}
       </span>,
     ],
     ["On", q.receive.chain],
@@ -2035,7 +1976,7 @@ function PrivateLanded({ quote: q, onDone }: { quote: PrivateBridgeQuote; onDone
         logo={<TokenMark src={q.receive.logo} size={56} />}
         amount={
           <>
-            {stableTextDown(q.receive.amount)}{" "}
+            {displayAmountText(q.receive.amount)}{" "}
             <span className="text-[16px] tracking-normal text-mute">{q.receive.symbol}</span>
           </>
         }
@@ -2073,7 +2014,7 @@ function PrivateProgress({
   onGiveUp: () => void;
 }) {
   const q = stage.quote;
-  const amount = `${fmtMoney(Number(q.receive.amount))} ${q.receive.symbol}`;
+  const amount = `${displayAmountText(q.receive.amount)} ${q.receive.symbol}`;
   const relay = status?.stage ?? "waiting";
   const failed =
     stage.kind === "failed" || (stage.kind === "sent" && !q.sameChain && (relay === "refunded" || relay === "failed"));
@@ -2129,7 +2070,7 @@ function PrivateProgress({
   );
 }
 
-/** At most six decimals, trailing zeros dropped, rounded down so Max never asks for more than is there. */
+/** For an amount field: at most six decimals, trailing zeros dropped, rounded down so Max never asks for more than is there. */
 function trimAmount(text: string): string {
   const [whole, frac = ""] = text.split(".");
   const f = frac.slice(0, 6).replace(/0+$/, "");
@@ -2137,18 +2078,17 @@ function trimAmount(text: string): string {
 }
 
 /** Max for a stablecoin sent to a deposit address: all of it, up to the bridge's limit. */
-function stableMax(value: bigint, decimals: number): string {
+export function stableMax(value: bigint, decimals: number): string {
   const cap = parseUnits(String(BRIDGE_MAX_USD), decimals);
   return trimAmount(formatUnits(value > cap ? cap : value, decimals));
 }
 
 /** "Balance 727.49 USDC" under the amount, with Max when it has one. Nothing without a reading. */
-function SourceBalance({
+export function SourceBalance({
   value,
   loading,
   decimals,
   symbol,
-  stable,
   over,
   onMax,
 }: {
@@ -2156,7 +2096,6 @@ function SourceBalance({
   loading: boolean;
   decimals: number;
   symbol: string;
-  stable?: boolean;
   /** The source chain's name when the amount is more than the balance there. */
   over: string | null;
   onMax: (() => void) | null;
@@ -2173,7 +2112,7 @@ function SourceBalance({
     <>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
         <span className="tnum text-[12px] text-mute">
-          Balance {formatBridgeBalance(value, decimals, stable)} {symbol}
+          Balance {formatBridgeBalance(value, decimals)} {symbol}
         </span>
         {onMax && (
           <button
@@ -2192,7 +2131,7 @@ function SourceBalance({
 }
 
 /** "Powered by" Relay's own wordmark, dark or light with the theme, linking to Relay. */
-function PoweredByRelay() {
+export function PoweredByRelay() {
   return (
     <span className="whitespace-nowrap">
       Powered by{" "}
@@ -2254,7 +2193,7 @@ function SwapReview({
         Swap
         <TokenMark src={quote.send.logo} size={18} />
         <span className="tnum font-medium">
-          {quote.send.amount} {quote.send.symbol}
+          {typedAmount(quote.send.amount)} {quote.send.symbol}
         </span>
         on
         <ChainLogo id={quote.send.chainId} size={18} />
@@ -2267,7 +2206,7 @@ function SwapReview({
           <dt className="text-mute">You get about</dt>
           <dd className="tnum flex items-center gap-1.5 text-right text-foreground">
             <TokenMark src={quote.receive.logo} size={18} />
-            {Number(quote.receive.amount).toFixed(2)} {quote.receive.symbol}
+            {displayAmountText(quote.receive.amount)} {quote.receive.symbol}
           </dd>
         </div>
         <div className="flex min-h-11 items-center justify-between gap-3">
@@ -2277,7 +2216,7 @@ function SwapReview({
         <div className="flex min-h-11 items-center justify-between gap-3">
           <dt className="text-mute">At least</dt>
           <dd className="tnum text-right text-foreground">
-            {Number(quote.receive.minimum).toFixed(2)} {quote.receive.symbol}
+            {displayAmountText(quote.receive.minimum)} {quote.receive.symbol}
           </dd>
         </div>
         {feeRows(quote, "Swap fee").map(([k, v]) => (
@@ -2345,15 +2284,15 @@ function SwapReview({
   );
 }
 
-/** Dollars with cents and thousands separators. */
-function fmtMoney(n: number): string {
+/** Dollars with cents and thousands separators (token amounts go through lib/amountShort). */
+export function fmtMoney(n: number): string {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /** "1 ETH = 2,504.83 USDG", from what a quote sends and returns. */
 function rateLine(q: BridgeQuote): string {
   const rate = Number(q.receive.amount) / Number(q.send.amount);
-  return Number.isFinite(rate) && rate > 0 ? `1 ${q.send.symbol} = ${fmtMoney(rate)} ${q.receive.symbol}` : "";
+  return Number.isFinite(rate) && rate > 0 ? `1 ${q.send.symbol} = ${displayAmountNumber(rate)} ${q.receive.symbol}` : "";
 }
 
 /** The live price under the swap amount: what arrives, the rate and the fees. */
@@ -2365,14 +2304,14 @@ function SwapPrice({ quote, from, to }: { quote: BridgeQuote | null; from: strin
       quote ? (
         <span className="flex items-center gap-1.5 font-medium">
           <TokenMark src={quote.receive.logo} size={16} />
-          {fmtMoney(Number(quote.receive.amount))} {to}
+          {displayAmountText(quote.receive.amount)} {to}
         </span>
       ) : (
         wait
       ),
     ],
     ["Rate", quote ? rateLine(quote) : wait],
-    ["At least", quote ? `${fmtMoney(Number(quote.receive.minimum))} ${to}` : wait],
+    ["At least", quote ? `${displayAmountText(quote.receive.minimum)} ${to}` : wait],
     ...(quote ? feeRows(quote, "Swap fee") : ([["Swap fee", wait]] as [string, React.ReactNode][])),
     ["Network fee", `A few cents of ${from}`],
   ];
@@ -2392,7 +2331,7 @@ function SwapPrice({ quote, from, to }: { quote: BridgeQuote | null; from: strin
 }
 
 /** Relay's fee under `label`, then Gloam's own on a line of its own when it takes one (BRIDGE_FEE_BPS). */
-function feeRows(q: { feeUsd: number; appFee: BridgeAppFee | null }, label: string): [string, string][] {
+export function feeRows(q: { feeUsd: number; appFee: BridgeAppFee | null }, label: string): [string, string][] {
   const { relayUsd, app } = bridgeFeeLines(q);
   const said = (usd: number) => (usd < 0.01 ? "Under a cent" : `about $${fmtMoney(usd)}`);
   return [[label, said(relayUsd)], ...(app ? ([[`Gloam fee (${formatFeePercent(app.bps)})`, said(app.usd)]] as [string, string][]) : [])];
@@ -2403,7 +2342,7 @@ function feeRows(q: { feeUsd: number; appFee: BridgeAppFee | null }, label: stri
  * (lib/bridge expensiveRoute). The fees are already in the rows above; this
  * puts the total in plain words and says what tends to cost less.
  */
-function CostWarning({ quote }: { quote: CostedQuote & { receive: { symbol: string } } }) {
+export function CostWarning({ quote }: { quote: CostedQuote & { receive: { symbol: string } } }) {
   const cost = expensiveRoute(quote);
   if (!cost) return null;
   const pct = cost.share >= 0.1 ? Math.round(cost.share * 100) : Math.round(cost.share * 1000) / 10;

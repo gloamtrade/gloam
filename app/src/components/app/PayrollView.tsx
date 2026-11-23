@@ -35,7 +35,6 @@ import {
   activeSpendableNotes,
   assetDecimals,
   formatAssetAmount,
-  formatAssetAmountExact,
   gasFor,
   shieldPoolAbi,
   SIGNED_OUT_BALANCE_MESSAGE,
@@ -279,7 +278,7 @@ function Amount({
 }) {
   return (
     <span className={`inline-flex items-center whitespace-nowrap ${logo ? "gap-2" : "gap-1.5"} ${className}`}>
-      <span className="tnum">{formatAssetAmount(raw, asset, 6)}</span>
+      <span className="tnum">{formatAssetAmount(raw, asset)}</span>
       {logo ? (
         <TokenLogo id={logoId} symbol={symbol} size={size} />
       ) : (
@@ -423,8 +422,8 @@ export function PayrollView() {
   const badCount = parsed.rows.length - validRows.length;
   const total = draftTotal(parsed.rows);
   const directCount = validRows.filter((r) => r.kind === "gloam").length;
-  // The deposit to add is rounded up to what the summary shows (whole cents for a
-  // stablecoin, 0.000001 ETH), so it can be typed as shown; 0.01 ETH steps asked for too much.
+  // The deposit to add is rounded up to whole cents for a stablecoin (0.000001 ETH
+  // otherwise), so a stablecoin shortfall shows exactly at two places; 0.01 ETH steps asked for too much.
   const plan = useMemo(
     () =>
       fundingPlan(
@@ -570,7 +569,7 @@ export function PayrollView() {
         : loaded && wrongAsset
           ? `${loaded.name} pays in ${loadedSymbol}. Switch back to ${loadedSymbol} to run it.`
           : loaded && capOver > 0n
-            ? `This list is ${formatAssetAmountExact(capOver, asset)} ${token.symbol} over the schedule's cap, so the run is blocked. Edit the schedule or the list.`
+            ? `This list is ${formatAssetAmount(capOver, asset)} ${token.symbol} over the schedule's cap, so the run is blocked. Edit the schedule or the list.`
             : !relayOn && !walletOnChain
           ? `Switch your wallet to ${network.label}, or turn on Hide my wallet.`
           : relayOn && relayStatus?.gasHigh
@@ -966,7 +965,7 @@ export function PayrollView() {
 
             <p className="mt-4 flex items-center gap-2.5 text-foreground">
               <span className="tnum text-[34px] font-light leading-none tracking-[-0.02em]">
-                {formatAssetAmount(paidTotal, b.asset, summaryDecimals(b.asset))}
+                {formatAssetAmount(paidTotal, b.asset)}
               </span>
               <TokenLogo id={opt.logoId} symbol={opt.symbol} size={22} />
             </p>
@@ -1148,7 +1147,7 @@ export function PayrollView() {
                       {/* Signed out no balance is read, so none is named, not even "No private balance". */}
                       {isConnected && (
                         <span className="tnum mt-0.5 block text-[12px] leading-tight text-mute">
-                          {b > 0n ? `${formatAssetAmount(b, o.address, summaryDecimals(o.address))} private` : "No private balance"}
+                          {b > 0n ? `${formatAssetAmount(b, o.address)} private` : "No private balance"}
                         </span>
                       )}
                     </span>
@@ -1511,7 +1510,7 @@ export function PayrollView() {
                   total === 0n ? "text-faint" : ""
                 }`}
               >
-                {formatAssetAmountExact(total, asset)}
+                {formatAssetAmount(total, asset)}
               </span>
               <TokenLogo id={token.logoId} symbol={token.symbol} size={24} />
             </p>
@@ -1533,7 +1532,7 @@ export function PayrollView() {
                 <div className="mt-3.5 flex items-center justify-between gap-3 text-[13px]">
                   <span className="text-mute">Cap per run</span>
                   <span className="tnum text-foreground">
-                    {formatAssetAmount(loaded.cap, loaded.asset, summaryDecimals(loaded.asset))} {loadedSymbol}
+                    {formatAssetAmount(loaded.cap, loaded.asset)} {loadedSymbol}
                   </span>
                 </div>
                 <div className="mt-3">
@@ -1547,8 +1546,8 @@ export function PayrollView() {
                   {wrongAsset
                     ? `This schedule pays in ${loadedSymbol}.`
                     : capOver > 0n
-                      ? `${formatAssetAmountExact(capOver, asset)} ${token.symbol} over the cap. This run is blocked.`
-                      : `${formatAssetAmount(BigInt(loaded.cap) - total, asset, summaryDecimals(asset))} ${token.symbol} under the cap.`}
+                      ? `${formatAssetAmount(capOver, asset)} ${token.symbol} over the cap. This run is blocked.`
+                      : `${formatAssetAmount(BigInt(loaded.cap) - total, asset)} ${token.symbol} under the cap.`}
                 </p>
               </div>
             )}
@@ -1565,7 +1564,7 @@ export function PayrollView() {
                   <div className="flex items-center justify-between gap-3 text-[13px]">
                     <span className="text-mute">Private balance</span>
                     <span className="tnum text-foreground">
-                      {formatAssetAmount(bal.total, asset, summaryDecimals(asset))} {token.symbol}
+                      {formatAssetAmount(bal.total, asset)} {token.symbol}
                     </span>
                   </div>
                   <div className="mt-3">
@@ -1581,7 +1580,7 @@ export function PayrollView() {
                       ? "Payments come out of your private balance."
                       : plan.shortfall === 0n
                         ? "Covers this run."
-                        : `${formatAssetAmountExact(plan.shortfall, asset)} ${token.symbol} short. Add it as one deposit.`}
+                        : `${formatAssetAmount(plan.shortfall, asset)} ${token.symbol} short. Add it as one deposit.`}
                   </p>
                 </>
               )}
@@ -1610,7 +1609,7 @@ export function PayrollView() {
             <div className="mt-5">
               {validRows.length > 0 && plan.shortfall > 0n && isConnected ? (
                 <Link href="/app/vault?tab=shield" className="btn btn-ink btn-lg btn-block">
-                  Add {formatAssetAmountExact(plan.shortfall, asset)} {token.symbol} privately
+                  Add {formatAssetAmount(plan.shortfall, asset)} {token.symbol} privately
                 </Link>
               ) : (
                 <button type="button" disabled={!canRun || starting} onClick={() => void startRun()} className="btn btn-ink btn-lg btn-block">
@@ -1707,7 +1706,7 @@ export function PayrollView() {
                         <span className="min-w-0">
                           <span className="block truncate text-[14px] text-foreground">{b.title}</span>
                           <span className="tnum mt-0.5 block truncate text-[12px] text-mute">
-                            {paid.length} of {b.rows.length} paid, {formatAssetAmount(sum, b.asset, summaryDecimals(b.asset))} {opt?.symbol ?? ""}
+                            {paid.length} of {b.rows.length} paid, {formatAssetAmount(sum, b.asset)} {opt?.symbol ?? ""}
                           </span>
                         </span>
                       </button>

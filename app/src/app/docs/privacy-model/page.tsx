@@ -6,6 +6,7 @@ import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { SCREEN_LIST_INFO } from "@/lib/screening";
 import { swapMainnets } from "@/lib/vaultSwap";
+import { RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 
 export const metadata: Metadata = {
   title: "What stays private",
@@ -110,6 +111,17 @@ export default function DocsPrivacyPage() {
         <li>That the pool was used, the caller of each transaction, and timing</li>
         <li>Every commitment and nullifier as opaque hashes, plus the pool total</li>
       </ul>
+
+      {SOLANA_RINGS_ENABLED && (
+        <>
+          <h2 id="solana">On {SOLANA_NAME}</h2>
+          <p>
+            Everything above is about the Gloam vault. Gloam on Solana runs
+            through Helius Privacy Rings instead. {RINGS_PRIVACY_NOTE} See{" "}
+            <Link href="/docs/chain#solana">{SOLANA_NAME}</Link>.
+          </p>
+        </>
+      )}
 
       <h2>The anonymity set is the whole game</h2>
       <p>

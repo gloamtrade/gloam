@@ -17,6 +17,7 @@ import { CloseIcon, HashIcon, Kbd, PageIcon, SearchIcon, useIsMac } from "./docs
 import { liveMainnetCountWords, liveMainnetNames } from "@/lib/mainnet";
 import { ELYSIUM_FLAG, ELYSIUM_TESTNET_FLAG } from "@/lib/elysium";
 import { BNB_ENABLED } from "@/lib/bnb";
+import { SOLANA_NAME, SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 
 /* ------------------------------------------------------------------ */
 /* Static index: the nav list plus a hand-written description, a few   */
@@ -289,6 +290,7 @@ const PAGE_META: Record<string, PageMeta> = {
       "What an explorer actually shows",
       "What stays hidden",
       "What the public still sees",
+      ...(SOLANA_RINGS_ENABLED ? [`On ${SOLANA_NAME}`] : []),
       "The anonymity set is the whole game",
       "What we will not promise",
       "Private from the public, not from an operator",
@@ -313,7 +315,7 @@ const PAGE_META: Record<string, PageMeta> = {
   },
   "/docs/chain": {
     description: `${liveMainnetNames()} mainnet, and their testnets: chain IDs, RPCs, pools, assets and deposit limits.`,
-    keywords: ["robinhood", "tempo", "base", "base sepolia", "chain id", "rpc", "network", "mainnet", "testnet", "4663", "4217", "8453", "46630", "42431", "84532", "1", "ethereum", "explorer", "pool address", "deposit limits", "deposit limit", "usdg", "usdc.e", "usdt0", "usdc", "eurc", "usdt", "pyusd", "gas", "gloam token", "relayer", "fees", "swap router", "treasury", "ethereum sepolia", "sepolia", "11155111", ...(ELYSIUM_FLAG || ELYSIUM_TESTNET_FLAG ? ["elysium", "hype", "hyperliquid", "99801"] : []), ...(BNB_ENABLED ? ["bnb", "bnb chain", "bsc", "56", "bdx", "beldex"] : [])],
+    keywords: ["robinhood", "tempo", "base", "base sepolia", "chain id", "rpc", "network", "mainnet", "testnet", "4663", "4217", "8453", "46630", "42431", "84532", "1", "ethereum", "explorer", "pool address", "deposit limits", "deposit limit", "usdg", "usdc.e", "usdt0", "usdc", "eurc", "usdt", "pyusd", "gas", "gloam token", "relayer", "fees", "swap router", "treasury", "ethereum sepolia", "sepolia", "11155111", ...(ELYSIUM_FLAG || ELYSIUM_TESTNET_FLAG ? ["elysium", "hype", "hyperliquid", "99801"] : []), ...(BNB_ENABLED ? ["bnb", "bnb chain", "bsc", "56", "bdx", "beldex"] : []), ...(SOLANA_RINGS_ENABLED ? ["solana", "sol", "privacy rings", "helius"] : [])],
     headings: [
       `${liveMainnetCountWords().replace(/^./, (c) => c.toUpperCase())}, one shielded pool design`,
       "Mainnet",
@@ -325,6 +327,7 @@ const PAGE_META: Record<string, PageMeta> = {
       ...(ELYSIUM_FLAG ? ["Elysium"] : []),
       ...(ELYSIUM_TESTNET_FLAG ? ["Elysium testnet"] : []),
       ...(BNB_ENABLED ? ["BNB Chain"] : []),
+      ...(SOLANA_RINGS_ENABLED ? [SOLANA_NAME] : []),
       "Switching networks in the app",
       "Honest status",
     ],

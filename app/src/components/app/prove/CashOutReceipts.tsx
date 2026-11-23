@@ -10,7 +10,7 @@ import { bridgeMarkFor } from "@/lib/cashOutBridge";
 import { getNetwork, isNetworkKey, type GloamNetwork } from "@/lib/networks";
 import { getAllNotes, onNotesSaved, unlockNoteVault } from "@/lib/noteVault";
 import { publicClientFor } from "@/lib/rhClient";
-import { assetLabel, formatAssetAmountExact, notesForWallet } from "@/lib/shield";
+import { formatAssetLabel, notesForWallet } from "@/lib/shield";
 import { useShownAccount } from "../AccountScope";
 import { useNetwork } from "../NetworkProvider";
 import { CashOutReceiptSheet } from "../CashOutReceiptSheet";
@@ -156,7 +156,8 @@ export function CashOutReceipts() {
     return <EmptyCard title="No vault on this network" body="Switch to a network Gloam runs on to see your cash outs." />;
   }
 
-  const amount = (raw: bigint, asset: string) => `${formatAssetAmountExact(raw, asset, 2)} ${assetLabel(asset)}`;
+  // two places, cut down, like every amount shown (lib/amountShort)
+  const amount = (raw: bigint, asset: string) => formatAssetLabel(raw, asset);
   const day = (ms: number) => new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   return (

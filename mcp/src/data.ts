@@ -46,6 +46,8 @@ export const PRIVACY_STATUS = {
     "cash out (in the Gloam app and SDK)",
     "private swaps where the network has a swap router (gloam_swap_quote says): who swapped stays private, the tokens and amounts are public",
   ],
+  solana:
+    "Solana mainnet (gloam_solana_* tools), through Helius Solana Privacy Rings: a private payment hides the asset and the amount. The two private accounts it moves between are visible, adding money shows the wallet it came from, a cash out shows its destination, asset and amount, and proofs are made by Helius's prover. Sender and recipient are not hidden on Solana.",
   disabled: ["the old sealed trade: retired on every network"],
   notLive: ["the old sealed trade"],
   review:

@@ -22,8 +22,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  packages:
-    name: Packages and examples
+  # Four jobs run side by side, so a run takes as long as the slowest one, not all of them.
+  app:
+    name: App self-tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -58,16 +59,23 @@ jobs:
           NEXT_PUBLIC_BNB_ENABLED=1 NEXT_PUBLIC_BNB_POOL=0x89d3042390204f57b8b4F8949D3c2203E4002164 NEXT_PUBLIC_BNB_DEPLOY_BLOCK=134300000 NEXT_PUBLIC_BNB_LIVE_SINCE="21 November 2026" ../mcp/node_modules/.bin/tsx scripts/selftest-claim-csp.mts
 
       # Solana (off by default): account derivation, the proxy allowlist and the relay
-      # policy; payroll's list checks, pacing and resume against a fake chain. No network.
+      # policy; money from another chain made private (the relay's deposit rule, the
+      # flow and its retries against a fake chain); payroll's list checks, pacing and
+      # resume against a fake chain; the public site's Solana copy and status checks,
+      # off and on; a returning wallet, staying signed in and signing out, and Solana's
+      # place in the menus. No network.
       - name: App Solana self-tests
         working-directory: app
         run: |
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-rings.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-bridge-in.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-payroll.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-payroll-csv.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-pay-across.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-relay-batch.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-cashout-across.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-site.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-opened.mts
 
       # Partner links: a payment or cash out in parts counts to the partner as one
       # payment, from one balance entry, part by part or in one transaction. The
@@ -75,6 +83,18 @@ jobs:
       - name: App partner link self-tests
         working-directory: app
         run: ../mcp/node_modules/.bin/tsx scripts/selftest-partner-across.mts
+
+      # Every token amount the app shows: two places, cut down and never rounded up,
+      # "<0.01" for dust, "0.00" for zero, thousands separators, 6- and 18-decimal
+      # tokens and bigints (lib/amountShort, lib/shield formatAssetAmount), and the
+      # exact formatter that what is sent, copied, exported or proved keeps. Then the
+      # screens only next-release has: one balance, receipts, pay and cash out in parts.
+      - name: App amount display self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-amount-display.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-amount-short.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-amount-across.mts
 
       # Each sign-in's own private account in a browser: signed out shows nothing, a second
       # wallet sees and spends none of the first's, the first account goes to its owner on
@@ -87,13 +107,41 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-all-networks.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-name-offer.mts
 
+      # A Gloam wallet's Solana account (lib/turnkeySolana): made in the same Turnkey
+      # wallet at Turnkey's first Solana path, transactions signed in their own slot,
+      # no message signing (its private account never opens from a Turnkey signature),
+      # found like a wallet extension and gone on sign-out. What opens that private
+      # account (lib/solanaRings/gloamRoot): the same passkey on two devices opens the
+      # same account, an email sign-in's backup code restores it on a new device, and
+      # only a passkey-keyed recovery backup carries the code. Stand-in Turnkey,
+      # WebAuthn and /api/recovery: no request leaves the process.
+      - name: App Gloam wallet on Solana self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-turnkey-solana.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-gloam-solana-root.mts
+
       # BNB Chain (off by default): off, no pool, on, and bad values; the pruned-logs check
-      # end to end through the app's own transports. Fake RPCs only, nothing reaches a host.
+      # end to end through the app's own transports; a payment to a Gloam address landing
+      # in a fresh browser through the vault client. Fake RPCs only, nothing reaches a host.
       - name: App BNB Chain self-tests
         working-directory: app
         run: |
           ../mcp/node_modules/.bin/tsx scripts/selftest-bnb.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-bnb-everywhere.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-bnb-receive.mts
+
+      # Public activity on a mainnet: the first read covers the last week (a day on
+      # BNB Chain), newest blocks first, rows show as each span returns, Show older
+      # reads one more window, a call answers at its time limit while the read goes
+      # on, and nothing read in time is an error with Retry, never a skeleton. On
+      # Base and on BNB Chain; a stand-in chain, nothing reaches a host.
+      - name: App activity self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-activity-window.mts
+          NEXT_PUBLIC_BNB_ENABLED=1 NEXT_PUBLIC_BNB_POOL=0x89d3042390204f57b8b4F8949D3c2203E4002164 NEXT_PUBLIC_BNB_DEPLOY_BLOCK=134300000 NEXT_PUBLIC_BNB_LIVE_SINCE="21 November 2026" ../mcp/node_modules/.bin/tsx scripts/selftest-activity-window.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-activity-eth.mts
 
       # Email updates: the list (subscribe, unsubscribe, admin CSV) and sending it
       # (markdown escaping, one message per person, one-click unsubscribe, never
@@ -110,11 +158,57 @@ jobs:
         working-directory: app
         run: ../mcp/node_modules/.bin/tsx scripts/selftest-cashout-receipt.mts
 
+  sdk:
+    name: SDK and mppx-gloam
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # pnpm's version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The app's dependencies are installed too: some package tests check
+      # byte compatibility against the app's own source (claim links, receive
+      # tags). The app itself is not built here.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
       - name: SDK tests
         run: pnpm --filter @gloamtrade/sdk test
 
       - name: mppx-gloam tests
         run: pnpm --filter @gloamtrade/mppx-gloam test
+
+  mcp:
+    name: MCP and GAME plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # pnpm's version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The app's dependencies are installed too: some package tests check
+      # byte compatibility against the app's own source (claim links, receive
+      # tags). The app itself is not built here.
+      - name: Install
+        run: pnpm install --frozen-lockfile
 
       - name: MCP typecheck
         run: pnpm --filter @gloamtrade/mcp typecheck
@@ -127,6 +221,29 @@ jobs:
 
       - name: GAME plugin build
         run: pnpm --filter @gloamtrade/game-plugin-gloam build
+
+  examples:
+    name: Examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # pnpm's version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The app's dependencies are installed too: some package tests check
+      # byte compatibility against the app's own source (claim links, receive
+      # tags). The app itself is not built here.
+      - name: Install
+        run: pnpm install --frozen-lockfile
 
       - name: Examples typecheck
         run: pnpm --filter './examples/*' --workspace-concurrency=1 run --if-present typecheck

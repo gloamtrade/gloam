@@ -3,6 +3,7 @@ import { liveMainnetNames } from "@/lib/mainnet";
 import Link from "next/link";
 import { LegalLayout } from "@/components/LegalLayout";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
+import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { rpcProxyNetworkNames } from "@/lib/rpcProxy";
 
@@ -10,7 +11,7 @@ export const metadata: Metadata = { title: "Privacy Policy" };
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="November 22, 2026">
+    <LegalLayout title="Privacy Policy" updated="November 23, 2026">
       <p>
         This Privacy Policy describes what information Gloam (&ldquo;we,&rdquo;
         &ldquo;us&rdquo;) handles when you use gloam.trade, the Gloam app, the
@@ -258,6 +259,20 @@ export default function PrivacyPage() {
           that signature, so Turnkey, and anyone with access to Gloam&apos;s
           Turnkey account, could open a backup made with it. The app says so
           before you choose it.
+        </p>
+      )}
+      {EMBEDDED_WALLETS && SOLANA_RINGS_ENABLED && (
+        <p>
+          A Gloam wallet also has a Solana account, in the same Turnkey wallet,
+          which signs your Solana transactions. Your private account on Solana
+          does not come from its signatures: it opens with your passkey (a key
+          your passkey makes on your device) or, if you sign in with an email,
+          with a backup code made in your browser and shown to you once.
+          Neither Turnkey nor our servers receive either. The backup code is
+          kept in your browser, sealed like your private balance, and in your
+          recovery backup only when that backup uses a passkey. Without your
+          passkey, the code or this browser, the private account can&apos;t be
+          opened, by you or by us.
         </p>
       )}
       <h2>9. Tester applications and contest entries</h2>
