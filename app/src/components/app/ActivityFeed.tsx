@@ -6,6 +6,7 @@ import { displayAmount } from "@/lib/amountShort";
 import { useAppAccount } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
 import { useActivity } from "@/hooks/useActivity";
+import { activityView } from "@/lib/walletActivity";
 
 const PAGE_SIZE = 5;
 
@@ -61,8 +62,12 @@ export function ActivityFeed() {
   const { network } = useNetwork();
   // The payments pools (mainnet, Base Sepolia) read the wallet's transfers from the chain.
   const activity = useActivity(address, network.paymentsPool ? network.chainId : undefined);
-  const { data, isLoading, isError } = activity;
-  const retry = "refetch" in activity ? () => void activity.refetch() : null;
+  const { data, isFetching, refetch: retry, showOlder } = activity;
+  const view = activityView(activity);
+  const scope = data?.scope;
+  const pct = scope && scope.progress > 0 && scope.progress < 1 ? ` ${Math.floor(scope.progress * 100)}%` : "";
+  const days = scope?.days ?? 7;
+  const lastDays = days === 1 ? "the last day" : `the last ${days} days`;
   const txs = useMemo(() => data?.txs ?? [], [data]);
   const pageCount = Math.max(1, Math.ceil(txs.length / PAGE_SIZE));
 
@@ -94,39 +99,53 @@ export function ActivityFeed() {
     <div className="gl-card flex max-h-[min(30rem,72vh)] flex-col overflow-hidden lg:sticky lg:top-6">
       <Header />
 
-      {isLoading && (
-        <ul className="divide-y divide-line border-t border-line" aria-label="Loading activity">
-          {[0, 1, 2].map((i) => (
-            <li key={i} className="flex min-h-[60px] items-center gap-3 px-5">
-              <span className="h-9 w-9 shrink-0 animate-pulse rounded-full bg-surface" />
-              <span className="flex-1 space-y-2">
-                <span className="block h-3 w-32 animate-pulse rounded-full bg-surface" />
-                <span className="block h-2.5 w-20 animate-pulse rounded-full bg-surface" />
-              </span>
-            </li>
-          ))}
-        </ul>
+      {view === "reading" && (
+        <div className="border-t border-line">
+          <p role="status" aria-live="polite" className="tnum px-5 pt-3 text-[12.5px] text-mute">
+            Reading {network.label}...{pct}
+          </p>
+          <ul aria-hidden>
+            {[0, 1, 2].map((i) => (
+              <li key={i} className="flex min-h-[60px] items-center gap-3 px-5">
+                <span className="h-9 w-9 shrink-0 animate-pulse rounded-full bg-surface" />
+                <span className="flex-1 space-y-2">
+                  <span className="block h-3 w-32 animate-pulse rounded-full bg-surface" />
+                  <span className="block h-2.5 w-20 animate-pulse rounded-full bg-surface" />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
-      {isError && (
+      {view === "error" && (
         <div className="border-t border-line px-5 py-6">
-          <p className="text-[13.5px] text-mute">Could not load your history. Try again in a moment.</p>
+          <p className="text-[13.5px] text-mute">
+            Could not read your history{scope || network.paymentsPool ? ` from ${network.label}` : ""}. Try again in a moment.
+          </p>
           {retry && (
-            <button type="button" onClick={retry} className="btn btn-ghost btn-sm mt-3">
-              Try again
+            <button type="button" onClick={retry} disabled={isFetching} className="btn btn-ghost btn-sm mt-3">
+              {isFetching ? "Trying again..." : "Try again"}
             </button>
           )}
         </div>
       )}
-      {!isLoading && !isError && txs.length === 0 && (
+      {(view === "empty" || view === "empty-window") && (
         <div className="border-t border-line px-5 py-6">
-          <p className="text-[14px] text-foreground">Nothing public yet</p>
+          <p className="text-[14px] text-foreground">
+            {view === "empty-window" ? `No public transfers in ${lastDays}` : "Nothing public yet"}
+          </p>
           <p className="mt-1 text-[13.5px] leading-relaxed text-mute">
             Private adds, sends and proofs stay off this list by design.
           </p>
+          {view === "empty-window" && showOlder && (
+            <button type="button" onClick={showOlder} disabled={isFetching} className="btn btn-ghost btn-sm mt-3">
+              Show older
+            </button>
+          )}
         </div>
       )}
 
-      {!isLoading && !isError && txs.length > 0 && (
+      {view === "list" && (
         <>
           <ul className="min-h-0 flex-1 divide-y divide-line overflow-y-auto border-t border-line">
             {pageTxs.map((tx) => {
@@ -181,6 +200,27 @@ export function ActivityFeed() {
               );
             })}
           </ul>
+
+          {scope && (scope.reading || scope.stalled || !scope.complete) && (
+            <div className="flex min-h-[48px] shrink-0 items-center justify-between gap-3 border-t border-line px-5 py-1.5">
+              <p role="status" aria-live="polite" className="tnum text-[12.5px] text-mute">
+                {scope.stalled
+                  ? "Some blocks could not be read"
+                  : scope.reading
+                    ? `Reading older blocks...${pct}`
+                    : `Showing ${lastDays}`}
+              </p>
+              {scope.stalled && retry ? (
+                <button type="button" onClick={retry} disabled={isFetching} className="btn btn-ghost btn-sm">
+                  Try again
+                </button>
+              ) : !scope.reading && showOlder ? (
+                <button type="button" onClick={showOlder} disabled={isFetching} className="btn btn-ghost btn-sm">
+                  Show older
+                </button>
+              ) : null}
+            </div>
+          )}
 
           <div className="flex shrink-0 items-center justify-between gap-2 border-t border-line px-3 py-2">
             <button
