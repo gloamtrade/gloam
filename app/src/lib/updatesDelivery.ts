@@ -123,19 +123,25 @@ export async function recordDeliveryEvent(svixId: string, event: ResendEvent, no
   const outcome = OUTCOME_OF[type] ?? null;
   if (!outcome) return { handled: false, outcome: null, removed: 0 };
 
-  const [fresh] = await kv([["SET", seenKey(svixId), "1", "NX", "EX", 14 * 86_400]]);
-  if (fresh === null) return { handled: false, outcome, removed: 0 };
+  // handled before? A retry of a call that failed partway finds no mark and does
+  // the rest: every step below is safe to repeat, and the mark is set last.
+  const [seen] = await kv([["GET", seenKey(svixId)]]);
+  if (seen != null) return { handled: false, outcome, removed: 0 };
 
   const data = event.data ?? {};
   const emailId = typeof data.email_id === "string" && data.email_id.length <= 200 ? data.email_id : null;
   const updateId = updateIdOf(data.tags);
   if (updateId && emailId) await kv([["SADD", outcomeKey(updateId, outcome), emailId]]);
 
-  if (outcome !== "bounced" && outcome !== "complained") return { handled: true, outcome, removed: 0 };
+  const done = async (removed: number): Promise<HandledEvent> => {
+    await kv([["SET", seenKey(svixId), "1", "EX", 14 * 86_400]]);
+    return { handled: true, outcome, removed };
+  };
+  if (outcome !== "bounced" && outcome !== "complained") return done(0);
 
   // a soft bounce is counted and nothing more: the address may work next time
   const bounceType = typeof data.bounce?.type === "string" ? data.bounce.type : "";
-  if (outcome === "bounced" && bounceType && bounceType !== "Permanent") return { handled: true, outcome, removed: 0 };
+  if (outcome === "bounced" && bounceType && bounceType !== "Permanent") return done(0);
 
   const to = Array.isArray(data.to) ? data.to : typeof data.to === "string" ? [data.to] : [];
   const detail = (
@@ -147,15 +153,18 @@ export async function recordDeliveryEvent(svixId: string, event: ResendEvent, no
   for (const raw of to.slice(0, 50)) {
     const email = normalizeEmail(raw);
     if (!email) continue;
-    const wasOn = await unsubscribeEmail(email);
+    const wasOn = await unsubscribeEmail(email, outcome === "complained" ? "complained" : "bounced");
     if (wasOn) removed++;
+    // listed once per call and address, even when Resend sends the call again
+    const [first] = await kv([["SET", `${seenKey(svixId)}:${createHash("sha256").update(email).digest("hex").slice(0, 16)}`, "1", "NX", "EX", 14 * 86_400]]);
+    if (first === null) continue;
     const problem: DeliveryProblem = { email, kind: outcome, detail: detail || "Bounced", updateId, at: now, removed: wasOn };
     await kv([
       ["LPUSH", PROBLEMS_KEY, JSON.stringify(problem)],
       ["LTRIM", PROBLEMS_KEY, 0, PROBLEMS_MAX - 1],
     ]);
   }
-  return { handled: true, outcome, removed };
+  return done(removed);
 }
 
 /** Delivered, bounced, complaints and delays for one update. */
