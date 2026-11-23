@@ -610,4 +610,29 @@ await test("the app binds the account on every app page, and Receive shows only 
   assert.match(read("lib/passkey.ts"), /if \(otherAccountsHere\(\)\) throw/);
 });
 
+await test("the wallet keeps switching: past the reload cap the page stays on the old account, and a deposit can't land in it", async () => {
+  await newPage();
+  sessionStorage.removeItem("gloam.accounts.reloads.v1");
+  await signIn(SECOND);
+  assert.equal(scope.accountScopeState().phase, "ready");
+  const bound = slot.boundSlot();
+  const before = vault.getAllNotes().map((n) => n.id).sort();
+  // three changes of account in 30 seconds already used this tab's reloads
+  const now = Date.now();
+  sessionStorage.setItem("gloam.accounts.reloads.v1", JSON.stringify([now, now, now]));
+  const at = reloads;
+  await scope.signInAs(DUKE);
+  const st = scope.accountScopeState();
+  assert.equal(st.phase, "leaving", "the page can't reload again yet");
+  assert.equal(reloads, at, "and doesn't");
+  assert.ok(st.error, "it says so");
+  assert.equal(slot.boundSlot(), bound, "still bound to the second wallet's account");
+  await assert.rejects(shield.saveLocalNote(note("5000000000000000000", DUKE)), slot.SignedOutError, "Duke's new deposit note is refused");
+  assert.deepEqual(vault.getAllNotes().map((n) => n.id).sort(), before, "nothing landed in the second wallet's account");
+  const read = (f: string) => readFileSync(new URL(`../src/${f}`, import.meta.url), "utf8");
+  assert.match(read("components/app/ShieldView.tsx"), /if \(scopeLeaving\) \{\s*\n\s*setFormError/, "Add stops before anything is proven or sent");
+  assert.match(read("components/app/BridgeIn.tsx"), /if \(scopeLeaving\) \{\s*\n\s*setPriv/, "and so does bringing money over privately");
+  sessionStorage.removeItem("gloam.accounts.reloads.v1");
+});
+
 console.log(`selftest-account-scope: ${passed} checks passed`);

@@ -17,6 +17,7 @@ import { ScheduleEditor } from "./payroll/ScheduleEditor";
 import { ScheduleList } from "./payroll/ScheduleList";
 import { ScheduleIcon } from "./payroll/scheduleUi";
 import { useSchedules } from "./payroll/useSchedules";
+import { nameChangeMessage, usePayrollNames } from "./payroll/usePayrollNames";
 import { RelayToggle } from "./RelayToggle";
 import { TokenLogo } from "./TokenLogo";
 import { SealDots } from "@/components/ui/SealDots";
@@ -62,10 +63,6 @@ import {
   loadBatches,
   newBatch,
   parsePayrollCsv,
-  applyPayrollNames,
-  payrollNamesToLookUp,
-  NAME_PENDING,
-  type PayrollNameAnswer,
   runNetwork,
   runPayroll,
   saveBatch,
@@ -75,7 +72,6 @@ import {
   type PayrollRowStatus,
 } from "@/lib/payroll";
 import { holdsPendingPayment } from "@/lib/payrollStore";
-import { lookupGloamName } from "@/hooks/useGloamName";
 import { walletErrorForPeople } from "@/lib/walletErrors";
 import {
   cadenceLabel,
@@ -413,44 +409,15 @@ export function PayrollView() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const rawParsed = useMemo(() => parsePayrollCsv(csv, asset), [csv, asset]);
-  // "@ada" in the address column: each name is looked up once, on Robinhood Chain's registry
-  const [nameAnswers, setNameAnswers] = useState<ReadonlyMap<string, PayrollNameAnswer>>(() => new Map());
-  const namesToLookUp = useMemo(() => payrollNamesToLookUp(rawParsed.rows, nameAnswers).join(","), [rawParsed.rows, nameAnswers]);
-  useEffect(() => {
-    if (!namesToLookUp) return;
-    let stale = false;
-    const names = namesToLookUp.split(",");
-    void Promise.all(
-      names.map(async (n): Promise<[string, PayrollNameAnswer]> => {
-        const record = await lookupGloamName(n);
-        return [n, record === "failed" ? "failed" : record ? { tag: record.tag } : "none"];
-      })
-    ).then((found) => {
-      if (stale) return;
-      setNameAnswers((prev) => {
-        const next = new Map(prev);
-        for (const [n, a] of found) next.set(n, a);
-        return next;
-      });
-    });
-    return () => {
-      stale = true;
-    };
-  }, [namesToLookUp]);
-  const parsed = useMemo(
-    () => ({ ...rawParsed, rows: applyPayrollNames(rawParsed.rows, nameAnswers) }),
-    [rawParsed, nameAnswers]
-  );
-  /** Look the names up again: a failed read, or a name bought since. */
-  const retryNames = () =>
-    setNameAnswers((prev) => {
-      const next = new Map(prev);
-      for (const [n, a] of prev) if (a === "failed" || a === "none") next.delete(n);
-      return next;
-    });
-  const nameRetry = parsed.rows.some((r) => r.payName && r.error && r.error !== NAME_PENDING);
+  // "@ada" in the address column: each name looked up once, then again right before paying
+  const names = usePayrollNames(rawParsed.rows);
+  const parsed = useMemo(() => ({ ...rawParsed, rows: names.rows }), [rawParsed, names.rows]);
+  const retryNames = names.retry;
+  const nameRetry = names.failed;
   /** A name still being looked up: the run waits, so no one on the list is skipped by accident. */
-  const namesPending = parsed.rows.some((r) => r.error === NAME_PENDING);
+  const namesPending = names.pending;
+  /** A name that is pending or has no address: the list can't become a schedule until it is fixed. */
+  const nameProblem = names.pending || names.failed;
   const validRows = useMemo(() => parsed.rows.filter((r) => !r.error), [parsed.rows]);
   const badCount = parsed.rows.length - validRows.length;
   const total = draftTotal(parsed.rows);
@@ -710,6 +677,14 @@ export function PayrollView() {
     setStartError(null);
     let batch: PayrollBatch;
     try {
+      // a name can point somewhere new since the list loaded: read every one again before paying
+      if (!demo) {
+        const changes = await names.confirm(parsed.rows);
+        if (changes.length) {
+          setStartError(nameChangeMessage(changes));
+          return;
+        }
+      }
       batch = newBatch({
       title: title.trim() || "Payroll",
       chainId: network.chainId,
@@ -762,7 +737,8 @@ export function PayrollView() {
   }
 
   function newScheduleFromDraft() {
-    if (!pool) return;
+    // a row whose name is still being looked up (or has no address) would be dropped: fix it first
+    if (!pool || nameProblem) return;
     const from = validRows.length > 0 ? peopleFromDraft(parsed.rows) : [];
     setEditor({
       isNew: true,
@@ -1666,10 +1642,12 @@ export function PayrollView() {
                 <button
                   type="button"
                   onClick={newScheduleFromDraft}
+                  disabled={nameProblem}
+                  title={nameProblem ? "Fix the @names in the list first" : undefined}
                   className="btn btn-quiet btn-block mt-2 text-mute hover:text-foreground"
                 >
                   <ScheduleIcon name="calendar" className="h-3.5 w-3.5" />
-                  Save as a schedule
+                  {names.pending ? "Looking up the @names…" : "Save as a schedule"}
                 </button>
               )}
             </div>

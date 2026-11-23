@@ -48,6 +48,7 @@ const memo = await import("../src/lib/payMemo");
 const nets = await import("../src/lib/networks");
 const auto = await import("../src/lib/autoReceive");
 const sweep = await import("../src/lib/claimSweep");
+const shield = await import("../src/lib/shield");
 
 let passed = 0;
 async function test(name: string, fn: () => Promise<void>) {
@@ -154,6 +155,9 @@ await test("a payment to my Gloam address lands in my balance with nothing tappe
   assert.equal(n.status, "open");
   assert.ok(sweep.isClaimedNote(n), "as a claimed payment");
   assert.ok(sweep.isUnsecuredClaim(n), "which the relay secures next (secureClaimsInBackground)");
+  assert.equal(n.unfunded, false, "the vault said it holds it, so it counts at once");
+  assert.equal(sweep.claimsToSecure([n]).length, 1, "and the background secure picks it up");
+  assert.equal(n.id, auto.receivedNoteId(p.commitment), "its id comes from the payment, the same in every tab");
   assert.equal(events.length, 1, "the page is told");
   assert.equal(localStorage.getItem([...Array(localStorage.length).keys()].map((i) => localStorage.key(i)!).find((k) => k.startsWith("gloam.receive.cursor.v1"))!), "1000", "read up to the head");
 });
@@ -212,6 +216,73 @@ await test("paced, never twice, and read on from where it stopped", async () => 
   assert.equal(mine().length, before + 1);
 });
 
+await test("the label names the coin of the network it landed on", async () => {
+  // shown: Ethereum. A payment of native coin on BNB Chain is BNB, not ETH
+  assert.equal(auto.receivedLabel({ chainId: 56, primaryAsset: { symbol: "BNB", address: null, decimals: 18 } } as never, "500000000000000000", ETH), "0.5 BNB");
+  assert.equal(auto.receivedLabel({ chainId: 1, primaryAsset: { symbol: "ETH", address: null, decimals: 18 } } as never, "3000000000000000", ETH), "0.003 ETH");
+});
+
+await test("another tab saving the same payment mid-pass leaves one note", async () => {
+  const p = await payment(6_000_000_000_000_000n);
+  chain.inVault.add(p.commitment);
+  post(p.commitment, await receive.encryptTicketForTag(p.plain, myTag), 1310n);
+  const c = client as unknown as { readContract: (a: { functionName: string; args: [Hex] }) => Promise<unknown> };
+  const real = c.readContract;
+  let saved = false;
+  c.readContract = async (a) => {
+    if (!saved && a.functionName === "isSpent" && a.args[0].toLowerCase() === p.nullifier) {
+      saved = true;
+      // the other tab, on older code, saved it under an id of its own
+      await shield.saveLocalNote({
+        id: `imp-${Date.now()}-other`,
+        chainId: 1,
+        pool: POOL,
+        asset: ETH,
+        amountWei: "6000000000000000",
+        commitment: p.commitment,
+        secret: p.secret,
+        nullifier: p.nullifier,
+        bound: true,
+        scheme: "poseidon",
+        from: ME,
+        createdAt: Date.now(),
+        status: "open",
+        source: "local",
+      } as never);
+    }
+    return real(a);
+  };
+  chain.head = 1320n;
+  try {
+    await auto.receiveWaitingPayments(NET as never, ME, { client, force: true });
+  } finally {
+    c.readContract = real;
+  }
+  assert.equal(mine().filter((n) => n.commitment.toLowerCase() === p.commitment).length, 1, "one note for one payment");
+});
+
+await test("keys restored on a new device: payments sent before the restore still land", async () => {
+  const backup = await receive.exportReceiveKeys();
+  // a payment to this address while the new device didn't hold its key
+  const p = await payment(2_000_000_000_000_000n, "salary");
+  chain.inVault.add(p.commitment);
+  // older than the few blocks every pass reads again, so only a fresh read from the start finds it
+  post(p.commitment, await receive.encryptTicketForTag(p.plain, myTag), 1260n);
+  // the new device: no receive keys yet
+  const keys: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i)!);
+  for (const key of keys) if (key.startsWith("gloam.receive.identity")) localStorage.removeItem(key);
+  chain.head = 1340n;
+  assert.deepEqual(await auto.receiveWaitingPayments(NET as never, ME, { client, force: true }), [], "without the key nothing opens, and the read moves on");
+  // the backup is restored, and the chain moves on
+  await receive.importReceiveKeys(backup);
+  chain.head = 2000n;
+  const landed = await auto.receiveWaitingPayments(NET as never, ME, { client, force: true });
+  assert.equal(landed.length, 1, "the restore reads the board again: the payment lands");
+  assert.equal(landed[0]!.note, "salary");
+  assert.ok(mine().some((n) => n.commitment.toLowerCase() === p.commitment));
+});
+
 await test("signed out, nothing is read or saved", async () => {
   await vault.notesSettled();
   await slot.unbindSlot();
@@ -219,8 +290,8 @@ await test("signed out, nothing is read or saved", async () => {
   const reads = chain.reads.length;
   const p = await payment(13n);
   chain.inVault.add(p.commitment);
-  post(p.commitment, await receive.encryptTicketForTag(p.plain, myTag), 1350n);
-  chain.head = 1400n;
+  post(p.commitment, await receive.encryptTicketForTag(p.plain, myTag), 2050n);
+  chain.head = 2100n;
   assert.deepEqual(await auto.receiveWaitingPayments(NET as never, ME, { client, force: true }), []);
   assert.equal(chain.reads.length, reads, "the board isn't even read");
 });

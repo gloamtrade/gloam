@@ -35,7 +35,7 @@ export type ScheduleCadence =
 
 export type SchedulePerson = {
   name: string;
-  /** Gloam address (gloamr1…) or "" for a claim link */
+  /** Gloam address (gloamr1…), a Gloam name ("@ada", looked up each payday) or "" for a claim link */
   recipient: string;
   kind: PayeeKind;
   /** raw units of the schedule's asset */
@@ -306,7 +306,8 @@ export function peopleFromDraft(rows: DraftRow[]): SchedulePerson[] {
     .filter((r) => !r.error && r.amount != null)
     .map((r) => ({
       name: r.name,
-      recipient: r.recipient,
+      // a Gloam name stays a name, so each payday pays the address it holds then
+      recipient: r.payName ? `@${r.payName}` : r.recipient,
       kind: r.kind,
       amount: r.amount!.toString(),
       ...(r.note ? { note: r.note } : {}),
