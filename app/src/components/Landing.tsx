@@ -243,8 +243,8 @@ export function Landing() {
               <p className="mx-auto mt-4 max-w-[52ch] text-[17px] leading-[1.6] text-mute sm:text-[19px]">
                 Add money privately, pay anyone, and prove what you hold without
                 showing the number. Live on {liveMainnetNames()} mainnet{SHOW_TESTNETS ? ", and on testnet" : ""}.
-                {/* Solana hides the token and the amount only, so it gets its own line */}
-                {SOLANA_RINGS_ENABLED ? ` Also on ${SOLANA_NAME}, where a private payment hides the token and the amount.` : null}
+                {/* Solana hides the token and the amount only, and Helius's prover makes its proofs, so it gets its own line */}
+                {SOLANA_RINGS_ENABLED ? ` Also on ${SOLANA_NAME}: the token and the amount stay hidden, and Helius's prover makes the proof, not your device.` : null}
               </p>
             </div>
             <LiveProduct />

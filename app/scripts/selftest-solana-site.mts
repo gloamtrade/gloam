@@ -200,6 +200,17 @@ ok(banner.includes('"gloam:announce-dismissed:solana-live-v1"') && banner.includ
 ok(/SOLANA_RINGS_ENABLED \? "solana" : BNB_ENABLED \? "bnb" : null/.test(banner), "Solana's note shows while it is on, else BNB Chain's as before");
 ok(banner.includes("Private payments. The token and the amount stay hidden.") && banner.includes('href="/app/solana"'), "the Solana note's words and link");
 
+// ---------------------------------------------------------------- who makes the proof (source)
+
+// On Solana Helius's prover makes the proof: the landing's Solana line and the compare page say so,
+// and the compare page's "on your device" claims are scoped to the vault while Solana is on.
+const landing = readFileSync(new URL("../src/components/Landing.tsx", import.meta.url), "utf8");
+ok(/SOLANA_RINGS_ENABLED \? ` Also on \$\{SOLANA_NAME\}: the token and the amount stay hidden, and Helius's prover makes the proof, not your device\.`/.test(landing), "the landing's Solana line says Helius's prover makes the proof");
+ok(landing.includes("Some services, like Helius Privacy, make your proof on their server."), "the landing's EVM line is unchanged");
+const compare = readFileSync(new URL("../src/app/docs/compare/page.tsx", import.meta.url), "utf8");
+ok(/<h3 id="solana">Gloam on \{SOLANA_NAME\}<\/h3>/.test(compare) && compare.includes("{RINGS_PRIVACY_NOTE} The proof is made by Helius&apos;s") && compare.includes("prover, in an attested enclave, not on your device."), "the compare page's Solana note: Privacy Rings, the plain note, Helius's prover");
+ok(compare.includes('SOLANA_RINGS_ENABLED ? "on your device; on Solana, by Helius\'s prover" : "on your device"'), "the compare page's glance scopes 'on your device' while Solana is on");
+
 // ---------------------------------------------------------------- the copy (source)
 
 const FILES = [
@@ -210,6 +221,7 @@ const FILES = [
   "src/app/docs/chain/page.tsx",
   "src/app/docs/page.tsx",
   "src/app/docs/privacy-model/page.tsx",
+  "src/app/docs/compare/page.tsx",
   "src/app/llms.txt/route.ts",
   "src/lib/status/checks.ts",
   "src/lib/mcpRemote/tools.ts",
