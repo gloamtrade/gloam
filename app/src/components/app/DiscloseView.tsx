@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { useAppAccount } from "@/lib/demo";
+import { CashOutReceipts } from "./prove/CashOutReceipts";
 import { ExactBalance } from "./prove/ExactBalance";
 import { FundsFlow } from "./prove/FundsFlow";
 import { PaymentFlow } from "./prove/PaymentFlow";
@@ -11,13 +12,15 @@ import { ConnectCard, NoBalanceCard, ProveLayout, SafeToShare } from "./prove/Pr
 /**
  * Prove what you hold, three ways: one balance exactly, "at least" an amount
  * with the balance hidden, or a private payment. Each is sealed for one
- * verifier and an expiry. `?mode=` picks the tab so a link can open straight
+ * verifier and an expiry. Plus a receipt for a cash out to a public wallet,
+ * read from the chain. `?mode=` picks the tab so a link can open straight
  * onto one.
  */
 const MODES = [
   { id: "exact", label: "Exact balance", hint: "Show one private balance exactly" },
   { id: "funds", label: "At least", hint: "Show you hold at least an amount, balance hidden" },
   { id: "payment", label: "Payment", hint: "Show a private payment, the amount or a minimum" },
+  { id: "cashout", label: "Cash out", hint: "A receipt for a cash out to a public wallet" },
 ] as const;
 
 type ModeId = (typeof MODES)[number]["id"];
@@ -40,14 +43,14 @@ export function DiscloseView() {
     router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
   }
 
-  const what = mode === "payment" ? "a payment" : "a balance";
+  const what = mode === "payment" ? "a payment" : mode === "cashout" ? "a cash out" : "a balance";
 
   return (
     <div className="space-y-6">
       <div
         role="tablist"
         aria-label="What to prove"
-        className="inline-flex max-w-full rounded-full bg-surface-2 p-1 max-sm:flex max-sm:w-full dark:bg-panel dark:ring-1 dark:ring-line"
+        className="inline-flex max-w-full overflow-x-auto rounded-full bg-surface-2 p-1 max-sm:flex max-sm:w-full dark:bg-panel dark:ring-1 dark:ring-line"
       >
         {MODES.map((m) => {
           const active = m.id === mode;
@@ -82,6 +85,8 @@ export function DiscloseView() {
           <FundsFlow notes={open} empty={<NoBalanceCard />} />
         ) : mode === "payment" ? (
           <PaymentFlow notes={merged} />
+        ) : mode === "cashout" ? (
+          <CashOutReceipts />
         ) : (
           <ExactBalance notes={open} />
         )}

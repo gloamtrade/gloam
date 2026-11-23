@@ -24,7 +24,7 @@ export default function DisclosePage() {
   return (
     <AppShell
       title="Prove"
-      subtitle="Show someone a balance, a minimum you hold or a payment you got. They see only what the proof says, and nothing goes on chain."
+      subtitle="Show someone a balance, a minimum you hold or a payment you got, or get a receipt for a cash out. They see only what it says."
       actions={
         <Link href="/verify" className="btn btn-ghost btn-sm">
           Check a proof

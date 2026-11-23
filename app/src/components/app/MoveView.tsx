@@ -4103,7 +4103,17 @@ export function MoveView() {
           successTitle === "Cashed out" && xSent ? (
             <CrossChainCashOutStatus quote={xSent} fromChain={network.label} fromChainId={network.chainId} />
           ) : successTitle === "Cashed out" && cashedOut ? (
-            <AddTokenToWallet chainId={network.chainId} asset={cashedOut.asset} to={cashedOut.to} />
+            <>
+              <AddTokenToWallet chainId={network.chainId} asset={cashedOut.asset} to={cashedOut.to} />
+              {txHash && (
+                <Link
+                  href={`/app/disclose?mode=cashout&tx=${txHash}`}
+                  className="mt-3 inline-flex min-h-10 items-center text-[13.5px] font-medium text-foreground underline underline-offset-4"
+                >
+                  Get a receipt
+                </Link>
+              )}
+            </>
           ) : undefined
         }
         onClose={() => {

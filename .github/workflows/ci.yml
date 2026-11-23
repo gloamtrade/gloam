@@ -93,6 +93,12 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-updates-list.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-updates-mail.mts
 
+      # Prove > Cash out: a receipt read from a cash out's transaction (amount, fee,
+      # wallet, time), and finding this browser's cash outs by spend marker. Fake chain.
+      - name: App cash-out receipt self-test
+        working-directory: app
+        run: ../mcp/node_modules/.bin/tsx scripts/selftest-cashout-receipt.mts
+
       - name: SDK tests
         run: pnpm --filter @gloamtrade/sdk test
 
