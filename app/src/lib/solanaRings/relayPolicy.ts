@@ -19,10 +19,16 @@
  *    creates no account and pays no rent. One deposit of one listed asset (SOL,
  *    USDC, USDT, ZEC), no memo, at least RELAYED_DEPOSIT_MIN of it, so the relay
  *    never pays to put dust into the pool. Counted as a payment by the route.
- *  - associated token account: CreateIdempotent (1) only, alongside a pool
- *    transact (the cash-out recipient's token account). When that account does
- *    not exist yet the relay pays its rent (about 0.002 SOL), so the route
- *    counts it with registrations (ataAccounts names them).
+ *  - associated token account: CreateIdempotent (1) only, ONE per
+ *    transaction, alongside a pool transact, and only the cash out's own
+ *    destination: the account it creates must be one the transact names, its
+ *    mint a listed asset and its token program that asset's (classic SPL
+ *    Token for every listed asset, so no Token-2022 account sizes). When that
+ *    account does not exist yet the relay pays its rent (about 0.002 SOL), so
+ *    the route counts it with registrations (ataAccounts names it). Without
+ *    these rules a cash out could carry three token accounts of anyone's
+ *    choosing, at up to twice the rent with Token-2022 extensions, counted as
+ *    one rent event (reported 2026-11-24).
  * Exactly two signers, the relay and the private account: every extra
  * signature is another 5,000 lamports the relay would pay.
  * Version 1 transactions (what the SDK builds): the priority fee is a
@@ -77,7 +83,9 @@ const POOL_ALLOWED = new Set([16, 17]);
 const POOL_DEPOSIT = 15;
 const ATA_CREATE_IDEMPOTENT = 1;
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
-const TOKEN_PROGRAMS = new Set(["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]); // ggignore
+const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"; // ggignore
+const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"; // ggignore
+const TOKEN_PROGRAMS = new Set([TOKEN_PROGRAM, TOKEN_2022_PROGRAM]);
 
 /**
  * The least of each listed asset a relayed deposit may move, in base units:
@@ -103,6 +111,8 @@ export type RelayLimits = {
   maxInstructions: number;
   /** The assets a relayed deposit may move (by mint) and the least of each. Defaults to this network's listed assets. */
   depositMins?: ReadonlyMap<string, bigint>;
+  /** Whose listed assets a sponsored token account may be for. Defaults to this deployment's network. */
+  network?: RingsNetwork;
 };
 
 export const RELAY_LIMITS: RelayLimits = { maxPriorityFeeLamports: 50_000n, maxComputeUnits: 1_400_000, maxInstructions: 4 };
@@ -209,6 +219,12 @@ export function checkSponsoredTransaction(wire: Uint8Array, relayer: string, lim
   let depositor: string | undefined;
   let ata = false;
   const ataAccounts: string[] = [];
+  // Every account a pool transact names: a token account the relay creates must be one of them.
+  const transactAccounts = new Set<string>();
+  const listed = new Map<string, string>();
+  for (const a of ringsAssets(limits.network ?? SOLANA_RINGS_NETWORK)) {
+    if (a.mint) listed.set(a.mint, a.tokenProgram === "token-2022" ? TOKEN_2022_PROGRAM : TOKEN_PROGRAM);
+  }
   for (const ix of ixs) {
     const program = ix.programAddress as string;
     const data = ix.data ?? new Uint8Array();
@@ -224,12 +240,20 @@ export function checkSponsoredTransaction(wire: Uint8Array, relayer: string, lim
     } else if (program === SHIELDED_POOL_PROGRAM) {
       if (tag === undefined || !POOL_ALLOWED.has(tag)) return no("pool instruction not allowed");
       poolTransact = true;
+      for (const a of ix.accounts ?? []) transactAccounts.add(a.address as string);
     } else if (program === ATA_PROGRAM) {
       if (data.length !== 1 || tag !== ATA_CREATE_IDEMPOTENT) return no("token account instruction not allowed");
       // accounts: funder, the new token account, its owner, mint, system, token program
-      const funder = ix.accounts?.[0]?.address as string | undefined;
-      const created = ix.accounts?.[1]?.address as string | undefined;
-      if (funder !== relayer || !created) return no("token account instruction not allowed");
+      if (ata) return no("one token account per cash out");
+      const accts = ix.accounts ?? [];
+      const funder = accts[0]?.address as string | undefined;
+      const created = accts[1]?.address as string | undefined;
+      const mint = accts[3]?.address as string | undefined;
+      const tokenProgram = accts[5]?.address as string | undefined;
+      if (accts.length !== 6 || funder !== relayer || !created || !mint) return no("token account instruction not allowed");
+      const program = listed.get(mint);
+      if (!program) return no("token account for an asset Gloam doesn't list");
+      if (tokenProgram !== program) return no("token account under the wrong token program");
       ataAccounts.push(created);
       ata = true;
     } else {
@@ -237,6 +261,7 @@ export function checkSponsoredTransaction(wire: Uint8Array, relayer: string, lim
     }
   }
   if (ata && !poolTransact) return no("a token account only with a cash out");
+  if (ata && !ataAccounts.every((a) => transactAccounts.has(a))) return no("a token account only for the cash out's own destination");
   if (registry && poolTransact) return no("register and pay in separate transactions");
   if (deposit && ixs.length !== 1) return no("a deposit goes alone in its transaction");
 

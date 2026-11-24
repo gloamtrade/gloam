@@ -3,7 +3,7 @@ import { getBase64Decoder, getBase64Encoder, getTransactionDecoder, getTransacti
 import { RINGS_RELAY_LOW_LAMPORTS, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK } from "@/lib/solanaRings/config";
 import { RELAY_CALL_TIMEOUT_MS, RINGS_TREE, relayBroadcast, signatureOfWire, sigStatusFrom } from "@/lib/solanaRings/landing";
 import { SHIELDED_POOL_PROGRAM, USER_REGISTRY_PROGRAM, checkSponsoredTransaction } from "@/lib/solanaRings/relayPolicy";
-import { heliusRpcUrl, relayerSigner, ringsDepositorRate, ringsRelayRate } from "@/lib/solanaRings/server";
+import { heliusRpcUrl, relayerSigner, ringsDepositorRate, ringsRelayAttempt, ringsRelayRate } from "@/lib/solanaRings/server";
 import { screenOtherChainAddresses } from "@/lib/screeningServer";
 
 export const runtime = "nodejs";
@@ -122,6 +122,11 @@ export async function POST(req: Request) {
   const verdict = checkSponsoredTransaction(wire, signer.address);
   if (!verdict.ok) return refuse(422, "not_sponsorable", `Gloam's relay doesn't pay for this: ${verdict.reason}.`);
 
+  // A cheap per-IP count before any Solana read; the daily buckets come after the simulation below.
+  const attempt = await ringsRelayAttempt(req);
+  if (attempt === "unavailable") return refuse(503, "relay_unavailable", "Gloam's Solana relay is paused for a moment. Try again shortly.");
+  if (attempt === "limited") return refuse(429, "rate_limited", "Too many requests. Try again in a little while.");
+
   // A cash out that creates the recipient's token account costs the relay rent,
   // like a registration does: count it with them.
   let paysRent = verdict.kind === "register";
@@ -134,15 +139,6 @@ export async function POST(req: Request) {
     } catch {
       return refuse(502, "upstream_unavailable", "Solana is slow to answer. Try again.");
     }
-  }
-  const rate = await ringsRelayRate(req, paysRent ? "rent" : "transact");
-  if (rate === "unavailable") return refuse(503, "relay_unavailable", "Gloam's Solana relay is paused for a moment. Try again shortly.");
-  if (rate === "limited") return refuse(429, "rate_limited", "Too many requests. Try again in a little while.");
-  if (verdict.kind === "deposit") {
-    // No rent, so counted as a payment above; and by who deposits, so one wallet can't spread its adds over many IPs.
-    const mine = verdict.depositor ? await ringsDepositorRate(verdict.depositor) : "limited";
-    if (mine === "unavailable") return refuse(503, "relay_unavailable", "Gloam's Solana relay is paused for a moment. Try again shortly.");
-    if (mine === "limited") return refuse(429, "rate_limited", "Too many requests. Try again in a little while.");
   }
   if (!(await screenOtherChainAddresses(verdict.accounts))) return refuse(403, "screened", "This transaction can't go through Gloam.");
 
@@ -173,6 +169,18 @@ export async function POST(req: Request) {
     if (err) return refuse(422, "would_fail", "This transaction would fail on Solana, so it wasn't sent.");
   } catch {
     return refuse(502, "upstream_unavailable", "Solana is slow to answer. Try again.");
+  }
+
+  // Only a transaction that simulated (signatures and proof good) counts against the
+  // daily buckets, so ones that could never land can't use up the day for everyone.
+  const rate = await ringsRelayRate(req, paysRent ? "rent" : "transact");
+  if (rate === "unavailable") return refuse(503, "relay_unavailable", "Gloam's Solana relay is paused for a moment. Try again shortly.");
+  if (rate === "limited") return refuse(429, "rate_limited", "Too many requests. Try again in a little while.");
+  if (verdict.kind === "deposit") {
+    // No rent, so counted as a payment above; and by who deposits, so one wallet can't spread its adds over many IPs.
+    const mine = verdict.depositor ? await ringsDepositorRate(verdict.depositor) : "limited";
+    if (mine === "unavailable") return refuse(503, "relay_unavailable", "Gloam's Solana relay is paused for a moment. Try again shortly.");
+    if (mine === "limited") return refuse(429, "rate_limited", "Too many requests. Try again in a little while.");
   }
 
   // Sent, then sent again until Solana has seen it (Helius: retries are ours, not the RPC's).

@@ -100,6 +100,8 @@ export async function ringsProxyRate(req: Request, calls: number, now = Date.now
  * so a preview deployment without Redis can still be tested.
  */
 export const RINGS_RELAY_LIMITS = {
+  /** Tries per IP a minute, checked before the route spends any Solana reads on one (ringsRelayAttempt). */
+  attempt: { perIpPerMin: 30 },
   rent: { perIpPerDay: 5, allPerDay: 300 },
   transact: { perIpPerMin: 10, perIpPerDay: 200, allPerMin: 120, allPerDay: 5_000 },
   deposit: { perDepositorPerDay: 20 },
@@ -115,6 +117,21 @@ const DAY = 86_400;
 export const ringsRelayClock = { now: (): number => Date.now() };
 
 export type RelayRate = "ok" | "limited" | "unavailable";
+
+/**
+ * One more try at the relay from this IP, before the route reads Solana for
+ * it. The daily buckets (ringsRelayRate, ringsDepositorRate) are charged only
+ * once a transaction simulates, so transactions that would never land (bad
+ * signatures, failing proofs) can't use up the day's sponsorship for everyone
+ * (reported 2026-11-24); this cheap per-minute count bounds the reads they cost.
+ */
+export async function ringsRelayAttempt(req: Request, now = ringsRelayClock.now()): Promise<RelayRate> {
+  try {
+    return (await addRateCount(clientIp(req), "sol-relay-try", 1, now)) > RINGS_RELAY_LIMITS.attempt.perIpPerMin ? "limited" : "ok";
+  } catch (e) {
+    return e instanceof SharedCountUnavailable ? "unavailable" : "limited";
+  }
+}
 
 export async function ringsRelayRate(
   req: Request,
