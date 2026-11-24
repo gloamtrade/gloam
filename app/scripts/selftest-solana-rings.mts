@@ -337,17 +337,23 @@ const transact = ixFor(POOL, [16, 1, 2, 3], [owner], [address("9QyffJUe2wCAwQbkm
 const merge = ixFor(POOL, [17, 0], [owner]);
 const deposit = ixFor(POOL, [15, 0], [owner]);
 const cashOutTo = address("EZrTwr4q3Q2xvKGtZ6trFJJbPah73gBk43vME4d7p3vU");
-const ata = (funder: Address): Instruction =>
+const cashOutAta = address("4VxubgvasVNWnhQ4nMfm2pxAVZKamXYB9dZwfNrS6rRW");
+const USDC_MAINNET = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"; // ggignore
+// A cash out: the pool transact names the destination token account (as a real one does).
+const cashOut = ixFor(POOL, [16, 1, 2, 3], [owner], [address("9QyffJUe2wCAwQbkm6MjCEivB9kaQZnvJCedFWnw9mRA"), cashOutAta]);
+const ata = (funder: Address, o: { created?: Address; mint?: string; program?: string; extra?: boolean } = {}): Instruction =>
   ({
     programAddress: address(relay.ATA_PROGRAM),
     data: Uint8Array.of(1),
     accounts: [
       { address: funder, role: AccountRole.WRITABLE_SIGNER },
-      { address: address("4VxubgvasVNWnhQ4nMfm2pxAVZKamXYB9dZwfNrS6rRW"), role: AccountRole.WRITABLE },
+      { address: o.created ?? cashOutAta, role: AccountRole.WRITABLE },
       { address: cashOutTo, role: AccountRole.READONLY },
-      { address: address("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"), role: AccountRole.READONLY },
+      { address: address(o.mint ?? USDC_MAINNET), role: AccountRole.READONLY },
       { address: address("11111111111111111111111111111111"), role: AccountRole.READONLY },
-      { address: address(SPL_TOKEN_PROGRAM_ID), role: AccountRole.READONLY },
+      { address: address(o.program ?? SPL_TOKEN_PROGRAM_ID), role: AccountRole.READONLY },
+      ...(o.extra ? [{ address: address("SysvarRent111111111111111111111111111111111"), role: AccountRole.READONLY }] : []),
     ],
   }) as Instruction;
 
@@ -362,7 +368,7 @@ v = check(await wire({ instructions: [transact] }));
 ok(v.ok && v.kind === "transact" && v.ataAccounts.length === 0, "a private payment passes");
 v = check(await wire({ instructions: [merge] }));
 ok(v.ok && v.kind === "transact", "a merge passes");
-v = check(await wire({ instructions: [ata(relayer.address), transact] }));
+v = check(await wire({ instructions: [ata(relayer.address), cashOut] }));
 ok(v.ok && v.ataAccounts.length === 1 && v.accounts.includes(cashOutTo), "a token cash out passes, its new token account named and its recipient screened");
 
 const refuse = async (what: string, w: Uint8Array | Promise<Uint8Array>, reason?: RegExp) => {
@@ -395,7 +401,15 @@ await refuse("a priority fee over the cap", wire({ instructions: [transact], pri
   ok(!r.ok && /compute limit/.test(r.reason), "refused: a compute limit over the cap");
 }
 await refuse("a token account without a cash out", wire({ instructions: [ata(relayer.address), mergeEnc] }), /only with a cash out/);
-await refuse("a token account funded by someone else", wire({ instructions: [ata(owner.address), transact] }), /token account/);
+await refuse("a token account funded by someone else", wire({ instructions: [ata(owner.address), cashOut] }), /token account/);
+// Reported 2026-11-24: one cash out carrying several token accounts of anyone's choosing, at Token-2022 sizes.
+const otherAta = address("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin");
+await refuse("two token accounts on one cash out", wire({ instructions: [ata(relayer.address), ata(relayer.address, { created: otherAta }), cashOut] }), /one token account per cash out/);
+await refuse("a token account the cash out doesn't pay into", wire({ instructions: [ata(relayer.address, { created: otherAta }), cashOut] }), /own destination/);
+await refuse("a token account for a private payment that pays no token account", wire({ instructions: [ata(relayer.address), transact] }), /own destination/);
+await refuse("a Token-2022 token account", wire({ instructions: [ata(relayer.address, { program: TOKEN_2022 }), cashOut] }), /wrong token program/);
+await refuse("a token account for an unlisted mint", wire({ instructions: [ata(relayer.address, { mint: "So11111111111111111111111111111111111111112" }), cashOut] }), /doesn't list/);
+await refuse("a token account instruction with extra accounts", wire({ instructions: [ata(relayer.address, { extra: true }), cashOut] }), /token account instruction not allowed/);
 await refuse("registration and payment together", wire({ instructions: [register, transact] }), /separate/);
 await refuse("too many instructions", wire({ instructions: [transact, merge, transact, merge, transact] }), /number of instructions/);
 await refuse("not a transaction", Promise.resolve(new Uint8Array([1, 2, 3])), /not a Solana transaction/);

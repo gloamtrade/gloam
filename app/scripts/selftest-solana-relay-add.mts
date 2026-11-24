@@ -568,8 +568,9 @@ try {
     // One went through above; count the rest of today's 20 directly, then the route refuses the 21st from a fresh IP.
     let counted = 0;
     for (let i = 0; i < 40 && (await server.ringsDepositorRate(depositorSubject)) === "ok"; i++) counted++;
-    // two reached the count through the route above: the one sent, and the one its check run refused
-    ok(counted === server.RINGS_RELAY_LIMITS.deposit.perDepositorPerDay - 2, "the adds above were counted by their wallet");
+    // only the add that was sent reached the count: the one its check run refused did not
+    // (the daily buckets are charged after the simulation, so a refused run uses none of them)
+    ok(counted === server.RINGS_RELAY_LIMITS.deposit.perDepositorPerDay - 1, `the add that went out was counted by its wallet, the refused one was not (${counted})`);
     reset();
     chain.ip = "198.51.100.21";
     const b = await client.buildAddFor(s, USDC, 1_000_000n);
@@ -581,7 +582,8 @@ try {
         body: JSON.stringify({ tx: getBase64Decoder().decode(signed) }),
       })
     );
-    ok(res.status === 429 && chain.sent.length === 0 && !chain.helius.includes("simulateTransaction"), `the same wallet past ${server.RINGS_RELAY_LIMITS.deposit.perDepositorPerDay} a day: refused from a fresh IP, before any check run or send`);
+    // the daily buckets are charged once the check run passes, so the refusal comes after it, never after a send
+    ok(res.status === 429 && chain.sent.length === 0, `the same wallet past ${server.RINGS_RELAY_LIMITS.deposit.perDepositorPerDay} a day: refused from a fresh IP, and nothing sent`);
     ok((await server.ringsDepositorRate(stranger.address)) === "ok", "another wallet still gets its fee paid");
     ok((await server.ringsDepositorRate("not an address")) === "limited", "something that isn't an address is never counted as one");
     server.ringsRelayClock.now = () => relayAt + 86_400_000;
