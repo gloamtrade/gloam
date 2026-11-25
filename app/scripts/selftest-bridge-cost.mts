@@ -85,6 +85,56 @@ test("when Relay doesn't price what you pay, the cost is its fee and nothing is 
   assert.equal(expensiveRoute(quote(null, "10", 25)), null);
 });
 
+// A coin, not a stablecoin, landing (SOL or ZEC on Solana): `receive.usd` is its dollar value.
+const coin = (usd: number | null, receive: string, landedUsd: number | null, feeUsd: number, gasUsd: number | null = null) => ({
+  send: { usd },
+  receive: { amount: receive, usd: landedUsd },
+  feeUsd,
+  gasUsd,
+});
+
+test("a coin landing counts at its dollar price, never its amount as dollars", () => {
+  // Live 2026-11-23 shape: 20 USDC from Base for about 0.13 SOL, worth $19.80
+  const q = coin(19.99, "0.130412345", 19.8, 0.16);
+  const c = routeCost(q);
+  assert.ok(c && c.share !== null);
+  assert.equal(Math.round(c.usd * 100) / 100, 0.19, "$19.99 in, $19.80 of SOL out");
+  assert.ok(c.share < 0.01);
+  assert.equal(expensiveRoute(q), null);
+  // The same quote read the old way, the amount as dollars: a 99% cost
+  assert.ok(expensiveRoute({ ...q, receive: { amount: q.receive.amount } })!.share > 0.99, "what this guards against");
+  // About 0.0227 ZEC for 20 USDC, worth $19.71: still quiet
+  assert.equal(expensiveRoute(coin(19.99, "0.0227", 19.71, 0.16)), null);
+});
+
+test("a coin priced well under what you pay still warns", () => {
+  // $100 in, SOL worth $90 out: $10, 10%
+  const w = expensiveRoute(coin(100, "0.65", 90, 0.4));
+  assert.ok(w);
+  assert.equal(Math.round(w.usd * 100) / 100, 10);
+  assert.equal(Math.round(w.share * 100) / 100, 0.1);
+  // and never less than the fees, plus the gas
+  assert.equal(Math.round(routeCost(coin(100, "0.7", 100.5, 0.4, 0.2))!.usd * 100) / 100, 0.6);
+});
+
+test("a coin with no price: the fees are the whole cost, as a share of what you pay", () => {
+  const c = routeCost(coin(19.99, "0.130412345", null, 0.16));
+  assert.ok(c);
+  assert.equal(c.usd, 0.16);
+  assert.equal(Math.round(c.share! * 1000) / 1000, 0.008);
+  assert.equal(expensiveRoute(coin(19.99, "0.130412345", null, 0.16)), null);
+  // Fees that are themselves over 3% and $1 still warn
+  const w = expensiveRoute(coin(20, "0.12", null, 1.5, 0.3));
+  assert.ok(w);
+  assert.equal(Math.round(w.usd * 100) / 100, 1.8);
+  // and nothing priced at all: the fees, no share, no warning
+  assert.deepEqual(routeCost(coin(null, "0.13", null, 0.16)), { usd: 0.16, share: null });
+});
+
+test("a stablecoin's amount still counts as dollars, the price left out", () => {
+  assert.deepEqual(routeCost(quote(100, "99.60", 0.35)), routeCost({ send: { usd: 100 }, receive: { amount: "99.60", usd: undefined }, feeUsd: 0.35 }));
+});
+
 const TREASURY = "0xB3900ac9350903218e4c7597bAb0f008F01B30B8";
 
 test("Gloam's cut is off unless both settings are valid", () => {

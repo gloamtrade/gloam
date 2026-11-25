@@ -207,6 +207,8 @@ export async function POST(req: Request) {
   }
   const feeUsd = ["relayer", "app"].reduce((sum, k) => sum + Number(data?.fees?.[k]?.amountUsd ?? 0), 0);
   const gasUsd = Number(data?.fees?.gas?.amountUsd ?? NaN);
+  // What lands in dollars: the cost warning needs it when that is SOL or ZEC, not a stablecoin (costedQuote).
+  const usdOut = Number(out?.amountUsd ?? NaN);
   let outAmount: bigint;
   let outMin: bigint;
   try {
@@ -236,6 +238,7 @@ export async function POST(req: Request) {
       assetId: asset.id,
       decimals: asset.decimals,
       logo: `/brand/tokens/${asset.id}.png`,
+      usd: Number.isFinite(usdOut) && usdOut > 0 ? Math.round(usdOut * 100) / 100 : null,
     },
     refundTo: standIn ? "" : refundTo,
     feeUsd: Math.round(feeUsd * 100) / 100,
