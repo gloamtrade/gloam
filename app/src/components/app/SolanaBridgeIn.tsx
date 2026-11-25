@@ -367,7 +367,8 @@ export function SolanaBridgeIn({
     return t && trackedLive(t, Date.now()) ? { kind: "track", t, relay: "waiting", shield: { kind: "idle" }, qr: null } : FORM;
   });
   const [opened, setOpen] = useState(false);
-  const [source, setSource] = useState<Source>("relay");
+  // A Zcash transfer picked up after a reload starts over on the Zcash form.
+  const [source, setSource] = useState<Source>(() => (flow.kind === "track" && flow.t.via === "near" ? "zcash" : "relay"));
   // ZEC straight from a Zcash wallet: with its flag on, once ZEC is read as set up on Gloam.
   const zcashOn = zcashInVisible(session.network) && ready.zec === true;
   // Connecting a wallet from the sheet: it steps aside for the sign-in or
@@ -602,9 +603,9 @@ function phaseText(flow: Extract<Flow, { kind: "track" }>, phase: ReturnType<typ
   switch (phase) {
     case "waiting":
       if (flow.short) {
-        // NEAR Intents saw less than asked: by its rules it goes back by the deadline.
+        // NEAR Intents saw less than asked: by its rules (exact input) it goes back by the deadline.
         const fee = t.near?.refundFee ? `, less its ${t.near.refundFee} ZEC refund fee` : "";
-        return `Only ${flow.short} ${t.send.symbol} arrived, less than the ${typedAmount(t.send.amount)} asked. Unless the rest arrives in time, ${by} sends it back to your ${t.send.chain} address${fee}.`;
+        return `Only ${flow.short} ${t.send.symbol} arrived, less than the ${typedAmount(t.send.amount)} asked, so ${by} sends it back to your ${t.send.chain} address${fee}.`;
       }
       return t.mode === "wallet"
         ? t.unsure
@@ -1622,7 +1623,8 @@ function Tracking({
         </p>
       ) : null}
 
-      <QuoteRows q={{ ...t, gasUsd: null }} sentRow={!showAddress} returned={phase === "refunded" || phase === "failed"} />
+      {/* An expired address was never paid as far as anyone knows, and a short one wasn't paid what was asked: no "Sent" row for either. */}
+      {!expired && !flow.short && <QuoteRows q={{ ...t, gasUsd: null }} sentRow={!showAddress} returned={phase === "refunded" || phase === "failed"} />}
       {link && (
         <p className="mt-2 text-[13px]">
           <a href={link} target="_blank" rel="noopener noreferrer" className="text-foreground underline underline-offset-4">
@@ -1634,9 +1636,8 @@ function Tracking({
         (near ? (
           <>
             <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
-              Send only ZEC on Zcash, from a shielded or transparent balance, and use this address for this transfer only. Scanning the
-              code fills in the address and amount in most Zcash wallets. From an exchange, make sure exactly {t.send.amount} ZEC arrives:
-              less goes back to your Zcash address.
+              Send only ZEC on Zcash, from a shielded or transparent balance, and only once to this address. The code fills in the address
+              and amount. If less than {t.send.amount} ZEC arrives, it goes back to your Zcash address.
             </p>
             <p className="mt-2 text-[12px] leading-relaxed text-mute">{ZCASH_IN_PRIVACY_NOTE}</p>
           </>
