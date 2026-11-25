@@ -95,6 +95,22 @@ export type StarknetNetworkConfig = {
 
 type Env = Record<string, string | undefined>;
 
+/**
+ * What starknetConfig reads, each named in full: Next puts a NEXT_PUBLIC_ value
+ * into the browser's code only where it is written out as
+ * process.env.NEXT_PUBLIC_..., never through process.env as a whole (which is
+ * empty there). Read at each call, so a server sees the environment as it is.
+ * STARKNET_PROVER_URL is server-only: undefined in a browser.
+ */
+export function starknetEnv(): Env {
+  return {
+    NEXT_PUBLIC_STARKNET_POOL: process.env.NEXT_PUBLIC_STARKNET_POOL,
+    NEXT_PUBLIC_STARKNET_USDC: process.env.NEXT_PUBLIC_STARKNET_USDC,
+    NEXT_PUBLIC_STARKNET_DEVNET_RPC: process.env.NEXT_PUBLIC_STARKNET_DEVNET_RPC,
+    STARKNET_PROVER_URL: process.env.STARKNET_PROVER_URL,
+  };
+}
+
 const hexAddress = (v: string | undefined): string | null => {
   const s = (v ?? "").trim();
   return /^0x[0-9a-fA-F]{1,64}$/.test(s) ? s.toLowerCase() : null;
@@ -116,7 +132,7 @@ const httpUrl = (v: string | undefined): string | null => {
  *  - NEXT_PUBLIC_STARKNET_DEVNET_RPC: a local starknet-devnet (default 127.0.0.1:5050).
  *  - STARKNET_PROVER_URL: a proving service for the SDK's protocol (server side).
  */
-export function starknetConfig(network: StarknetNetwork = STARKNET_NETWORK, env: Env = process.env): StarknetNetworkConfig {
+export function starknetConfig(network: StarknetNetwork = STARKNET_NETWORK, env: Env = starknetEnv()): StarknetNetworkConfig {
   const pool = hexAddress(env.NEXT_PUBLIC_STARKNET_POOL);
   const proverUrl = httpUrl(env.STARKNET_PROVER_URL);
   const base = { network, chainId: STARKNET_CHAIN_IDS[network], pool, accountClassHash: STARKNET_ACCOUNT_CLASS_HASH, udc: STARKNET_UDC, proverUrl };

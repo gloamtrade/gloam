@@ -129,7 +129,9 @@ export function starknetRelayRate(req: Request, kind: "deploy" | "transact", now
   const strict = { failClosed: network === "mainnet" };
   return counted(async () => {
     if (kind === "deploy") {
-      if ((await addRateCount(ip, "sn-relay-deploy", 1, now, DAY, strict)) > STARKNET_RELAY_LIMITS.deploy.perIpPerDay) return false;
+      // A local devnet's STRK is free: its deploys are held only by the overall count.
+      const perIp = network === "devnet" ? STARKNET_RELAY_LIMITS.deploy.allPerDay : STARKNET_RELAY_LIMITS.deploy.perIpPerDay;
+      if ((await addRateCount(ip, "sn-relay-deploy", 1, now, DAY, strict)) > perIp) return false;
       return (await addRateCount("all", "sn-relay-deploy-all", 1, now, DAY, strict)) <= STARKNET_RELAY_LIMITS.deploy.allPerDay;
     }
     const t = STARKNET_RELAY_LIMITS.transact;

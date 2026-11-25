@@ -395,5 +395,17 @@ const RESULT = { proof: "UFJPT0Y=", proof_facts: ["0xa", "0xb"], l2_to_l1_messag
   ok(d.ok && d.kind === "approve" && d.amount === 1_000_000n, "an outside execution built by starknet.js passes as an approve");
 }
 
+/* ------------------------------------------------------------------ the browser gets the pool */
+{
+  // Next puts a NEXT_PUBLIC_ value into the browser only where it is written out in full;
+  // process.env as a whole is empty there (the pool read as unset on 2026-11-25's devnet run).
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../src/lib/starknetPrivacy/config.ts", import.meta.url), "utf8");
+  ok(/env: Env = starknetEnv\(\)/.test(src) && !/env: Env = process\.env/.test(src), "the config's default environment names each variable");
+  for (const k of ["NEXT_PUBLIC_STARKNET_POOL", "NEXT_PUBLIC_STARKNET_USDC", "NEXT_PUBLIC_STARKNET_DEVNET_RPC"])
+    ok(src.includes(`${k}: process.env.${k}`), `${k} is read in full`);
+  eq(config.starknetEnv().NEXT_PUBLIC_STARKNET_POOL, POOL, "and reads the pool");
+}
+
 globalThis.fetch = realFetch;
 console.log(`selftest-starknet-routes: ${pass} checks passed`);
