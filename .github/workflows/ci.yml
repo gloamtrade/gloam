@@ -83,6 +83,18 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-zec.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-metrics.mts
 
+      # Starknet (off by default): the core library behind NEXT_PUBLIC_STARKNET_ENABLED.
+      # Config (pools only from the environment), private-account keys from a wallet
+      # signature or a Gloam root (never a Solana account's), matching the devnet run
+      # that sent real transactions; what the relay will send (account deploy, the
+      # token approve, the pool's apply_actions) and every way each is refused, on the
+      # pool's real encoding; add, pay and cash out on the SDK's in-memory pool. No
+      # network. The devnet end to end (scripts/e2e-starknet-devnet.mts) runs locally.
+      - name: App Starknet self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-core.mts
+
       # Every token amount the app shows: two places, cut down and never rounded up,
       # "<0.01" for dust, "0.00" for zero, thousands separators, 6- and 18-decimal
       # tokens and bigints (lib/amountShort, lib/shield formatAssetAmount), and the
