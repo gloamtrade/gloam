@@ -69,7 +69,9 @@ jobs:
       # place in the menus; bridged ZEC (its mint, shown only once its ring interface is
       # read as set up, priced, two places); Solana in /admin (the relay's history read
       # into accounts opened, bring-ins, wallet adds, payments and cash-outs, wallet adds
-      # reported and checked, the mainnet totals with Solana in). No network.
+      # reported and checked, the mainnet totals with Solana in); ZEC from a Zcash wallet
+      # through NEAR Intents (refund addresses, the quote and status read from recorded
+      # 1Click answers, the route with 1Click faked). No network.
       - name: App Solana self-tests
         working-directory: app
         run: |
@@ -81,6 +83,7 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-site.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-opened.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-zec.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-zcash-in.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-metrics.mts
 
       # Every token amount the app shows: two places, cut down and never rounded up,

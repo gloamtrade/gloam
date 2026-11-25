@@ -1,0 +1,176 @@
+{
+  "_note": "Recorded from https://1click.chaindefuser.com on 2026-11-25 with no API key and no funds sent: POST /v0/quote (dry and real) for 0.1 ZEC from Zcash (nep141:zec.omft.near) to ZEC on Solana (1cs_v1:sol:spl:A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS), GET /v0/status of the real one, and three refusals. The real deposit address was replaced by a made-up one (t1S7M4S3...) so nothing here can be paid; the recipient is a random Solana key and the refund address the all-zero key hash, both nobody's.",
+  "quote": {
+    "quote": {
+      "amountIn": "10000000",
+      "amountInFormatted": "0.1",
+      "amountInUsd": "69.980000000000",
+      "minAmountIn": "10000000",
+      "amountOut": "9974272",
+      "amountOutFormatted": "0.09974272",
+      "amountOutUsd": "69.799955456000",
+      "minAmountOut": "9874529",
+      "timeEstimate": 452,
+      "refundFee": "32000",
+      "withdrawFee": "25728",
+      "deadline": "2026-11-28T16:35:04.000Z",
+      "timeWhenInactive": "2026-11-28T16:35:04.000Z",
+      "depositAddress": "t1S7M4S3woybcUVs6wvsXid2FmbsUZrwNUK"
+    },
+    "quoteRequest": {
+      "dry": false,
+      "depositMode": "SIMPLE",
+      "swapType": "EXACT_INPUT",
+      "slippageTolerance": 100,
+      "originAsset": "nep141:zec.omft.near",
+      "depositType": "ORIGIN_CHAIN",
+      "destinationAsset": "1cs_v1:sol:spl:A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS",
+      "amount": "10000000",
+      "refundTo": "t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs",
+      "refundType": "ORIGIN_CHAIN",
+      "recipient": "9twnoUfhTHaitUeiAnYczP76rETW4gdLgyTuLu7NEEW1",
+      "recipientType": "DESTINATION_CHAIN",
+      "deadline": "2026-11-25T16:35:04.000Z",
+      "confidentiality": "public",
+      "quoteWaitingTimeMs": 0,
+      "insured": false,
+      "appFees": []
+    },
+    "signature": "ed25519:3FPcREWPunqvWRqBUeSgo3dy14fBG4hJrhTrHuq2uyoiyopNzx3Qv8FSCkXSW8owS7Zs2dc3U1iCo8gdZPSM53SS",
+    "timestamp": "2026-11-25T13:35:05.735Z",
+    "correlationId": "8b2025cb-69cc-47e0-9573-82c1f8cc38aa"
+  },
+  "dryQuote": {
+    "quote": {
+      "amountIn": "10000000",
+      "amountInFormatted": "0.1",
+      "amountInUsd": "69.980000000000",
+      "minAmountIn": "10000000",
+      "amountOut": "9974272",
+      "amountOutFormatted": "0.09974272",
+      "amountOutUsd": "69.799955456000",
+      "minAmountOut": "9874529",
+      "timeEstimate": 452,
+      "refundFee": "32000",
+      "withdrawFee": "25728"
+    },
+    "quoteRequest": {
+      "dry": true,
+      "depositMode": "SIMPLE",
+      "swapType": "EXACT_INPUT",
+      "slippageTolerance": 100,
+      "originAsset": "nep141:zec.omft.near",
+      "depositType": "ORIGIN_CHAIN",
+      "destinationAsset": "1cs_v1:sol:spl:A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS",
+      "amount": "10000000",
+      "refundTo": "t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs",
+      "refundType": "ORIGIN_CHAIN",
+      "recipient": "9twnoUfhTHaitUeiAnYczP76rETW4gdLgyTuLu7NEEW1",
+      "recipientType": "DESTINATION_CHAIN",
+      "deadline": "2026-11-25T15:34:37.000Z",
+      "confidentiality": "public",
+      "quoteWaitingTimeMs": 0,
+      "insured": false,
+      "appFees": []
+    },
+    "signature": "ed25519:63TW8KjiMikpqsJG7t98y2gwxgL36opngTRB6AmVruorMVZPJRb5rxqgsh433TpkJP51MT7SNZZHrAYPZwL7W6Th",
+    "timestamp": "2026-11-25T13:34:38.470Z",
+    "correlationId": "5e07056c-306b-47d1-8ae7-b8cbba7c7af3"
+  },
+  "statusPending": {
+    "status": "PENDING_DEPOSIT",
+    "updatedAt": "2026-11-25T13:35:05.855Z",
+    "correlationId": "ab5a3b33-b4a6-4957-bb08-8090c119e360",
+    "swapDetails": {
+      "depositedAmount": null,
+      "depositedAmountUsd": null,
+      "depositedAmountFormatted": null,
+      "intentHashes": [],
+      "nearTxHashes": [],
+      "amountIn": null,
+      "amountInFormatted": null,
+      "amountInUsd": null,
+      "amountOut": null,
+      "amountOutFormatted": null,
+      "amountOutUsd": null,
+      "slippage": null,
+      "refundedAmount": "0",
+      "refundedAmountFormatted": "0",
+      "refundedAmountUsd": "0",
+      "refundReason": null,
+      "refundFee": "32000",
+      "withdrawFee": "25728",
+      "originChainTxHashes": [],
+      "destinationChainTxHashes": []
+    },
+    "quoteResponse": {
+      "timestamp": "2026-11-25T13:35:05.735Z",
+      "signature": "ed25519:3FPcREWPunqvWRqBUeSgo3dy14fBG4hJrhTrHuq2uyoiyopNzx3Qv8FSCkXSW8owS7Zs2dc3U1iCo8gdZPSM53SS",
+      "quoteRequest": {
+        "dry": false,
+        "swapType": "EXACT_INPUT",
+        "depositMode": "SIMPLE",
+        "slippageTolerance": 100,
+        "originAsset": "nep141:zec.omft.near",
+        "depositType": "ORIGIN_CHAIN",
+        "destinationAsset": "1cs_v1:sol:spl:A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS",
+        "amount": "10000000",
+        "refundTo": "t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs",
+        "refundType": "ORIGIN_CHAIN",
+        "recipient": "9twnoUfhTHaitUeiAnYczP76rETW4gdLgyTuLu7NEEW1",
+        "recipientType": "DESTINATION_CHAIN",
+        "deadline": "2026-11-25T16:35:04.000Z",
+        "appFees": [],
+        "virtualChainRecipient": null,
+        "virtualChainRefundRecipient": null,
+        "referral": null,
+        "confidentiality": "public"
+      },
+      "quote": {
+        "amountIn": "10000000",
+        "amountInFormatted": "0.1",
+        "amountInUsd": "69.980000000000",
+        "minAmountIn": "10000000",
+        "amountOut": "9974272",
+        "amountOutFormatted": "0.09974272",
+        "amountOutUsd": "69.799955456000",
+        "minAmountOut": "9874529",
+        "timeWhenInactive": "2026-11-28T16:35:04.000Z",
+        "depositAddress": "t1S7M4S3woybcUVs6wvsXid2FmbsUZrwNUK",
+        "deadline": "2026-11-28T16:35:04.000Z",
+        "timeEstimate": 452,
+        "refundFee": "32000",
+        "withdrawFee": "25728"
+      }
+    }
+  },
+  "refusals": {
+    "tooLow": {
+      "status": 400,
+      "body": {
+        "message": "Amount is too low for bridge, try at least 132000",
+        "correlationId": "4356e629-52d4-491f-a094-024bb8d91802",
+        "timestamp": "2026-11-25T13:34:40.600Z",
+        "path": "/v0/quote"
+      }
+    },
+    "refundSapling": {
+      "status": 400,
+      "body": {
+        "message": "refundTo is not valid",
+        "correlationId": "e3044eaf-5e0e-44e1-9076-b6ebf825856e",
+        "timestamp": "2026-11-25T13:34:39.097Z",
+        "path": "/v0/quote"
+      }
+    },
+    "refundUnified": {
+      "status": 400,
+      "body": {
+        "message": "refundTo is not valid",
+        "correlationId": "3c0085c2-6428-4733-bf02-516d66f413de",
+        "timestamp": "2026-11-25T13:34:39.758Z",
+        "path": "/v0/quote"
+      }
+    }
+  }
+}
