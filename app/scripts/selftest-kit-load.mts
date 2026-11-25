@@ -17,8 +17,10 @@
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-kit-load.mts
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   TURNKEY_ACTIVE_SESSION_KEY,
   TURNKEY_DEFAULT_SESSION_KEY,
@@ -208,9 +210,26 @@ test("the app no longer wraps its pages in the kit; the gate starts it beside th
   assert.match(gate, /setEmbeddedAvailability\("unavailable"\);\s*\n\s*setEmbeddedAuth\("signed-out"\);\s*\n\s*dropSignInWaiting\(\);/);
 
   const appKit = read("../src/components/app/TurnkeyAppKit.tsx");
-  // The kit wraps the sign-in flow, and (with Solana on) the Gloam wallet's Solana account sync,
-  // which needs the kit too and so loads with it, never before it.
-  assert.match(appKit, /<TurnkeyKitProvider>\s*<EmbeddedWalletFlow \/>\s*(\{SOLANA_RINGS_ENABLED && <TurnkeySolanaSync \/>\}\s*)?<\/TurnkeyKitProvider>/);
+  // The kit wraps the create-a-wallet sheet, and (with Solana on) the Gloam wallet's Solana
+  // account sync, which needs the kit too and so loads with it, never before it. What sits inside
+  // the provider is checked, not the order the children are in.
+  const provider = appKit.match(/<TurnkeyKitProvider>([\s\S]*?)<\/TurnkeyKitProvider>/);
+  assert.ok(provider, "TurnkeyAppKit renders the kit's provider");
+  const [wrapped, inKit] = provider;
+  const outsideKit = appKit.replace(wrapped, "");
+  assert.match(inKit, /<EmbeddedWalletFlow \/>/, "the create-a-wallet sheet sits inside the kit");
+  assert.doesNotMatch(outsideKit, /<EmbeddedWalletFlow\b/, "and nowhere outside it");
+  // the Solana sync renders once, inside the kit, behind the flag the app reads from the environment
+  const gatedSync = /\{\s*SOLANA_RINGS_ENABLED\s*&&\s*<TurnkeySolanaSync \/>\s*\}/g;
+  assert.equal(appKit.match(/<TurnkeySolanaSync\b/g)?.length, 1, "the Solana sync renders once");
+  assert.equal(inKit.match(gatedSync)?.length, 1, "inside the kit, behind SOLANA_RINGS_ENABLED");
+  assert.match(appKit, /import \{ SOLANA_RINGS_ENABLED \} from "@\/lib\/solanaRings\/config";/);
+  // it imports the kit, so rendering it anywhere else would load the kit with the page
+  const srcDir = fileURLToPath(new URL("../src/", import.meta.url));
+  for (const f of readdirSync(srcDir, { recursive: true, encoding: "utf8" })) {
+    if (!f.endsWith(".tsx") || f === join("components", "app", "TurnkeyAppKit.tsx")) continue;
+    assert.doesNotMatch(readFileSync(join(srcDir, f), "utf8"), /<TurnkeySolanaSync\b/, f);
+  }
   const kit = read("../src/components/app/TurnkeyKit.tsx");
   assert.match(kit, /<TurnkeyWagmiSync \/>\s*<GloamSignInSheet \/>/, "the sheet and the sync come with the kit");
   const sync = read("../src/components/app/TurnkeyWagmiSync.tsx");
