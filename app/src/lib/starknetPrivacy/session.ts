@@ -157,8 +157,17 @@ export class StarknetSession {
     return block;
   }
 
-  /** Wait until the last transaction is PROOF_DEPTH blocks behind the head; the block to prove at. */
-  async settle(onWait?: (left: number) => void): Promise<number> {
+  /**
+   * Wait until the last transaction is PROOF_DEPTH blocks behind the head; the
+   * block to prove at. Where notes are read from the pool directly (devnet and
+   * Sepolia: the SDK's contract reader reads the latest state, not the block a
+   * proof is pinned to), a payment that arrived in the last few blocks could be
+   * picked while the proof's block doesn't have it yet, so a spend there waits
+   * for the whole head to settle, not only this account's own last transaction.
+   * The hosted discovery service (mainnet) reads at the proof's block.
+   */
+  async settle(onWait?: (left: number) => void, spend = false): Promise<number> {
+    if (spend && this.cfg.discovery.kind === "contract") this.lastBlock = Math.max(this.lastBlock, await this.provider.getBlockNumber());
     const started = Date.now();
     for (;;) {
       const head = await this.provider.getBlockNumber();
@@ -232,7 +241,7 @@ export class StarknetSession {
   /** Pay `amount` privately to the private account `to`. Steps: 0 waiting for Starknet, 1 paying privately. */
   async pay(to: string, token: StarknetToken, amount: bigint, step: StepReporter): Promise<string> {
     step(0);
-    const at = await this.settle((left) => step(0, waitText(left)));
+    const at = await this.settle((left) => step(0, waitText(left)), true);
     step(1);
     const r = await payAction(this.transfers, { token: token.address, self: this.keys.address, to, amount, fee: this.feeFor(token), provingBlockId: at });
     return this.sendProven(r);
@@ -241,7 +250,7 @@ export class StarknetSession {
   /** Cash out `amount` to the public address `to`. Steps: 0 waiting for Starknet, 1 cashing out. */
   async cashOut(to: string, token: StarknetToken, amount: bigint, step: StepReporter): Promise<string> {
     step(0);
-    const at = await this.settle((left) => step(0, waitText(left)));
+    const at = await this.settle((left) => step(0, waitText(left)), true);
     step(1);
     const r = await cashOutAction(this.transfers, { token: token.address, self: this.keys.address, to, amount, fee: this.feeFor(token), provingBlockId: at });
     return this.sendProven(r);
