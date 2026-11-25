@@ -198,6 +198,11 @@ export function WalletConnectSheet({ open, onClose }: { open: boolean; onClose: 
           {stage.kind === "failed" && (
             <div className="rounded-2xl bg-surface px-4 py-4 text-[13.5px] leading-relaxed text-soft">
               <p>{stage.text}</p>
+              <p className="mt-2 text-mute">
+                {phone
+                  ? "You can also open gloam.trade in your wallet app's own browser, or close this and sign in with email."
+                  : "You can also use a wallet extension in this browser, or close this and sign in with email."}
+              </p>
               <button type="button" onClick={() => setAttempt((n) => n + 1)} className="btn btn-ink btn-sm mt-3">
                 Try again
               </button>
