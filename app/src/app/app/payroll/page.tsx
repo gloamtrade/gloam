@@ -5,6 +5,7 @@ import { PayrollView } from "@/components/app/PayrollView";
 import { ClientOnly } from "@/components/app/ClientOnly";
 import { SolanaOr } from "@/components/app/SolanaOr";
 import { SolanaPayrollPage } from "@/components/app/SolanaPayrollView";
+import { StarknetNotHere } from "@/components/app/StarknetParts";
 
 export const metadata: Metadata = {
   title: "Payroll",
@@ -24,7 +25,7 @@ export default function PayrollPage() {
     >
       {/* Balances, runs and the network all live in this browser. */}
       <ClientOnly>
-        <SolanaOr solana={<SolanaPayrollPage />}>
+        <SolanaOr solana={<SolanaPayrollPage />} starknet={<StarknetNotHere what="Payroll" />}>
           <PayrollView />
         </SolanaOr>
       </ClientOnly>

@@ -18,6 +18,11 @@
  * pages read `solana` to show their Solana side. Picking an EVM network clears
  * it. Saved apart from the EVM choice, under its own key.
  *
+ * Starknet (lib/starknetPrivacy, only while NEXT_PUBLIC_STARKNET_ENABLED is on)
+ * works the same way: picking it sets `starknet`, keeps the EVM network, and
+ * leaves Solana; picking Solana or an EVM network leaves it. One key holds
+ * which of the two (or neither) is picked.
+ *
  * This is the switch the app reads to know which chain to talk to. It does not
  * itself rewire the existing Robinhood write path (that stays the default);
  * consumers opt in by reading `useNetwork()` as they are migrated off the
@@ -42,9 +47,10 @@ import {
   type NetworkKey,
 } from "@/lib/networks";
 import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
 
 const STORAGE_KEY = "gloam.network";
-/** "solana" while Solana is the network picked in this browser. */
+/** "solana" or "starknet" while that is the network picked in this browser. */
 const DESTINATION_KEY = "gloam.destination";
 
 interface NetworkContextValue {
@@ -65,6 +71,13 @@ interface NetworkContextValue {
   solana: boolean;
   /** Pick Solana. Picking an EVM network (setNetworkKey) leaves it. */
   selectSolana: () => void;
+  /**
+   * Starknet is the network picked: like `solana`, `network` stays the last EVM
+   * network and pages show their Starknet side. Always false while Starknet is off.
+   */
+  starknet: boolean;
+  /** Pick Starknet. Picking Solana or an EVM network leaves it. */
+  selectStarknet: () => void;
 }
 
 const NetworkContext = createContext<NetworkContextValue | null>(null);
@@ -81,19 +94,27 @@ function readStored(): NetworkKey {
   return shownKeyOrDefault(v);
 }
 
-/** Whether this browser picked Solana last (and Solana is on here). */
-function readSolana(): boolean {
-  if (!SOLANA_RINGS_ENABLED || typeof window === "undefined") return false;
+type Destination = "solana" | "starknet" | null;
+
+function destinationFrom(v: string | null): Destination {
+  if (v === "solana" && SOLANA_RINGS_ENABLED) return "solana";
+  if (v === "starknet" && STARKNET_ENABLED) return "starknet";
+  return null;
+}
+
+/** Which of Solana or Starknet this browser picked last (and that one is on here), or neither. */
+function readDestination(): Destination {
+  if (typeof window === "undefined") return null;
   try {
-    return window.localStorage.getItem(DESTINATION_KEY) === "solana";
+    return destinationFrom(window.localStorage.getItem(DESTINATION_KEY));
   } catch {
-    return false;
+    return null;
   }
 }
 
-function saveSolana(on: boolean) {
+function saveDestination(d: Destination) {
   try {
-    if (on) window.localStorage.setItem(DESTINATION_KEY, "solana");
+    if (d) window.localStorage.setItem(DESTINATION_KEY, d);
     else window.localStorage.removeItem(DESTINATION_KEY);
   } catch {
     /* private mode / blocked storage: the choice holds for this visit */
@@ -105,7 +126,9 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   // on mount to avoid an SSR/client mismatch.
   const [networkKey, setKey] = useState<NetworkKey>(FIRST_PAINT_NETWORK_KEY);
   const [settled, setSettled] = useState(false);
-  const [solana, setSolana] = useState(false);
+  const [destination, setDestination] = useState<Destination>(null);
+  const solana = destination === "solana";
+  const starknet = destination === "starknet";
 
   useEffect(() => {
     const stored = readStored();
@@ -113,7 +136,8 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
     setShownNetworkKey(stored);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the saved network lives only in the browser; the server renders the default and this reads it once after mount
     if (stored !== networkKey) setKey(stored);
-    if (readSolana()) setSolana(true);
+    const d = readDestination();
+    if (d) setDestination(d);
     setSettled(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -125,7 +149,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
         setShownNetworkKey(e.newValue);
         setKey(e.newValue);
       }
-      if (e.key === DESTINATION_KEY) setSolana(SOLANA_RINGS_ENABLED && e.newValue === "solana");
+      if (e.key === DESTINATION_KEY) setDestination(destinationFrom(e.newValue));
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -134,9 +158,9 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   const setNetworkKey = (key: NetworkKey) => {
     setShownNetworkKey(key);
     setKey(key);
-    // an EVM network picked (by hand or by a link) leaves Solana
-    setSolana(false);
-    saveSolana(false);
+    // an EVM network picked (by hand or by a link) leaves Solana and Starknet
+    setDestination(null);
+    saveDestination(null);
     // a hidden testnet (opened from a claim link) is never saved over this browser's pick
     if (!isShownNetworkKey(key)) return;
     try {
@@ -148,13 +172,19 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 
   const selectSolana = () => {
     if (!SOLANA_RINGS_ENABLED) return;
-    setSolana(true);
-    saveSolana(true);
+    setDestination("solana");
+    saveDestination("solana");
+  };
+
+  const selectStarknet = () => {
+    if (!STARKNET_ENABLED) return;
+    setDestination("starknet");
+    saveDestination("starknet");
   };
 
   const value = useMemo<NetworkContextValue>(
-    () => ({ network: getNetwork(networkKey), networkKey, setNetworkKey, settled, solana, selectSolana }),
-    [networkKey, settled, solana]
+    () => ({ network: getNetwork(networkKey), networkKey, setNetworkKey, settled, solana, selectSolana, starknet, selectStarknet }),
+    [networkKey, settled, solana, starknet]
   );
 
   return (
@@ -173,5 +203,7 @@ export function useNetwork(): NetworkContextValue {
     settled: true,
     solana: false,
     selectSolana: () => {},
+    starknet: false,
+    selectStarknet: () => {},
   };
 }

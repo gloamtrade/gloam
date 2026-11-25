@@ -1,0 +1,411 @@
+/**
+ * Self-test: Gloam's Starknet routes (/api/starknet/rpc, /relay, /prove) and
+ * what they stand on (lib/starknetPrivacy/proxyPolicy, server, starkscanProver),
+ * with every node and prover faked: no request leaves the process.
+ *
+ *  - the RPC proxy: only reads pass (nothing that sends, no devnet methods, event
+ *    pages capped); same-origin and JSON only; batches capped; a refused call in
+ *    a batch is answered alone; the node's URL comes from the server.
+ *  - the relay: what it sends goes through relayPolicy and then the chain (an
+ *    account deploy only once, an approve only from a Gloam account, a proof only
+ *    while the pool's own STRK fee is off, the fee from the environment, the cap
+ *    on an approve); limits answer 429 or 503 before anything is sent; a failed
+ *    send says why without the key; the route refuses malformed bodies, more than
+ *    one call, other sites; GET names the relay, its fee and whether it is funded.
+ *  - the prover: only starknet_proveTransaction and starknet_specVersion; a
+ *    prover URL is passed on as is; mainnet goes through Starkscan's job API
+ *    (key header, a stable Idempotency-Key from the body, submit then poll) and
+ *    answers in the proving service's shape; Starkscan's refusals become plain
+ *    errors; the adapter as the SDK's prover takes the pool's message as output.
+ *
+ * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-routes.mts
+ */
+import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import Module from "node:module";
+import { fileURLToPath } from "node:url";
+import { ec, hash, num, outsideExecution, type Call } from "starknet";
+
+const stub = fileURLToPath(new URL("./server-only-stub.cjs", import.meta.url));
+const M = Module as unknown as { _resolveFilename: (req: string, ...rest: unknown[]) => string };
+const resolve = M._resolveFilename;
+M._resolveFilename = function (req: string, ...rest: unknown[]) {
+  return req === "server-only" ? stub : resolve.call(this, req, ...rest);
+};
+
+const RELAY = "0x25a6c9f0c15ef30c139065096b4b8e563e6b86191fd600a4f0616df8f22fb77";
+const POOL = "0x707b48deabbccebce6e3e0af4d9d232fb860e95bffe7efa66ac250b9e28acff";
+const USDC = "0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb";
+const NODE = "https://node.selftest/rpc";
+const STARKSCAN = "https://api.starkscan.co/v1/SN_MAIN/prove";
+
+const env = process.env as Record<string, string | undefined>;
+for (const k of Object.keys(env)) if (k.startsWith("NEXT_PUBLIC_STARKNET_") || k.startsWith("STARKNET_") || k.startsWith("GLOAM_STARKNET_")) delete env[k];
+delete env.UPSTASH_REDIS_REST_URL;
+delete env.UPSTASH_REDIS_REST_TOKEN;
+env.NEXT_PUBLIC_STARKNET_ENABLED = "1";
+env.NEXT_PUBLIC_STARKNET_NETWORK = "mainnet";
+env.NEXT_PUBLIC_STARKNET_POOL = POOL;
+env.STARKNET_RPC_URL = NODE;
+env.STARKSCAN_API_KEY = "selftest-starkscan-key";
+env.STARKNET_RELAY_FEE = "0.01";
+env.STARKNET_MAX_APPROVE = "1000";
+// The relay's key: a throwaway made here, in this process only.
+const SECRET = "0x0" + randomBytes(30).toString("hex");
+env.GLOAM_STARKNET_RELAYER_ADDRESS = RELAY;
+env.GLOAM_STARKNET_RELAYER_SECRET = SECRET;
+
+let pass = 0;
+const ok = (c: unknown, msg: string) => {
+  assert.ok(c, msg);
+  pass++;
+};
+const eq = <T,>(a: T, b: T, msg: string) => {
+  assert.deepEqual(a, b, msg);
+  pass++;
+};
+
+/* ------------------------------------------------------------------ a fake world: the node and Starkscan */
+type Seen = { url: string; method: string; headers: Record<string, string>; body: unknown };
+const seen: Seen[] = [];
+let starkscan: (url: string, init: RequestInit) => Response = () => new Response("{}", { status: 500 });
+const nodeAnswer: (call: { method: string; params: unknown; id: unknown }) => unknown = (c) => {
+  if (c.method === "starknet_specVersion") return "0.10.0";
+  if (c.method === "starknet_chainId") return "0x534e5f4d41494e";
+  if (c.method === "starknet_getNonce") return "0x7";
+  if (c.method === "starknet_call") return ["0x4563918244f40000", "0x0"]; // 5 STRK
+  if (c.method === "starknet_blockNumber") return 1234;
+  return null;
+};
+let nodeDown = false;
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  const headers = Object.fromEntries(new Headers(init.headers).entries());
+  const text = typeof init.body === "string" ? init.body : "";
+  let body: unknown = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = text;
+  }
+  seen.push({ url, method: init.method ?? "GET", headers, body });
+  if (url.startsWith(NODE)) {
+    if (nodeDown) throw new Error("connect ECONNREFUSED");
+    const one = (c: { method: string; params: unknown; id: unknown }) => ({ jsonrpc: "2.0", id: c.id, result: nodeAnswer(c) });
+    const out = Array.isArray(body) ? (body as never[]).map(one) : one(body as never);
+    return new Response(JSON.stringify(out), { headers: { "content-type": "application/json" } });
+  }
+  if (url.startsWith(STARKSCAN)) return starkscan(url, init);
+  if (url.startsWith("https://prover.selftest")) {
+    const b = body as { id: unknown };
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: { proof: "QUJD", proof_facts: ["0x1"], l2_to_l1_messages: [] } }), { headers: { "content-type": "application/json" } });
+  }
+  return realFetch(input as never, init);
+}) as typeof fetch;
+
+const config = await import("../src/lib/starknetPrivacy/config");
+const proxy = await import("../src/lib/starknetPrivacy/proxyPolicy");
+const server = await import("../src/lib/starknetPrivacy/server");
+const policy = await import("../src/lib/starknetPrivacy/relayPolicy");
+const account = await import("../src/lib/starknetPrivacy/account");
+const scan = await import("../src/lib/starknetPrivacy/starkscanProver");
+const rpcRoute = await import("../src/app/api/starknet/rpc/route");
+const relayRoute = await import("../src/app/api/starknet/relay/route");
+const proveRoute = await import("../src/app/api/starknet/prove/route");
+const { CallData, CairoCustomEnum, CairoOption, CairoOptionVariant } = await import("starknet");
+const { PrivacyPoolABI } = await import("@starkware-libs/starknet-privacy-sdk/abi");
+
+const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+  new Request(`https://www.gloam.trade${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "sec-fetch-site": "same-origin", "x-forwarded-for": "203.0.113.7", ...headers },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+
+/* ------------------------------------------------------------------ the proxy's rules */
+{
+  for (const m of ["starknet_call", "starknet_getClassHashAt", "starknet_getNonce", "starknet_blockNumber", "starknet_getTransactionReceipt", "starknet_getTransactionStatus", "starknet_chainId", "starknet_specVersion", "starknet_getStorageAt"])
+    ok(proxy.starknetRpcCallAllowed({ method: m, params: [] }), `${m} passes`);
+  for (const m of ["starknet_addInvokeTransaction", "starknet_addDeployAccountTransaction", "starknet_addDeclareTransaction", "starknet_estimateFee", "starknet_simulateTransactions", "starknet_traceTransaction", "devnet_mint", "devnet_createBlock", "eth_call", ""])
+    ok(!proxy.starknetRpcCallAllowed({ method: m, params: [] }), `${m || "an empty method"} is refused`);
+  ok(proxy.starknetRpcCallAllowed({ method: "starknet_getEvents", params: { filter: { chunk_size: 1000 } } }), "an event page of 1000 passes");
+  ok(!proxy.starknetRpcCallAllowed({ method: "starknet_getEvents", params: { filter: { chunk_size: 1001 } } }), "an event page over 1000 is refused");
+  ok(!proxy.starknetRpcCallAllowed({ method: "starknet_getEvents", params: { filter: {} } }), "an event page with no size is refused");
+  ok(proxy.STARKNET_PROVE_METHODS.has("starknet_proveTransaction") && proxy.STARKNET_PROVE_METHODS.size === 2, "the prover passes only proveTransaction and specVersion");
+}
+
+/* ------------------------------------------------------------------ the RPC route */
+{
+  seen.length = 0;
+  let res = await rpcRoute.POST(post("/api/starknet/rpc", { jsonrpc: "2.0", id: 1, method: "starknet_blockNumber", params: [] }));
+  eq(res.status, 200, "a read answers");
+  eq(((await res.json()) as { result: unknown }).result, 1234, "with the node's answer");
+  eq(seen.at(-1)?.url, NODE, "read from the server's node (STARKNET_RPC_URL)");
+
+  seen.length = 0;
+  res = await rpcRoute.POST(post("/api/starknet/rpc", [
+    { jsonrpc: "2.0", id: 1, method: "starknet_chainId", params: [] },
+    { jsonrpc: "2.0", id: 2, method: "starknet_addInvokeTransaction", params: [] },
+  ]));
+  const replies = (await res.json()) as { id: number; result?: unknown; error?: { code: number } }[];
+  eq(replies.map((r) => [r.id, r.error?.code ?? "ok"]), [[1, "ok"], [2, -32601]], "in a batch, the send is refused alone");
+  eq((seen.at(-1)?.body as { method: string }[]).map((c) => c.method), ["starknet_chainId"], "and never reaches the node");
+
+  res = await rpcRoute.POST(post("/api/starknet/rpc", { jsonrpc: "2.0", id: 1, method: "starknet_chainId" }, { "sec-fetch-site": "cross-site" }));
+  eq(res.status, 403, "another site is refused");
+  res = await rpcRoute.POST(new Request("https://www.gloam.trade/api/starknet/rpc", { method: "POST", headers: { "content-type": "text/plain" }, body: "{}" }));
+  eq(res.status, 415, "a body that isn't JSON is refused");
+  res = await rpcRoute.POST(post("/api/starknet/rpc", Array.from({ length: 21 }, (_, i) => ({ jsonrpc: "2.0", id: i, method: "starknet_chainId" }))));
+  eq(res.status, 400, "a batch over 20 is refused");
+  res = await rpcRoute.POST(post("/api/starknet/rpc", "x".repeat(proxy.STARKNET_RPC_MAX_BODY + 10)));
+  eq(res.status, 413, "a body over the cap is refused");
+  nodeDown = true;
+  res = await rpcRoute.POST(post("/api/starknet/rpc", { jsonrpc: "2.0", id: 1, method: "starknet_chainId" }));
+  nodeDown = false;
+  eq(res.status, 502, "a node that is down answers 502");
+}
+
+/* ------------------------------------------------------------------ the relay's rules, from the environment */
+const cfg = config.starknetConfig("mainnet", env);
+{
+  eq(server.relayKeys(env), { address: RELAY, secret: SECRET }, "the relay's address and key come from the environment");
+  eq(server.relayKeys({ GLOAM_STARKNET_RELAYER_ADDRESS: RELAY }), null, "no key, no relay");
+  eq(server.relayKeys({ GLOAM_STARKNET_RELAYER_ADDRESS: RELAY, GLOAM_STARKNET_RELAYER_SECRET: "not-hex" }), null, "a malformed key, no relay");
+  eq(server.relayKeys({ GLOAM_STARKNET_RELAYER_ADDRESS: RELAY, GLOAM_STARKNET_RELAYER_SECRET: "0x0" }), null, "a zero key, no relay");
+  const amounts = server.relayAmounts(cfg, env);
+  eq(amounts.fee[num.toHex(BigInt(USDC))], 10_000n, "the fee: 0.01 USDC");
+  eq(amounts.maxApprove[num.toHex(BigInt(USDC))], 1_000_000_000n, "the approve cap: 1,000 USDC");
+  const dflt = server.relayAmounts(cfg, {});
+  eq([dflt.fee[num.toHex(BigInt(USDC))], dflt.maxApprove[num.toHex(BigInt(USDC))]], [0n, 10_000_000_000n], "by default no fee and a 10,000 USDC cap");
+  eq(server.wholeToBase("1.5", 6), 1_500_000n, "whole tokens to base units");
+  eq(server.wholeToBase("1.1234567", 6), null, "more places than the token has is refused");
+  eq(server.wholeToBase("-1", 6), null, "a negative amount is refused");
+  eq(server.starknetUpstream(cfg, {}), cfg.rpcUrl, "the public node by default");
+}
+
+/* ------------------------------------------------------------------ relaySend against a fake chain */
+type Sent = { calls: Call[]; proof?: unknown };
+function fakeChain(o: { deployed?: Set<string>; classes?: Record<string, string>; poolFee?: bigint; sendThrows?: string } = {}) {
+  const sent: Sent[] = [];
+  const chain = {
+    async classHashAt(a: string) {
+      const k = num.toHex(BigInt(a));
+      if (o.classes?.[k]) return o.classes[k];
+      return o.deployed?.has(k) ? config.STARKNET_ACCOUNT_CLASS_HASH : null;
+    },
+    async poolFeeAmount() {
+      return o.poolFee ?? 0n;
+    },
+    async send(calls: Call[], proof?: unknown) {
+      if (o.sendThrows) throw new Error(o.sendThrows);
+      sent.push({ calls, proof });
+      return "0xabc";
+    },
+  };
+  return { chain, sent };
+}
+const okRate = async () => "ok" as const;
+const pub = ec.starkCurve.getStarkKey("0x4242");
+const acct = account.accountAddress(pub);
+const NOW = 1_800_000_000_000;
+const approveFor = (from: string, amount: bigint): Call => ({
+  contractAddress: from,
+  entrypoint: policy.OUTSIDE_V2_ENTRYPOINT,
+  calldata: [RELAY, "0x7", num.toHex(NOW / 1000 - 60), num.toHex(NOW / 1000 + 600), "0x1", USDC, policy.APPROVE_SELECTOR, "0x3", POOL, num.toHex(amount), "0x0", "0x2", "0x1", "0x2"],
+});
+const cd = new CallData(PrivacyPoolABI);
+const applyCall = (acts: InstanceType<typeof CairoCustomEnum>[]): Call => ({
+  contractAddress: POOL,
+  entrypoint: "apply_actions",
+  calldata: cd.compile("apply_actions", { actions: acts, screening: new CairoOption(CairoOptionVariant.None) }),
+});
+const to = (addr: string, amount: number) => new CairoCustomEnum({ TransferTo: { to_addr: addr, token: USDC, amount } });
+const PROOF = { proofFacts: ["0x1", "0x2"], proof: "QUJD" };
+{
+  let f = fakeChain();
+  let r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(r.ok && r.decision.kind === "deploy" && f.sent.length === 1, "a new account's deploy is sent");
+  f = fakeChain({ deployed: new Set([num.toHex(BigInt(acct))]) });
+  r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.code === "already_deployed" && f.sent.length === 0, "a deployed account's deploy is not paid for again");
+
+  f = fakeChain({ deployed: new Set([num.toHex(BigInt(acct))]) });
+  r = await server.relaySend({ calls: [approveFor(acct, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(r.ok && r.decision.kind === "approve" && f.sent.length === 1, "a Gloam account's approve is sent");
+  const other = "0x0700000000000000000000000000000000000000000000000000000000000001";
+  f = fakeChain({ classes: { [num.toHex(BigInt(other))]: "0x123" } });
+  r = await server.relaySend({ calls: [approveFor(other, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.status === 422 && f.sent.length === 0, "another account's approve is refused");
+  f = fakeChain({ deployed: new Set([num.toHex(BigInt(acct))]) });
+  r = await server.relaySend({ calls: [approveFor(acct, 2_000_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && /approve_amount/.test(r.message) && f.sent.length === 0, "an approve over the environment's cap is refused");
+
+  const OUT = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd";
+  f = fakeChain();
+  r = await server.relaySend({ calls: [applyCall([to(OUT, 250_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && /fee_missing/.test(r.message) && f.sent.length === 0, "a proof that doesn't pay the relay's fee is refused");
+  r = await server.relaySend({ calls: [applyCall([to(OUT, 250_000), to(RELAY, 10_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(r.ok && r.decision.kind === "apply" && f.sent.length === 1, "a cash out paying the fee is sent");
+  eq(f.sent[0]?.proof, PROOF, "with its proof");
+  f = fakeChain({ poolFee: 1n });
+  r = await server.relaySend({ calls: [applyCall([to(OUT, 250_000), to(RELAY, 10_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.code === "pool_fee_on" && r.status === 503 && f.sent.length === 0, "while the pool charges its own STRK fee, nothing is sent");
+
+  f = fakeChain();
+  r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async () => "limited" });
+  ok(!r.ok && r.status === 429 && f.sent.length === 0, "over the limit: 429, nothing sent");
+  r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async () => "unavailable" });
+  ok(!r.ok && r.status === 503 && f.sent.length === 0, "no shared count: 503, nothing sent");
+  f = fakeChain({ sendThrows: `RPC: starknet_addInvokeTransaction failed ${"x".repeat(400)}` });
+  r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.status === 502 && r.message.length < 300 && !r.message.includes(SECRET.slice(2)), "a failed send says why, short, never with the key");
+}
+
+/* ------------------------------------------------------------------ the relay route */
+{
+  const f = fakeChain();
+  const make = server.starknetRelayChains.make;
+  server.starknetRelayChains.make = () => f.chain;
+  let res = await relayRoute.POST(post("/api/starknet/relay", { calls: [account.deployAccountCall(pub)] }));
+  let body = (await res.json()) as { ok: boolean; txHash?: string; kind?: string };
+  eq([res.status, body.ok, body.kind, body.txHash], [200, true, "deploy", "0xabc"], "the route sends an account deploy");
+  res = await relayRoute.POST(post("/api/starknet/relay", { calls: [account.deployAccountCall(pub), account.deployAccountCall(pub)] }));
+  eq(res.status, 400, "two calls are refused");
+  res = await relayRoute.POST(post("/api/starknet/relay", { calls: [{ contractAddress: config.STARKNET_UDC, entrypoint: "deploy_contract", calldata: ["hello"] }] }));
+  eq(res.status, 400, "calldata that isn't a number is refused");
+  res = await relayRoute.POST(post("/api/starknet/relay", { calls: [account.deployAccountCall(pub)], proof: { proofFacts: ["zz"], proof: "QUJD" } }));
+  eq(res.status, 400, "a proof fact that isn't hex is refused");
+  res = await relayRoute.POST(post("/api/starknet/relay", "not json"));
+  eq(res.status, 400, "a body that isn't JSON is refused");
+  res = await relayRoute.POST(post("/api/starknet/relay", { calls: [{ contractAddress: "0x5", entrypoint: "transfer", calldata: ["0x1"] }] }));
+  body = (await res.json()) as never;
+  eq(res.status, 422, "a call outside the rules is refused");
+  res = await relayRoute.POST(post("/api/starknet/relay", { calls: [account.deployAccountCall(pub)] }, { "sec-fetch-site": "cross-site" }));
+  eq(res.status, 403, "another site is refused");
+  // The per-minute tries, held on one clock minute.
+  const at = Date.UTC(2031, 0, 1, 0, 0, 5);
+  server.starknetRelayClock.now = () => at;
+  const statuses: number[] = [];
+  for (let i = 0; i < 32; i++) statuses.push((await relayRoute.POST(post("/api/starknet/relay", { calls: [{ contractAddress: "0x5", entrypoint: "transfer", calldata: ["0x1"] }] }, { "x-forwarded-for": "198.51.100.9" }))).status);
+  server.starknetRelayClock.now = () => Date.now();
+  ok(statuses.slice(0, 30).every((s) => s === 422) && statuses.slice(30).every((s) => s === 429), "after 30 tries a minute, one IP gets 429 before any check");
+  server.starknetRelayChains.make = make;
+
+  const get = (await (await relayRoute.GET()).json()) as { on: boolean; funded: boolean; relayer: string; network: string; pool: string; fee: Record<string, string> };
+  eq([get.on, get.funded, get.relayer, get.network, get.pool], [true, true, RELAY, "mainnet", POOL], "GET: on, funded (5 STRK), its address, the network and the pool");
+  eq(get.fee[num.toHex(BigInt(USDC))], "10000", "GET: the fee per token");
+  ok(!JSON.stringify(get).includes(SECRET.slice(2)), "GET never shows the key");
+}
+
+/* ------------------------------------------------------------------ the prover */
+const TX = { type: "INVOKE", version: "0x3", sender_address: POOL, calldata: ["0x1"], signature: ["0x1", "0x2"], nonce: "0x7" };
+const RESULT = { proof: "UFJPT0Y=", proof_facts: ["0xa", "0xb"], l2_to_l1_messages: [{ from_address: POOL, to_address: "0x0", payload: ["0xc1a55", "0x5", "0x6"] }] };
+{
+  let res = await proveRoute.POST(post("/api/starknet/prove", { jsonrpc: "2.0", id: 1, method: "starknet_call", params: [] }));
+  eq(((await res.json()) as { error: { code: number } }).error.code, -32601, "only the prover's methods pass");
+  res = await proveRoute.POST(post("/api/starknet/prove", { jsonrpc: "2.0", id: 2, method: "starknet_specVersion", params: [] }));
+  eq(((await res.json()) as { result: string }).result, "0.10.0", "specVersion answers");
+  res = await proveRoute.POST(post("/api/starknet/prove", { jsonrpc: "2.0", id: 3, method: "starknet_proveTransaction", params: { block_id: { block_number: 100 }, transaction: TX } }, { "sec-fetch-site": "cross-site" }));
+  eq(res.status, 403, "another site is refused");
+
+  const keys: string[] = [];
+  let polls = 0;
+  starkscan = (url, init) => {
+    const h = new Headers(init.headers);
+    eq(h.get("X-Starkscan-Api-Key"), "selftest-starkscan-key", "Starkscan gets the key, in its header");
+    if ((init.method ?? "GET") === "POST") {
+      keys.push(h.get("Idempotency-Key") ?? "");
+      const b = JSON.parse(String(init.body)) as { block_id: unknown; transaction: unknown };
+      eq(b.block_id, { block_number: 100 }, "the block to prove at goes as is");
+      return new Response(JSON.stringify({ jobId: "job_1", status: "queued", terminal: false, pollAfterSeconds: 0.001 }), { status: 202 });
+    }
+    polls++;
+    eq(url, `${STARKSCAN}/job_1`, "then it polls the job");
+    return new Response(JSON.stringify(polls < 2 ? { jobId: "job_1", status: "dispatched", pollAfterSeconds: 0.001 } : { jobId: "job_1", status: "succeeded", terminal: true, result: RESULT }), { status: 200 });
+  };
+  const call = { jsonrpc: "2.0", id: 4, method: "starknet_proveTransaction", params: { block_id: { block_number: 100 }, transaction: TX } };
+  res = await proveRoute.POST(post("/api/starknet/prove", call));
+  eq(((await res.json()) as { result: unknown }).result, RESULT, "mainnet proves through Starkscan, answered in the proving service's shape");
+  polls = 0;
+  await proveRoute.POST(post("/api/starknet/prove", call));
+  ok(/^gloam-[0-9a-f]{48}$/.test(keys[0]!) && keys[0] === keys[1], "the same request carries the same Idempotency-Key");
+
+  starkscan = () => new Response(JSON.stringify({ error: { message: "no prove scope" } }), { status: 403 });
+  res = await proveRoute.POST(post("/api/starknet/prove", call));
+  const err = ((await res.json()) as { error: { message: string } }).error;
+  ok(/can't prove yet/.test(err.message), "a key without prove scope says so plainly");
+
+  env.STARKNET_PROVER_URL = "https://prover.selftest/rpc";
+  seen.length = 0;
+  res = await proveRoute.POST(post("/api/starknet/prove", call));
+  eq(((await res.json()) as { result: { proof: string } }).result.proof, "QUJD", "a prover URL is passed on as is");
+  eq((seen.at(-1)?.body as { method: string }).method, "starknet_proveTransaction", "with the same method");
+  delete env.STARKNET_PROVER_URL;
+}
+
+/* ------------------------------------------------------------------ Starkscan's adapter */
+{
+  const opts = (f: (url: string, init: RequestInit) => Response, timeoutMs = 2_000) => ({
+    url: STARKSCAN,
+    apiKey: "k",
+    timeoutMs,
+    sleep: async () => {},
+    fetch: (async (u: string, i: RequestInit) => f(u, i)) as unknown as typeof fetch,
+  });
+  const job = (status: string, extra: object = {}) => new Response(JSON.stringify({ jobId: "j", status, pollAfterSeconds: 1, ...extra }), { status: 200 });
+  const code = async (p: Promise<unknown>) => {
+    try {
+      await p;
+      return "resolved";
+    } catch (e) {
+      return e instanceof scan.StarkscanProveError ? e.code : "other";
+    }
+  };
+  eq(await code(scan.starkscanProve(opts(() => new Response("{}", { status: 404 })), 1, TX)), "relay_off", "404: the relay is off");
+  eq(await code(scan.starkscanProve(opts((u, i) => (i.method === "POST" ? job("queued") : job("failed", { error: { message: "INVALID_SIGNATURE" } }))), 1, TX)), "failed", "a failed job fails");
+  eq(await code(scan.starkscanProve(opts((u, i) => (i.method === "POST" ? job("queued") : job("unknown_delivery"))), 1, TX)), "lost", "a lost answer says so");
+  eq(await code(scan.starkscanProve(opts((u, i) => (i.method === "POST" ? job("queued") : job("unavailable"))), 1, TX)), "unavailable", "a busy prover says so");
+  eq(await code(scan.starkscanProve(opts(() => job("queued"), 1), 1, TX)), "timeout", "a job that never finishes times out");
+  eq(await code(scan.starkscanProve(opts((u, i) => (i.method === "POST" ? job("queued") : job("succeeded", { result: { proof: 5 } }))), 1, TX)), "bad_answer", "a proof that can't be read is refused");
+  eq(await code(scan.starkscanProve({ ...opts(() => job("queued")), apiKey: "" }, 1, TX)), "no_key", "no key, no request");
+
+  const provider = new scan.StarkscanProofProvider(
+    opts((u, i) => (i.method === "POST" ? job("queued") : job("succeeded", { result: RESULT }))),
+    config.STARKNET_CHAIN_IDS.mainnet as never,
+    { nodeUrl: NODE, poolAddress: POOL }
+  );
+  const proof = await provider.prove(TX as never, 100);
+  eq([proof.data, proof.proofFacts, proof.output], [RESULT.proof, RESULT.proof_facts, RESULT.l2_to_l1_messages[0]!.payload], "as the SDK's prover: the proof, its facts and the pool's message");
+  const details = (await provider.getDefaultDetails()) as { nonce?: bigint };
+  eq(details.nonce, 7n, "its details carry the pool's nonce, read from the node");
+}
+
+/* ------------------------------------------------------------------ a real outside execution passes end to end */
+{
+  // Signed by a real key, built the way the page builds it (Account.getOutsideTransaction is
+  // what lib/starknetPrivacy/session calls; here its output shape, by outsideExecution).
+  const call = outsideExecution.buildExecuteFromOutsideCall({
+    outsideExecution: { caller: RELAY, nonce: "0x1", execute_after: NOW / 1000 - 60, execute_before: NOW / 1000 + 600, calls: [{ to: USDC, selector: hash.getSelectorFromName("approve"), calldata: [POOL, "0xf4240", "0x0"] }] },
+    signature: ["0x1", "0x2"],
+    signerAddress: acct,
+    version: "2" as never,
+  } as never);
+  const d = policy.checkRelayCall(call, server.relayContext(cfg, RELAY, env, NOW));
+  ok(d.ok && d.kind === "approve" && d.amount === 1_000_000n, "an outside execution built by starknet.js passes as an approve");
+}
+
+/* ------------------------------------------------------------------ the browser gets the pool */
+{
+  // Next puts a NEXT_PUBLIC_ value into the browser only where it is written out in full;
+  // process.env as a whole is empty there (the pool read as unset on 2026-11-25's devnet run).
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../src/lib/starknetPrivacy/config.ts", import.meta.url), "utf8");
+  ok(/env: Env = starknetEnv\(\)/.test(src) && !/env: Env = process\.env/.test(src), "the config's default environment names each variable");
+  for (const k of ["NEXT_PUBLIC_STARKNET_POOL", "NEXT_PUBLIC_STARKNET_USDC", "NEXT_PUBLIC_STARKNET_DEVNET_RPC"])
+    ok(src.includes(`${k}: process.env.${k}`), `${k} is read in full`);
+  eq(config.starknetEnv().NEXT_PUBLIC_STARKNET_POOL, POOL, "and reads the pool");
+}
+
+globalThis.fetch = realFetch;
+console.log(`selftest-starknet-routes: ${pass} checks passed`);

@@ -14,6 +14,9 @@
  * solanaSlot): Robinhood Chain, Base, Solana, BNB Chain, then the rest. It is not
  * an EVM network: picking it sets NetworkProvider's `solana` and keeps the
  * EVM network as it was, and the app's pages show their Solana side.
+ *
+ * Starknet (lib/starknetPrivacy) is listed the same way while it is on: after
+ * Solana on a mainnet build, with the testnets on a Sepolia or devnet one.
  */
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -21,6 +24,7 @@ import { MAINNET_ENABLED, isNetworkWritable, shownNetworks, solanaSlot } from "@
 import { SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, shownAssets } from "@/lib/solanaRings/config";
 import { useNetwork } from "./NetworkProvider";
 import { useSolana } from "./SolanaAccount";
+import { STARKNET_ENABLED, STARKNET_NETWORK } from "@/lib/starknetPrivacy/config";
 import { TokenLogo } from "./TokenLogo";
 import type { GloamNetwork } from "@/lib/networks";
 
@@ -36,11 +40,30 @@ const SOLANA_PAGES = new Set(["/app", "/app/vault", "/app/payroll", "/app/settin
 /** Solana's row sits in the mainnet list on a mainnet build, with the testnets on a devnet one. */
 const SOLANA_GROUP = SOLANA_RINGS_NETWORK === "devnet" ? "Testnet" : "Mainnet";
 
-/** A group's rows: its networks, with Solana's row in its place (after Base on mainnet, last with the testnets). */
-function groupRows(title: string, list: GloamNetwork[]): (GloamNetwork | "solana")[] {
-  if (!SOLANA_RINGS_ENABLED || title !== SOLANA_GROUP) return list;
-  const at = SOLANA_GROUP === "Mainnet" ? solanaSlot(list.map((n) => n.key)) : list.length;
-  return [...list.slice(0, at), "solana", ...list.slice(at)];
+/** Starknet's row sits with the mainnets on a mainnet build, with the testnets on a Sepolia or devnet one. */
+const STARKNET_GROUP = STARKNET_NETWORK === "mainnet" ? "Mainnet" : "Testnet";
+
+/** "Starknet Sepolia", "Starknet devnet" or "Starknet". */
+const STARKNET_LABEL = STARKNET_NETWORK === "mainnet" ? "Starknet" : STARKNET_NETWORK === "sepolia" ? "Starknet Sepolia" : "Starknet devnet";
+
+/** The pages that have a Starknet side; from any other, picking Starknet opens Portfolio. */
+const STARKNET_PAGES = new Set(["/app", "/app/vault"]);
+
+type Row = GloamNetwork | "solana" | "starknet";
+
+/** A group's rows: its networks, with Solana's row in its place (after Base on mainnet, last with the testnets), then Starknet's. */
+function groupRows(title: string, list: GloamNetwork[]): Row[] {
+  let rows: Row[] = list;
+  if (SOLANA_RINGS_ENABLED && title === SOLANA_GROUP) {
+    const at = SOLANA_GROUP === "Mainnet" ? solanaSlot(list.map((n) => n.key)) : list.length;
+    rows = [...list.slice(0, at), "solana", ...list.slice(at)];
+  }
+  if (STARKNET_ENABLED && title === STARKNET_GROUP) {
+    const after = rows.indexOf("solana");
+    const at = after >= 0 ? after + 1 : rows.length;
+    rows = [...rows.slice(0, at), "starknet", ...rows.slice(at)];
+  }
+  return rows;
 }
 
 /** One short line per network: what it holds. Same length and shape for every row. */
@@ -59,7 +82,7 @@ function assetLine(n: GloamNetwork): string {
 }
 
 export function NetworkSelector() {
-  const { network, setNetworkKey, settled, solana, selectSolana } = useNetwork();
+  const { network, setNetworkKey, settled, solana, selectSolana, starknet, selectStarknet } = useNetwork();
   const solReady = useSolana()?.ready ?? {};
   const router = useRouter();
   const pathname = usePathname();
@@ -78,13 +101,32 @@ export function NetworkSelector() {
   ).filter((group) => group.list.length > 0);
   // Solana's row joins the group of its kind; a devnet build with the testnets hidden gives it a Testnet group of its own.
   if (SOLANA_RINGS_ENABLED && !groups.some((g) => g.title === SOLANA_GROUP)) groups.push({ title: SOLANA_GROUP, hint: "", list: [] });
-  const shownLabel = solana ? "Solana" : network.label;
-  const shownNet = solana ? (SOLANA_RINGS_NETWORK === "devnet" ? "Devnet" : "Mainnet") : network.testnet ? "Testnet" : "Mainnet";
+  if (STARKNET_ENABLED && !groups.some((g) => g.title === STARKNET_GROUP)) groups.push({ title: STARKNET_GROUP, hint: "", list: [] });
+  const shownLabel = solana ? "Solana" : starknet ? "Starknet" : network.label;
+  const shownNet = solana
+    ? SOLANA_RINGS_NETWORK === "devnet"
+      ? "Devnet"
+      : "Mainnet"
+    : starknet
+      ? STARKNET_NETWORK === "mainnet"
+        ? "Mainnet"
+        : STARKNET_NETWORK === "sepolia"
+          ? "Sepolia"
+          : "Devnet"
+      : network.testnet
+        ? "Testnet"
+        : "Mainnet";
 
   const pickSolana = () => {
     setOpen(false);
     if (!solana) selectSolana();
     if (!SOLANA_PAGES.has(pathname)) router.push("/app");
+  };
+
+  const pickStarknet = () => {
+    setOpen(false);
+    if (!starknet) selectStarknet();
+    if (!STARKNET_PAGES.has(pathname)) router.push("/app");
   };
 
   useEffect(() => {
@@ -127,6 +169,8 @@ export function NetworkSelector() {
         {settled ? (
           solana ? (
             <TokenLogo id="solana" symbol="Solana" size={34} network />
+          ) : starknet ? (
+            <TokenLogo id="starknet" symbol="Starknet" size={34} network />
           ) : (
             <TokenLogo id={network.family} symbol={network.label} size={34} network />
           )
@@ -173,6 +217,29 @@ export function NetworkSelector() {
                 {group.hint && <span className="text-[11.5px] text-mute">{group.hint}</span>}
               </p>
               {groupRows(group.title, group.list).map((n) => {
+                if (n === "starknet")
+                  return (
+                    <button
+                      key="starknet"
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={starknet}
+                      aria-label={STARKNET_LABEL}
+                      onClick={pickStarknet}
+                      className={`flex h-[52px] w-full items-center gap-3 rounded-xl px-2.5 text-left transition-colors hover:bg-surface ${starknet ? "bg-surface" : ""}`}
+                    >
+                      <TokenLogo id="starknet" symbol="Starknet" size={30} network />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-medium leading-tight text-foreground">{STARKNET_LABEL}</span>
+                        <span className="mt-0.5 block truncate text-[12px] leading-tight text-mute">{STARKNET_NETWORK === "devnet" ? "Test token" : "USDC"}</span>
+                      </span>
+                      {starknet && (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden className="shrink-0 text-foreground">
+                          <path d="m5.5 12.5 4 4 9-9" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </button>
+                  );
                 if (n === "solana")
                   return (
                     <button
@@ -196,7 +263,7 @@ export function NetworkSelector() {
                       )}
                     </button>
                   );
-                const active = !solana && n.key === network.key;
+                const active = !solana && !starknet && n.key === network.key;
                 const writable = isNetworkWritable(n);
                 return (
                   <button
