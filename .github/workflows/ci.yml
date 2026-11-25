@@ -88,12 +88,17 @@ jobs:
       # signature or a Gloam root (never a Solana account's), matching the devnet run
       # that sent real transactions; what the relay will send (account deploy, the
       # token approve, the pool's apply_actions) and every way each is refused, on the
-      # pool's real encoding; add, pay and cash out on the SDK's in-memory pool. No
-      # network. The devnet end to end (scripts/e2e-starknet-devnet.mts) runs locally.
+      # pool's real encoding; add, pay and cash out on the SDK's in-memory pool. The
+      # routes (/api/starknet/rpc, relay, prove) with the node and Starkscan faked: the
+      # proxy's read-only allowlist, the relay's checks on the chain and its limits,
+      # Starkscan's job API (key, Idempotency-Key, submit then poll) and its adapter as
+      # the SDK's prover. No network. The devnet end to end (scripts/e2e-starknet-devnet.mts)
+      # runs locally.
       - name: App Starknet self-tests
         working-directory: app
         run: |
           ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-core.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-routes.mts
 
       # Every token amount the app shows: two places, cut down and never rounded up,
       # "<0.01" for dust, "0.00" for zero, thousands separators, 6- and 18-decimal
