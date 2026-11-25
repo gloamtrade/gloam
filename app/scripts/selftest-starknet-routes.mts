@@ -69,7 +69,7 @@ const eq = <T,>(a: T, b: T, msg: string) => {
 type Seen = { url: string; method: string; headers: Record<string, string>; body: unknown };
 const seen: Seen[] = [];
 let starkscan: (url: string, init: RequestInit) => Response = () => new Response("{}", { status: 500 });
-let nodeAnswer: (call: { method: string; params: unknown; id: unknown }) => unknown = (c) => {
+const nodeAnswer: (call: { method: string; params: unknown; id: unknown }) => unknown = (c) => {
   if (c.method === "starknet_specVersion") return "0.10.0";
   if (c.method === "starknet_chainId") return "0x534e5f4d41494e";
   if (c.method === "starknet_getNonce") return "0x7";
