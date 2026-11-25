@@ -801,7 +801,10 @@ ok(!/\u2014/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /public/.test(bridgeIn
     /preview: true/.test(sheet) && /<LivePrice/.test(sheet) && /LIVE_PRICE_DEBOUNCE_MS/.test(sheet) && /LIVE_PRICE_REFRESH_MS/.test(sheet) && /You get about/.test(sheet) && /in your private balance/.test(sheet),
     "the live price shows under the amount as soon as one is typed, after a pause, refreshed"
   );
-  ok(/Getting a price…/.test(sheet) && /Try again/.test(sheet) && /<CostWarning quote=\{quote\}/.test(sheet) && /feeRows\(quote, "Relay fee"\)/.test(sheet), "loading, an error with Try again, the fee lines and the cost warning");
+  ok(
+    /Getting a price…/.test(sheet) && /Try again/.test(sheet) && /<CostWarning quote=\{quote\}/.test(sheet) && /feeRows\(quote, feeLabel\)/.test(sheet) && /provider = "Relay"/.test(sheet),
+    "loading, an error with Try again, the fee lines (Relay's unless NEAR Intents carries it) and the cost warning"
+  );
   ok(/typedAmount\(flow\.quote\.send\.amount\)/.test(sheet) && /typedAmount\(q\.send\.amount\)/.test(sheet), "the review and the Sent line say back the amount as typed");
   ok(/typedAmount\(amount\)/.test(evmSheet) && /typedAmount\(q\.send\.amount\)/.test(evmSheet) && !/Bridge \$\{displayAmountText\(amount\)\}/.test(evmSheet), "BridgeIn's button and review say back the amount as typed too");
 }
