@@ -1,0 +1,270 @@
+"use client";
+
+/**
+ * Gloam on Starknet as one account the whole app shares while Starknet is the
+ * network picked (NetworkProvider `starknet`): the browser wallet that opens
+ * it, the private account it opens (lib/starknetPrivacy/session, on the
+ * Starknet privacy pool), its private balance and what sits at its address,
+ * and every money move with the step it is on. Portfolio and the Vault's
+ * actions read it, so moving between them keeps the account open.
+ *
+ * The main wallet (an EVM browser wallet) signs one message
+ * (lib/starknetPrivacy/account starknetAccountMessage); the private account's
+ * keys come from that signature, the same on any device, so there is nothing
+ * to back up. The keys live only in this tab, held for the visit (`kept`,
+ * below): leaving the app pages and coming back does not ask again; a reload
+ * does. A Gloam wallet (signed in with email or a passkey) can't open it yet:
+ * Turnkey keeps its signatures, and a private account's key never comes from one.
+ *
+ * Nothing here loads the Starknet SDK until Starknet is picked.
+ */
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useSignMessage } from "wagmi";
+import { useNetwork } from "./NetworkProvider";
+import { useAppAccount } from "@/lib/demo";
+import { EMBEDDED_CONNECTOR_ID } from "@/lib/embeddedWallet";
+import { STARKNET_ENABLED, STARKNET_NETWORK, type StarknetToken } from "@/lib/starknetPrivacy/config";
+import type { StarknetRelayInfo, StarknetSession } from "@/lib/starknetPrivacy/session";
+
+export type StarknetTaskKind = "setup" | "add" | "pay" | "cashout" | "refresh";
+
+/** A wait, named step by step (the same shape SolanaSteps draws). */
+export type StarknetTask = { kind: StarknetTaskKind; steps: string[]; at: number; detail?: string };
+
+type StarknetCtx = {
+  /** Starknet is the network picked (and on). */
+  on: boolean;
+  network: typeof STARKNET_NETWORK;
+  /** USDC here (or devnet's stand-in); null while none is listed. */
+  token: StarknetToken | null;
+  relay: StarknetRelayInfo | null;
+  /** The browser wallet that opens the private account, once connected. */
+  wallet: { address: string; gloam: boolean } | null;
+  /** The private account's address, once it is open. */
+  address: string | null;
+  /** Private balance, base units, once read. */
+  privateBalance: bigint | null;
+  /** What sits at the private account's own address (not private yet), once read. */
+  publicBalance: bigint | null;
+  /** The relay's fee per proven move, base units (0 when none). */
+  fee: bigint;
+  task: StarknetTask | null;
+  error: { kind: StarknetTaskKind; message: string } | null;
+  setUp(): Promise<boolean>;
+  refresh(): Promise<boolean>;
+  add(amount: bigint): Promise<string | null>;
+  pay(to: string, amount: bigint): Promise<string | null>;
+  cashOut(to: string, amount: bigint): Promise<string | null>;
+  /** Close the private account in this tab. */
+  close(): void;
+  clearError(): void;
+};
+
+const Ctx = createContext<StarknetCtx | null>(null);
+
+/** The Starknet account, or null outside the app (or while Starknet is off). */
+export function useStarknet(): StarknetCtx | null {
+  return useContext(Ctx);
+}
+
+/** Short form of a Starknet address: "0x68b8...e656". */
+export function shortStark(a: string): string {
+  return a.length > 14 ? `${a.slice(0, 6)}...${a.slice(-4)}` : a;
+}
+
+/** Open sessions for this visit, by main wallet (lower case). Never stored. */
+const kept = new Map<string, StarknetSession>();
+
+const lib = () => Promise.all([import("@/lib/starknetPrivacy/session"), import("@/lib/starknetPrivacy/account"), import("@/lib/starknetPrivacy/config")]);
+
+/** What a failure says, plainly; never a stack or an address dump. */
+function say(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e);
+  if (/user rejected|denied|rejected the request/i.test(m)) return "The wallet did not sign. Try again when you're ready.";
+  if (/rate.?limit|too many/i.test(m)) return "Too many requests. Try again in a little while.";
+  return m.length > 220 ? `${m.slice(0, 217)}...` : m;
+}
+
+const STEPS: Record<Exclude<StarknetTaskKind, "refresh">, string[]> = {
+  setup: ["Setting up your Starknet account", "Waiting for Starknet", "Opening your private account"],
+  add: ["Approving", "Waiting for Starknet", "Adding privately"],
+  pay: ["Waiting for Starknet", "Paying privately"],
+  cashout: ["Waiting for Starknet", "Cashing out"],
+};
+
+export function StarknetAccountProvider({ children }: { children: ReactNode }) {
+  const { starknet } = useNetwork();
+  const on = STARKNET_ENABLED && starknet;
+  const account = useAppAccount();
+  const { signMessageAsync } = useSignMessage();
+  const mainAddress = account.isConnected && account.address ? account.address.toLowerCase() : null;
+  const gloam = account.connector?.id === EMBEDDED_CONNECTOR_ID;
+
+  const [relay, setRelay] = useState<StarknetRelayInfo | null>(null);
+  const [token, setToken] = useState<StarknetToken | null>(null);
+  const [session, setSession] = useState<StarknetSession | null>(null);
+  const [privateBalance, setPrivate] = useState<bigint | null>(null);
+  const [publicBalance, setPublic] = useState<bigint | null>(null);
+  const [task, setTask] = useState<StarknetTask | null>(null);
+  const [error, setError] = useState<StarknetCtx["error"]>(null);
+  const busy = useRef(false);
+
+  // The relay and the token, once Starknet is picked.
+  useEffect(() => {
+    if (!on) return;
+    let live = true;
+    void lib()
+      .then(async ([s, , c]) => {
+        const cfg = c.starknetConfig();
+        if (live) setToken(cfg.tokens[0] ?? null);
+        const info = await s.readRelayInfo().catch(() => null);
+        if (live) setRelay(info ?? { on: false, funded: false, relayer: null, network: STARKNET_NETWORK, pool: null, fee: {}, maxApprove: {} });
+      })
+      .catch(() => live && setRelay({ on: false, funded: false, relayer: null, network: STARKNET_NETWORK, pool: null, fee: {}, maxApprove: {} }));
+    return () => {
+      live = false;
+    };
+  }, [on]);
+
+  // The account kept for this wallet this visit; another wallet (or none) closes it.
+  useEffect(() => {
+    const k = mainAddress ? (kept.get(mainAddress) ?? null) : null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- follow the connected wallet: its kept account, or none
+    setSession(k);
+    setPrivate(null);
+    setPublic(null);
+    setError(null);
+  }, [mainAddress]);
+
+  const readBalances = useCallback(
+    async (s: StarknetSession): Promise<boolean> => {
+      const t = token ?? s.cfg.tokens[0];
+      if (!t) return false;
+      const [p, w] = await Promise.all([s.privateBalance(t), s.publicBalance(t)]);
+      setPrivate(p);
+      setPublic(w);
+      return true;
+    },
+    [token]
+  );
+
+  useEffect(() => {
+    if (!session || !on) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the balances are read from Starknet after the account opens; they land once the reads answer
+    void readBalances(session).catch(() => {});
+  }, [session, on, readBalances]);
+
+  const run = useCallback(
+    async <T,>(kind: StarknetTaskKind, work: (step: (at: number, detail?: string) => void) => Promise<T>): Promise<T | null> => {
+      if (busy.current) return null;
+      busy.current = true;
+      setError(null);
+      const steps = kind === "refresh" ? ["Reading your balance"] : STEPS[kind];
+      setTask({ kind, steps, at: 0 });
+      try {
+        return await work((at, detail) => setTask({ kind, steps, at: Math.min(at, steps.length - 1), detail }));
+      } catch (e) {
+        setError({ kind, message: say(e) });
+        return null;
+      } finally {
+        busy.current = false;
+        setTask(null);
+      }
+    },
+    []
+  );
+
+  const setUp = useCallback(async (): Promise<boolean> => {
+    if (!on || !mainAddress || gloam || !relay?.on) return false;
+    const done = await run("setup", async (step) => {
+      const [s, a, c] = await lib();
+      const cfg = c.starknetConfig();
+      const message = a.starknetAccountMessage(0);
+      const sig = await signMessageAsync({ message });
+      const bytes = hexBytes(sig);
+      const seed = await a.seedFromWalletSignature(bytes, 0);
+      bytes.fill(0);
+      const keys = await a.keysFromSeed(seed, 0, cfg.accountClassHash);
+      seed.fill(0);
+      const opened = new s.StarknetSession(cfg, keys, relay, window.location.origin);
+      await opened.ensureOpen(step);
+      kept.set(mainAddress, opened);
+      setSession(opened);
+      await readBalances(opened);
+      return true;
+    });
+    return done === true;
+  }, [on, mainAddress, gloam, relay, run, signMessageAsync, readBalances]);
+
+  const refresh = useCallback(async () => (session ? (await run("refresh", () => readBalances(session))) === true : false), [session, run, readBalances]);
+
+  const move = useCallback(
+    async (kind: "add" | "pay" | "cashout", work: (s: StarknetSession, t: StarknetToken, step: (at: number, d?: string) => void) => Promise<string>) => {
+      const s = session;
+      const t = token;
+      if (!s || !t) return null;
+      const hash = await run(kind, (step) => work(s, t, step));
+      if (hash) await readBalances(s).catch(() => {});
+      return hash;
+    },
+    [session, token, run, readBalances]
+  );
+
+  const value = useMemo<StarknetCtx>(
+    () => ({
+      on,
+      network: STARKNET_NETWORK,
+      token,
+      relay,
+      wallet: mainAddress ? { address: mainAddress, gloam } : null,
+      address: session?.address ?? null,
+      privateBalance,
+      publicBalance,
+      fee: relay && token ? BigInt(relay.fee[`0x${BigInt(token.address).toString(16)}`] ?? "0") : 0n,
+      task,
+      error,
+      setUp,
+      refresh,
+      add: (amount) => move("add", (s, t, step) => s.add(t, amount, step)),
+      pay: (to, amount) =>
+        move("pay", async (s, t, step) => {
+          if (!(await s.canBePaid(to, t))) throw new Error("That private account isn't open on Starknet yet.");
+          return s.pay(to, t, amount, step);
+        }),
+      cashOut: (to, amount) => move("cashout", (s, t, step) => s.cashOut(to, t, amount, step)),
+      close: () => {
+        if (mainAddress) kept.delete(mainAddress);
+        setSession(null);
+        setPrivate(null);
+        setPublic(null);
+      },
+      clearError: () => setError(null),
+    }),
+    [on, token, relay, mainAddress, gloam, session, privateBalance, publicBalance, task, error, setUp, refresh, move]
+  );
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+function hexBytes(hex: string): Uint8Array {
+  const h = hex.startsWith("0x") ? hex.slice(2) : hex;
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+/** Amount helpers, two places shown (lib/amountShort), every decimal kept for inputs. */
+export function parseStarkAmount(text: string, decimals: number): bigint | null {
+  const t = text.trim();
+  if (!/^\d+(\.\d+)?$/.test(t)) return null;
+  const [whole, frac = ""] = t.split(".");
+  if (frac.length > decimals) return null;
+  const v = BigInt(whole!) * 10n ** BigInt(decimals) + BigInt((frac + "0".repeat(decimals)).slice(0, decimals) || "0");
+  return v > 0n ? v : null;
+}
+
+export function plainStarkAmount(v: bigint, decimals: number): string {
+  const base = 10n ** BigInt(decimals);
+  const frac = (v % base).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return frac ? `${v / base}.${frac}` : `${v / base}`;
+}

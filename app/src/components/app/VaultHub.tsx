@@ -21,6 +21,8 @@ import {
 } from "@/lib/vaultHub";
 import { SOLANA_VAULT_ACTIONS, missingOnSolana } from "@/lib/solanaRings/vaultActions";
 import { SolanaVaultHome, SolanaVaultPanel } from "./SolanaVault";
+import { STARKNET_VAULT_ACTIONS, missingOnStarknet } from "@/lib/starknetPrivacy/vaultActions";
+import { StarknetVaultHome, StarknetVaultPanel } from "./StarknetVault";
 
 /**
  * The Vault: one place for every private money move. With no action in the
@@ -84,7 +86,7 @@ const AgentTopUpsView = dynamic(() => import("./AgentTopUpsView").then((m) => m.
 export function VaultHub() {
   const router = useRouter();
   const sp = useSearchParams();
-  const { network, networkKey, setNetworkKey, settled, solana } = useNetwork();
+  const { network, networkKey, setNetworkKey, settled, solana, starknet } = useNetwork();
   const { address } = useAppAccount();
   // The views read the saved network and wallet, which only exist in the
   // browser: render them once hydrated (this suspends apart from the network
@@ -96,7 +98,9 @@ export function VaultHub() {
   // On Solana, Solana's own four (lib/solanaRings/vaultActions).
   const actions = solana
     ? SOLANA_VAULT_ACTIONS
-    : vaultActionsFor({
+    : starknet
+      ? STARKNET_VAULT_ACTIONS
+      : vaultActionsFor({
         swap: vaultSwapRouter(network.chainId) !== null && swapOpenTo(address),
         stocks: Boolean(network.stocks),
       });
@@ -135,15 +139,15 @@ export function VaultHub() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the fragment is read after mount; this marks the link as moved for
     setSwitchedFor(hash);
     // with Solana picked it moves even to the last EVM network, which leaves Solana
-    const to = swapLinkMove(swapLinkTo, networkKey, solana);
+    const to = swapLinkMove(swapLinkTo, networkKey, solana || starknet);
     if (to) setNetworkKey(to);
-  }, [settled, swapLinkTo, switchedFor, hash, networkKey, setNetworkKey, solana]);
+  }, [settled, swapLinkTo, switchedFor, hash, networkKey, setNetworkKey, solana, starknet]);
   const switching = Boolean(swapLinkTo && swapLinkTo !== networkKey && switchedFor !== hash);
 
   // A claim link, a payment request or a link that names its network is for an
   // EVM network: on Solana it moves back there (the network it names, or the
   // last one), so the link opens as it always did.
-  const evmLink = solana && (hash.startsWith("#claim=") || mode === "pay" || Boolean(sp.get("net")));
+  const evmLink = (solana || starknet) && (hash.startsWith("#claim=") || mode === "pay" || Boolean(sp.get("net")));
   useEffect(() => {
     if (evmLink) setNetworkKey(networkKey);
   }, [evmLink, networkKey, setNetworkKey]);
@@ -164,6 +168,18 @@ export function VaultHub() {
       </div>
     ) : (
       <HomeSkeleton />
+    );
+  }
+
+  if (starknet && !evmLink) {
+    if (!current) return <StarknetVaultHome missing={missingOnStarknet(tab)} />;
+    return (
+      <div className="space-y-6">
+        <ActionRow actions={actions} current={current.id} onSelect={select} />
+        <div id="vault-panel" role="tabpanel" aria-labelledby={`vault-tab-${current.id}`} className="min-w-0">
+          <StarknetVaultPanel id={current.id} onReceive={() => select("receive")} />
+        </div>
+      </div>
     );
   }
 

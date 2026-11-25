@@ -17,6 +17,7 @@ import { TestFundsNotice } from "./TestFundsNotice";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { VaultNavGroup, VaultNavGroupStatic, navActiveFill } from "./VaultNavGroup";
 import { SOLANA_RINGS_NETWORK } from "@/lib/solanaRings/config";
+import { STARKNET_NETWORK } from "@/lib/starknetPrivacy/config";
 
 type NavItem = {
   href: string;
@@ -223,6 +224,7 @@ export function AppShell({
   subtitle,
   subtitleTempo,
   subtitleSolana,
+  subtitleStarknet,
   actions,
   actionsSolana,
 }: {
@@ -233,13 +235,17 @@ export function AppShell({
   subtitleTempo?: string;
   /** Optional subtitle while Solana is the network picked, where the EVM one would not hold. */
   subtitleSolana?: string;
+  /** Optional subtitle while Starknet is the network picked. */
+  subtitleStarknet?: string;
   /** Optional controls shown at the right of the page header. */
   actions?: ReactNode;
   /** The controls on Solana; left unset, an EVM page's controls are not shown there. */
   actionsSolana?: ReactNode;
 }) {
   const pathname = usePathname();
-  const { network, settled: networkSettled, solana } = useNetwork();
+  const { network, settled: networkSettled, solana, starknet } = useNetwork();
+  // Solana and Starknet are not EVM networks: the EVM side's sections, controls and notices step aside.
+  const offEvm = solana || starknet;
   const [open, setOpen] = useState(false);
 
   // Tokenized-stock Markets only exists on Robinhood Chain testnet. On Tempo
@@ -249,10 +255,16 @@ export function AppShell({
   // yet drop out the same way.
   const isTempo = network.family === "tempo";
   const navItems = nav.filter(
-    (item) => !(item.robinhoodOnly && (!networkSettled || !network.stocks || solana)) && !(item.evmOnly && solana)
+    (item) => !(item.robinhoodOnly && (!networkSettled || !network.stocks || offEvm)) && !(item.evmOnly && offEvm)
   );
-  const shownSubtitle = solana ? (subtitleSolana ?? subtitle) : isTempo && subtitleTempo ? subtitleTempo : subtitle;
-  const shownActions = solana ? actionsSolana : actions;
+  const shownSubtitle = solana
+    ? (subtitleSolana ?? subtitle)
+    : starknet
+      ? (subtitleStarknet ?? subtitle)
+      : isTempo && subtitleTempo
+        ? subtitleTempo
+        : subtitle;
+  const shownActions = solana ? actionsSolana : starknet ? undefined : actions;
 
   useEffect(() => {
     void import("@/lib/track").then(({ track }) => {
@@ -365,8 +377,8 @@ export function AppShell({
 
       <div className="gl-tabbar-space flex flex-1 flex-col lg:pl-[272px]">
         <main className="mx-auto w-full max-w-[1120px] flex-1 px-4 pb-16 pt-5 sm:px-8 sm:pt-7">
-          {/* the EVM side's notices: not while Solana is the network picked */}
-          {!solana && (
+          {/* the EVM side's notices: not while Solana or Starknet is the network picked */}
+          {!offEvm && (
             <>
               <ReceivedNotice />
               <FeeRiseNotice />
@@ -396,6 +408,8 @@ export function AppShell({
                 ? "Gloam. Not investment, legal or tax advice."
                 : solana
                 ? `Gloam on Solana ${SOLANA_RINGS_NETWORK === "devnet" ? "devnet" : "mainnet"}. Not investment, legal or tax advice.`
+                : starknet
+                ? `Gloam on Starknet ${STARKNET_NETWORK === "mainnet" ? "mainnet" : STARKNET_NETWORK === "sepolia" ? "Sepolia" : "devnet"}. Not investment, legal or tax advice.`
                 : !network.testnet
                 ? `Gloam on ${network.label} mainnet. Not investment, legal or tax advice.`
                 : isTempo

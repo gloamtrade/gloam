@@ -10,6 +10,7 @@ import { FRESH_WALLET_ENABLED } from "@/lib/freshWalletFlag";
 import { swapOpenTo, vaultSwapRouter } from "@/lib/vaultSwap";
 import { vaultActionFromParams, vaultActionsFor, type VaultActionId } from "@/lib/vaultNav";
 import { SOLANA_VAULT_ACTIONS } from "@/lib/solanaRings/vaultActions";
+import { STARKNET_VAULT_ACTIONS } from "@/lib/starknetPrivacy/vaultActions";
 
 /**
  * The fill that marks the current page. The sidebar is a panel, so a surface
@@ -60,20 +61,22 @@ function VaultNavList({
   tab: string | null;
   mode: string | null;
 }) {
-  const { network, settled, solana } = useNetwork();
+  const { network, settled, solana, starknet } = useNetwork();
   const { address } = useAppAccount();
   // Until this browser's network is known, only the actions every network has,
-  // so a Swap or Trade entry never flashes in and out. On Solana, Solana's four.
+  // so a Swap or Trade entry never flashes in and out. On Solana, Solana's four; on Starknet, Starknet's.
   const actions = solana
     ? SOLANA_VAULT_ACTIONS
-    : vaultActionsFor({
+    : starknet
+      ? STARKNET_VAULT_ACTIONS
+      : vaultActionsFor({
         swap: settled && vaultSwapRouter(network.chainId) !== null && swapOpenTo(address),
         stocks: settled && Boolean(network.stocks),
       });
   const rows: { id: VaultActionId | "fresh-wallet"; label: string; href: string }[] = [...actions];
   // Same wait for the network, so Fresh wallet never flashes in and out either.
   // Only while the flow is on (lib/freshWalletFlag).
-  if (FRESH_WALLET_ENABLED && settled && !solana && network.chainId === GAS_STATION_CHAIN_ID) {
+  if (FRESH_WALLET_ENABLED && settled && !solana && !starknet && network.chainId === GAS_STATION_CHAIN_ID) {
     rows.splice(rows.findIndex((a) => a.id === "topups") + 1, 0, { id: "fresh-wallet", label: "Fresh wallet", href: FRESH_WALLET_PATH });
   }
   const inVault = pathname === "/app/vault";
