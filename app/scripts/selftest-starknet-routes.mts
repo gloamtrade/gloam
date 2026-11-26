@@ -437,7 +437,7 @@ const RESULT = { proof: "UFJPT0Y=", proof_facts: ["0xa", "0xb"], l2_to_l1_messag
   eq(await code(scan.starkscanProve(opts(() => new Response(JSON.stringify({ error: { code: "prover_key_concurrency" } }), { status: 429 })), 1, TX)), "unavailable", "too many proofs at once: busy, so the SDK retries");
   eq(await code(scan.starkscanProve(opts(() => new Response(JSON.stringify({ error: { code: "prover_daily_budget_exhausted" } }), { status: 429 })), 1, TX)), "quota", "the day's quota used up says so");
   const failed = await scan.starkscanProve(opts((u, i) => (i.method === "POST" ? job("queued") : job("failed", { error: { code: 55, message: "Account validation failed" } }))), 1, TX).catch((x: unknown) => x as InstanceType<typeof scan.StarkscanProveError>);
-  eq(failed.prover, { code: 55 }, "a failed job carries the prover's own code");
+  eq((failed as InstanceType<typeof scan.StarkscanProveError>).prover, { code: 55 }, "a failed job carries the prover's own code");
 
   // A result Starkscan already handed over can't come back: the next round proves again under a new key.
   const rounds = scan.memoryRounds();

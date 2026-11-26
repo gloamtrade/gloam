@@ -230,7 +230,7 @@ const ctxBase = {
   };
   const withAtt = policy.checkRelayCall([attested([from("0x99", 1_000_000), write()], 1_795_000_000)], ctx, proof);
   ok(withAtt.ok && withAtt.kind === "apply" && withAtt.attestedAt === 1_795_000_000, "an add's screening attestation time is read");
-  eq(policy.decodeApply(apply([write()]).calldata!.map((x) => BigInt(x as string)))?.attestedAt, null, "no attestation reads as none");
+  eq(policy.decodeApply((apply([write()]).calldata as string[]).map((x) => BigInt(x)))?.attestedAt, null, "no attestation reads as none");
   eq(policy.checkRelayCall([apply([write(), to(OUT, 250_000)])], { ...ctx, minFee: fee }, proof), { ok: false, reason: "fee_missing" }, "no fee when one is asked is refused");
   eq(policy.checkRelayCall([apply([to(RELAY, 4_999)])], { ...ctx, minFee: fee }, proof), { ok: false, reason: "fee_too_low" }, "a fee under the minimum is refused");
   eq(policy.checkRelayCall([apply([to(OUT, 1, "0x123")])], ctx, proof), { ok: false, reason: "token_not_listed" }, "moving an unlisted token is refused");
