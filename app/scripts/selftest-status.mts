@@ -193,6 +193,30 @@ assert.equal(email.reason, "Turnkey reports a problem with Email.");
 assert.equal(checks.judgeTurnkey(tk("major", [{ name: "APIs", status: "major_outage" }, { name: "SDKs", status: "degraded_performance" }])).status, "down");
 ok("Turnkey");
 
+// Starknet (shown only while its flag is on): its relay's STRK against the line where it pauses,
+// its RPC's latest block, and its prover route reached without a proof.
+const STRK = 10n ** 18n;
+const snLow = 30n * STRK;
+const snOn = { ms: 200, on: true, funded: true };
+assert.equal(checks.judgeStarknetRelay({ api: null, strk: null }, snLow).status, "down");
+assert.equal(checks.judgeStarknetRelay({ api: { ...snOn, on: false }, strk: 100n * STRK }, snLow).reason, "Paused.");
+const snOut = checks.judgeStarknetRelay({ api: { ...snOn, funded: false }, strk: 12n * STRK }, snLow);
+assert.equal(snOut.status, "down");
+assert.equal(snOut.reason, "Out of STRK for fees: paused until it is topped up.");
+assert.equal(snOut.detail, "Gas 12 STRK");
+assert.equal(checks.judgeStarknetRelay({ api: snOn, strk: 50n * STRK }, snLow).status, "degraded", "under three times the line: top it up");
+assert.equal(checks.judgeStarknetRelay({ api: snOn, strk: 200n * STRK }, snLow).status, "operational");
+assert.equal(checks.judgeStarknetNetwork(null).status, "down");
+assert.equal(checks.judgeStarknetNetwork({ ms: 100, httpStatus: 200, ageSec: 4, block: 18_540_000 }).detail, "Latest block 4 s ago");
+assert.equal(checks.judgeStarknetNetwork({ ms: 100, httpStatus: 200, ageSec: 90, block: 1 }).status, "degraded");
+assert.equal(checks.judgeStarknetNetwork({ ms: 100, httpStatus: 200, ageSec: 400, block: 1 }).status, "down");
+assert.equal(checks.judgeStarknetNetwork({ ms: 100, httpStatus: 404, ageSec: null, block: null }).status, "down");
+assert.equal(checks.judgeStarknetProver({ ms: 80, httpStatus: 200, version: "0.10.0" }).status, "operational");
+assert.equal(checks.judgeStarknetProver({ ms: 80, httpStatus: 404, version: undefined }).status, "down");
+assert.equal(checks.judgeStarknetProver(null).status, "down");
+assert.ok(!checks.statusParts().some((p) => p.id.endsWith(":starknet")), "no Starknet rows while its flag is off");
+ok("Starknet");
+
 // ---------------------------------------------------------------- parts
 
 const parts = checks.statusParts();
