@@ -7,7 +7,9 @@
  * and the plain note for a section Starknet doesn't have.
  */
 import Link from "next/link";
-import { useId, useState, type ReactNode } from "react";
+import { useId, useState, useSyncExternalStore, type ReactNode } from "react";
+import { gloamPasskeys, noGloamPasskeys, onGloamPasskeys } from "@/lib/gloamPasskeys";
+import { keptStarknetCode, starknetCodeRootFor } from "@/lib/starknetPrivacy/gloamCodes";
 import { Spinner } from "@/components/ui/Spinner";
 import { displayAmount } from "@/lib/amountShort";
 import { STARKNET_NETWORK, type StarknetToken } from "@/lib/starknetPrivacy/config";
@@ -16,6 +18,7 @@ import { CashOutPercentChips } from "./CashOutPrivacy";
 import { SolanaSteps } from "./SolanaParts";
 import { TokenLogo } from "./TokenLogo";
 import { WalletMenu } from "./WalletMenu";
+import { GloamRootOpen, type GloamRootCodes } from "./GloamAccountParts";
 import { parseStarkAmount, plainStarkAmount, shortStark, useStarknet, type StarknetTask, type StarknetTaskKind } from "./StarknetAccount";
 
 /** "Starknet", "Starknet Sepolia" or "Starknet devnet". */
@@ -28,7 +31,8 @@ export function starkAmount(v: bigint, token: Pick<StarknetToken, "decimals">): 
 
 /** The wait, step by step. */
 export function StarknetSteps({ task, className = "" }: { task: StarknetTask | null; className?: string }) {
-  return <SolanaSteps task={task} className={className} />;
+  // SolanaSteps draws only the steps; Starknet's own kinds (restore) don't matter to it.
+  return <SolanaSteps task={task ? { ...task, kind: "setup" } : null} className={className} />;
 }
 
 /**
@@ -90,15 +94,29 @@ export function StarknetPrivacyNote({ className = "" }: { className?: string }) 
   return <p className={`text-[12.5px] leading-relaxed text-mute ${className}`}>{STARKNET_PRIVACY_NOTE}</p>;
 }
 
+const STARKNET_CODES: GloamRootCodes = { kept: keptStarknetCode, rootFor: starknetCodeRootFor };
+
+/** A Gloam wallet's account seed from its root, salted for Starknet (loaded with the account code, not before). */
+const starknetSeedFromRoot = (root: Uint8Array, kind: "passkey" | "code", index: number) =>
+  import("@/lib/starknetPrivacy/account").then((a) => a.seedFromGloamRoot(root, kind, index));
+
 /**
- * Until the private account is open: connect a browser wallet, then sign once
- * to open it (the first time also sets it up on Starknet; Gloam pays for
- * that). The same card on every Starknet screen.
+ * Until the private account is open: connect a wallet, then open it: a browser
+ * wallet signs once, a Gloam wallet uses its passkey or a backup code (the
+ * first time also sets it up on Starknet; Gloam pays for that). A device that
+ * opened it before reopens it with no prompt. The same card on every Starknet screen.
  */
 export function StarknetGate({ lead }: { lead?: ReactNode }) {
   const sn = useStarknet();
+  const passkeys = useSyncExternalStore(onGloamPasskeys, gloamPasskeys, noGloamPasskeys);
   if (!sn) return null;
   const { relay, wallet } = sn;
+  const paused = relay && !relay.funded;
+  const pausedNote = paused ? (
+    <p className="mt-4 rounded-[16px] bg-warn-soft px-4 py-3 text-[13px] leading-relaxed text-warn">
+      Private payments on {STARKNET_NAME} are paused for a moment. Try again later.
+    </p>
+  ) : null;
 
   let body: ReactNode;
   if (!relay) {
@@ -128,13 +146,34 @@ export function StarknetGate({ lead }: { lead?: ReactNode }) {
         </div>
       </>
     );
+  } else if (sn.restoring) {
+    body = (
+      <p role="status" aria-live="polite" className="flex items-center gap-2.5 text-[14px] text-foreground">
+        <Spinner />
+        Opening your private account
+      </p>
+    );
   } else if (wallet.gloam) {
     body = (
       <>
-        <h2 className="t-title text-foreground">Open it with a browser wallet</h2>
-        <p className="mt-1.5 max-w-[56ch] text-[14px] leading-relaxed text-mute">
-          On {STARKNET_NAME}, your private account opens with a browser wallet for now. Signing in with email or a passkey comes next.
-        </p>
+        <h2 className="t-title text-foreground">Open your private account</h2>
+        <GloamRootOpen
+          owner={wallet.address}
+          passkeys={passkeys}
+          task={sn.task}
+          returning={false}
+          codes={STARKNET_CODES}
+          seedFromRoot={starknetSeedFromRoot}
+          open={(opener) => void sn.setUp(opener)}
+          action={(label, onClick, stop) => (
+            <>
+              {pausedNote}
+              <StarknetActionButton kind="setup" label={label} stop={paused ? "Paused for a moment" : (stop ?? null)} onClick={onClick} className="mt-5" />
+            </>
+          )}
+        />
+        <StarknetSteps task={sn.task?.kind === "setup" ? sn.task : null} className="mt-4" />
+        <StarknetError kind={["setup", "restore"]} className="mt-4" />
       </>
     );
   } else {
@@ -151,14 +190,10 @@ export function StarknetGate({ lead }: { lead?: ReactNode }) {
             <span className="tnum block truncate text-[12.5px] text-mute">Opened by {shortStark(wallet.address)}</span>
           </span>
         </div>
-        {!relay.funded && (
-          <p className="mt-4 rounded-[16px] bg-warn-soft px-4 py-3 text-[13px] leading-relaxed text-warn">
-            Private payments on {STARKNET_NAME} are paused for a moment. Try again later.
-          </p>
-        )}
-        <StarknetActionButton kind="setup" label="Sign to open" stop={relay.funded ? null : "Paused for a moment"} onClick={() => void sn.setUp()} className="mt-5" />
+        {pausedNote}
+        <StarknetActionButton kind="setup" label="Sign to open" stop={paused ? "Paused for a moment" : null} onClick={() => void sn.setUp()} className="mt-5" />
         <StarknetSteps task={sn.task?.kind === "setup" ? sn.task : null} className="mt-4" />
-        <StarknetError kind="setup" className="mt-4" />
+        <StarknetError kind={["setup", "restore"]} className="mt-4" />
       </>
     );
   }

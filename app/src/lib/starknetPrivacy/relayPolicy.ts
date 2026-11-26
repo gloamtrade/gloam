@@ -24,9 +24,13 @@
  *     external call rides on the relay's STRK), move only listed tokens, stay
  *     under MAX_ACTIONS, and, when the relay asks a fee, withdraw at least that
  *     fee of a listed token to the relay itself. The pool takes its own STRK
- *     fee (get_fee_amount) from its caller only with an allowance the relay
- *     never gives, so a pool fee turned on fails the call instead of taking the
- *     relay's STRK: the route reads get_fee_amount and pauses when it is not 0.
+ *     fee (get_fee_amount) from its caller: the route (lib/starknetPrivacy/server
+ *     relaySend) reads it, refuses one above the relay's cap, and wraps the apply
+ *     in approve(pool, exactly that fee) and approve(pool, 0) in the same
+ *     transaction, so the pool can take that fee and nothing after it.
+ *     The decision names the deposit's screening attestation time (mainnet's
+ *     pool takes one only while it is under 300 seconds old), so a stale one is
+ *     refused before the relay pays for a transaction that reverts.
  */
 import { CallData, hash, num, type Call, type RawArgsObject } from "starknet";
 import { PrivacyPoolABI } from "@starkware-libs/starknet-privacy-sdk/abi";
@@ -63,7 +67,15 @@ export type RelayProof = { proofFacts: readonly string[]; proof: string };
 export type RelayDecision =
   | { ok: true; kind: "deploy"; publicKey: string }
   | { ok: true; kind: "approve"; account: string; token: string; amount: bigint }
-  | { ok: true; kind: "apply"; fee: { token: string; amount: bigint } | null; deposits: number; withdrawals: number }
+  | {
+      ok: true;
+      kind: "apply";
+      fee: { token: string; amount: bigint } | null;
+      deposits: number;
+      withdrawals: number;
+      /** The screening attestation's issued_at (unix seconds), or null when the call carries none. */
+      attestedAt: number | null;
+    }
   | { ok: false; reason: string };
 
 const no = (reason: string): RelayDecision => ({ ok: false, reason });
@@ -160,6 +172,11 @@ const APPLY_TYPES = [
 
 /** The server actions an apply_actions call carries, or null when they don't decode exactly. */
 export function decodeServerActions(cd: readonly bigint[]): Variant[] | null {
+  return decodeApply(cd)?.actions ?? null;
+}
+
+/** An apply_actions call's server actions and its screening attestation time, or null when they don't decode exactly. */
+export function decodeApply(cd: readonly bigint[]): { actions: Variant[]; attestedAt: number | null } | null {
   try {
     const decoded = poolCallData.decodeParameters(APPLY_TYPES, cd.map((x) => num.toHex(x))) as unknown[];
     const actions = decoded?.[0] as unknown;
@@ -167,7 +184,13 @@ export function decodeServerActions(cd: readonly bigint[]): Variant[] | null {
     // Re-encode to be sure nothing trails the two parameters.
     const again = poolCallData.compile(APPLY_ENTRYPOINT, { actions, screening: decoded[1] } as RawArgsObject);
     if (again.length !== cd.length || again.some((x, i) => BigInt(x) !== cd[i])) return null;
-    return actions as Variant[];
+    const screening = decoded[1] as { isSome?: () => boolean; unwrap?: () => { issued_at?: unknown } } | undefined;
+    let attestedAt: number | null = null;
+    if (screening?.isSome?.()) {
+      const at = Number(BigInt((screening.unwrap?.()?.issued_at ?? 0) as bigint | string | number));
+      attestedAt = Number.isSafeInteger(at) && at > 0 ? at : 0;
+    }
+    return { actions: actions as Variant[], attestedAt };
   } catch {
     return null;
   }
@@ -180,8 +203,9 @@ function checkApply(entrypoint: string, cd: bigint[], ctx: RelayContext, proof?:
   // every other network needs one.
   const proofBody = typeof proof.proof === "string" ? proof.proof : "";
   if (proofBody.length === 0 && ctx.cfg.network !== "devnet") return no("no_proof");
-  const actions = decodeServerActions(cd);
-  if (!actions) return no("actions_decode");
+  const decoded = decodeApply(cd);
+  if (!decoded) return no("actions_decode");
+  const { actions, attestedAt } = decoded;
   if (actions.length === 0) return no("no_actions");
   if (actions.length > MAX_ACTIONS) return no("too_many_actions");
   let fee: { token: string; amount: bigint } | null = null;
@@ -210,5 +234,5 @@ function checkApply(entrypoint: string, cd: bigint[], ctx: RelayContext, proof?:
     const min = ctx.minFee?.[fee.token] ?? 0n;
     if (min <= 0n || fee.amount < min) return no("fee_too_low");
   }
-  return { ok: true, kind: "apply", fee, deposits, withdrawals };
+  return { ok: true, kind: "apply", fee, deposits, withdrawals, attestedAt };
 }

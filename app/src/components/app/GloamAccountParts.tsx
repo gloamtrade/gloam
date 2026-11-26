@@ -83,8 +83,59 @@ export type GloamAccountAction = (label: string, onClick: () => void, stop?: str
 export function GloamAccountOpen({ returning, action }: { returning: boolean; action: GloamAccountAction }) {
   const sol = useSolana();
   const gloam = useSyncExternalStore(onGloamSolana, gloamSolana, () => GLOAM_SOLANA_OFF);
-  const owner = sol?.main?.account.address ?? null;
-  const passkey = gloam.passkeys.length > 0;
+  return (
+    <GloamRootOpen
+      owner={sol?.main?.account.address ?? null}
+      passkeys={gloam.passkeys}
+      task={sol?.task ?? null}
+      returning={returning}
+      codes={SOLANA_CODES}
+      seedFromRoot={accountSeedFromRoot}
+      open={(opener) => void sol?.setUp(opener)}
+      action={action}
+    />
+  );
+}
+
+const SOLANA_CODES: GloamRootCodes = { kept: keptCodeSecret, rootFor: codeRootFor };
+
+/** How a private account opens from a root: what the wait's first step says, and its seed for an index. */
+export type GloamRootOpener = { first: string; seed: (index: number) => Promise<Uint8Array> };
+
+/** Where a network keeps a Gloam wallet's backup-code secrets (lib/solanaRings/gloamCodes, lib/starknetPrivacy/gloamCodes). */
+export type GloamRootCodes = {
+  kept(owner: string): Promise<Uint8Array | null>;
+  rootFor(owner: string, secret: Uint8Array | null, typed?: boolean): Promise<Uint8Array>;
+};
+
+/**
+ * The open card itself, for any network whose Gloam-wallet private account
+ * opens from a root (a passkey's PRF output or a backup code): Solana
+ * (GloamAccountOpen, above) and Starknet (StarknetParts). `owner` is the
+ * Gloam wallet's address on that network, `codes` where that network keeps
+ * its backup codes, `seedFromRoot` its own salted derivation, and `open` its
+ * setUp. `task` is the network's wait, while one runs.
+ */
+export function GloamRootOpen({
+  owner,
+  passkeys,
+  task,
+  returning,
+  codes,
+  seedFromRoot,
+  open,
+  action,
+}: {
+  owner: string | null;
+  passkeys: readonly string[];
+  task: unknown;
+  returning: boolean;
+  codes: GloamRootCodes;
+  seedFromRoot: (root: Uint8Array, kind: "passkey" | "code", index: number) => Promise<Uint8Array>;
+  open: (opener: GloamRootOpener) => void;
+  action: GloamAccountAction;
+}) {
+  const passkey = passkeys.length > 0;
   const [stored, setStored] = useState<{ owner: string; has: boolean } | null>(null);
   const [mode, setMode] = useState<GloamOpenMode>("auto");
   const [fresh, setFresh] = useState<{ owner: string; secret: Uint8Array; code: string } | null>(null);
@@ -92,13 +143,14 @@ export function GloamAccountOpen({ returning, action }: { returning: boolean; ac
   const [typed, setTyped] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const busy = Boolean(sol?.task);
+  const busy = Boolean(task);
 
   // Whether this browser keeps this account's backup code (read once per account).
   useEffect(() => {
     if (!owner) return;
     let live = true;
-    void keptCodeSecret(owner)
+    void codes
+      .kept(owner)
       .then((secret) => {
         secret?.fill(0);
         if (live) setStored({ owner, has: Boolean(secret) });
@@ -107,7 +159,7 @@ export function GloamAccountOpen({ returning, action }: { returning: boolean; ac
     return () => {
       live = false;
     };
-  }, [owner, sol?.task]);
+  }, [owner, task, codes]);
 
   // The code made for this account is wiped from memory when the card goes.
   useEffect(
@@ -117,7 +169,7 @@ export function GloamAccountOpen({ returning, action }: { returning: boolean; ac
     [fresh],
   );
 
-  if (!sol || !owner) return null;
+  if (!owner) return null;
   const known = stored?.owner === owner ? stored.has : null;
 
   /**
@@ -125,12 +177,12 @@ export function GloamAccountOpen({ returning, action }: { returning: boolean; ac
    * keeps. Kept first, never over another; a typed code opens even when another is kept (lib/solanaRings/gloamCodes codeRootFor).
    */
   const openWithCode = (secret: Uint8Array | null, typed = false) =>
-    void sol.setUp({
+    open({
       first: "Reading your backup code",
       seed: async (index) => {
-        const root = await codeRootFor(owner, secret, typed);
+        const root = await codes.rootFor(owner, secret, typed);
         try {
-          return await accountSeedFromRoot(root, "code", index);
+          return await seedFromRoot(root, "code", index);
         } finally {
           root.fill(0);
         }
@@ -138,12 +190,12 @@ export function GloamAccountOpen({ returning, action }: { returning: boolean; ac
     });
 
   const openWithPasskey = () =>
-    void sol.setUp({
+    open({
       first: "Confirm with your passkey",
       seed: async (index) => {
-        const root = await passkeyRoot({ rpId: embeddedRpId(window.location.hostname), credentialIds: gloam.passkeys });
+        const root = await passkeyRoot({ rpId: embeddedRpId(window.location.hostname), credentialIds: passkeys });
         try {
-          return await accountSeedFromRoot(root, "passkey", index);
+          return await seedFromRoot(root, "passkey", index);
         } finally {
           root.fill(0);
         }

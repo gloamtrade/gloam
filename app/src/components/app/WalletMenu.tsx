@@ -32,6 +32,7 @@ import { walletDeclined } from "@/lib/walletErrors";
 import { embeddedAvailability, onEmbeddedAvailability, openEmbeddedSheet, signOutEmbedded } from "@/lib/turnkeyBridge";
 import { forgetClaim } from "@/lib/claimLinkStore";
 import { useNetwork } from "./NetworkProvider";
+import { STARKNET_NETWORK } from "@/lib/starknetPrivacy/config";
 import { SolanaWalletMenu } from "./SolanaWalletMenu";
 import { ExitGlyph, GearGlyph, GridGlyph, SendGlyph } from "./MenuGlyphs";
 import { shortSol } from "./SolanaAccount";
@@ -53,6 +54,10 @@ const WalletConnectSheet = dynamic(() => import("./WalletConnectSheet").then((m)
  * sidebar, `.gl-mobilebar` means compact, anything else is inline).
  */
 export type WalletMenuVariant = "sidebar" | "compact" | "inline";
+
+/** What the wallet control says it is on while Starknet is picked. */
+const STARKNET_LABEL = STARKNET_NETWORK === "mainnet" ? "Starknet" : STARKNET_NETWORK === "sepolia" ? "Starknet Sepolia" : "Starknet devnet";
+const STARKNET_LABEL_FULL = STARKNET_NETWORK === "mainnet" ? "Starknet mainnet" : STARKNET_LABEL;
 
 function detectVariant(el: HTMLElement | null): WalletMenuVariant {
   if (!el) return "inline";
@@ -97,7 +102,7 @@ function EvmWalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
     forgetClaim();
     disconnect();
   };
-  const { network } = useNetwork();
+  const { network, starknet } = useNetwork();
   const { switchChainAsync, isPending: switching } = useSwitchChain();
   // Gloam wallets: offered while the Turnkey kit can work on this page.
   const embeddedState = useSyncExternalStore(onEmbeddedAvailability, embeddedAvailability, () => "starting" as const);
@@ -387,7 +392,10 @@ function EvmWalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
     );
   }
 
-  const wrong = chainId !== network.chainId;
+  // On Starknet the wallet's own chain doesn't matter: it only opens the private account there.
+  const wrong = !starknet && chainId !== network.chainId;
+  const shownOn = starknet ? STARKNET_LABEL : network.label;
+  const shownOnFull = starknet ? STARKNET_LABEL_FULL : `${network.label}${network.testnet ? " testnet" : " mainnet"}`;
 
   // A passkey (Tempo Wallet) account cannot move to Robinhood Chain: offer a
   // browser wallet there instead of a network switch that cannot succeed.
@@ -487,7 +495,7 @@ function EvmWalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
               {shortAddress(address)}
             </span>
             <span className="mt-0.5 block truncate text-[12px] leading-tight text-mute">
-              {network.label}
+              {shownOn}
             </span>
           </span>
           <UpDownGlyph className="shrink-0 text-faint" />
@@ -529,7 +537,7 @@ function EvmWalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
                 {shortAddress(address, 6)}
               </p>
               <p className="mt-0.5 truncate text-[12px] text-mute">
-                {network.label}{network.testnet ? " testnet" : " mainnet"}
+                {shownOnFull}
               </p>
             </div>
             <button
@@ -543,7 +551,7 @@ function EvmWalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
             </button>
           </div>
           {embedded && <GloamSolanaRow />}
-          {isTempoFeeChain(network.chainId) && !demo && (
+          {!starknet && isTempoFeeChain(network.chainId) && !demo && (
             <TempoFeeRow
               address={address as Address}
               passkey={isTempoWallet(connector)}

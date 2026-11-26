@@ -53,3 +53,10 @@ export const STARKNET_PROVE_METHODS = new Set(["starknet_proveTransaction", "sta
 
 /** A prove request body is capped at 1 MiB (Starkscan's own cap). */
 export const STARKNET_PROVE_MAX_BODY = 1024 * 1024;
+
+/** OHTTP media types (RFC 9458) the discovery relay (/api/starknet/discovery) passes. */
+export const STARKNET_OHTTP_REQUEST = "message/ohttp-req";
+export const STARKNET_OHTTP_RESPONSE = "message/ohttp-res";
+export const STARKNET_OHTTP_KEYS = "application/ohttp-keys";
+/** A sealed discovery request is small (an address, a viewing key, a cursor). */
+export const STARKNET_DISCOVERY_MAX_BODY = 64 * 1024;

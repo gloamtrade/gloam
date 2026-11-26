@@ -34,11 +34,16 @@ export function poolContract(provider: RpcProvider, pool: string) {
   return new Contract({ abi: PrivacyPoolABI, address: pool, providerOrAccount: provider }).typedv2(PrivacyPoolABI);
 }
 
-/** Where this network's notes and channels are read from. */
-export function discoveryFor(cfg: StarknetNetworkConfig, provider: RpcProvider): DiscoveryProviderInterface {
+/**
+ * Where this network's notes and channels are read from. `serviceUrl` replaces
+ * the hosted discovery service's own URL: the page passes Gloam's relay
+ * (STARKNET_PROXY_PATHS.discovery), so requests sealed to the service pass
+ * through Gloam and the service never sees who asked.
+ */
+export function discoveryFor(cfg: StarknetNetworkConfig, provider: RpcProvider, serviceUrl?: string): DiscoveryProviderInterface {
   if (!cfg.pool) throw new Error(`No Starknet privacy pool is set for ${cfg.network}.`);
   if (cfg.discovery.kind === "indexer") {
-    return new IndexerDiscoveryProvider(cfg.discovery.url, cfg.pool, { ohttp: true });
+    return new IndexerDiscoveryProvider(serviceUrl ?? cfg.discovery.url, cfg.pool, { ohttp: true });
   }
   return new ContractDiscoveryProvider(poolContract(provider, cfg.pool) as never);
 }
