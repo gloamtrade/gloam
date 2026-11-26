@@ -73,7 +73,7 @@ const nodeAnswer: (call: { method: string; params: unknown; id: unknown }) => un
   if (c.method === "starknet_specVersion") return "0.10.0";
   if (c.method === "starknet_chainId") return "0x534e5f4d41494e";
   if (c.method === "starknet_getNonce") return "0x7";
-  if (c.method === "starknet_call") return ["0x4563918244f40000", "0x0"]; // 5 STRK
+  if (c.method === "starknet_call") return ["0x2b5e3af16b1880000", "0x0"]; // 50 STRK
   if (c.method === "starknet_blockNumber") return 1234;
   return null;
 };
@@ -248,9 +248,48 @@ const PROOF = { proofFacts: ["0x1", "0x2"], proof: "QUJD" };
   r = await server.relaySend({ calls: [applyCall([to(OUT, 250_000), to(RELAY, 10_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(r.ok && r.decision.kind === "apply" && f.sent.length === 1, "a cash out paying the fee is sent");
   eq(f.sent[0]?.proof, PROOF, "with its proof");
-  f = fakeChain({ poolFee: 1n });
-  r = await server.relaySend({ calls: [applyCall([to(OUT, 250_000), to(RELAY, 10_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
-  ok(!r.ok && r.code === "pool_fee_on" && r.status === 503 && f.sent.length === 0, "while the pool charges its own STRK fee, nothing is sent");
+  eq(f.sent[0]?.calls.length, 1, "with no pool fee, the apply goes alone");
+  const STRK_FEE = 4_500_000_000_000_000_000n;
+  f = fakeChain({ poolFee: STRK_FEE });
+  const cashOut = applyCall([to(OUT, 250_000), to(RELAY, 10_000)]);
+  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(r.ok && f.sent.length === 1, "the pool's own STRK fee is paid by the relay");
+  const strkApprove = (amount: bigint) => ({ contractAddress: config.STARKNET_STRK, entrypoint: "approve", calldata: [num.toHex(BigInt(POOL)), num.toHex(amount), "0x0"] });
+  eq(f.sent[0]?.calls, [strkApprove(STRK_FEE), cashOut, strkApprove(0n)], "in one transaction: approve exactly the fee, apply, approve 0");
+  f = fakeChain({ poolFee: 11n * 10n ** 18n });
+  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.code === "pool_fee_high" && r.status === 503 && f.sent.length === 0, "a pool fee over the cap (10 STRK by default): paused, nothing sent");
+  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env: { ...env, STARKNET_MAX_POOL_FEE: "20" }, now: NOW, rate: okRate });
+  ok(r.ok && f.sent.length === 1, "a higher cap set in the environment lets it through");
+
+  // The canonical pool: pinned to its class, and a deposit's screening attestation checked before paying.
+  const PIN = "0xc1a55";
+  const pinned = { ...cfg, poolClassHash: PIN };
+  const poolKey = num.toHex(BigInt(POOL));
+  const from = (addr: string, amount: number) => new CairoCustomEnum({ TransferFrom: { from_addr: addr, token: USDC, amount } });
+  const attested = (c: Call, at: number): Call => ({ ...c, calldata: [...(c.calldata as string[]).slice(0, -1), "0x0", num.toHex(at), "0x123", "0x456"] });
+  const add = applyCall([from(acct, 1_000_000), to(RELAY, 10_000)]);
+  const nowS = NOW / 1000;
+  f = fakeChain({ classes: { [poolKey]: PIN } });
+  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(r.ok && f.sent.length === 1, "the pool still on its pinned class: sent");
+  f = fakeChain({ classes: { [poolKey]: "0xbad" } });
+  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.code === "pool_changed" && r.status === 503 && f.sent.length === 0, "the pool's code changed: paused until Gloam checks it");
+  f = fakeChain();
+  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.code === "upstream_unavailable" && f.sent.length === 0, "the pool's class unread: nothing sent");
+  f = fakeChain({ classes: { [poolKey]: PIN } });
+  r = await server.relaySend({ calls: [add], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.code === "screening_missing" && f.sent.length === 0, "a deposit with no screening attestation is refused before paying");
+  r = await server.relaySend({ calls: [attested(add, nowS - 30)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(r.ok && f.sent.length === 1, "a deposit with a fresh attestation is sent");
+  r = await server.relaySend({ calls: [attested(add, nowS - server.SCREENING_SEND_WINDOW_S - 1)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.code === "screening_expired" && r.status === 409 && f.sent.length === 1, "a stale attestation is refused, so the page proves again");
+  r = await server.relaySend({ calls: [attested(cashOut, nowS - 30)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && /unexpected_screening/.test(r.message) && f.sent.length === 1, "an attestation on a move with no deposit is refused (the pool would revert)");
+  r = await server.relaySend({ calls: [add], proof: PROOF, cfg, relay: RELAY, chain: fakeChain().chain, env, now: NOW, rate: okRate });
+  ok(r.ok, "a pool that isn't pinned isn't held to the canonical pool's screening rule");
 
   f = fakeChain();
   r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async () => "limited" });
@@ -293,7 +332,7 @@ const PROOF = { proofFacts: ["0x1", "0x2"], proof: "QUJD" };
   server.starknetRelayChains.make = make;
 
   const get = (await (await relayRoute.GET()).json()) as { on: boolean; funded: boolean; relayer: string; network: string; pool: string; fee: Record<string, string> };
-  eq([get.on, get.funded, get.relayer, get.network, get.pool], [true, true, RELAY, "mainnet", POOL], "GET: on, funded (5 STRK), its address, the network and the pool");
+  eq([get.on, get.funded, get.relayer, get.network, get.pool], [true, true, RELAY, "mainnet", POOL], "GET: on, funded (50 STRK, over the 30 STRK line), its address, the network and the pool");
   eq(get.fee[num.toHex(BigInt(USDC))], "10000", "GET: the fee per token");
   ok(!JSON.stringify(get).includes(SECRET.slice(2)), "GET never shows the key");
 }
@@ -329,7 +368,33 @@ const RESULT = { proof: "UFJPT0Y=", proof_facts: ["0xa", "0xb"], l2_to_l1_messag
   eq(((await res.json()) as { result: unknown }).result, RESULT, "mainnet proves through Starkscan, answered in the proving service's shape");
   polls = 0;
   await proveRoute.POST(post("/api/starknet/prove", call));
-  ok(/^gloam-[0-9a-f]{48}$/.test(keys[0]!) && keys[0] === keys[1], "the same request carries the same Idempotency-Key");
+  ok(/^gloam-[0-9a-f]{48}-r0$/.test(keys[0]!) && keys[0] === keys[1], "the same request carries the same Idempotency-Key");
+
+  // Only the pool's own proof invocations spend Gloam's proof quota.
+  starkscan = () => {
+    throw new Error("Starkscan must not be called");
+  };
+  res = await proveRoute.POST(post("/api/starknet/prove", { ...call, params: { ...call.params, transaction: { ...TX, sender_address: "0x5" } } }));
+  eq(((await res.json()) as { error: { code: number } }).error.code, -32602, "a transaction from anyone but the pool is refused before Starkscan");
+
+  // Today's quota used up: a plain busy answer the SDK does not retry (only -32005 is retried).
+  let posts = 0;
+  starkscan = () => {
+    posts++;
+    return new Response(JSON.stringify({ error: { code: "prover_daily_budget_exhausted", message: "Out of proofs for this UTC day" } }), { status: 429, headers: { "Retry-After": "3600" } });
+  };
+  res = await proveRoute.POST(post("/api/starknet/prove", call));
+  let e = ((await res.json()) as { error: { code: number; message: string } }).error;
+  eq([e.code, e.message, posts], [-32603, "Starknet is busy. Try again later.", 1], "quota used up: one request, a plain busy message, not retried");
+
+  // A failed job passes the prover's own code on (10000: screening refused the deposit).
+  starkscan = (url, init) =>
+    (init.method ?? "GET") === "POST"
+      ? new Response(JSON.stringify({ jobId: "job_2", status: "queued", pollAfterSeconds: 0.001 }), { status: 202 })
+      : new Response(JSON.stringify({ jobId: "job_2", status: "failed", terminal: true, error: { source: "prover", code: 10000, message: "Transaction rejected", data: "screening_blocked" } }), { status: 200 });
+  res = await proveRoute.POST(post("/api/starknet/prove", { ...call, params: { ...call.params, block_id: { block_number: 101 } } }));
+  e = ((await res.json()) as { error: { code: number; message: string; data?: unknown } }).error as never;
+  eq([(e as { code: number }).code, (e as { data?: unknown }).data], [10000, "screening_blocked"], "a screening refusal keeps its code and reason for the SDK");
 
   starkscan = () => new Response(JSON.stringify({ error: { message: "no prove scope" } }), { status: 403 });
   res = await proveRoute.POST(post("/api/starknet/prove", call));
@@ -369,6 +434,41 @@ const RESULT = { proof: "UFJPT0Y=", proof_facts: ["0xa", "0xb"], l2_to_l1_messag
   eq(await code(scan.starkscanProve(opts(() => job("queued"), 1), 1, TX)), "timeout", "a job that never finishes times out");
   eq(await code(scan.starkscanProve(opts((u, i) => (i.method === "POST" ? job("queued") : job("succeeded", { result: { proof: 5 } }))), 1, TX)), "bad_answer", "a proof that can't be read is refused");
   eq(await code(scan.starkscanProve({ ...opts(() => job("queued")), apiKey: "" }, 1, TX)), "no_key", "no key, no request");
+  eq(await code(scan.starkscanProve(opts(() => new Response(JSON.stringify({ error: { code: "prover_key_concurrency" } }), { status: 429 })), 1, TX)), "unavailable", "too many proofs at once: busy, so the SDK retries");
+  eq(await code(scan.starkscanProve(opts(() => new Response(JSON.stringify({ error: { code: "prover_daily_budget_exhausted" } }), { status: 429 })), 1, TX)), "quota", "the day's quota used up says so");
+  const failed = await scan.starkscanProve(opts((u, i) => (i.method === "POST" ? job("queued") : job("failed", { error: { code: 55, message: "Account validation failed" } }))), 1, TX).catch((x: unknown) => x as InstanceType<typeof scan.StarkscanProveError>);
+  eq(failed.prover, { code: 55 }, "a failed job carries the prover's own code");
+
+  // A result Starkscan already handed over can't come back: the next round proves again under a new key.
+  const rounds = scan.memoryRounds();
+  const idems: string[] = [];
+  let given = false;
+  const again = await scan.starkscanProve(
+    {
+      ...opts((u, i) => {
+        if (i.method === "POST") {
+          const k = new Headers(i.headers).get("Idempotency-Key") ?? "";
+          idems.push(k);
+          // The first round's job already gave its result away.
+          if (k.endsWith("-r0")) return job("succeeded", { terminal: true, resultUnavailableReason: "delivered_or_expired" });
+          return job("queued");
+        }
+        given = true;
+        return job("succeeded", { terminal: true, result: RESULT });
+      }),
+      rounds,
+    },
+    1,
+    TX
+  );
+  eq(again, RESULT, "a new round proves again");
+  ok(given && idems.length === 2 && idems[0]!.endsWith("-r0") && idems[1]!.endsWith("-r1") && idems[0]!.slice(0, -3) === idems[1]!.slice(0, -3), "under the same body's key, next round");
+
+  // The answer is cut to what the SDK reads; a deposit's attestation is kept.
+  const SIG = { issued_at: 1_795_000_000, sig_r: "0x1", sig_s: "0x2" };
+  eq(scan.asResult({ ...RESULT, extra: 1, additional_data: { signature: { ...SIG, more: true } } }), { ...RESULT, additional_data: { signature: SIG } }, "extra fields dropped, the attestation kept");
+  eq(scan.asResult({ ...RESULT, additional_data: { signature: { issued_at: "soon", sig_r: "0x1", sig_s: "0x2" } } }), null, "a malformed attestation is refused");
+  eq(scan.asResult({ ...RESULT, l2_to_l1_messages: [{ from_address: POOL, payload: [] }] }), null, "a message with no to_address is refused");
 
   const provider = new scan.StarkscanProofProvider(
     opts((u, i) => (i.method === "POST" ? job("queued") : job("succeeded", { result: RESULT }))),

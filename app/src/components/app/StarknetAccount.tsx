@@ -94,6 +94,8 @@ function say(e: unknown): string {
   const m = e instanceof Error ? e.message : String(e);
   if (/user rejected|denied|rejected the request/i.test(m)) return "The wallet did not sign. Try again when you're ready.";
   if (/rate.?limit|too many/i.test(m)) return "Too many requests. Try again in a little while.";
+  // Gloam's daily proof quota on Starknet is used up (lib/starknetPrivacy/starkscanProver).
+  if (/Starknet is busy/i.test(m)) return "Starknet is busy. Try again later.";
   return m.length > 220 ? `${m.slice(0, 217)}...` : m;
 }
 

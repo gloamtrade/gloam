@@ -35,7 +35,7 @@ export type StarkscanProveResult = {
   additional_data?: { signature?: { issued_at: number; sig_r: string; sig_s: string } };
 };
 
-export type StarkscanErrorCode = "no_key" | "no_scope" | "relay_off" | "rejected" | "failed" | "timeout" | "bad_answer" | "unavailable" | "lost";
+export type StarkscanErrorCode = "no_key" | "no_scope" | "relay_off" | "rejected" | "failed" | "timeout" | "bad_answer" | "unavailable" | "lost" | "quota";
 
 export class StarkscanProveError extends Error {
   override readonly name = "StarkscanProveError";
@@ -172,7 +172,8 @@ export async function starkscanProve(opts: StarkscanOptions, blockId: ProvingBlo
     const code = String((j?.error as { code?: unknown } | undefined)?.code ?? "");
     if (status === 403) return new StarkscanProveError("no_scope", "Gloam's Starkscan key can't prove yet.");
     if (status === 404) return new StarkscanProveError("relay_off", "Starkscan's prover is not on right now.");
-    if (status === 429 && code === "prover_daily_budget_exhausted") return new StarkscanProveError("failed", "Proving on Starknet is at today's limit. Try again tomorrow.");
+    // Gloam's daily proof quota is used up: say busy, and never retry into it (it resets at UTC midnight).
+    if (status === 429 && code === "prover_daily_budget_exhausted") return new StarkscanProveError("quota", "Starknet is busy. Try again later.");
     if (status === 429 || status === 503) return new StarkscanProveError("unavailable", "The prover is busy. Try again shortly.");
     if (status >= 400 && status < 500) return new StarkscanProveError("rejected", j ? jobError(j) : `The prover refused it (${status}).`);
     return new StarkscanProveError("unavailable", `The prover answered ${status}.`);
