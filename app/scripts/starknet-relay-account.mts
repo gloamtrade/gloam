@@ -31,7 +31,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { Account, CallData, RpcProvider, ec, hash, num } from "starknet";
+import { Account, CallData, RpcProvider, addAddressPadding, ec, hash, num } from "starknet";
 import { STARKNET_ACCOUNT_CLASS_HASH, STARKNET_STRK, starknetConfig, type StarknetNetwork } from "../src/lib/starknetPrivacy/config";
 
 const env = process.env as Record<string, string | undefined>;
@@ -58,8 +58,9 @@ function newSecret(): string {
   }
 }
 
+/** The account's address, padded to 64 hex digits (some exchanges refuse a shorter one). */
 function addressFor(publicKey: string): string {
-  return num.toHex(hash.calculateContractAddressFromHash(publicKey, STARKNET_ACCOUNT_CLASS_HASH, CallData.compile([publicKey]), 0));
+  return addAddressPadding(num.toHex(hash.calculateContractAddressFromHash(publicKey, STARKNET_ACCOUNT_CLASS_HASH, CallData.compile([publicKey]), 0)));
 }
 
 function load(): KeyFile {
