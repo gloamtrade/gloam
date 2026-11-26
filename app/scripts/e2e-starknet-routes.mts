@@ -44,6 +44,15 @@ const open = async (seed: string) => {
   return s;
 };
 
+// The pool's own STRK fee, if it asks one (scratch: turn it on with set_fee_amount to test the relay paying it).
+const node0 = new RpcProvider({ nodeUrl: DEVNET, batch: 0 });
+const poolFee = BigInt((await node0.callContract({ contractAddress: cfg.pool!, entrypoint: "get_fee_amount", calldata: [] }))[0]!);
+const collector = (await node0.callContract({ contractAddress: cfg.pool!, entrypoint: "get_fee_collector", calldata: [] }))[0]!;
+const STRK_TOKEN = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
+const strkOf = async (a: string) => BigInt((await node0.callContract({ contractAddress: STRK_TOKEN, entrypoint: "balance_of", calldata: [a] }))[0]!);
+const collected0 = BigInt(collector) === 0n ? 0n : await strkOf(collector);
+console.log(`the pool asks ${poolFee} STRK base units per apply`);
+
 console.log("opening two accounts through the routes");
 const RUN = process.env.RUN_ID ?? String(Date.now());
 const alice = await open(`e2e-starknet-routes-alice-${RUN}`);
@@ -69,15 +78,22 @@ await alice.pay(bob.address, token, (3n * ONE) / 10n, log("pay"));
 
 console.log("bob cashes out 0.1");
 const OUT = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abce";
+const out0 = BigInt((await node.callContract({ contractAddress: token.address, entrypoint: "balance_of", calldata: [OUT] }))[0]!);
 await bob.cashOut(OUT, token, ONE / 10n, log("cashout"));
 
 eq(await alice.privateBalance(token), (7n * ONE) / 10n, "alice keeps 0.7 privately");
 eq(await bob.privateBalance(token), (2n * ONE) / 10n, "bob keeps 0.2 privately");
 const out = await node.callContract({ contractAddress: token.address, entrypoint: "balance_of", calldata: [OUT] });
-eq(BigInt(out[0]!), ONE / 10n, "the cash-out address got 0.1");
+eq(BigInt(out[0]!) - out0, ONE / 10n, "the cash-out address got 0.1");
 const STRK = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
 for (const [n, s] of [["alice", alice], ["bob", bob]] as const) {
   const r = await node.callContract({ contractAddress: STRK, entrypoint: "balance_of", calldata: [s.address] });
   eq(BigInt(r[0]!), 0n, `${n} never held STRK`);
+}
+if (poolFee > 0n) {
+  // Five applies: two opens, an add, a payment, a cash out. The relay paid each one's fee and left no allowance.
+  eq((await strkOf(collector)) - collected0, 5n * poolFee, "the relay paid the pool's STRK fee on each of the five applies");
+  const allowance = await node.callContract({ contractAddress: STRK, entrypoint: "allowance", calldata: [relayInfo.relayer!, cfg.pool!] });
+  eq(BigInt(allowance[0]!), 0n, "and left the pool no STRK allowance");
 }
 console.log(`[e2e-starknet-routes] PASS, ${checks} checks`);
