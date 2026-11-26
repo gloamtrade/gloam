@@ -198,7 +198,7 @@ test("a token the router doesn't list is refused with a plain line, and the rest
   assert.equal(swapLinkSummary(l), "Swap 100 USDG");
 });
 
-test("a real token Gloam lists but the router doesn't swap is refused (GRIFT, Add only)", () => {
+test("a real token the router doesn't swap is refused (GRIFT)", () => {
   const l = read({ from: "USDG", to: "GRIFT", chain: RH });
   assert.equal(l.to, null);
   assert.equal(l.problems.length, 1);

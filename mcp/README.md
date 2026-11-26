@@ -11,7 +11,7 @@ Every tool that touches a chain takes a `network`:
 | `network` | What it is | Assets | Keys |
 | --- | --- | --- | --- |
 | `tempo-mainnet` | Tempo mainnet | USDC.e, pathUSD, USDT0, OUSD | Final ceremony keys |
-| `robinhood-mainnet` | Robinhood Chain mainnet | USDG, GLOAM, PONS, CASHCAT, ETH, AI, ORBIO; GRIFT once its timelocked limit lands | Final ceremony keys |
+| `robinhood-mainnet` | Robinhood Chain mainnet | USDG, GLOAM, PONS, CASHCAT, ETH, AI, ORBIO | Final ceremony keys |
 | `base-mainnet` | Base mainnet | USDC, EURC, USDT, ETH | Final ceremony keys |
 | `ethereum-mainnet` | Ethereum mainnet | USDC, USDT, USDG, PYUSD, EURC, ETH | Final ceremony keys |
 | `tempo` | Tempo testnet (Moderato) | PathUSD and other test stablecoins | Dev keys |
@@ -296,7 +296,7 @@ Assets are named by symbol or by `0x` token address (with `decimals` for a token
 | Network | Symbols |
 | --- | --- |
 | `tempo-mainnet` | `USDC.e`, `pathUSD`, `USDT0`, `OUSD` |
-| `robinhood-mainnet` | `USDG`, `GLOAM`, `GRIFT`, `PONS`, `CASHCAT`, `AI`, `ORBIO`, `ETH` |
+| `robinhood-mainnet` | `USDG`, `GLOAM`, `PONS`, `CASHCAT`, `AI`, `ORBIO`, `ETH` |
 | `tempo` (testnet) | `PathUSD`, `OUSD`, `AlphaUSD`, `BetaUSD`, `ThetaUSD` |
 | `robinhood` (testnet) | `ETH`, `USDG` |
 | `base-mainnet` | `USDC`, `EURC`, `USDT`, `ETH` |

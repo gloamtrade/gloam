@@ -455,7 +455,7 @@ await test("the route: only Gloam's own checkable tokens, on the three chains; b
   for (const q of ["chain=tempo&token=" + PONS, "chain=robinhood&token=0x123", "chain=robinhood", "token=" + PONS, `chain=robinhood&token=0x${"0".repeat(40)}`]) {
     assert.equal((await get(q)).status, 400, q);
   }
-  for (const t of [USDG_RH, WETH_RH, NVDA_RH, OUTSIDER, WALLET]) {
+  for (const t of [GRIFT, USDG_RH, WETH_RH, NVDA_RH, OUTSIDER, WALLET]) {
     const res = await get(`chain=robinhood&token=${t}`);
     assert.equal(res.status, 404, t);
     assert.deepEqual(await res.json(), { error: "not_offered" });
@@ -687,7 +687,7 @@ await test("the key is never in a log line", () => {
 // ---------------------------------------------------------------- the card's side
 
 await test("which tokens get a check: Gloam's own tokens on Robinhood Chain, Base and Ethereum, never stablecoins, stocks or wrapped ETH", () => {
-  for (const t of [GLOAM, PONS, CASHCAT, ORBIO, AI, VIRTUAL, GRIFT]) assert.ok(ti.checkableToken(4663, t), t);
+  for (const t of [GLOAM, PONS, CASHCAT, ORBIO, AI, VIRTUAL]) assert.ok(ti.checkableToken(4663, t), t);
   assert.ok(ti.checkableToken(4663, GLOAM.toUpperCase().replace("0X", "0x")), "any case");
   for (const t of [USDG_RH, WETH_RH, NVDA_RH, "0x0000000000000000000000000000000000000000", OUTSIDER, null, undefined]) assert.equal(ti.checkableToken(4663, t), null, String(t));
   // the BDX OFT on Base and Ethereum is not Beldex's and is no longer listed there

@@ -60,7 +60,6 @@ import {
   RH_MAINNET_CHAIN_ID,
   RH_MAINNET_AI,
   RH_MAINNET_CASHCAT,
-  RH_MAINNET_GRIFT,
   RH_MAINNET_ORBIO,
   RH_MAINNET_PONS,
   RH_MAINNET_USDG,
@@ -215,7 +214,6 @@ export const KNOWN_ASSETS: KnownAsset[] = [
   // Mainnet: exactly what the mainnet pools list.
   { symbol: "USDG", chainId: RH_MAINNET_CHAIN_ID, address: RH_MAINNET_USDG, decimals: 6, stable: true },
   { symbol: "GLOAM", chainId: RH_MAINNET_CHAIN_ID, address: GLOAM_TOKEN, decimals: 18, stable: false },
-  { symbol: "GRIFT", chainId: RH_MAINNET_CHAIN_ID, address: RH_MAINNET_GRIFT, decimals: 18, stable: false },
   { symbol: "ETH", chainId: RH_MAINNET_CHAIN_ID, address: NATIVE_ASSET, decimals: 18, stable: false },
   { symbol: "PONS", chainId: RH_MAINNET_CHAIN_ID, address: RH_MAINNET_PONS, decimals: 18, stable: false },
   { symbol: "CASHCAT", chainId: RH_MAINNET_CHAIN_ID, address: RH_MAINNET_CASHCAT, decimals: 18, stable: false },

@@ -101,12 +101,11 @@ check("no BDX on Base or Ethereum, and no limit-gated token there", () => {
   for (const id of [4217, 84532, 11155111, 46630, 42431]) assert.deepEqual(limitGatedTokensFor(id), []);
 });
 
-check("GRIFT, AI and ORBIO are listed on Robinhood Chain mainnet only, gated by their live limits", () => {
+check("AI and ORBIO are listed on Robinhood Chain mainnet only, gated by their live limits", () => {
   const gated = limitGatedTokensFor(4663);
   assert.deepEqual(
     gated.map((t) => [t.symbol, t.address, t.decimals, t.kind, t.coingecko]),
     [
-      ["GRIFT", "0x9f4BA41F91a59A34e17eE8C9EB3A51363B11aBD5", 18, "token", "grift-world"],
       ["AI", "0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18", 18, "token", "artificial-inu-3"],
       ["ORBIO", "0xAa07A0e9209e16aC99708C3EC70159c6eF3128A3", 18, "token", "orbio-so"],
     ]
@@ -114,9 +113,9 @@ check("GRIFT, AI and ORBIO are listed on Robinhood Chain mainnet only, gated by 
   for (const t of gated) assert.ok(walletDisplayTokensFor(4663).some((x) => x.id === t.id), `the wallet card reads ${t.symbol}`);
   assert.equal(openGatedFromReads(gated, true, gated.map(() => [0n, 0n])).size, 0, "closed while a limit is 0");
   const max = (1n << 128n) - 1n;
-  const grift = gated[0]!.address.toLowerCase();
-  const justGrift = openGatedFromReads(gated, true, [[max, max], [0n, 0n], undefined]);
-  assert.deepEqual([...justGrift], [grift], "each opens on its own, at no limit too, and a failed read stays closed");
+  const ai = gated[0]!.address.toLowerCase();
+  const justAi = openGatedFromReads(gated, true, [[max, max], undefined]);
+  assert.deepEqual([...justAi], [ai], "each opens on its own, at no limit too, and a failed read stays closed");
 });
 
 check("PONS and CASHCAT are open on Robinhood Chain mainnet now: Add takes them with no live read", () => {
