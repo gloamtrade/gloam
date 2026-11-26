@@ -227,7 +227,7 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!session || !on) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the balances are read from Starknet after the account opens; they land once the reads answer
+    // The balances are read from Starknet after the account opens; they land once the reads answer.
     void readBalances(session).catch(() => {});
   }, [session, on, readBalances]);
 
