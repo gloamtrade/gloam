@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 import { readCappedBody } from "@/lib/cspReport";
-import { STARKNET_ENABLED, STARKNET_NETWORK } from "@/lib/starknetPrivacy/config";
+import { STARKNET_ENABLED, STARKNET_NETWORK, sameStarknetAddress } from "@/lib/starknetPrivacy/config";
 import { STARKNET_PROVE_MAX_BODY, STARKNET_PROVE_METHODS } from "@/lib/starknetPrivacy/proxyPolicy";
 import { StarkscanProveError, starkscanProve } from "@/lib/starknetPrivacy/starkscanProver";
-import { serverConfig, starknetProveRate, starknetUpstream } from "@/lib/starknetPrivacy/server";
+import { serverConfig, starknetProveRate, starknetUpstream, starkscanRounds } from "@/lib/starknetPrivacy/server";
 import { devnetMockProve } from "@/lib/starknetPrivacy/devnetProver";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// a proof takes a few seconds; Starkscan's job API is polled within this
-export const maxDuration = 60;
+// Starkscan publishes no proving time: its job is polled for up to STARKSCAN_WAIT_MS, then
+// the SDK's retry (same body, same job) picks it up again.
+export const maxDuration = 300;
+const STARKSCAN_WAIT_MS = 270_000;
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -50,12 +52,15 @@ export async function POST(req: Request) {
 
   const p = call.params as { block_id?: unknown; transaction?: unknown } | undefined;
   if (!p || typeof p !== "object" || !p.transaction || typeof p.transaction !== "object") return rpcError(call.id, -32602, "Invalid params");
+  // Only the pool's own proof invocations: Gloam's prover budget proves nothing else.
+  const cfg = serverConfig();
+  const sender = (p.transaction as { sender_address?: unknown }).sender_address;
+  if (!cfg.pool || typeof sender !== "string" || !sameStarknetAddress(sender, cfg.pool)) return rpcError(call.id, -32602, "Only the privacy pool's transactions are proved here.");
 
   const rate = await starknetProveRate(req);
   if (rate === "unavailable") return rpcError(call.id, -32005, "Proving is paused for a moment. Try again shortly.", 503);
   if (rate === "limited") return rpcError(call.id, -32005, "Too many proofs. Try again in a little while.", 429);
 
-  const cfg = serverConfig();
   const proverUrl = cfg.proverUrl;
   try {
     if (proverUrl) {
@@ -73,7 +78,7 @@ export async function POST(req: Request) {
     if (STARKNET_NETWORK === "mainnet") {
       const key = (process.env.STARKSCAN_API_KEY ?? "").trim();
       if (!key || !cfg.starkscanProveUrl) return rpcError(call.id, -32603, "Proving on Starknet isn't set up yet.");
-      const result = await starkscanProve({ url: cfg.starkscanProveUrl, apiKey: key }, p.block_id as never, p.transaction);
+      const result = await starkscanProve({ url: cfg.starkscanProveUrl, apiKey: key, timeoutMs: STARKSCAN_WAIT_MS, rounds: starkscanRounds() }, p.block_id as never, p.transaction);
       return NextResponse.json({ jsonrpc: "2.0", id: call.id ?? null, result }, { headers: NO_STORE });
     }
     if (STARKNET_NETWORK === "devnet") {
@@ -83,7 +88,10 @@ export async function POST(req: Request) {
     return rpcError(call.id, -32603, "Proving on Starknet Sepolia isn't set up yet.");
   } catch (e) {
     if (e instanceof StarkscanProveError) {
-      const code = e.code === "unavailable" ? -32005 : e.code === "rejected" ? 10000 : -32603;
+      // The prover's own code on a failed job (10000: screening refused the deposit), so the SDK names it.
+      if (e.prover) return NextResponse.json({ jsonrpc: "2.0", id: call.id ?? null, error: { code: e.prover.code, message: e.message, ...(e.prover.data !== undefined ? { data: e.prover.data } : {}) } }, { headers: NO_STORE });
+      // Busy, or still proving: the SDK retries the same body, which finds the same job.
+      const code = e.code === "unavailable" || e.code === "timeout" ? -32005 : -32603;
       return rpcError(call.id, code, e.message);
     }
     const why = e instanceof Error ? e.message.replace(/\s+/g, " ").slice(0, 240) : "prove failed";

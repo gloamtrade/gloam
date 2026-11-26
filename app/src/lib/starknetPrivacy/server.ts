@@ -16,12 +16,16 @@ import "server-only";
  *  - STARKNET_MAX_APPROVE: the most one approve may allow, in whole tokens (default 10,000).
  *  - STARKNET_RELAY_FEE: what each proven transaction pays the relay, in whole
  *    tokens, withdrawn inside the proof (default 0: no fee).
+ *  - STARKNET_MAX_POOL_FEE: the most STRK the relay lets the pool take per
+ *    apply_actions, in whole STRK (default 10). Mainnet's pool asked 4.5 on
+ *    2026-11-26; above the cap the relay pauses instead of paying.
  */
 import { Account, RpcProvider, num, type Call } from "starknet";
 import { SharedCountUnavailable, addRateCount, clientIp } from "@/lib/mcpRemote/rateLimit";
 import { STARKNET_NETWORK, STARKNET_STRK, sameStarknetAddress, starknetConfig, type StarknetNetwork, type StarknetNetworkConfig } from "./config";
 import { accountAddress } from "./account";
 import { checkRelayCall, type RelayContext, type RelayDecision, type RelayProof } from "./relayPolicy";
+import type { StarkscanRounds } from "./starkscanProver";
 
 type Env = Record<string, string | undefined>;
 
@@ -69,9 +73,13 @@ export function relayContext(cfg: StarknetNetworkConfig, relay: string, env: Env
   return { cfg, relay, now: Math.floor(now / 1000), maxApprove, minFee: fee };
 }
 
-/** The relay is "low" below this much STRK: it says it is paused rather than fail sends. */
+/**
+ * The relay is "low" below this much STRK: it says it is paused rather than fail
+ * sends. On mainnet one proven move cost the relay about 7 STRK on 2026-11-26
+ * (the pool's 4.5 STRK fee and about 2.5 STRK of gas), so this is a few moves.
+ */
 export const STARKNET_RELAY_LOW_STRK: Record<StarknetNetwork, bigint> = {
-  mainnet: 5n * 10n ** 18n,
+  mainnet: 30n * 10n ** 18n,
   sepolia: 1n * 10n ** 18n,
   devnet: 1n,
 };
@@ -142,6 +150,18 @@ export function starknetRelayRate(req: Request, kind: "deploy" | "transact", now
   });
 }
 
+/**
+ * Where /api/starknet/prove keeps each request body's Starkscan round
+ * (lib/starknetPrivacy/starkscanProver): Redis when set, so a retry that lands
+ * on another instance finds the same job; this process otherwise.
+ */
+export function starkscanRounds(now = () => starknetRelayClock.now()): StarkscanRounds {
+  return {
+    get: (digest) => addRateCount(digest, "sn-prove-round", 0, now(), DAY),
+    next: (digest) => addRateCount(digest, "sn-prove-round", 1, now(), DAY),
+  };
+}
+
 /** One more proof from this IP. */
 export function starknetProveRate(req: Request, now = starknetRelayClock.now(), network: StarknetNetwork = STARKNET_NETWORK): Promise<StarknetRate> {
   const ip = clientIp(req);
@@ -192,10 +212,40 @@ export function relayChain(upstream: string, keys: { address: string; secret: st
   };
 }
 
+/** Most STRK the relay lets the pool take per apply_actions, base units. */
+export function maxPoolFee(env: Env = process.env): bigint {
+  return wholeToBase(env.STARKNET_MAX_POOL_FEE, 18) ?? 10n * 10n ** 18n;
+}
+
+/**
+ * A deposit's screening attestation must be at most this old when the relay
+ * sends it: the pool takes one under 300 seconds old at the block it lands in
+ * (DEPOSITOR_VALIDATION_MAX_AGE), and the rest is for inclusion.
+ */
+export const SCREENING_SEND_WINDOW_S = 240;
+
+const U128 = 1n << 128n;
+
+/**
+ * The apply call as the relay sends it: when the pool asks a STRK fee, between
+ * STRK.approve(pool, exactly that fee) and STRK.approve(pool, 0), in one
+ * transaction, so the pool can take that fee from the relay and nothing more.
+ */
+export function withPoolFee(apply: Call, pool: string, fee: bigint): Call[] {
+  if (fee <= 0n) return [apply];
+  const approve = (amount: bigint): Call => ({
+    contractAddress: STARKNET_STRK,
+    entrypoint: "approve",
+    calldata: [num.toHex(BigInt(pool)), num.toHex(amount % U128), num.toHex(amount / U128)],
+  });
+  return [approve(fee), apply, approve(0n)];
+}
+
 /**
  * Check a proposed call against the relay's rules, then the chain (an approve
- * only from a Gloam account; a pool whose own STRK fee is off), then send it.
- * `rate` charges the day's buckets only once everything else passed.
+ * only from a Gloam account; the pool still the class it was pinned to, its
+ * STRK fee under the cap, a deposit's screening attestation fresh), then send
+ * it. `rate` charges the day's buckets only once everything else passed.
  */
 export async function relaySend(input: {
   calls: Call[];
@@ -214,14 +264,29 @@ export async function relaySend(input: {
     const cls = await chain.classHashAt(decision.account);
     if (!cls || !sameStarknetAddress(cls, cfg.accountClassHash)) return { ok: false, status: 422, code: "not_relayable", message: "Gloam's relay only sends for a Gloam account." };
   }
+  let send = input.calls;
   if (decision.kind === "apply") {
+    if (cfg.poolClassHash) {
+      const cls = await chain.classHashAt(cfg.pool!);
+      if (!cls) return { ok: false, status: 502, code: "upstream_unavailable", message: "Starknet is slow to answer. Try again." };
+      // The pool's owner can change its code at once: a new class waits for Gloam to check it.
+      if (!sameStarknetAddress(cls, cfg.poolClassHash)) return { ok: false, status: 503, code: "pool_changed", message: "Private payments on Starknet are paused for a moment." };
+      // The canonical pool takes a screening attestation with a deposit and refuses one without.
+      const nowS = Math.floor((input.now ?? Date.now()) / 1000);
+      if (decision.deposits > 0 && decision.attestedAt === null) return { ok: false, status: 422, code: "screening_missing", message: "Starknet's deposit check didn't come back. Try again." };
+      if (decision.deposits === 0 && decision.attestedAt !== null) return { ok: false, status: 422, code: "not_relayable", message: "Gloam's relay doesn't send this: unexpected_screening." };
+      if (decision.attestedAt !== null && nowS - decision.attestedAt > SCREENING_SEND_WINDOW_S) {
+        return { ok: false, status: 409, code: "screening_expired", message: "That took too long to send. Try again." };
+      }
+    }
     let fee: bigint;
     try {
       fee = await chain.poolFeeAmount(cfg.pool!);
     } catch {
       return { ok: false, status: 502, code: "upstream_unavailable", message: "Starknet is slow to answer. Try again." };
     }
-    if (fee !== 0n) return { ok: false, status: 503, code: "pool_fee_on", message: "Private payments on Starknet are paused for a moment." };
+    if (fee > maxPoolFee(input.env)) return { ok: false, status: 503, code: "pool_fee_high", message: "Private payments on Starknet are paused for a moment." };
+    send = withPoolFee(input.calls[0]!, cfg.pool!, fee);
   }
   if (decision.kind === "deploy") {
     // Already deployed: nothing to pay for.
@@ -232,7 +297,7 @@ export async function relaySend(input: {
   if (rate === "unavailable") return { ok: false, status: 503, code: "relay_unavailable", message: "Gloam's Starknet relay is paused for a moment. Try again shortly." };
   if (rate === "limited") return { ok: false, status: 429, code: "rate_limited", message: "Too many requests. Try again in a little while." };
   try {
-    const txHash = await chain.send(input.calls, input.proof);
+    const txHash = await chain.send(send, input.proof);
     return { ok: true, txHash: num.toHex(BigInt(txHash)), decision };
   } catch (e) {
     // The node's reason, cut short; never the relay's key or the request.

@@ -74,12 +74,14 @@ export class StarknetSession {
     if (!cfg.pool) throw new Error(`No Starknet privacy pool is set for ${cfg.network}.`);
     const rpcUrl = `${origin}${STARKNET_PROXY_PATHS.rpc}`;
     this.provider = starknetProvider(rpcUrl);
+    // A proof can take minutes on mainnet: the route waits up to 270 s, then says busy, and a retry finds the same job.
     const prover = new ProvingServiceProofProvider(`${origin}${STARKNET_PROXY_PATHS.prove}`, cfg.chainId as constants.StarknetChainId, {
       nodeUrl: rpcUrl,
       poolAddress: cfg.pool,
-      requestTimeoutMs: 60_000,
+      requestTimeoutMs: 290_000,
+      retry: { maxRetries: 4, baseDelayMs: 2_000 },
     });
-    this.transfers = gloamTransfers({ cfg, keys, prover, discovery: discoveryFor(cfg, this.provider) });
+    this.transfers = gloamTransfers({ cfg, keys, prover, discovery: discoveryFor(cfg, this.provider, `${origin}${STARKNET_PROXY_PATHS.discovery}`) });
     this.signer = new Account({ provider: this.provider, address: keys.address, signer: num.toHex(keys.accountKey), cairoVersion: "1" });
   }
 
@@ -234,8 +236,17 @@ export class StarknetSession {
     step(1);
     const at = await this.settle((left) => step(1, waitText(left)));
     step(2);
-    const r = await addAction(this.transfers, { token: token.address, self: this.keys.address, amount, fee, provingBlockId: at });
-    return this.sendProven(r);
+    // A deposit carries Starknet's screening attestation, good for 300 seconds: a proof that
+    // came back too late to send is made again once (the relay refuses a stale one before paying).
+    for (let tries = 0; ; tries++) {
+      const r = await addAction(this.transfers, { token: token.address, self: this.keys.address, amount, fee, provingBlockId: at });
+      try {
+        return await this.sendProven(r);
+      } catch (e) {
+        if (tries === 0 && e instanceof StarknetRelayError && e.code === "screening_expired") continue;
+        throw e;
+      }
+    }
   }
 
   /** Pay `amount` privately to the private account `to`. Steps: 0 waiting for Starknet, 1 paying privately. */

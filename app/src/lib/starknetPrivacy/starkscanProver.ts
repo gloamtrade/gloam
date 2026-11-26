@@ -13,10 +13,17 @@
  *  - StarkscanProofProvider: the same as an SDK ProofProviderInterface, for code
  *    that proves on the server (the SDK, the MCP).
  *
- * The key stays on the server. A request is keyed by a hash of its body
- * (Idempotency-Key), so a retried submit finds the same job. Results are given
- * once and then dropped by Starkscan, so a poll that loses its answer cannot
- * get it again: the caller proves again.
+ * The key stays on the server. A request is keyed by a hash of its body and a
+ * round (Idempotency-Key), so a retried submit (the SDK retries a busy prover
+ * with the same body) finds the same job and Starkscan charges one proof. A
+ * result is handed over once and then dropped by Starkscan: a job that already
+ * gave its result moves the body to the next round (`rounds`, shared through
+ * Redis in the route) and proves again under a new key.
+ *
+ * The answer is the prover's, cut to the fields the SDK reads (it parses them
+ * strictly). additional_data carries a deposit's screening attestation, which
+ * the pool needs with the deposit and refuses after 300 seconds. A failed job
+ * passes the prover's own code on (10000 is a screening refusal).
  */
 import { ProvingServiceProofProvider, type Proof, type ProofInvocation, type ProofProviderInterface, type ProvingBlockId } from "@starkware-libs/starknet-privacy-sdk";
 import type { constants } from "starknet";
@@ -34,21 +41,46 @@ export class StarkscanProveError extends Error {
   override readonly name = "StarkscanProveError";
   constructor(
     readonly code: StarkscanErrorCode,
-    message: string
+    message: string,
+    /** The prover's own JSON-RPC code and data on a failed job (10000: refused by screening). */
+    readonly prover?: { code: number; data?: unknown }
   ) {
     super(message);
   }
 }
+
+/** Which round a request body is on: a new round is a new Idempotency-Key, so a new job. */
+export type StarkscanRounds = {
+  get(body: string): Promise<number>;
+  next(body: string): Promise<number>;
+};
+
+/** Rounds kept in this process (tests, or where Redis isn't set). */
+export function memoryRounds(): StarkscanRounds {
+  const m = new Map<string, number>();
+  return {
+    get: async (b) => m.get(b) ?? 0,
+    next: async (b) => {
+      const n = (m.get(b) ?? 0) + 1;
+      m.set(b, n);
+      return n;
+    },
+  };
+}
+
+const processRounds = memoryRounds();
 
 export type StarkscanOptions = {
   /** https://api.starkscan.co/v1/SN_MAIN/prove */
   url: string;
   apiKey: string;
   fetch?: typeof fetch;
-  /** Give up after this long, submit and polls together. */
+  /** Give up after this long, submit and polls together; a timeout is "busy", so the caller retries into the same job. */
   timeoutMs?: number;
   /** Wait between polls (tests pass a no-op). */
   sleep?: (ms: number) => Promise<void>;
+  /** Where a body's round is kept (default: this process). */
+  rounds?: StarkscanRounds;
 };
 
 const MAX_BODY = 1024 * 1024;
@@ -77,15 +109,27 @@ function blockParam(b: ProvingBlockId | undefined): unknown {
   return b;
 }
 
-function asResult(x: unknown): StarkscanProveResult | null {
+/** The prover's answer, cut to exactly the fields the SDK parses; null when one is missing or malformed. */
+export function asResult(x: unknown): StarkscanProveResult | null {
   const r = x as Partial<StarkscanProveResult> | null;
   if (!r || typeof r !== "object") return null;
-  if (typeof r.proof !== "string" || !Array.isArray(r.proof_facts) || !Array.isArray(r.l2_to_l1_messages)) return null;
+  if (typeof r.proof !== "string" || !r.proof || !Array.isArray(r.proof_facts) || !Array.isArray(r.l2_to_l1_messages)) return null;
   if (!r.proof_facts.every((f) => typeof f === "string")) return null;
+  const messages: StarkscanProveResult["l2_to_l1_messages"] = [];
   for (const m of r.l2_to_l1_messages) {
-    if (!m || typeof m.from_address !== "string" || !Array.isArray(m.payload) || !m.payload.every((p) => typeof p === "string")) return null;
+    if (!m || typeof m.from_address !== "string" || typeof m.to_address !== "string" || !Array.isArray(m.payload) || !m.payload.every((p) => typeof p === "string")) return null;
+    messages.push({ from_address: m.from_address, to_address: m.to_address, payload: [...m.payload] });
   }
-  return r as StarkscanProveResult;
+  const out: StarkscanProveResult = { proof: r.proof, proof_facts: [...r.proof_facts], l2_to_l1_messages: messages };
+  const sig = (r.additional_data as { signature?: unknown } | undefined)?.signature as { issued_at?: unknown; sig_r?: unknown; sig_s?: unknown } | undefined;
+  if (r.additional_data !== undefined) {
+    if (!r.additional_data || typeof r.additional_data !== "object") return null;
+    if (sig === undefined) out.additional_data = {};
+    else if (typeof sig.issued_at === "number" && Number.isSafeInteger(sig.issued_at) && typeof sig.sig_r === "string" && typeof sig.sig_s === "string") {
+      out.additional_data = { signature: { issued_at: sig.issued_at, sig_r: sig.sig_r, sig_s: sig.sig_s } };
+    } else return null;
+  }
+  return out;
 }
 
 function jobError(j: Job): string {
@@ -93,16 +137,29 @@ function jobError(j: Job): string {
   return typeof e?.message === "string" ? e.message.slice(0, 300) : `The prover answered ${String(j.status ?? "with an error")}.`;
 }
 
+/** The prover's own code and data on a failed job, when it gave them. */
+function proverError(j: Job): { code: number; data?: unknown } | undefined {
+  const e = j.error as { code?: unknown; data?: unknown } | undefined;
+  return typeof e?.code === "number" && Number.isInteger(e.code) ? { code: e.code, ...(e.data !== undefined ? { data: e.data } : {}) } : undefined;
+}
+
+/** A job that already handed its result over (Starkscan keeps none after that). */
+function resultGone(j: Job & { resultUnavailableReason?: unknown }): boolean {
+  return j.status === "succeeded" && j.result === undefined && typeof j.resultUnavailableReason === "string";
+}
+
 /** Prove one transaction at `blockId` through Starkscan, waiting for the job. */
 export async function starkscanProve(opts: StarkscanOptions, blockId: ProvingBlockId | undefined, transaction: unknown): Promise<StarkscanProveResult> {
   if (!opts.apiKey) throw new StarkscanProveError("no_key", "No Starkscan key is set.");
   const f = opts.fetch ?? fetch;
   const sleep = opts.sleep ?? defaultSleep;
+  const rounds = opts.rounds ?? processRounds;
   const deadline = Date.now() + (opts.timeoutMs ?? 50_000);
   const body = JSON.stringify({ block_id: blockParam(blockId), transaction });
   if (body.length > MAX_BODY) throw new StarkscanProveError("rejected", "That transaction is too large to prove.");
-  const idem = `gloam-${(await sha256Hex(body)).slice(0, 48)}`;
+  const digest = (await sha256Hex(body)).slice(0, 48);
   const headers = { "content-type": "application/json", "X-Starkscan-Api-Key": opts.apiKey };
+  const left = () => Math.max(1_000, deadline - Date.now());
 
   const read = async (res: Response): Promise<Job> => {
     try {
@@ -112,52 +169,57 @@ export async function starkscanProve(opts: StarkscanOptions, blockId: ProvingBlo
     }
   };
   const httpError = (status: number, j: Job | null): StarkscanProveError => {
+    const code = String((j?.error as { code?: unknown } | undefined)?.code ?? "");
     if (status === 403) return new StarkscanProveError("no_scope", "Gloam's Starkscan key can't prove yet.");
     if (status === 404) return new StarkscanProveError("relay_off", "Starkscan's prover is not on right now.");
+    if (status === 429 && code === "prover_daily_budget_exhausted") return new StarkscanProveError("failed", "Proving on Starknet is at today's limit. Try again tomorrow.");
     if (status === 429 || status === 503) return new StarkscanProveError("unavailable", "The prover is busy. Try again shortly.");
     if (status >= 400 && status < 500) return new StarkscanProveError("rejected", j ? jobError(j) : `The prover refused it (${status}).`);
     return new StarkscanProveError("unavailable", `The prover answered ${status}.`);
   };
-
-  let res: Response;
-  try {
-    res = await f(opts.url, { method: "POST", headers: { ...headers, "Idempotency-Key": idem }, body, signal: AbortSignal.timeout(Math.max(1_000, deadline - Date.now())) });
-  } catch {
-    throw new StarkscanProveError("unavailable", "The prover could not be reached.");
-  }
-  let job = await read(res).catch((e) => {
-    if (!res.ok) throw httpError(res.status, null);
-    throw e;
-  });
-  if (!res.ok) throw httpError(res.status, job);
-
-  const id = typeof job.jobId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(job.jobId) ? job.jobId : null;
-  if (!id && job.status !== "succeeded") throw new StarkscanProveError("bad_answer", "The prover gave no job.");
-
-  for (;;) {
-    if (job.status === "succeeded") {
-      const out = asResult(job.result);
-      if (!out) throw new StarkscanProveError("bad_answer", "The prover's proof could not be read.");
-      return out;
-    }
-    if (job.status === "failed") throw new StarkscanProveError("failed", jobError(job));
-    if (job.status === "unavailable") throw new StarkscanProveError("unavailable", "The prover is busy. Try again shortly.");
-    if (job.status === "unknown_delivery") throw new StarkscanProveError("lost", "The proof was made but its answer was lost. Try again.");
-    if (job.terminal === true && TERMINAL.has(String(job.status))) throw new StarkscanProveError("failed", jobError(job));
-    const wait = typeof job.pollAfterSeconds === "number" && job.pollAfterSeconds > 0 ? Math.min(job.pollAfterSeconds, 5) * 1000 : 1_000;
-    if (Date.now() + wait > deadline) throw new StarkscanProveError("timeout", "The proof is taking too long. Try again.");
-    await sleep(wait);
+  const ask = async (url: string, init: RequestInit): Promise<Job> => {
+    let res: Response;
     try {
-      res = await f(`${opts.url}/${id}`, { method: "GET", headers: { "X-Starkscan-Api-Key": opts.apiKey }, signal: AbortSignal.timeout(Math.max(1_000, deadline - Date.now())) });
+      res = await f(url, { ...init, signal: AbortSignal.timeout(left()) });
     } catch {
+      if (Date.now() >= deadline) throw new StarkscanProveError("timeout", "The proof is taking a while. Still working on it.");
       throw new StarkscanProveError("unavailable", "The prover could not be reached.");
     }
-    job = await read(res).catch((e) => {
+    const job = await read(res).catch((e) => {
       if (!res.ok) throw httpError(res.status, null);
       throw e;
     });
     if (!res.ok) throw httpError(res.status, job);
+    return job;
+  };
+
+  // A job whose result was already handed over can't give it again: the next round is a new job.
+  for (let fresh = 0; fresh < 3; fresh++) {
+    const round = await rounds.get(digest);
+    const idem = `gloam-${digest}-r${round}`;
+    let job = await ask(opts.url, { method: "POST", headers: { ...headers, "Idempotency-Key": idem }, body });
+    const id = typeof job.jobId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(job.jobId) ? job.jobId : null;
+    if (!id && job.status !== "succeeded") throw new StarkscanProveError("bad_answer", "The prover gave no job.");
+    for (;;) {
+      if (resultGone(job)) break;
+      if (job.status === "succeeded") {
+        const out = asResult(job.result);
+        if (!out) throw new StarkscanProveError("bad_answer", "The prover's proof could not be read.");
+        return out;
+      }
+      if (job.status === "failed") throw new StarkscanProveError("failed", jobError(job), proverError(job));
+      if (job.status === "unavailable") throw new StarkscanProveError("unavailable", "The prover is busy. Try again shortly.");
+      if (job.status === "unknown_delivery") throw new StarkscanProveError("lost", "Starkscan lost track of that proof. Try again in a few minutes.");
+      if (job.terminal === true && TERMINAL.has(String(job.status))) throw new StarkscanProveError("failed", jobError(job), proverError(job));
+      if (!id) throw new StarkscanProveError("bad_answer", "The prover gave no job.");
+      const wait = typeof job.pollAfterSeconds === "number" && job.pollAfterSeconds > 0 ? Math.min(job.pollAfterSeconds, 5) * 1000 : 1_000;
+      if (Date.now() + wait > deadline) throw new StarkscanProveError("timeout", "The proof is taking a while. Still working on it.");
+      await sleep(wait);
+      job = await ask(`${opts.url}/${id}`, { method: "GET", headers: { "X-Starkscan-Api-Key": opts.apiKey } });
+    }
+    await rounds.next(digest);
   }
+  throw new StarkscanProveError("lost", "The proof's answer was lost. Try again.");
 }
 
 /** The pool's message in a proof: its payload is [class_hash, ...server actions], what apply_actions takes. */

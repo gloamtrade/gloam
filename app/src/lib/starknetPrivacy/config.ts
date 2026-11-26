@@ -13,7 +13,10 @@
  * The pool has an auditor key: what a person registers is sealed to it, so the
  * key's holder can read that person's private activity. The proving service
  * runs each transaction to prove it, so it sees it too. Starknet screens
- * deposits.
+ * deposits. On mainnet, Starknet's hosted discovery service finds an
+ * account's notes with its viewing key, so it can read them too; the request
+ * is sealed to that service (OHTTP) and passes through Gloam, so Gloam can't
+ * read it and the service doesn't see who asked.
  *
  * Gloam's account layer (lib/starknetPrivacy/account) keeps people's main
  * wallets out of the pool: each person gets a Starknet account derived from
@@ -28,10 +31,14 @@ export type StarknetNetwork = "devnet" | "sepolia" | "mainnet";
 export const STARKNET_ENABLED = process.env.NEXT_PUBLIC_STARKNET_ENABLED === "1";
 
 function readNetwork(v: string | undefined): StarknetNetwork {
-  return v === "mainnet" || v === "devnet" ? v : "sepolia";
+  return v === "sepolia" || v === "devnet" ? v : "mainnet";
 }
 
-/** Sepolia until StarkWare's Sepolia prover and pool exist; mainnet only when set. */
+/**
+ * Mainnet unless set: Starknet's canonical pool, hosted discovery and
+ * Starkscan's prover are mainnet only. Sepolia stays for later (no prover or
+ * pool for it yet); devnet is for local tests.
+ */
 export const STARKNET_NETWORK: StarknetNetwork = readNetwork(process.env.NEXT_PUBLIC_STARKNET_NETWORK);
 
 /** Gloam's proxy paths (later stages). The node and prover URLs never reach the browser directly. */
@@ -39,7 +46,28 @@ export const STARKNET_PROXY_PATHS = {
   rpc: "/api/starknet/rpc",
   prove: "/api/starknet/prove",
   relay: "/api/starknet/relay",
+  /** The hosted discovery service (mainnet), relayed for OHTTP: requests sealed to the service pass through. */
+  discovery: "/api/starknet/discovery",
 } as const;
+
+/**
+ * Starknet's canonical privacy pool on mainnet, read 2026-11-26: Starkscan names
+ * it "Starknet: Canonical Privacy Pool", and starkware-libs/starknet-privacy's
+ * own SDK tests cite a mainnet transaction into it
+ * (0x56a224012f76e8451b9d22e7b6812801ec07fcef8ef74b871e3c9f735a215ba). On chain:
+ * version 2.1, the same functions and the same apply_actions (with the
+ * screening attestation) as PRIVACY-0.14.4-RC.2, auditor and screener keys set,
+ * not paused, holding USDC, a pool fee of 4.5 STRK per apply_actions taken
+ * from its caller, upgrade delay 0 (its owner can change its code at once).
+ */
+export const STARKNET_MAINNET_POOL = "0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a";
+/**
+ * Its class hash on 2026-11-26. A local build of PRIVACY-0.14.4-RC.2 hashes to
+ * 0x35cb88d951b56f4a26c78039df80b4d6436b3f89406c3d458df5c3eb83239db (another
+ * compiler), with the same functions. The relay sends to the pool only while
+ * its class is this one: an upgrade pauses Starknet until Gloam checks it.
+ */
+export const STARKNET_MAINNET_POOL_CLASS_HASH = "0x06d163f2b27df0f53c5b0d019366261ba8034af1bef949dee920a60fe58bcf83";
 
 /** Chain ids as felts (the short strings SN_MAIN, SN_SEPOLIA, SN_DEVNET). */
 export const STARKNET_CHAIN_IDS: Record<StarknetNetwork, string> = {
@@ -79,6 +107,8 @@ export type StarknetNetworkConfig = {
   rpcUrl: string;
   /** The privacy pool. Null until known: never guessed. */
   pool: string | null;
+  /** The pool's class the relay checks before it sends (null: not pinned, a pool set by hand). */
+  poolClassHash: string | null;
   accountClassHash: string;
   udc: string;
   tokens: StarknetToken[];
@@ -126,16 +156,21 @@ const httpUrl = (v: string | undefined): string | null => {
  * anything not yet known (every pool, Sepolia's USDC for the pool, a Sepolia
  * prover) comes from the environment or stays null.
  *
- *  - NEXT_PUBLIC_STARKNET_POOL: the privacy pool on the chosen network.
+ *  - NEXT_PUBLIC_STARKNET_POOL: the privacy pool on the chosen network
+ *    (mainnet: STARKNET_MAINNET_POOL unless set).
  *  - NEXT_PUBLIC_STARKNET_USDC: USDC on Sepolia (two USDC tokens answer there;
  *    the one the pool lists is the one to use).
  *  - NEXT_PUBLIC_STARKNET_DEVNET_RPC: a local starknet-devnet (default 127.0.0.1:5050).
  *  - STARKNET_PROVER_URL: a proving service for the SDK's protocol (server side).
  */
 export function starknetConfig(network: StarknetNetwork = STARKNET_NETWORK, env: Env = starknetEnv()): StarknetNetworkConfig {
-  const pool = hexAddress(env.NEXT_PUBLIC_STARKNET_POOL);
+  const set = hexAddress(env.NEXT_PUBLIC_STARKNET_POOL);
+  // Mainnet's canonical pool unless another is set; a pool set by hand isn't pinned to a class.
+  const canonical = network === "mainnet" && (!set || sameStarknetAddress(set, STARKNET_MAINNET_POOL));
+  const pool = canonical ? STARKNET_MAINNET_POOL : set;
+  const poolClassHash = canonical ? STARKNET_MAINNET_POOL_CLASS_HASH : null;
   const proverUrl = httpUrl(env.STARKNET_PROVER_URL);
-  const base = { network, chainId: STARKNET_CHAIN_IDS[network], pool, accountClassHash: STARKNET_ACCOUNT_CLASS_HASH, udc: STARKNET_UDC, proverUrl };
+  const base = { network, chainId: STARKNET_CHAIN_IDS[network], pool, poolClassHash, accountClassHash: STARKNET_ACCOUNT_CLASS_HASH, udc: STARKNET_UDC, proverUrl };
   if (network === "mainnet") {
     return {
       ...base,

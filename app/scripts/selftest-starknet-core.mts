@@ -62,9 +62,17 @@ const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 /* ------------------------------------------------------------------ config */
 {
   ok(config.STARKNET_ENABLED === false, "off by default");
-  eq(config.STARKNET_NETWORK, "sepolia", "Sepolia by default");
+  eq(config.STARKNET_NETWORK, "mainnet", "mainnet by default (its pool, discovery and prover are mainnet only)");
   const m = config.starknetConfig("mainnet", {});
-  eq(m.pool, null, "no mainnet pool unless set");
+  eq(m.pool, config.STARKNET_MAINNET_POOL, "mainnet's canonical pool by default");
+  eq(m.poolClassHash, config.STARKNET_MAINNET_POOL_CLASS_HASH, "pinned to the class read on chain");
+  eq(config.STARKNET_MAINNET_POOL, "0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a", "the canonical pool's address");
+  const same = config.starknetConfig("mainnet", { NEXT_PUBLIC_STARKNET_POOL: "0x40337B1AF3C663E86E333BAB5A4B28DA8D4652A15A69BEEE2B677776FFE812A" });
+  eq([same.pool, same.poolClassHash], [config.STARKNET_MAINNET_POOL, config.STARKNET_MAINNET_POOL_CLASS_HASH], "the canonical pool set by hand is still pinned");
+  const other = config.starknetConfig("mainnet", { NEXT_PUBLIC_STARKNET_POOL: "0xabc" });
+  eq([other.pool, other.poolClassHash], ["0xabc", null], "another pool set by hand is used, not pinned");
+  eq(config.starknetConfig("sepolia", {}).pool, null, "no Sepolia pool unless set");
+  eq(config.starknetConfig("devnet", {}).poolClassHash, null, "devnet's pool isn't pinned");
   eq(m.tokens.map((t) => [t.symbol, t.decimals, t.address]), [["USDC", 6, "0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb"]], "mainnet USDC");
   eq(m.discovery, { kind: "indexer", url: "https://discovery.nodes.starknet.org" }, "mainnet uses the hosted discovery");
   eq(m.proverUrl, null, "no SDK prover unless set");
@@ -212,8 +220,17 @@ const ctxBase = {
   const write = () => new CairoCustomEnum({ WriteOnce: { storage_address: "0x77", value: ["0x1", "0x2"] } });
   const fee = { [num.toHex(BigInt(USDC))]: 5_000n };
 
-  eq(policy.checkRelayCall([apply([write(), to(OUT, 250_000), to(RELAY, 5_000)])], { ...ctx, minFee: fee }, proof), { ok: true, kind: "apply", fee: { token: num.toHex(BigInt(USDC)), amount: 5_000n }, deposits: 0, withdrawals: 2 }, "a cash out with the relay's fee is sent");
-  eq(policy.checkRelayCall([apply([from("0x99", 1_000_000), write()])], ctx, proof), { ok: true, kind: "apply", fee: null, deposits: 1, withdrawals: 0 }, "an add with no fee asked is sent");
+  eq(policy.checkRelayCall([apply([write(), to(OUT, 250_000), to(RELAY, 5_000)])], { ...ctx, minFee: fee }, proof), { ok: true, kind: "apply", fee: { token: num.toHex(BigInt(USDC)), amount: 5_000n }, deposits: 0, withdrawals: 2, attestedAt: null }, "a cash out with the relay's fee is sent");
+  eq(policy.checkRelayCall([apply([from("0x99", 1_000_000), write()])], ctx, proof), { ok: true, kind: "apply", fee: null, deposits: 1, withdrawals: 0, attestedAt: null }, "an add with no fee asked is sent");
+  // A deposit's screening attestation (Some = 0, issued_at, r, s) is read, not judged, here.
+  const attested = (actionsList: CairoCustomEnum[], at: number): Call => {
+    const c = apply(actionsList);
+    const felts = (c.calldata as string[]).slice(0, -1);
+    return { ...c, calldata: [...felts, "0x0", num.toHex(at), "0x123", "0x456"] };
+  };
+  const withAtt = policy.checkRelayCall([attested([from("0x99", 1_000_000), write()], 1_795_000_000)], ctx, proof);
+  ok(withAtt.ok && withAtt.kind === "apply" && withAtt.attestedAt === 1_795_000_000, "an add's screening attestation time is read");
+  eq(policy.decodeApply(apply([write()]).calldata!.map((x) => BigInt(x as string)))?.attestedAt, null, "no attestation reads as none");
   eq(policy.checkRelayCall([apply([write(), to(OUT, 250_000)])], { ...ctx, minFee: fee }, proof), { ok: false, reason: "fee_missing" }, "no fee when one is asked is refused");
   eq(policy.checkRelayCall([apply([to(RELAY, 4_999)])], { ...ctx, minFee: fee }, proof), { ok: false, reason: "fee_too_low" }, "a fee under the minimum is refused");
   eq(policy.checkRelayCall([apply([to(OUT, 1, "0x123")])], ctx, proof), { ok: false, reason: "token_not_listed" }, "moving an unlisted token is refused");
