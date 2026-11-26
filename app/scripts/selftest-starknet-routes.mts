@@ -69,6 +69,8 @@ const eq = <T,>(a: T, b: T, msg: string) => {
 type Seen = { url: string; method: string; headers: Record<string, string>; body: unknown };
 const seen: Seen[] = [];
 let starkscan: (url: string, init: RequestInit) => Response = () => new Response("{}", { status: 500 });
+const DISCOVERY = "https://discovery.nodes.starknet.org";
+let discovery: (url: string, init: RequestInit) => Response = () => new Response("{}", { status: 500 });
 const nodeAnswer: (call: { method: string; params: unknown; id: unknown }) => unknown = (c) => {
   if (c.method === "starknet_specVersion") return "0.10.0";
   if (c.method === "starknet_chainId") return "0x534e5f4d41494e";
@@ -97,6 +99,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => 
     return new Response(JSON.stringify(out), { headers: { "content-type": "application/json" } });
   }
   if (url.startsWith(STARKSCAN)) return starkscan(url, init);
+  if (url.startsWith(DISCOVERY)) return discovery(url, init);
   if (url.startsWith("https://prover.selftest")) {
     const b = body as { id: unknown };
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: { proof: "QUJD", proof_facts: ["0x1"], l2_to_l1_messages: [] } }), { headers: { "content-type": "application/json" } });
@@ -113,6 +116,8 @@ const scan = await import("../src/lib/starknetPrivacy/starkscanProver");
 const rpcRoute = await import("../src/app/api/starknet/rpc/route");
 const relayRoute = await import("../src/app/api/starknet/relay/route");
 const proveRoute = await import("../src/app/api/starknet/prove/route");
+const discoveryRoute = await import("../src/app/api/starknet/discovery/route");
+const keysRoute = await import("../src/app/api/starknet/discovery/ohttp-keys/route");
 const { CallData, CairoCustomEnum, CairoOption, CairoOptionVariant } = await import("starknet");
 const { PrivacyPoolABI } = await import("@starkware-libs/starknet-privacy-sdk/abi");
 
@@ -479,6 +484,45 @@ const RESULT = { proof: "UFJPT0Y=", proof_facts: ["0xa", "0xb"], l2_to_l1_messag
   eq([proof.data, proof.proofFacts, proof.output], [RESULT.proof, RESULT.proof_facts, RESULT.l2_to_l1_messages[0]!.payload], "as the SDK's prover: the proof, its facts and the pool's message");
   const details = (await provider.getDefaultDetails()) as { nonce?: bigint };
   eq(details.nonce, 7n, "its details carry the pool's nonce, read from the node");
+}
+
+/* ------------------------------------------------------------------ discovery through Gloam (OHTTP relay) */
+{
+  const sealed = new Uint8Array([1, 2, 3, 250, 0, 7]);
+  const answer = new Uint8Array([9, 8, 7]);
+  let got: { url: string; type: string | null; body: Uint8Array; headers: Record<string, string> } | null = null;
+  discovery = (url, init) => {
+    const h = Object.fromEntries(new Headers(init.headers).entries());
+    got = { url, type: h["content-type"] ?? null, body: new Uint8Array(init.body as Uint8Array), headers: h };
+    return new Response(answer, { headers: { "content-type": "message/ohttp-res" } });
+  };
+  const ohttp = (body: BodyInit, headers: Record<string, string> = {}) =>
+    new Request("https://www.gloam.trade/api/starknet/discovery", {
+      method: "POST",
+      headers: { "content-type": "message/ohttp-req", "sec-fetch-site": "same-origin", "x-forwarded-for": "203.0.113.7", cookie: "a=b", ...headers },
+      body,
+    });
+  let res = await discoveryRoute.POST(ohttp(sealed));
+  eq([res.status, res.headers.get("content-type")], [200, "message/ohttp-res"], "a sealed request is relayed and its sealed answer comes back");
+  eq(Array.from(new Uint8Array(await res.arrayBuffer())), Array.from(answer), "byte for byte");
+  const g = got as unknown as { url: string; type: string | null; body: Uint8Array; headers: Record<string, string> };
+  eq([g.url, g.type, Array.from(g.body)], [DISCOVERY, "message/ohttp-req", Array.from(sealed)], "the service gets the sealed bytes as they came");
+  ok(!("x-forwarded-for" in g.headers) && !("cookie" in g.headers), "and nothing about who asked");
+  res = await discoveryRoute.POST(ohttp(sealed, { "content-type": "application/json" }));
+  eq(res.status, 415, "only sealed requests pass");
+  res = await discoveryRoute.POST(ohttp(sealed, { "sec-fetch-site": "cross-site" }));
+  eq(res.status, 403, "another site is refused");
+  res = await discoveryRoute.POST(ohttp(new Uint8Array(proxy.STARKNET_DISCOVERY_MAX_BODY + 1)));
+  eq(res.status, 413, "a body over the cap is refused");
+  eq(discoveryRoute.GET().status, 405, "GET is not a discovery request");
+
+  const keyBytes = new Uint8Array([0, 41, 1, 0, 32]);
+  discovery = (url) => (url === `${DISCOVERY}/ohttp-keys` ? new Response(keyBytes, { headers: { "content-type": "application/ohttp-keys" } }) : new Response("no", { status: 404 }));
+  res = await keysRoute.GET();
+  eq([res.status, res.headers.get("content-type"), Array.from(new Uint8Array(await res.arrayBuffer()))], [200, "application/ohttp-keys", Array.from(keyBytes)], "the service's key config comes through Gloam");
+  discovery = () => new Response("<html>", { headers: { "content-type": "text/html" } });
+  res = await keysRoute.GET();
+  eq(res.status, 502, "anything but a key config is refused");
 }
 
 /* ------------------------------------------------------------------ a real outside execution passes end to end */
