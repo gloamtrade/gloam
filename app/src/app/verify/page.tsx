@@ -352,8 +352,9 @@ export default function VerifyPage() {
               A Gloam proof, checked here
             </h1>
             <p className="mt-3 max-w-[52ch] text-[15px] leading-relaxed text-soft">
-              Your browser checks it against Gloam&apos;s vault on chain. Nothing is sent to Gloam, and you
-              need no wallet or account.
+              {result.kind === "chain"
+                ? `Your browser checks it against ${result.p.kind === "solana-payment" ? "Solana" : "Starknet's privacy pool"}, and you need no wallet or account. It stays in your browser. The chain is read through Gloam's read-only relay, which sees the ${result.p.kind === "solana-payment" ? "transaction" : "accounts"} looked up.`
+                : "Your browser checks it against Gloam's vault on chain. Nothing is sent to Gloam, and you need no wallet or account."}
             </p>
             <ResultView result={result} />
             {finished && <MakeYourOwn from="link" />}

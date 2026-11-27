@@ -18,6 +18,9 @@
  * and the pool's target/dev in STARKNET_POOL_ARTIFACTS. Proofs are the SDK's
  * mock (devnet runs --proof-mode none); the pool contract runs for real.
  *
+ * STARKNET_PROVE_KEEP=1 keeps devnet up afterwards and prints the environment
+ * for `next dev` and Bob's disclosure, to look at /verify in a browser.
+ *
  * Run from app/:
  *   STARKNET_DEVNET_PORT=5161 STARKNET_POOL_ARTIFACTS=<repo>/target/dev ../mcp/node_modules/.bin/tsx scripts/e2e-starknet-prove-devnet.mts
  */
@@ -193,6 +196,12 @@ async function main() {
   const mainnetDeps = rd.channelDeps({ network: "mainnet", provider: node, pool, chainId: "0x534e5f4d41494e", fromBlock: 0 });
   ok(failed(await sc.verifyStarknetChannel(received, mainnetDeps), "Made on Starknet devnet"), "a mainnet reader refuses a devnet disclosure");
   log(`${checks} checks passed`);
+  if (process.env.STARKNET_PROVE_KEEP === "1") {
+    // To look at it in a browser: devnet stays up, with what `next dev` needs and the disclosure to paste at /verify.
+    console.log(`NEXT_PUBLIC_STARKNET_ENABLED=1 NEXT_PUBLIC_STARKNET_NETWORK=devnet NEXT_PUBLIC_STARKNET_DEVNET_RPC=${URL} NEXT_PUBLIC_STARKNET_POOL=${pool}`);
+    console.log(`DISCLOSURE ${sc.encodeStarknetChannel(received)}`);
+    await new Promise(() => {});
+  }
 }
 
 main()
