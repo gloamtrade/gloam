@@ -27,6 +27,7 @@ import {
   type RowStatus,
 } from "@/lib/solanaRings/payroll";
 import type { PayrollStore } from "@/lib/solanaRings/payrollStore";
+import { claimLinkUrl, encodeClaim, newClaim } from "@/lib/solanaRings/claimLink";
 import { Spinner } from "@/components/ui/Spinner";
 import { TokenLogo } from "./TokenLogo";
 import { formatSolAmount, useSolana, type SolanaPayrollEngine } from "./SolanaAccount";
@@ -34,7 +35,8 @@ import { SolanaGate, SolanaSteps, preferredAsset, useSolanaUsd, usd } from "./So
 
 const storeLib = () => import("@/lib/solanaRings/payrollStore");
 
-const TEMPLATE = "name,address,amount\nAda Obi,PASTE_THEIR_SOLANA_PRIVATE_ADDRESS,250\nTunde Bello,PASTE_THEIR_SOLANA_PRIVATE_ADDRESS,180";
+// a blank address gets a claim link, as on the other chains
+const TEMPLATE = "name,address,amount\nAda Obi,PASTE_THEIR_SOLANA_PRIVATE_ADDRESS,250\nTunde Bello,,180";
 
 const STATUS_LABEL: Record<RowStatus, string> = {
   queued: "Waiting",
@@ -138,6 +140,7 @@ export function SolanaPayrollView(props: {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [copied, setCopied] = useState<string | null>(null);
   const [registry, setRegistry] = useState<Map<string, boolean>>(() => new Map());
   const [checkError, setCheckError] = useState<string | null>(null);
   const [checkTick, setCheckTick] = useState(0);
@@ -279,7 +282,15 @@ export function SolanaPayrollView(props: {
         setError(`Your private balance is ${fmt(fresh.short, asset.decimals)} ${asset.symbol} short. Add more first.`);
         return;
       }
-      const r = freshRun({ network: engine.network, owner: engine.owner, asset: asset.id, rows });
+      // A claim link for each row with no address, made now and saved with the run before anything is paid.
+      const withLinks = await Promise.all(
+        rows.map(async (row) => {
+          if (!row.link || row.error || row.amount === null) return row;
+          const linkBody = encodeClaim(newClaim(engine.network, asset, row.amount));
+          return { ...row, linkBody, address: await engine.claimAddress(linkBody) };
+        })
+      );
+      const r = freshRun({ network: engine.network, owner: engine.owner, asset: asset.id, rows: withLinks });
       setStarting(1);
       await store.save(r);
       setRun(r);
@@ -310,7 +321,17 @@ export function SolanaPayrollView(props: {
   function exportRun(r: PayrollRun) {
     const a = ringsAssets(r.network).find((x) => x.id === r.asset);
     if (!a) return;
-    download(`gloam-solana-payroll-${new Date(r.createdAt).toISOString().slice(0, 10)}.csv`, resultsCsv(r, a));
+    download(`gloam-solana-payroll-${new Date(r.createdAt).toISOString().slice(0, 10)}.csv`, resultsCsv(r, a, (b) => claimLinkUrl(b, window.location.origin)));
+  }
+
+  async function copy(id: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+      window.setTimeout(() => setCopied((c) => (c === id ? null : c)), 2000);
+    } catch {
+      setError("Could not copy in this browser.");
+    }
   }
 
   if (loadError) {
@@ -341,6 +362,7 @@ export function SolanaPayrollView(props: {
     const symbol = runAsset?.symbol ?? "";
     const done = run.state === "done" && !runOpen(run);
     const of = c.paid + c.toPay + c.unknown;
+    const links = run.rows.filter((r) => r.link && r.status === "paid");
     const share = of > 0 ? Math.round((c.paid / of) * 100) : 0;
     return (
       <div className="grid max-lg:gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-6">
@@ -354,12 +376,21 @@ export function SolanaPayrollView(props: {
               <li key={i} className="flex items-start justify-between gap-3 py-3">
                 <div className="min-w-0">
                   <p className="truncate text-[14px] text-foreground">{r.name}</p>
-                  <p className="truncate font-mono text-[12px] text-mute">{short(r.address)}</p>
+                  {r.link ? <p className="text-[12px] text-mute">Claim link</p> : <p className="truncate font-mono text-[12px] text-mute">{short(r.address)}</p>}
                   {r.reason && r.status !== "paid" && <p className="mt-0.5 text-[12px] leading-snug text-warn">{r.reason}</p>}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   <span className="tnum text-[14px] text-foreground">{r.status === "skipped" ? "" : `${fmt(BigInt(r.amount), decimals)} ${symbol}`}</span>
                   <span className="flex items-center gap-1">
+                    {r.status === "paid" && r.link && (
+                      <button
+                        type="button"
+                        onClick={() => void copy(`row-${i}`, claimLinkUrl(r.link!, window.location.origin))}
+                        className="inline-flex h-6 items-center rounded-full px-2 text-[12px] text-mute underline-offset-2 hover:text-foreground hover:underline"
+                      >
+                        {copied === `row-${i}` ? "Copied" : "Copy link"}
+                      </button>
+                    )}
                     {r.status === "paid" && r.signature && (
                       <a
                         href={ringsExplorerTx(r.signature, run.network)}
@@ -424,6 +455,15 @@ export function SolanaPayrollView(props: {
                   {!relayFunded && <p className="text-[12.5px] text-warn">Private payments on Solana are paused for a moment. Try again later.</p>}
                 </>
               ) : null}
+              {!running && links.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-block"
+                  onClick={() => void copy("all", links.map((r) => `${r.name}: ${claimLinkUrl(r.link!, window.location.origin)}`).join("\n"))}
+                >
+                  {copied === "all" ? "Copied" : `Copy ${links.length} claim ${links.length === 1 ? "link" : "links"}`}
+                </button>
+              )}
               <button type="button" className="btn btn-ghost btn-block" onClick={() => exportRun(run)}>
                 Download results
               </button>
@@ -445,6 +485,9 @@ export function SolanaPayrollView(props: {
                 </button>
               )}
             </div>
+            {done && links.length > 0 && (
+              <p className="mt-4 border-t border-line pt-4 text-[12.5px] leading-relaxed text-mute">Claim links work like cash. Send each one only to its person.</p>
+            )}
             <Status error={error} />
           </section>
         </aside>
@@ -563,7 +606,7 @@ export function SolanaPayrollView(props: {
               <UploadGlyph className="h-6 w-6 text-foreground" />
               <p className="mt-3 text-[17px] text-foreground">{dragging ? "Drop it here" : "Drop your team’s CSV"}</p>
               <p className="mt-1.5 max-w-[42ch] text-[13.5px] leading-relaxed text-mute">
-                One line per person, up to {PAYROLL_MAX_ROWS}. Each one needs a Gloam private address on Solana.
+                One line per person, up to {PAYROLL_MAX_ROWS}. Put their Gloam private address on Solana, or leave it blank and they get a claim link instead.
               </p>
               <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5" aria-label="Columns">
                 {["name", "address", "amount"].map((c) => (
@@ -607,7 +650,11 @@ export function SolanaPayrollView(props: {
                   <li key={r.line} className="flex items-start justify-between gap-3 py-3">
                     <div className="min-w-0">
                       <p className="truncate text-[14px] text-foreground">{r.name}</p>
-                      <p className="truncate font-mono text-[12px] text-mute">{r.address ? short(r.address) : `Line ${r.line}`}</p>
+                      {r.link ? (
+                        <p className="text-[12px] text-mute">Claim link, you share it after the run</p>
+                      ) : (
+                        <p className="truncate font-mono text-[12px] text-mute">{r.address ? short(r.address) : `Line ${r.line}`}</p>
+                      )}
                       {r.error && <p className="mt-0.5 text-[12px] leading-snug text-warn">{r.error}</p>}
                       {!r.error && r.note && <p className="mt-0.5 text-[12px] leading-snug text-mute">{r.note}</p>}
                     </div>
