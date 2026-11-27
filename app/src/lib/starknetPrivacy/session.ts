@@ -359,22 +359,29 @@ export class StarknetSession {
   }
 
   /**
-   * Add `amount` of what sits at the account's address to the private balance.
-   * Steps: 0 approving, 1 waiting for Starknet, 2 adding privately.
+   * `calls` signed by the account as one SNIP-9 outside execution that only
+   * Gloam's relay may send, for the next `windowS` seconds: the call to hand it.
    */
-  async add(token: StarknetToken, amount: bigint, step: StepReporter): Promise<string> {
+  async outsideCall(calls: Call[], windowS = 600): Promise<Call> {
+    if (!this.relayNow.relayer) throw new StarknetRelayError("relay_paused", "Private payments on Starknet are paused for a moment. Try again later.");
+    const now = Math.floor(Date.now() / 1000);
+    const outside = await this.signer.getOutsideTransaction({ caller: this.relayNow.relayer, execute_after: now - 60, execute_before: now + windowS }, calls, OutsideExecutionVersion.V2);
+    const [call] = outsideExecution.buildExecuteFromOutsideCall(outside);
+    return call!;
+  }
+
+  /**
+   * Add `amount` of what sits at the account's address to the private balance.
+   * Steps: 0 approving, 1 waiting for Starknet, 2 adding privately. `approved`:
+   * the pool's approve already landed (a bring-in sends it with the receive).
+   */
+  async add(token: StarknetToken, amount: bigint, step: StepReporter, opts: { approved?: boolean } = {}): Promise<string> {
     step(0);
     await this.checkRelay(token);
     const fee = this.feeFor(token);
     const cap = this.maxAdd(token);
     if (amount > cap) throw new StarknetRelayError("over_cap", "That is more than one add can move. Add it in smaller parts.");
-    const now = Math.floor(Date.now() / 1000);
-    const outside = await this.signer.getOutsideTransaction(
-      { caller: this.relayNow.relayer!, execute_after: now - 60, execute_before: now + 600 },
-      [approveCall(token.address, this.cfg.pool!, amount)],
-      OutsideExecutionVersion.V2
-    );
-    await this.confirm(await this.relay(outsideExecution.buildExecuteFromOutsideCall(outside)));
+    if (!opts.approved) await this.confirm(await this.relay([await this.outsideCall([approveCall(token.address, this.cfg.pool!, amount)])]));
     step(1);
     const at = await this.settle((left) => step(1, waitText(left)));
     step(2);

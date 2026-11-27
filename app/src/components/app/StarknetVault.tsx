@@ -22,6 +22,7 @@ import { SuccessModal } from "./SuccessModal";
 import { TokenLogo } from "./TokenLogo";
 import { parseStarkAmount, useStarknet } from "./StarknetAccount";
 import { StarknetClaimCard, StarknetClaimLead, StarknetPayOrLink, useStarknetClaimInHash } from "./StarknetLinks";
+import { StarknetAddFromPicker, StarknetBringIn, StarknetBringInPending, bringInSources, type StarknetAddFrom } from "./StarknetBringIn";
 import {
   STARKNET_NAME,
   StarknetActionButton,
@@ -212,7 +213,11 @@ function FeeLine({ fee, token, from = "from your private balance" }: { fee: bigi
 function StarknetAddView({ token }: { token: StarknetToken }) {
   const sn = useStarknet()!;
   const [amount, setAmount] = useState("");
+  const [from, setFrom] = useState<StarknetAddFrom>("account");
   const { show, modal } = useSuccess(token);
+  // Other networks to bring USDC in from with Circle's CCTP, when Gloam's relay does it.
+  const sources = bringInSources(sn.cctp);
+  const source = from === "account" ? null : (sources.find((s) => s.chainId === from) ?? null);
   const balance = sn.publicBalance;
   const problem = starkAmountProblem(amount, token, balance);
   const value = parseStarkAmount(amount, token.decimals);
@@ -220,47 +225,72 @@ function StarknetAddView({ token }: { token: StarknetToken }) {
   // The relay approves at most this much for one add, and refuses more before anything moves.
   const tooBig = value !== null && sn.maxAdd > 0n && value > sn.maxAdd ? `One add moves at most ${starkAmount(sn.maxAdd, token)} ${token.symbol}` : null;
   const working = sn.task?.kind === "add";
+  const busy = working || sn.task?.kind === "bringin";
   const stop = !sn.relay?.funded ? "Paused for a moment" : !amount.trim() || !value ? "Enter an amount" : (problem ?? tooSmall ?? tooBig);
 
   return (
-    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
       <section className="gl-card p-5 sm:p-7">
         <h2 className="t-title text-foreground">Add privately</h2>
         <p className="mt-1.5 max-w-[56ch] text-[14px] leading-relaxed text-mute">
-          Move {token.symbol} that sits on your Starknet account into your private balance. Adding shows your account and the amount.
+          {source
+            ? `Bring ${token.symbol} in from ${source.name} and add it to your private balance. The transfer and the add show your Starknet account and the amount.`
+            : `Move ${token.symbol} that sits on your Starknet account into your private balance. Adding shows your account and the amount.`}
         </p>
-        <div className="mt-5">
-          <StarknetAmountCard
-            id="sn-add-amount"
-            label="Add"
-            balanceLabel="On your account"
-            balance={balance}
-            token={token}
-            amount={amount}
-            onAmount={setAmount}
-            problem={problem}
-            disabled={working}
-          />
-        </div>
-        <FeeLine fee={sn.fee} token={token} from="taken from what you add" />
-        {!sn.relay?.funded && <RelayPaused />}
-        <StarknetActionButton
-          kind="add"
-          label="Add privately"
-          stop={stop}
-          className="mt-5"
-          onClick={() => {
-            // The fee comes out of what is added (inside the proof): the private balance grows by the rest.
-            const fee = sn.fee;
-            void sn.add(value!).then((hash) => {
-              if (!hash) return;
-              setAmount("");
-              show({ title: "Added privately", body: "It's in your private balance now.", amount: value! - fee, hash });
-            });
-          }}
-        />
-        <StarknetSteps task={working ? sn.task : null} className="mt-4" />
-        <StarknetError kind="add" className="mt-4" />
+        {sn.pendingBringIns.length > 0 && (
+          <div className="mt-5">
+            <StarknetBringInPending token={token} />
+          </div>
+        )}
+        {sources.length > 0 && (
+          <div className="mt-5">
+            <StarknetAddFromPicker value={source ? source.chainId : "account"} onChange={setFrom} sources={sources} disabled={busy} />
+          </div>
+        )}
+        {source ? (
+          <div className="mt-3">
+            <StarknetBringIn
+              source={source}
+              token={token}
+              onDone={(hash, lands) => show({ title: "Added privately", body: `It came in from ${source.name} and is in your private balance now.`, amount: lands, hash })}
+            />
+          </div>
+        ) : (
+          <>
+            <div className={sources.length > 0 ? "mt-3" : "mt-5"}>
+              <StarknetAmountCard
+                id="sn-add-amount"
+                label="Add"
+                balanceLabel="On your account"
+                balance={balance}
+                token={token}
+                amount={amount}
+                onAmount={setAmount}
+                problem={problem}
+                disabled={working}
+              />
+            </div>
+            <FeeLine fee={sn.fee} token={token} from="taken from what you add" />
+            {!sn.relay?.funded && <RelayPaused />}
+            <StarknetActionButton
+              kind="add"
+              label="Add privately"
+              stop={stop}
+              className="mt-5"
+              onClick={() => {
+                // The fee comes out of what is added (inside the proof): the private balance grows by the rest.
+                const fee = sn.fee;
+                void sn.add(value!).then((hash) => {
+                  if (!hash) return;
+                  setAmount("");
+                  show({ title: "Added privately", body: "It's in your private balance now.", amount: value! - fee, hash });
+                });
+              }}
+            />
+            <StarknetSteps task={working ? sn.task : null} className="mt-4" />
+            <StarknetError kind="add" className="mt-4" />
+          </>
+        )}
       </section>
       <aside className="gl-card p-5 sm:p-6">
         <h3 className="text-[15px] text-foreground">Fund your Starknet account</h3>
@@ -270,7 +300,11 @@ function StarknetAddView({ token }: { token: StarknetToken }) {
         <div className="mt-4">
           <StarknetAddressCopy address={sn.address!} label="Your Starknet account" />
         </div>
-        <p className="mt-4 text-[12.5px] leading-relaxed text-mute">Bringing money in from other networks is coming.</p>
+        <p className="mt-4 text-[12.5px] leading-relaxed text-mute">
+          {sources.length > 0
+            ? `Or pick another network under From: Gloam brings ${token.symbol} in through Circle, with no Starknet wallet or STRK.`
+            : "Bringing money in from other networks is coming."}
+        </p>
       </aside>
       {modal}
     </div>

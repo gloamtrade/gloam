@@ -30,6 +30,7 @@ import { useAppAccount } from "@/lib/demo";
 import { EMBEDDED_CONNECTOR_ID } from "@/lib/embeddedWallet";
 import { STARKNET_ENABLED, STARKNET_NETWORK, type StarknetToken } from "@/lib/starknetPrivacy/config";
 import type { StarknetRelayInfo, StarknetSession } from "@/lib/starknetPrivacy/session";
+import type { CctpInfo, PendingBringIn } from "@/lib/starknetPrivacy/cctpClient";
 import { forgetStarknetAccount, keepStarknetAccount, keptStarknetAccount, starknetKeepDb } from "@/lib/starknetPrivacy/keep";
 import type { PayrollDeps, Reach } from "@/lib/starknetPrivacy/payroll";
 import type { PayrollStore } from "@/lib/starknetPrivacy/payrollStore";
@@ -41,7 +42,17 @@ import { isStarknetClaimHash } from "@/lib/starknetPrivacy/claimLink";
 /** How a Gloam wallet opens its private account here (never a signature): what the wait's first step says, and the seed. */
 export type StarknetOpener = { first: string; seed: (index: number) => Promise<Uint8Array> };
 
-export type StarknetTaskKind = "setup" | "restore" | "add" | "pay" | "cashout" | "refresh";
+export type StarknetTaskKind = "setup" | "restore" | "add" | "pay" | "cashout" | "refresh" | "bringin";
+
+/**
+ * Bringing USDC in from another network (lib/starknetPrivacy/cctpClient): the
+ * source chain's own steps and burn first (`burn`, signed in the person's
+ * wallet there), or a burn already sent (`resume`); then Circle, the relay's
+ * receive and the private add.
+ */
+export type StarknetBringInPlan =
+  | { sourceSteps: string[]; burn: (step: (at: number, detail?: string) => void) => Promise<PendingBringIn> }
+  | { resume: PendingBringIn };
 
 /** A wait, named step by step (the same shape SolanaSteps draws). */
 export type StarknetTask = { kind: StarknetTaskKind; steps: string[]; at: number; detail?: string };
@@ -113,6 +124,12 @@ type StarknetCtx = {
   payroll: StarknetPayrollEngine | null;
   /** Claim links over the open account, or null until it is open. */
   links: StarknetLinksEngine | null;
+  /** Bringing USDC in with Circle's CCTP: on or off, Gloam's fee on the receive, Circle's fee per source. Null while unread. */
+  cctp: CctpInfo | null;
+  /** Burns sent from another network that haven't arrived yet (kept on this device). */
+  pendingBringIns: PendingBringIn[];
+  /** Bring USDC in from another network and add it privately; the add's hash, or null. */
+  bringIn(plan: StarknetBringInPlan): Promise<string | null>;
   /** Close the private account in this tab and forget it on this device. */
   close(): void;
   clearError(): void;
@@ -151,6 +168,7 @@ const STEPS: Record<Exclude<StarknetTaskKind, "refresh">, string[]> = {
   add: ["Approving", "Waiting for Starknet", "Adding privately"],
   pay: ["Waiting for Starknet", "Paying privately"],
   cashout: ["Waiting for Starknet", "Cashing out"],
+  bringin: ["Waiting for Circle", "Arriving on Starknet", "Waiting for Starknet", "Adding privately"],
 };
 
 export function StarknetAccountProvider({ children }: { children: ReactNode }) {
@@ -173,6 +191,8 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
   const [publicBalance, setPublic] = useState<bigint | null>(null);
   const [task, setTask] = useState<StarknetTask | null>(null);
   const [error, setError] = useState<StarknetCtx["error"]>(null);
+  const [cctp, setCctp] = useState<CctpInfo | null>(null);
+  const [pendingBringIns, setPendingBringIns] = useState<PendingBringIn[]>([]);
   const busy = useRef(false);
 
   // The relay and the token, once Starknet is picked.
@@ -185,6 +205,10 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
         if (live) setToken(cfg.tokens[0] ?? null);
         const info = await s.readRelayInfo().catch(() => null);
         if (live) setRelay(info ?? { on: false, funded: false, relayer: null, network: STARKNET_NETWORK, pool: null, fee: {}, maxApprove: {} });
+        // Bringing money in from other networks (CCTP): read once, quietly off when it can't be.
+        const cc = await import("@/lib/starknetPrivacy/cctpClient");
+        const bring = await cc.readCctpInfo().catch(() => cc.CCTP_OFF);
+        if (live) setCctp(bring);
       })
       .catch(() => live && setRelay({ on: false, funded: false, relayer: null, network: STARKNET_NETWORK, pool: null, fee: {}, maxApprove: {} }));
     return () => {
@@ -276,6 +300,20 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
     },
     [token]
   );
+
+  // Burns from other networks this device sent for this account and hasn't seen arrive.
+  useEffect(() => {
+    if (!session || !on) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- no account open: nothing pending to show
+      setPendingBringIns([]);
+      return;
+    }
+    let live = true;
+    void import("@/lib/starknetPrivacy/cctpClient").then((c) => live && setPendingBringIns(c.pendingBringIns(session.address)));
+    return () => {
+      live = false;
+    };
+  }, [session, on]);
 
   useEffect(() => {
     if (!session || !on) return;
@@ -438,6 +476,49 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
     };
   }, [session, token, readBalances]);
 
+  const bringIn = useCallback(
+    async (plan: StarknetBringInPlan): Promise<string | null> => {
+      const s = session;
+      const t = token;
+      const info = cctp;
+      if (!s || !t || !info?.on) return null;
+      const lead = "burn" in plan ? plan.sourceSteps : [];
+      const hash = await run(
+        "bringin",
+        async (step) => {
+          const [c, k] = await Promise.all([import("@/lib/starknetPrivacy/cctpClient"), import("@/lib/starknetPrivacy/cctp")]);
+          let p: PendingBringIn;
+          if ("burn" in plan) {
+            p = await plan.burn(step);
+            // Kept before anything else waits on it: a closed tab picks it up again here.
+            c.keepPendingBringIn(s.address, p);
+            setPendingBringIns(c.pendingBringIns(s.address));
+          } else p = plan.resume;
+          const source = k.cctpSourceByDomain(p.domain);
+          if (!source) throw new Error("That network can't bring money in here.");
+          return c.finishBringIn({
+            session: s,
+            token: t,
+            info,
+            pending: p,
+            source,
+            origin: window.location.origin,
+            step: (at, detail) => step(lead.length + at, detail),
+            onArrived: () => {
+              c.dropPendingBringIn(s.address, p.tx);
+              setPendingBringIns(c.pendingBringIns(s.address));
+            },
+          });
+        },
+        [...lead, ...STEPS.bringin]
+      );
+      setRelay(s.relayInfo);
+      await readBalances(s).catch(() => {});
+      return hash;
+    },
+    [session, token, cctp, run, readBalances]
+  );
+
   const value = useMemo<StarknetCtx>(
     () => ({
       on,
@@ -464,6 +545,9 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
       cashOut: (to, amount) => move("cashout", (s, t, step) => s.cashOut(to, t, amount, step)),
       payroll,
       links,
+      cctp,
+      pendingBringIns,
+      bringIn,
       close: () => {
         if (mainAddress) kept.delete(mainAddress);
         const db = starknetKeepDb();
@@ -474,7 +558,7 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
       },
       clearError: () => setError(null),
     }),
-    [on, token, relay, mainAddress, gloam, session, privateBalance, publicBalance, restoring, task, error, setUp, refresh, move, payroll, links]
+    [on, token, relay, mainAddress, gloam, session, privateBalance, publicBalance, restoring, task, error, setUp, refresh, move, payroll, links, cctp, pendingBringIns, bringIn]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
