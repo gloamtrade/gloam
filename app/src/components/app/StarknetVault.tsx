@@ -10,7 +10,9 @@
  * What each screen says follows lib/starknetPrivacy/config, once and plainly:
  * a payment over an open channel hides who paid, who was paid and how much;
  * the first payment to someone shows their private account; adding shows the
- * account and the amount; a cash out shows where it went and how much.
+ * account and the amount; a cash out shows where it went and how much. A
+ * payment request (components/app/StarknetRequests) fills in Pay and never
+ * touches the chain.
  */
 import Link from "next/link";
 import { useState } from "react";
@@ -22,6 +24,8 @@ import { SuccessModal } from "./SuccessModal";
 import { TokenLogo } from "./TokenLogo";
 import { parseStarkAmount, useStarknet } from "./StarknetAccount";
 import { StarknetClaimCard, StarknetClaimLead, StarknetPayOrLink, useStarknetClaimInHash } from "./StarknetLinks";
+import { StarknetRequestBanner, StarknetRequestCard, StarknetRequestLead, useStarknetRequestInHash } from "./StarknetRequests";
+import { requestAmountText, type StarknetRequest, type StarknetRequestOnPay } from "@/lib/starknetPrivacy/requestLink";
 import { StarknetCashOutNetPicker, StarknetCashOutTo, cashOutDestinations, type StarknetCashOutNet } from "./StarknetCashOutTo";
 import { StarknetBringInSolana } from "./StarknetBringInSolana";
 import { StarknetAddFromPicker, StarknetBringIn, StarknetBringInPending, StarknetBringInRelay, bringInRelaySources, bringInSources, type StarknetAddFrom } from "./StarknetBringIn";
@@ -156,16 +160,22 @@ export function StarknetVaultHome({ missing }: { missing?: string | null }) {
 export function StarknetVaultPanel({ id, onReceive }: { id: VaultActionId; onReceive: () => void }) {
   const sn = useStarknet();
   const claim = useStarknetClaimInHash();
+  // A request link (#snreq=...): Pay pays the first listed token, so a request names that one.
+  const request = useStarknetRequestInHash(STARKNET_NETWORK, 1);
   if (!sn) return null;
-  if (!sn.address || !sn.token) return <StarknetGate lead={id === "receive" && claim ? <StarknetClaimLead claim={claim} token={sn.token} /> : undefined} />;
+  if (!sn.address || !sn.token) {
+    const lead =
+      id === "receive" && claim ? <StarknetClaimLead claim={claim} token={sn.token} /> : id === "pay" && request?.request ? <StarknetRequestLead request={request.request} token={sn.token} /> : undefined;
+    return <StarknetGate lead={lead} />;
+  }
   if (id === "shield") return <StarknetAddView token={sn.token} />;
-  if (id === "pay") return <StarknetPayOrLink spend={<StarknetSpendView kind="pay" token={sn.token} onReceive={onReceive} />} />;
+  if (id === "pay") return <StarknetPayOrLink spend={<StarknetSpendView kind="pay" token={sn.token} onReceive={onReceive} fromUrl={request} />} />;
   if (id === "cashout") return <StarknetSpendView kind="cashout" token={sn.token} onReceive={onReceive} />;
   if (id === "receive")
     return (
       <div className="space-y-6">
         {claim && <StarknetClaimCard claim={claim} />}
-        <StarknetReceiveView />
+        <StarknetReceiveView token={sn.token} />
       </div>
     );
   return null;
@@ -333,7 +343,7 @@ function StarknetAddView({ token }: { token: StarknetToken }) {
 
 // ---------------------------------------------------------------- Pay privately and Cash out
 
-function StarknetSpendView({ kind, token, onReceive }: { kind: "pay" | "cashout"; token: StarknetToken; onReceive: () => void }) {
+function StarknetSpendView({ kind, token, onReceive, fromUrl = null }: { kind: "pay" | "cashout"; token: StarknetToken; onReceive: () => void; fromUrl?: StarknetRequestOnPay | null }) {
   const sn = useStarknet()!;
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
@@ -341,6 +351,22 @@ function StarknetSpendView({ kind, token, onReceive }: { kind: "pay" | "cashout"
   const { show, modal } = useSuccess(token);
   const balance = sn.privateBalance;
   const pay = kind === "pay";
+  // A request link fills in who and how much, once per link (set while rendering, so it is there on the first paint).
+  const [request, setRequest] = useState<StarknetRequest | null>(null);
+  const [filledFor, setFilledFor] = useState<StarknetRequestOnPay | null>(null);
+  if (pay && fromUrl?.request && filledFor !== fromUrl) {
+    setFilledFor(fromUrl);
+    setRequest(fromUrl.request);
+    setTo(fromUrl.request.to);
+    setAmount(fromUrl.request.amount !== null ? requestAmountText(fromUrl.request.amount, token.decimals) : "");
+  }
+  const asked = pay && request ? (
+    <StarknetRequestBanner request={request} token={token} onDismiss={() => setRequest(null)} />
+  ) : pay && fromUrl?.problem ? (
+    <p role="alert" className="mt-5 rounded-[16px] bg-warn-soft px-4 py-3 text-[13px] leading-relaxed text-warn">
+      {fromUrl.problem}
+    </p>
+  ) : null;
   // A cash out can also go to another network with Circle's CCTP, when Gloam's relay does it.
   const destinations = pay ? [] : cashOutDestinations(sn.cctp);
   const dest = net === "starknet" ? null : (destinations.find((d) => d.chainId === net) ?? null);
@@ -365,6 +391,7 @@ function StarknetSpendView({ kind, token, onReceive }: { kind: "pay" | "cashout"
     return (
       <section className="gl-card p-5 sm:p-7">
         <h2 className="t-title text-foreground">{pay ? "Pay privately" : "Cash out"}</h2>
+        {asked}
         <StarknetEmptyBalance onReceive={onReceive} />
         {modal}
       </section>
@@ -381,6 +408,7 @@ function StarknetSpendView({ kind, token, onReceive }: { kind: "pay" | "cashout"
             ? `Send from your private balance to any address on ${dest.name}. Circle delivers it there, so nothing is needed on ${dest.name}.`
             : `Send from your private balance to any ${STARKNET_NAME} address. A cash out shows where it went and how much, never which account it came from.`}
       </p>
+      {asked}
       {destinations.length > 0 && (
         <div className="mt-5">
           <StarknetCashOutNetPicker value={dest ? dest.chainId : "starknet"} onChange={setNet} destinations={destinations} disabled={working} />
@@ -429,6 +457,11 @@ function StarknetSpendView({ kind, token, onReceive }: { kind: "pay" | "cashout"
               void (pay ? sn.pay(to, value!) : sn.cashOut(to, value!)).then((hash) => {
                 if (!hash) return;
                 setAmount("");
+                if (request) {
+                  // Paid: a reload no longer fills the request in again.
+                  setRequest(null);
+                  if (fromUrl) history.replaceState(null, "", window.location.pathname + window.location.search);
+                }
                 show({
                   title: pay ? "Paid privately" : "Cashed out",
                   body: pay ? "They'll see it in their private balance." : "It's on its way to that address.",
@@ -449,7 +482,7 @@ function StarknetSpendView({ kind, token, onReceive }: { kind: "pay" | "cashout"
 
 // ---------------------------------------------------------------- Receive
 
-function StarknetReceiveView() {
+function StarknetReceiveView({ token }: { token: StarknetToken }) {
   const sn = useStarknet()!;
   return (
     <section className="gl-card max-w-[720px] p-5 sm:p-7">
@@ -459,6 +492,11 @@ function StarknetReceiveView() {
       </p>
       <div className="mt-5">
         <StarknetAddressCopy address={sn.address!} label="Your private account on Starknet" />
+      </div>
+      <div className="mt-6 border-t border-line pt-6">
+        <h3 className="text-[15px] font-medium text-foreground">Request a payment</h3>
+        <p className="mt-1 text-[13px] leading-relaxed text-mute">A link with the amount and a note, like an invoice.</p>
+        <StarknetRequestCard token={token} />
       </div>
     </section>
   );

@@ -10,7 +10,7 @@ import { VAULT_ACTIONS, type VaultActionId, type VaultActionInfo } from "@/lib/v
 const LINES: Partial<Record<VaultActionId, string>> = {
   shield: "Move USDC on your Starknet account into your private balance.",
   pay: "Pay another private account on Starknet. Who and how much stay hidden.",
-  receive: "Share your private account to get paid.",
+  receive: "Share your private account, or ask to be paid.",
   cashout: "Back to any Starknet address. The cash out shows on the explorer.",
 };
 
