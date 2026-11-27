@@ -1201,6 +1201,11 @@ function StarknetSection() {
           0.25 USDC inside its proof.
         </li>
         <li>
+          <strong>Payment requests</strong>, a link that fills in Pay with your
+          private account and the amount. Nothing about it goes on chain, and
+          the note stays with the payer.
+        </li>
+        <li>
           <strong>Who makes the proof</strong>, Starkscan&apos;s prover, which
           sees the transaction it proves. The pool&apos;s auditor key can read
           an account&apos;s private activity.

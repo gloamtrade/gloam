@@ -15,7 +15,7 @@
  *    doesn't list is said instead; the Vault moves to Starknet for it and never
  *    sends it back to an EVM network; the banner says the name comes from the
  *    link, the note is not sent, and what a first payment shows;
- *  - Receive has "Request a payment".
+ *  - Receive has "Request a payment"; docs and Glim say requests work there.
  *
  * No network. Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-requests.mts
  */
@@ -49,6 +49,7 @@ const { readAmountText } = await import("../src/lib/amountText");
 const { vaultActionFromUrl } = await import("../src/lib/vaultHub");
 const { STARKNET_VAULT_ACTIONS } = await import("../src/lib/starknetPrivacy/vaultActions");
 const sdk = await import("@gloamtrade/sdk");
+const { starknetFacts } = await import("../src/lib/telegramBot/knowledge");
 
 let checks = 0;
 const ok = (cond: unknown, msg: string) => {
@@ -249,6 +250,18 @@ const src = (f: string) => readFileSync(fileURLToPath(new URL(`../src/${f}`, imp
   for (const [i, line] of card.split("\n").entries()) ok(!/—|happy to/i.test(line), `StarknetRequests.tsx:${i + 1}: no em dash or banned phrase`);
   ok(!/hides? who (paid|was paid)/i.test(card.replace(/never shows who paid/g, "")), "the request screens never say a payment hides the payee");
   ok(card.includes("Nothing about the request goes on chain"), "Receive says nothing goes on chain");
+}
+
+// ------------------------------------------------------------------ docs and Glim
+
+{
+  const facts = starknetFacts() ?? "";
+  ok(facts.includes("claim links, payment requests and cash out work there"), "Glim: requests work on Starknet");
+  ok(facts.includes("A Starknet payment request is a link that fills in Pay") && facts.includes("its note is only shown to the payer"), "Glim: what a request is, and that its note is not sent");
+  ok(facts.includes("a first payment shows the payee's private account"), "Glim: paying it shows what any first payment shows");
+  const docs = src("app/docs/starknet/page.tsx");
+  ok(docs.includes('id="requests"') && docs.includes("Nothing about a request goes on chain"), "the Starknet docs say what a request is");
+  ok(src("app/docs/chain/page.tsx").includes("<strong>Payment requests</strong>, a link that fills in Pay with your\n          private account"), "the networks page lists requests on Starknet");
 }
 
 console.log(`selftest-starknet-requests: ${checks} checks passed`);
