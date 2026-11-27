@@ -82,6 +82,13 @@ export function addFeePayer(input: {
   return input.relay?.on && input.relay.funded && input.relay.relayer && input.signOnly ? "relay" : "needs_sol";
 }
 
+/**
+ * Where a Solana claim link opened in the app waits in this tab while the
+ * wallet connects (lib/solanaRings/claimKeep). Here, with nothing else loaded,
+ * because WelcomeModal's first-paint script reads it too. Never rename it.
+ */
+export const SOLANA_CLAIM_KEY = "gloam.solanaClaim";
+
 /** How the site names the network: "Solana", or "Solana devnet" on a devnet build. */
 export const SOLANA_NAME = SOLANA_RINGS_NETWORK === "devnet" ? "Solana devnet" : "Solana";
 

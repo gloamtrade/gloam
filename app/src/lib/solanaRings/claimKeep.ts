@@ -12,9 +12,9 @@
  * link is claimed, turns out used, or the person clears the box or signs out.
  */
 import { decodeClaim } from "./claimLink";
+import { SOLANA_CLAIM_KEY } from "./config";
 
-/** Also read by WelcomeModal's first-paint script: never rename it. */
-export const SOLANA_CLAIM_KEY = "gloam.solanaClaim";
+export { SOLANA_CLAIM_KEY };
 export const SOLANA_CLAIM_KEEP_MS = 15 * 60_000;
 
 type Store = Pick<Storage, "getItem" | "setItem" | "removeItem">;

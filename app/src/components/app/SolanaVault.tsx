@@ -3,9 +3,10 @@
 /**
  * The Vault on Solana: the same overview, action row and forms as on the EVM
  * networks (VaultHome, VaultHub's row, Add privately's amount card), over the
- * Solana account (SolanaAccount). Solana has Add privately, Pay privately,
- * Receive and Cash out; Swap, Agent top-ups and Public send are not on Solana
- * yet, so they are not listed here.
+ * Solana account (SolanaAccount). Solana has Add privately, Pay privately
+ * (to a private address or by claim link), Receive (with Claim a payment and
+ * Request a payment) and Cash out; Swap, Agent top-ups and Public send are not
+ * on Solana yet, so they are not listed here.
  *
  * What each screen says follows lib/solanaRings/config: a private payment
  * hides the token and the amount, the two private accounts it moves between
@@ -36,10 +37,16 @@ import {
   useSolanaUsd,
   usd,
 } from "./SolanaParts";
-import { formatSolAmount, parseSolAmount, shortSol, useSolana } from "./SolanaAccount";
+import { formatSolAmount, parseSolAmount, plainSolAmount, shortSol, useSolana } from "./SolanaAccount";
 import { displayAmountText, typedAmount } from "@/lib/amountShort";
 import { SolanaArrivals, SolanaBridgeIn } from "./SolanaBridgeIn";
 import { solanaBridgeVisible } from "@/lib/solanaRings/bridgeIn";
+import { claimLinkUrl, decodeClaim, decodeRequest, requestBodyFromHash, type SolanaRequest } from "@/lib/solanaRings/claimLink";
+import { SolanaClaimCard, SolanaLinkShare, SolanaRequestBanner, SolanaRequestCard, SolanaSentLinks, useSolanaClaimFromUrl } from "./SolanaLinks";
+
+/** What a claim link shows on Solana, said where one is made. */
+const LINK_PRIVACY_NOTE =
+  "On Solana, a claim link hides the token and the amount. Your private account, the link's one-time account and the account that claims it show on Solana.";
 
 function holdings(b: Record<string, bigint> | null, toUsd: (id: string, v: bigint) => number | null): Holding[] {
   if (!b) return [];
@@ -179,13 +186,33 @@ export function SolanaVaultHome({ missing }: { missing?: string | null }) {
 
 export function SolanaVaultPanel({ id, onReceive }: { id: VaultActionId; onReceive: () => void }) {
   const sol = useSolana();
+  // A claim link opened here (#sol=...), kept for the tab while the wallet connects.
+  const claim = useSolanaClaimFromUrl();
   if (!sol) return null;
-  if (!sol.address) return <SolanaGate />;
+  if (!sol.address) return <SolanaGate lead={claim && id === "receive" ? <ClaimWaiting body={claim} /> : undefined} />;
   if (id === "shield") return <SolanaAddView />;
   if (id === "pay") return <SolanaSpendView kind="pay" onReceive={onReceive} />;
   if (id === "cashout") return <SolanaSpendView kind="cashout" onReceive={onReceive} />;
-  if (id === "receive") return <SolanaReceiveView />;
+  if (id === "receive") return <SolanaReceiveView claim={claim} />;
   return null;
+}
+
+/** Above the connect card when a claim link opened the app: what waits, and that the account comes first. */
+function ClaimWaiting({ body }: { body: string }) {
+  const read = decodeClaim(body);
+  if (!read.ok) return null;
+  const { asset, amount } = read.claim;
+  return (
+    <section className="gl-card flex items-center gap-4 p-5 sm:p-6" aria-label="A payment for you">
+      <TokenLogo id={asset.id} symbol={asset.symbol} size={40} />
+      <div className="min-w-0">
+        <p className="text-[15px] text-foreground">
+          Someone sent you <span className="tnum font-medium">{formatSolAmount(amount, asset.decimals)} {asset.symbol}</span>
+        </p>
+        <p className="mt-0.5 text-[13px] leading-relaxed text-mute">Open your private account below, then claim it. It waits in the link until you do.</p>
+      </div>
+    </section>
+  );
 }
 
 function useSuccess() {
@@ -380,6 +407,25 @@ export function SolanaNotPrivateYet() {
 
 // ---------------------------------------------------------------- Pay privately and Cash out
 
+/** A request link (#solreq=...) in the address bar, read once on mount: null when there is none. */
+function useSolanaRequestFromUrl(network: string): { request: SolanaRequest | null; problem: string | null } {
+  const [found, setFound] = useState<{ request: SolanaRequest | null; problem: string | null }>({ request: null, problem: null });
+  useEffect(() => {
+    const body = requestBodyFromHash(window.location.hash);
+    if (!body) return;
+    const r = decodeRequest(body);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the request lives in the address bar's fragment, read once after mount
+    setFound(
+      !r.ok
+        ? { request: null, problem: r.why === "unknown" ? "This request is from a newer Gloam. Reload the page and try again." : "This request link is cut off or damaged. Ask them to send it again." }
+        : r.request.network !== network
+          ? { request: null, problem: `This request is for Solana ${r.request.network}, and this is Gloam on Solana ${network}.` }
+          : { request: r.request, problem: null }
+    );
+  }, [network]);
+  return found;
+}
+
 function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onReceive: () => void }) {
   const sol = useSolana()!;
   const toUsd = useSolanaUsd();
@@ -389,19 +435,38 @@ function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onRecei
   const [assetId, setAssetId] = useState(preferredAsset(sol.balances, assets).id);
   const [amount, setAmount] = useState("");
   const [to, setTo] = useState(kind === "cashout" ? own : "");
+  // Pay to a private address, or make a claim link anyone can claim (as on the other chains).
+  const [style, setStyle] = useState<"direct" | "link">("direct");
+  const [made, setMade] = useState<{ url: string; label: string; asset: RingsAsset; amount: bigint } | null>(null);
   const { show, modal } = useSuccess();
-  // The first read of the balance names the asset to pay with.
+  const fromUrl = useSolanaRequestFromUrl(sol.network);
+  const [request, setRequest] = useState<SolanaRequest | null>(null);
+  const [filledFor, setFilledFor] = useState<SolanaRequest | null>(null);
+  // A request link fills in who, what and how much, once.
+  useEffect(() => {
+    if (kind !== "pay" || !fromUrl.request || filledFor === fromUrl.request) return;
+    const r = fromUrl.request;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the request is read from the address bar after mount
+    setFilledFor(r);
+    setRequest(r);
+    setStyle("direct");
+    setTo(r.to);
+    setAssetId(r.asset.id);
+    if (r.amount !== null) setAmount(plainSolAmount(r.amount, r.asset.decimals));
+  }, [kind, fromUrl.request, filledFor]);
+  // The first read of the balance names the asset to pay with (a request names its own).
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the balance arrives after mount
-    if (firstHeld && !amount && (sol.balances?.[assetId] ?? 0n) === 0n) setAssetId(firstHeld.id);
-  }, [firstHeld, amount, assetId, sol.balances]);
+    if (firstHeld && !amount && !request && (sol.balances?.[assetId] ?? 0n) === 0n) setAssetId(firstHeld.id);
+  }, [firstHeld, amount, assetId, sol.balances, request]);
 
   const asset = assets.find((a) => a.id === assetId) ?? assets[0]!;
   const have = sol.balances?.[asset.id] ?? null;
   const problem = amountProblem(amount, asset, have);
   const value = parseSolAmount(amount, asset.decimals);
-  const working = sol.task?.kind === kind;
-  const target = to.trim();
+  const byLink = kind === "pay" && style === "link";
+  const working = sol.task?.kind === (byLink ? "link" : kind);
+  const target = byLink ? "" : to.trim();
   const shape = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(target);
   const toProblem = !target ? null : !shape ? "That isn't a Solana address." : kind === "pay" && target === sol.address ? "That is your own private account." : null;
   const funded = sol.relay?.funded !== false;
@@ -409,7 +474,7 @@ function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onRecei
     ? "Paused for a moment"
     : sol.ready[asset.id] === false
       ? `${asset.symbol} is not set up on Gloam yet`
-      : !target
+      : !target && !byLink
         ? kind === "pay"
           ? "Enter a private address"
           : "Enter an address"
@@ -431,15 +496,70 @@ function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onRecei
       <h2 className="t-title text-foreground">{title}</h2>
       <p className="mt-1 text-[14px] leading-relaxed text-mute">
         {kind === "pay"
-          ? "Send from your private balance to another Gloam private account on Solana."
+          ? "Send from your private balance to a Gloam private account on Solana, or to anyone by claim link."
           : "From your private balance back to any Solana address."}
       </p>
+
+      {kind === "pay" && request && <SolanaRequestBanner request={request} onDismiss={() => setRequest(null)} />}
+      {kind === "pay" && fromUrl.problem && (
+        <p role="alert" className="mt-5 rounded-[16px] bg-warn-soft px-4 py-3 text-[13px] leading-relaxed text-warn">
+          {fromUrl.problem}
+        </p>
+      )}
 
       {empty ? (
         <SolanaEmptyBalance onReceive={onReceive} />
       ) : (
         <>
-          <div className="mt-6">
+          {kind === "pay" && (
+            <div className="mt-6">
+              <p id="sol-pay-to" className="text-[13px] text-mute">
+                To
+              </p>
+              <div role="radiogroup" aria-labelledby="sol-pay-to" className="mt-2 grid grid-cols-2 gap-2">
+                {(
+                  [
+                    ["direct", "Private address", "They already use Gloam"],
+                    ["link", "Claim link", "Anyone, even new to Gloam"],
+                  ] as const
+                ).map(([s, label, hint]) => {
+                  const active = style === s;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      disabled={working}
+                      onClick={() => {
+                        setStyle(s);
+                        setMade(null);
+                        sol.clearError();
+                      }}
+                      className={`flex min-h-[60px] min-w-0 items-start gap-3 rounded-[14px] border px-3.5 py-3 text-left transition-colors ${
+                        active ? "border-foreground bg-panel" : "border-line hover:border-line-strong hover:bg-surface"
+                      }`}
+                    >
+                      <span aria-hidden className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border transition-colors ${active ? "border-foreground bg-foreground" : "border-line-strong"}`}>
+                        {active && <span className="h-2 w-2 rounded-full bg-panel" />}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[14.5px] leading-snug text-foreground">{label}</span>
+                        <span className="mt-0.5 block text-[12px] leading-snug text-mute">{hint}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {byLink && (
+                <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
+                  You get a link to send any way you like. They tap it and claim in Gloam. Anyone with the link can claim it, and you can take it back until they do.
+                </p>
+              )}
+            </div>
+          )}
+          {!byLink && (
+          <div className={kind === "pay" ? "mt-5" : "mt-6"}>
             <div className="flex items-baseline justify-between gap-3">
               <label htmlFor={`sol-${kind}-to`} className="text-[13px] text-mute">
                 {kind === "pay" ? "To a Gloam private address" : "To"}
@@ -469,6 +589,7 @@ function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onRecei
               <p className="mt-1.5 text-[13px] text-mute">Your Solana wallet, {sol.main?.wallet.name}.</p>
             ) : null}
           </div>
+          )}
 
           <div className="mt-5">
             <SolanaAmountCard
@@ -490,17 +611,25 @@ function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onRecei
           </div>
 
           <p className="mt-4 text-[12.5px] leading-relaxed text-mute">
-            {kind === "pay" ? RINGS_PRIVACY_NOTE : "A cash out shows the address it goes to, the token and the amount. Gloam pays the network fee."}
+            {byLink ? LINK_PRIVACY_NOTE : kind === "pay" ? RINGS_PRIVACY_NOTE : "A cash out shows the address it goes to, the token and the amount. Gloam pays the network fee."}
           </p>
           {!funded && <RelayPaused />}
 
           <div className="mt-5">
             <SolanaActionButton
-              kind={kind}
-              label={kind === "pay" ? "Pay privately" : toMine ? "Cash out to my wallet" : "Cash out to this address"}
+              kind={byLink ? "link" : kind}
+              label={byLink ? "Make the claim link" : kind === "pay" ? "Pay privately" : toMine ? "Cash out to my wallet" : "Cash out to this address"}
               stop={stop}
               onClick={() => {
                 if (value === null) return;
+                if (byLink) {
+                  void sol.makeLink(asset, value).then((r) => {
+                    if (!r) return;
+                    setMade({ url: claimLinkUrl(r.body, window.location.origin), label: `${formatSolAmount(value, asset.decimals)} ${asset.symbol}`, asset, amount: value });
+                    setAmount("");
+                  });
+                  return;
+                }
                 const run = kind === "pay" ? sol.pay(target, asset, value) : sol.cashOut(target, asset, value);
                 void run.then((sig) => {
                   if (!sig) return;
@@ -521,9 +650,20 @@ function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onRecei
             />
           </div>
           <SolanaSteps task={working ? sol.task : null} className="mt-4" />
-          <SolanaError kind={kind} className="mt-4" />
+          <SolanaError kind={byLink ? "link" : kind} className="mt-4" />
         </>
       )}
+      {kind === "pay" && <SolanaSentLinks />}
+      <SuccessModal
+        open={Boolean(made)}
+        title="Claim link ready"
+        body="It is kept under Sent links in this browser too, so you can copy it again or take it back."
+        logo={made ? <TokenLogo id={made.asset.id} symbol={made.asset.symbol} size={56} /> : undefined}
+        amount={made?.label}
+        detail={made ? <SolanaLinkShare url={made.url} kind="claim" label={made.label} stacked /> : undefined}
+        secondaryLabel="Done"
+        onClose={() => setMade(null)}
+      />
       {modal}
     </section>
   );
@@ -531,7 +671,7 @@ function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onRecei
 
 // ---------------------------------------------------------------- Receive
 
-function SolanaReceiveView() {
+function SolanaReceiveView({ claim }: { claim: string | null }) {
   const sol = useSolana()!;
   const address = sol.address!;
   const assets = useShownAssets(sol.balances);
@@ -595,7 +735,15 @@ function SolanaReceiveView() {
         </div>
 
         {/* stacked on a phone: a hairline above, as EVM's Receive sets off its second part */}
-        <div className="max-lg:border-t max-lg:border-line max-lg:pt-6">
+        <SolanaClaimCard initial={claim} />
+
+        <section className="border-t border-line pt-6 lg:col-span-2">
+          <h3 className="text-[15px] font-medium text-foreground">Request a payment</h3>
+          <p className="mt-1 text-[13px] leading-relaxed text-mute">A link with the amount and a note, like an invoice.</p>
+          <SolanaRequestCard />
+        </section>
+
+        <div className="border-t border-line pt-6 lg:col-span-2">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-[15px] font-medium text-foreground">Payments to you</h3>
             {/* -my-2: the button doesn't push this title below the one beside it */}

@@ -50,7 +50,6 @@ import {
 import { isGloamAccount } from "@/lib/turnkeySolana";
 import type { ClaimResult, LinkState } from "@/lib/solanaRings/claim";
 import type { SolanaSentLinksStore } from "@/lib/solanaRings/sentLinks";
-import { dropSolanaClaim } from "@/lib/solanaRings/claimKeep";
 
 const lib = () => import("@/lib/solanaRings/client");
 
@@ -80,6 +79,8 @@ export type SolanaPayrollEngine = {
   balances(): Record<string, bigint>;
   deps(asset: RingsAsset): Promise<Pick<PayrollDeps, "build" | "send" | "release" | "confirm" | "resolve" | "message" | "tooBig">>;
   message(e: unknown): Promise<string>;
+  /** A claim link's one-time account (its Solana address), for a payroll row with no address. */
+  claimAddress(body: string): Promise<string>;
 };
 
 type Main = { wallet: SolanaWallet; account: SolanaAccount };
@@ -662,7 +663,7 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
     if (tellWallet && w) void disconnectSolana(w);
     forgetWallet(browserStorage());
     // a claim link this tab held goes too, so the next person here never sees it
-    dropSolanaClaim();
+    void import("@/lib/solanaRings/claimKeep").then((k) => k.dropSolanaClaim()).catch(() => undefined);
     const db = browserKeepDb();
     if (db) void forgetAccount(db).catch(() => {});
     restoreTried.current = true;
@@ -1019,6 +1020,7 @@ function realPayrollEngine(s: RingsSession): SolanaPayrollEngine {
       };
     },
     message: async (e) => (await lib()).ringsErrorMessage(e),
+    claimAddress: async (body) => (await (await lib()).claimDestination(body, s.network)).address,
   };
 }
 
@@ -1068,5 +1070,6 @@ function demoPayrollEngine(network: RingsNetwork, owner: string, bal: DemoStore)
       };
     },
     message: async (e) => (e instanceof Error ? e.message : "Something went wrong. Try again."),
+    claimAddress: async () => demoSig().slice(0, 44),
   };
 }
