@@ -405,6 +405,44 @@ const ctxBase = {
       pass++;
     }
     {
+      // The relay sends no moves (mainnet, no fee set): an add, a payment and a cash out stop before any proof or send.
+      const moves = async (label: string, run: (s: InstanceType<typeof session.StarknetSession>) => Promise<unknown>) => {
+        const { s } = fresh();
+        relayAnswer = info("0", { moves: "off" });
+        asked.length = 0;
+        await assert.rejects(run(s), (e: Error & { code?: string }) => e.code === "moves_off" && /aren't open yet/.test(e.message) && !/fee_unset/.test(e.message));
+        pass++;
+        eq(asked, ["GET /api/starknet/relay"], `moves off: ${label} reads the relay and stops there`);
+      };
+      await moves("an add", (s) => s.add(usdc, 1_000n, () => {}));
+      await moves("a payment", (s) => s.pay(OUT, usdc, 1_000n, () => {}));
+      await moves("a cash out", (s) => s.cashOut(OUT, usdc, 1_000n, () => {}));
+      // A relay that is off says paused first; one that doesn't name moves (older) is taken as on.
+      const { s } = fresh();
+      relayAnswer = info("0", { moves: "off", on: false });
+      await assert.rejects(s.cashOut(OUT, usdc, 1_000n, () => {}), (e: Error & { code?: string }) => e.code === "relay_paused");
+      pass++;
+      relayAnswer = info("20000");
+      await assert.rejects(s.cashOut(OUT, usdc, 1_000n, () => {}), (e: Error & { code?: string }) => e.code === "relay_changed");
+      pass++;
+    }
+    {
+      // An account's open owes no fee: moves off doesn't stop it (it goes on to its proof).
+      relayAnswer = info("0", { moves: "off" });
+      const { s, node, t } = fresh();
+      let head = 2_000;
+      node.getBlockNumber = async () => head++;
+      node.getClassHashAt = async () => "0x1";
+      t.discoverRequirement = async () => "Register";
+      let proved = false;
+      t.build = () => {
+        proved = true;
+        throw new Error("stop here");
+      };
+      await rejects(s.ensureOpen(() => {}), "the open stops at the proof (faked)");
+      ok(proved, "moves off: an account's open still reaches its proof");
+    }
+    {
       // A node that can't answer is never "not deployed".
       const { s, node } = fresh();
       const answer: { e: unknown } = { e: null };

@@ -501,7 +501,7 @@ export async function relaySend(input: {
   const move = decision.kind === "approve" || (decision.kind === "apply" && !decision.setup);
   const feeAsked = Object.values(ctx.minFee ?? {}).some((v) => v > 0n);
   const sponsored = cfg.network === "mainnet" && move && !feeAsked;
-  if (sponsored && relayCaps(cfg.network, input.env).sponsoredPerDay <= 0) {
+  if (sponsored && relayMoves(cfg, input.env) === "off") {
     return { ok: false, status: 503, code: "fee_unset", message: "Gloam's relay isn't set to send private moves on Starknet yet." };
   }
   // The pool's owner can change its code at once: until Gloam checks a new class nothing reaches the
@@ -606,6 +606,19 @@ export const STARKNET_RELAY_INFO_PER_IP_PER_MIN = 60;
 
 export function starknetRelayInfoRate(req: Request, now = starknetRelayClock.now()): Promise<RateResult> {
   return hitRateLimit(clientIp(req), "sn-relay-info", STARKNET_RELAY_INFO_PER_IP_PER_MIN, now);
+}
+
+/**
+ * Whether the relay sends moves (an add, a payment, a cash out) at all. On
+ * mainnet a move needs the relay's fee (STARKNET_RELAY_FEE) or a sponsored
+ * budget (STARKNET_SPONSORED_MOVES_PER_DAY): with neither, relaySend refuses
+ * every one (fee_unset), so GET says "off" and the page stops before it proves.
+ * An account's open owes no fee and is not a move.
+ */
+export function relayMoves(cfg: StarknetNetworkConfig, env: Env = process.env): "on" | "off" {
+  if (cfg.network !== "mainnet") return "on";
+  const feeAsked = Object.values(relayAmounts(cfg, env).fee).some((v) => v > 0n);
+  return feeAsked || relayCaps(cfg.network, env).sponsoredPerDay > 0 ? "on" : "off";
 }
 
 /** The network this deployment serves. */

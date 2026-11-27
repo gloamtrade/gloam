@@ -11,7 +11,8 @@
  *    while the pool's own STRK fee is off, the fee from the environment, the cap
  *    on an approve); limits answer 429 or 503 before anything is sent; a failed
  *    send says why without the key; the route refuses malformed bodies, more than
- *    one call, other sites; GET names the relay, its fee and whether it is funded,
+ *    one call, other sites; GET names the relay, its fee, whether it is funded and
+ *    whether it sends moves (off on mainnet with no fee and no sponsored budget),
  *    reads the relay's STRK at most once per 20 seconds, and holds each IP to 60 a minute.
  *  - the prover: only starknet_proveTransaction and starknet_specVersion; a
  *    prover URL is passed on as is; mainnet goes through Starkscan's job API
@@ -534,10 +535,11 @@ const PROOF = { proofFacts: ["0x1", "0x2"], proof: "QUJD" };
   const get = (await (await relayRoute.GET(info())).json()) as { on: boolean; funded: boolean; moves: string; relayer: string; network: string; pool: string; fee: Record<string, string> };
   eq([get.on, get.funded, get.relayer, get.network, get.pool], [true, true, RELAY, "mainnet", POOL], "GET: on, funded (50 STRK, over the 30 STRK line), its address, the network and the pool");
   eq(get.fee[num.toHex(BigInt(USDC))], "10000", "GET: the fee per token");
+  eq(get.moves, "on", "GET: moves on (a fee is set)");
   ok(!JSON.stringify(get).includes(SECRET.slice(2)), "GET never shows the key");
 }
 
-/* ------------------------------------------------------------------ the relay's GET: a light limit, its STRK read once per 20 s */
+/* ------------------------------------------------------------------ the relay's GET: a light limit, its STRK read once per 20 s, moves on or off */
 {
   type Info = { ok: boolean; funded?: boolean; moves?: string; error?: { code: string } };
   const at = Date.UTC(2032, 0, 1, 0, 0, 0);
@@ -578,6 +580,25 @@ const PROOF = { proofFacts: ["0x1", "0x2"], proof: "QUJD" };
     eq([r.status, r.body.error?.code, Number(r.retry) > 0], [429, "rate_limited", true], "with Retry-After and a plain code");
     eq((await read(10 * 60_000 + 7_000, "198.51.100.71")).status, 200, "another IP is not held");
     eq((await read(11 * 60_000, "198.51.100.70")).status, 200, "the next minute it answers again");
+
+    // Moves "off" on mainnet with no fee and no sponsored budget, exactly when relaySend says fee_unset.
+    const fee = env.STARKNET_RELAY_FEE;
+    delete env.STARKNET_RELAY_FEE;
+    eq((await read(12 * 60_000, "198.51.100.72")).body.moves, "off", "GET: no relay fee and no sponsored budget on mainnet: moves off");
+    env.STARKNET_SPONSORED_MOVES_PER_DAY = "3";
+    eq((await read(12 * 60_000, "198.51.100.73")).body.moves, "on", "a sponsored budget: moves on");
+    delete env.STARKNET_SPONSORED_MOVES_PER_DAY;
+    env.STARKNET_RELAY_FEE = "0";
+    eq((await read(12 * 60_000, "198.51.100.74")).body.moves, "off", "a fee of 0 is no fee");
+    env.STARKNET_RELAY_FEE = fee;
+    eq((await read(12 * 60_000, "198.51.100.75")).body.moves, "on", "the fee back: moves on");
+    const noFee = { ...env, STARKNET_RELAY_FEE: undefined };
+    eq(server.relayMoves(cfg, noFee), "off", "relayMoves: mainnet, no fee");
+    eq(server.relayMoves(cfg, { ...noFee, STARKNET_SPONSORED_MOVES_PER_DAY: "1" }), "on", "relayMoves: a sponsored budget");
+    eq([server.relayMoves({ ...cfg, network: "sepolia" }, noFee), server.relayMoves({ ...cfg, network: "devnet" }, noFee)], ["on", "on"], "relayMoves: Sepolia and devnet send moves with no fee");
+    const cashOut = applyCall([to("0x0126", 250_000)]);
+    const off = await relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: fakeChain().chain, env: noFee, now: NOW, rate: okRate });
+    ok(!off.ok && off.code === "fee_unset", "and relaySend refuses the move GET called off");
   } finally {
     nodeDown = false;
     server.starknetRelayClock.now = () => Date.now();
