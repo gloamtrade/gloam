@@ -103,7 +103,8 @@ jobs:
       # sealed store and schedules. Claim links: the link format (no collision with EVM
       # or Solana links), claiming once, take back, link rows in a run, sent links sealed.
       # @gloamtrade/sdk/starknet against the app byte for byte (the account from a wallet
-      # signature or a Gloam root, keys, claim links, the calls the relay sends).
+      # signature or a Gloam root, keys, claim links, the calls the relay sends). The public
+      # site's Starknet copy (docs, llms.txt, the hosted MCP, Glim), off and on.
       # No network. The devnet end to ends (scripts/e2e-starknet-devnet.mts, and
       # scripts/e2e-starknet-sdk-devnet.mts for the SDK) run locally.
       - name: App Starknet self-tests
@@ -114,6 +115,7 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-payroll.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-claim-links.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-sdk.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-site.mts
 
       # Every token amount the app shows: two places, cut down and never rounded up,
       # "<0.01" for dust, "0.00" for zero, thousands separators, 6- and 18-decimal
