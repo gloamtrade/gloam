@@ -476,6 +476,35 @@ const ctxBase = {
       };
       eq([await s2.confirm("0x123"), calls], [4_323, 3], "it waits through not-yet-seen and pre-confirmed for accepted");
     }
+    {
+      // The relay sent nothing for a moment (busy with another send): the same proof goes again, never a new one.
+      const { s, node } = fresh(1);
+      node.getTransactionReceipt = async () => ({ finality_status: "ACCEPTED_ON_L2", execution_status: "SUCCEEDED", block_number: 5_000 });
+      const posts: string[] = [];
+      const answers = [
+        { status: 503, body: { ok: false, error: { code: "relay_busy", message: "Gloam's Starknet relay is busy. Try again in a moment." } } },
+        { status: 502, body: { ok: false, error: { code: "upstream_unavailable", message: "Starknet is slow to answer. Try again." } } },
+        { status: 200, body: { ok: true, txHash: "0xfeed" } },
+      ];
+      const before = globalThis.fetch;
+      globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          posts.push(String(init.body));
+          const a = answers.shift()!;
+          return Response.json(a.body, { status: a.status });
+        }
+        return before(url, init);
+      }) as typeof fetch;
+      const proven = { callAndProof: { call: { contractAddress: cfgM.pool!, entrypoint: "apply_actions", calldata: ["0x1"] }, proof: { proofFacts: ["0x2"], data: "AA==" } } };
+      const send = (s as unknown as { sendProven(r: unknown): Promise<string> }).sendProven.bind(s);
+      eq(await send(proven), "0xfeed", "a busy relay gets the same proof again");
+      eq([posts.length, new Set(posts).size], [3, 1], "three sends of one body: no proof made twice");
+      answers.push({ status: 422, body: { ok: false, error: { code: "not_relayable", message: "Gloam's relay doesn't send this: fee_missing." } } });
+      posts.length = 0;
+      await rejects(send(proven), "a refusal is not sent again");
+      eq(posts.length, 1, "it is sent once");
+      globalThis.fetch = before;
+    }
   } finally {
     globalThis.fetch = realFetch;
   }

@@ -43,6 +43,9 @@ function rpcCode(e: unknown): number | null {
 const CONTRACT_NOT_FOUND = 20;
 const BLOCK_NOT_FOUND = 24;
 
+/** Relay answers that sent nothing and can pass the next time: the same proof can go again. */
+const RESEND_SAME_PROOF = new Set(["relay_busy", "upstream_unavailable"]);
+
 type Receipt = { finality_status?: string; execution_status?: string; block_number?: number; revert_reason?: string };
 
 export type StarknetRelayInfo = {
@@ -281,8 +284,23 @@ export class StarknetSession {
     return this.settle(onWait, true, blind ? async (at) => !(await this.spentSince(at, token)) : undefined);
   }
 
+  /**
+   * Send a proven call through the relay and wait for it. A proof is one of a
+   * small daily quota, so when the relay answers that it sent nothing for a
+   * moment (busy with another send, or the node slow to answer its checks),
+   * the same proof goes again, up to three more times, rather than the move
+   * failing and a retry proving it again.
+   */
   private async sendProven(r: { callAndProof: { call: Call; proof: { proofFacts: readonly string[]; data: string } } }): Promise<string> {
-    const hash = await this.relay([r.callAndProof.call], r.callAndProof.proof);
+    let hash: string | null = null;
+    for (let tries = 0; hash === null; tries++) {
+      try {
+        hash = await this.relay([r.callAndProof.call], r.callAndProof.proof);
+      } catch (e) {
+        if (tries >= 3 || !(e instanceof StarknetRelayError) || !RESEND_SAME_PROOF.has(e.code)) throw e;
+        await sleep(this.pollMs * 2 ** (tries + 1));
+      }
+    }
     await this.confirm(hash);
     return hash;
   }
