@@ -11,7 +11,8 @@
  *    while the pool's own STRK fee is off, the fee from the environment, the cap
  *    on an approve); limits answer 429 or 503 before anything is sent; a failed
  *    send says why without the key; the route refuses malformed bodies, more than
- *    one call, other sites; GET names the relay, its fee and whether it is funded.
+ *    one call, other sites; GET names the relay, its fee and whether it is funded,
+ *    reads the relay's STRK at most once per 20 seconds, and holds each IP to 60 a minute.
  *  - the prover: only starknet_proveTransaction and starknet_specVersion; a
  *    prover URL is passed on as is; mainnet goes through Starkscan's job API
  *    (key header, a stable Idempotency-Key from the body, submit then poll) and
@@ -122,6 +123,7 @@ const { kv1, resetMemoryKv } = await import("../src/lib/partnersKv");
 const { CallData, CairoCustomEnum, CairoOption, CairoOptionVariant } = await import("starknet");
 const { PrivacyPoolABI } = await import("@starkware-libs/starknet-privacy-sdk/abi");
 
+const info = (ip = "203.0.113.7") => new Request("https://www.gloam.trade/api/starknet/relay", { headers: { "x-forwarded-for": ip } });
 const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
   new Request(`https://www.gloam.trade${path}`, {
     method: "POST",
@@ -529,10 +531,57 @@ const PROOF = { proofFacts: ["0x1", "0x2"], proof: "QUJD" };
   ok(statuses.slice(0, 30).every((s) => s === 422) && statuses.slice(30).every((s) => s === 429), "after 30 tries a minute, one IP gets 429 before any check");
   server.starknetRelayChains.make = make;
 
-  const get = (await (await relayRoute.GET()).json()) as { on: boolean; funded: boolean; relayer: string; network: string; pool: string; fee: Record<string, string> };
+  const get = (await (await relayRoute.GET(info())).json()) as { on: boolean; funded: boolean; moves: string; relayer: string; network: string; pool: string; fee: Record<string, string> };
   eq([get.on, get.funded, get.relayer, get.network, get.pool], [true, true, RELAY, "mainnet", POOL], "GET: on, funded (50 STRK, over the 30 STRK line), its address, the network and the pool");
   eq(get.fee[num.toHex(BigInt(USDC))], "10000", "GET: the fee per token");
   ok(!JSON.stringify(get).includes(SECRET.slice(2)), "GET never shows the key");
+}
+
+/* ------------------------------------------------------------------ the relay's GET: a light limit, its STRK read once per 20 s */
+{
+  type Info = { ok: boolean; funded?: boolean; moves?: string; error?: { code: string } };
+  const at = Date.UTC(2032, 0, 1, 0, 0, 0);
+  const strkReads = () => seen.filter((x) => x.url === NODE && [x.body].flat().some((c) => (c as { method?: string } | null)?.method === "starknet_call")).length;
+  const read = async (ms: number, ip = "198.51.100.40") => {
+    server.starknetRelayClock.now = () => at + ms;
+    const res = await relayRoute.GET(info(ip));
+    return { status: res.status, body: (await res.json()) as Info, retry: res.headers.get("retry-after") };
+  };
+  try {
+    const start = strkReads();
+    let r = await read(0);
+    eq([r.status, r.body.funded, strkReads() - start], [200, true, 1], "GET reads the relay's STRK once");
+    for (let i = 1; i <= 9; i++) r = await read(i * 1_000, `198.51.100.${40 + i}`);
+    eq(strkReads() - start, 1, "ten GETs within 20 seconds, from ten IPs: still one read of the node");
+    r = await read(server.RELAY_STRK_CACHE_MS + 1);
+    eq([r.body.funded, strkReads() - start], [true, 2], "after 20 seconds it reads again");
+    const both = await Promise.all([read(2 * server.RELAY_STRK_CACHE_MS + 2, "198.51.100.60"), read(2 * server.RELAY_STRK_CACHE_MS + 2, "198.51.100.61")]);
+    eq([both.every((x) => x.body.funded === true), strkReads() - start], [true, 3], "two GETs at the same moment share one read");
+    nodeDown = true;
+    r = await read(3 * server.RELAY_STRK_CACHE_MS + 10);
+    eq([r.status, r.body.funded, strkReads() - start], [200, false, 4], "a node that doesn't answer: not funded");
+    r = await read(3 * server.RELAY_STRK_CACHE_MS + 2_010);
+    eq(strkReads() - start, 4, "and it isn't asked again by every caller");
+    nodeDown = false;
+    r = await read(3 * server.RELAY_STRK_CACHE_MS + server.RELAY_STRK_MISS_MS + 11);
+    eq([r.body.funded, strkReads() - start], [true, 5], "five seconds after a failed read it asks again");
+
+    // 60 a minute per IP, counted in memory (no Redis call), then 429.
+    const minute = at + 10 * 60_000;
+    const statuses: number[] = [];
+    for (let i = 0; i < server.STARKNET_RELAY_INFO_PER_IP_PER_MIN + 1; i++) {
+      server.starknetRelayClock.now = () => minute + i * 100;
+      statuses.push((await relayRoute.GET(info("198.51.100.70"))).status);
+    }
+    ok(statuses.slice(0, 60).every((s) => s === 200) && statuses[60] === 429, "one IP: 60 GETs a minute, then 429");
+    r = await read(10 * 60_000 + 7_000, "198.51.100.70");
+    eq([r.status, r.body.error?.code, Number(r.retry) > 0], [429, "rate_limited", true], "with Retry-After and a plain code");
+    eq((await read(10 * 60_000 + 7_000, "198.51.100.71")).status, 200, "another IP is not held");
+    eq((await read(11 * 60_000, "198.51.100.70")).status, 200, "the next minute it answers again");
+  } finally {
+    nodeDown = false;
+    server.starknetRelayClock.now = () => Date.now();
+  }
 }
 
 /* ------------------------------------------------------------------ the prover */

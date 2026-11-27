@@ -43,6 +43,8 @@ const WINDOW_SEC = 60;
  * same for whoever asks (a bridge's progress for whoever holds its request id),
  * and what it reads is held in memory a while (ballots, final counts, live
  * balances, prices, token checks), so these are counted per instance too.
+ * So is GET /api/starknet/relay (sn-relay-info): the relay's settings and its
+ * STRK, held 20 seconds per instance.
  */
 const LOCAL_BUCKETS = new Set([
   "req",
@@ -66,6 +68,7 @@ const LOCAL_BUCKETS = new Set([
   "token-insight",
   "bridge-status",
   "csp-report",
+  "sn-relay-info",
 ]);
 const PREFIX = "gloam:mcp:rl:";
 const MEM_MAX_KEYS = 10_000;

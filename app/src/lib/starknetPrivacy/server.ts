@@ -34,7 +34,7 @@ import "server-only";
  */
 import { createHash, randomBytes } from "crypto";
 import { Account, RpcProvider, num, type Call } from "starknet";
-import { SharedCountUnavailable, addRateCount, clientIp, hitBatchedCount } from "@/lib/mcpRemote/rateLimit";
+import { SharedCountUnavailable, addRateCount, clientIp, hitBatchedCount, hitRateLimit, type RateResult } from "@/lib/mcpRemote/rateLimit";
 import { kv1 } from "@/lib/partnersKv";
 import { STARKNET_NETWORK, STARKNET_STRK, sameStarknetAddress, starknetConfig, type StarknetNetwork, type StarknetNetworkConfig } from "./config";
 import { accountAddress } from "./account";
@@ -578,6 +578,34 @@ export async function relayStrk(upstream: string, relay: string): Promise<bigint
   } catch {
     return null;
   }
+}
+
+/**
+ * How long one instance keeps the relay's STRK for GET /api/starknet/relay
+ * (each page load and each move reads it), and a failed read, so a slow node
+ * isn't asked again by every caller. Callers at the same moment share one read.
+ */
+export const RELAY_STRK_CACHE_MS = 20_000;
+export const RELAY_STRK_MISS_MS = 5_000;
+let strkCache: { key: string; at: number; ms: number; value: Promise<bigint | null> } | null = null;
+
+/** relayStrk, read at most once per RELAY_STRK_CACHE_MS on this instance. */
+export function relayStrkCached(upstream: string, relay: string, now = starknetRelayClock.now()): Promise<bigint | null> {
+  const key = `${upstream}|${relay}`;
+  if (strkCache && strkCache.key === key && now - strkCache.at < strkCache.ms) return strkCache.value;
+  const entry = { key, at: now, ms: RELAY_STRK_CACHE_MS, value: relayStrk(upstream, relay) };
+  void entry.value.then((v) => {
+    if (v === null) entry.ms = RELAY_STRK_MISS_MS;
+  });
+  strkCache = entry;
+  return entry.value;
+}
+
+/** GET /api/starknet/relay per IP a minute, counted on each instance (no Redis call). */
+export const STARKNET_RELAY_INFO_PER_IP_PER_MIN = 60;
+
+export function starknetRelayInfoRate(req: Request, now = starknetRelayClock.now()): Promise<RateResult> {
+  return hitRateLimit(clientIp(req), "sn-relay-info", STARKNET_RELAY_INFO_PER_IP_PER_MIN, now);
 }
 
 /** The network this deployment serves. */
