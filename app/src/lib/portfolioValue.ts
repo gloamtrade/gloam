@@ -26,9 +26,12 @@ function moneyParts(usd: number, unpriced: readonly string[], formatUsd: (n: num
 
 /**
  * The Portfolio's private balance headline, worked out apart from the page so
- * it can be checked: dollars where every asset has a price, and the amounts of
- * those that don't next to them ("$100 + 1,000.00 GLOAM"), never "2 assets" for a
- * vault that is mostly priced, and never a silent $0 for one that isn't.
+ * it can be checked. Dollars only ("$95"): an asset with no dollar price is
+ * named in the chips under the number and in "Not in the total" below, never
+ * tacked onto the big number ("$93 + 7.86 GLOAM + 7.99 PONS" showed while
+ * $GLOAM's price loaded, then vanished). Null while a price it needs is still
+ * loading, so the page shows a placeholder instead of a figure that jumps.
+ * With nothing priced at all: the one amount, or "2 assets", never "$0".
  */
 export function privateHeadline(args: {
   showUsd: boolean;
@@ -36,13 +39,17 @@ export function privateHeadline(args: {
   sealedUsd: number;
   /** "1,000.00 GLOAM" for each asset held with no dollar price, largest first, each through tidyAmount. */
   unpriced: string[];
+  /** A held asset's price is still on its way. */
+  pending?: boolean;
   /** The vault as amounts ("500.00 USDC", "2 assets"), shown when dollars are off. */
   vaultValue: string;
   formatUsd: (n: number) => string;
-}): string {
-  const { showUsd, sealedUsd, unpriced, vaultValue, formatUsd } = args;
+}): string | null {
+  const { showUsd, sealedUsd, unpriced, pending, vaultValue, formatUsd } = args;
   if (!showUsd) return vaultValue;
-  return moneyParts(sealedUsd, unpriced, formatUsd).join(" + ");
+  if (pending) return null;
+  if (sealedUsd > 0 || unpriced.length === 0) return formatUsd(sealedUsd);
+  return unpriced.length === 1 ? unpriced[0] : vaultValue;
 }
 
 /** One balance in the Portfolio's wallet card, as the order and the total read it. */
