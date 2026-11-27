@@ -11,6 +11,8 @@
  *    amount are public; the token's approve runs first, relayPolicy).
  *  - pay: a private payment. The first payment to someone opens a channel to
  *    them, which shows their account's address; later ones show nothing.
+ *  - payMany: payroll, a payment to each of several accounts in one
+ *    transaction (one proof, one fee).
  *  - cashOut: a withdrawal to any address (its destination and amount are
  *    public, never the account it came from).
  *
@@ -22,7 +24,7 @@
  * relay, the updated registry, and the SDK's privacy warnings.
  */
 import type { ExecuteOptions, ExecuteResult, PrivateTransfersInterface, ProvingBlockId } from "@starkware-libs/starknet-privacy-sdk";
-import { num, type Call } from "starknet";
+import { num, type Call, type ProviderInterface } from "starknet";
 
 /** u128: the pool's amount type. */
 const U128_MAX = (1n << 128n) - 1n;
@@ -80,6 +82,42 @@ export async function pay(t: PrivateTransfersInterface, input: Common & { to: st
   const tb = t.build(opts(input, { autoSelectNotes: "naive" })).with(input.token).transfer({ recipient: input.to, amount: input.amount });
   if (input.fee) tb.withdraw({ recipient: input.fee.recipient, amount: input.fee.amount });
   return tb.surplusTo(input.self).execute();
+}
+
+export type Payment = { to: string; amount: bigint };
+
+function payManyBuilder(t: PrivateTransfersInterface, input: Common & { payments: readonly Payment[] }) {
+  if (!input.payments.length) throw new Error("No one to pay.");
+  for (const p of input.payments) {
+    checkAmount(p.amount);
+    if (BigInt(p.to) === BigInt(input.self)) throw new Error("That is this account.");
+  }
+  checkFee(input.fee);
+  const tb = t
+    .build(opts(input, { autoSelectNotes: "naive" }))
+    .with(input.token)
+    .transfer(...input.payments.map((p) => ({ recipient: p.to, amount: p.amount })));
+  if (input.fee) tb.withdraw({ recipient: input.fee.recipient, amount: input.fee.amount });
+  return tb.surplusTo(input.self);
+}
+
+/**
+ * Pay several private accounts in one transaction (payroll): a note to each,
+ * Gloam's fee once, the change back to `self`. The first payment to someone
+ * opens a channel to them in the same transaction, which shows their account;
+ * several at once show together.
+ */
+export async function payMany(t: PrivateTransfersInterface, input: Common & { payments: readonly Payment[] }): Promise<ExecuteResult> {
+  return payManyBuilder(t, input).execute();
+}
+
+/**
+ * The same payment run on the pool with the SDK's mock prover (no proof made,
+ * nothing sent): its call has the server actions the real one would carry, so
+ * its size can be checked against the relay's cap first.
+ */
+export async function simulatePayMany(t: PrivateTransfersInterface, input: Common & { payments: readonly Payment[] }, node: ProviderInterface): Promise<ExecuteResult> {
+  return payManyBuilder(t, input).simulate({ node });
 }
 
 /** Cash out `amount` of `token` to the public address `to`. */
