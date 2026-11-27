@@ -23,6 +23,7 @@ import { TokenLogo } from "./TokenLogo";
 import { parseStarkAmount, useStarknet } from "./StarknetAccount";
 import { StarknetClaimCard, StarknetClaimLead, StarknetPayOrLink, useStarknetClaimInHash } from "./StarknetLinks";
 import { StarknetCashOutNetPicker, StarknetCashOutTo, cashOutDestinations, type StarknetCashOutNet } from "./StarknetCashOutTo";
+import { StarknetBringInSolana } from "./StarknetBringInSolana";
 import { StarknetAddFromPicker, StarknetBringIn, StarknetBringInPending, StarknetBringInRelay, bringInRelaySources, bringInSources, type StarknetAddFrom } from "./StarknetBringIn";
 import {
   STARKNET_NAME,
@@ -253,7 +254,11 @@ function StarknetAddView({ token }: { token: StarknetToken }) {
             <StarknetAddFromPicker value={source?.chainId ?? relaySource?.chainId ?? "account"} onChange={setFrom} sources={sources} relaySources={relaySources} disabled={busy} />
           </div>
         )}
-        {source ? (
+        {source?.kind === "svm" ? (
+          <div className="mt-3">
+            <StarknetBringInSolana token={token} onDone={(hash, lands) => show({ title: "Added privately", body: "It came in from Solana and is in your private balance now.", amount: lands, hash })} />
+          </div>
+        ) : source ? (
           <div className="mt-3">
             <StarknetBringIn
               source={source}
