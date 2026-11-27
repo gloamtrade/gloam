@@ -427,7 +427,7 @@ export function StarknetPayrollView(props: {
             {running && (
               <SolanaSteps
                 className="mt-5"
-                task={{ kind: "pay", steps: [stopping ? "Pausing after this proof" : "Paying privately, many people per proof"], at: 0, detail: detail ?? undefined }}
+                task={{ kind: "pay", steps: [stopping ? "Pausing after this proof" : "Paying privately"], at: 0, detail: detail ?? undefined }}
               />
             )}
             {run.error && !running && (

@@ -370,7 +370,7 @@ export function StarknetNotHere({ what, back = { href: "/app/vault", label: "Ope
     <div className="gl-card max-w-[620px] p-6 sm:p-8">
       <p className="t-title text-foreground">{what} is not on Starknet yet</p>
       <p className="mt-2 max-w-[52ch] text-[14px] leading-relaxed text-mute">
-        On Starknet, Gloam adds, pays privately and cashes out. Pick another network from the menu for the rest.
+        On Starknet, Gloam adds, pays privately, runs payroll and cashes out. Pick another network from the menu for the rest.
       </p>
       <Link href={back.href} className="btn btn-ghost mt-5">
         {back.label}

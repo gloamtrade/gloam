@@ -147,7 +147,7 @@ export function StarknetScheduleList({
                   <p className="truncate text-[14px] text-foreground">{s.name}</p>
                   <p className="tnum mt-0.5 text-[12.5px] text-mute">
                     {cadenceLabel(s.cadence, today)}
-                    {st.payday && st.status !== "ended" ? `. Next ${dayLabel(st.payday, today)}` : ""}
+                    {st.payday && st.status !== "ended" ? `. ${owed ? "Payday" : "Next"} ${dayLabel(st.payday, today)}` : ""}
                   </p>
                   <p className="tnum mt-0.5 text-[12.5px] text-mute">
                     {people(s.people.length)}, {starkAmount(scheduleTotal(s), token)} {token.symbol}
