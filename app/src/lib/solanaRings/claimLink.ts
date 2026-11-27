@@ -172,7 +172,11 @@ export type ClaimRead =
 /** A link body back to its claim. */
 export function decodeClaim(body: string): ClaimRead {
   const bytes = fromBase58(body.trim());
-  if (!bytes || bytes.length !== CLAIM_BYTES) return { ok: false, why: bytes && bytes[0]! > VERSION ? "unknown" : "damaged" };
+  if (!bytes || bytes.length !== CLAIM_BYTES) {
+    // Another length is a newer link only when it is whole (its own check holds) and says a newer version; else it was cut.
+    const whole = bytes && bytes.length > 4 && sameBytes(check(bytes.subarray(0, bytes.length - 4)), bytes.subarray(bytes.length - 4));
+    return { ok: false, why: whole && bytes![0]! > VERSION ? "unknown" : "damaged" };
+  }
   const head = bytes.subarray(0, CLAIM_BYTES - 4);
   if (!sameBytes(check(head), bytes.subarray(CLAIM_BYTES - 4))) return { ok: false, why: "damaged" };
   if (head[0] !== VERSION) return { ok: false, why: head[0]! > VERSION ? "unknown" : "damaged" };

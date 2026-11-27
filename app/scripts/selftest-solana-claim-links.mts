@@ -119,8 +119,14 @@ const fixedRandom = (k: number) => Uint8Array.from({ length: k }, (_, i) => (see
 
   // cut at any length, or one character changed: refused
   let cutOk = true;
-  for (let i = 1; i < body.length; i++) if (L.decodeClaim(body.slice(0, i)).ok) cutOk = false;
+  let cutWhy = true;
+  for (let i = 1; i < body.length; i++) {
+    const r = L.decodeClaim(body.slice(0, i));
+    if (r.ok) cutOk = false;
+    else if (r.why !== "damaged") cutWhy = false;
+  }
   ok(cutOk, "a link cut at any length is refused");
+  ok(cutWhy, "and said to be cut or damaged, never from a newer Gloam");
   let typoOk = true;
   for (let i = 0; i < body.length; i++) {
     for (const ch of ["1", "z", "A"]) {
@@ -154,6 +160,8 @@ const fixedRandom = (k: number) => Uint8Array.from({ length: k }, (_, i) => (see
   const v2 = bytes.slice();
   v2[0] = 2;
   eq(L.decodeClaim(reseal(v2)), { ok: false, why: "unknown" }, "a newer version says so");
+  const v2long = Uint8Array.from([2, ...bytes.slice(1, 27), 9, 9, 9, 0, 0, 0, 0]);
+  eq(L.decodeClaim(reseal(v2long)), { ok: false, why: "unknown" }, "a newer, longer link that is whole says so too");
   const net9 = bytes.slice();
   net9[1] = 9;
   eq(L.decodeClaim(reseal(net9)), { ok: false, why: "unknown" }, "an unknown network says so");
@@ -681,6 +689,32 @@ function claimerTab(w: World, dest: string, modes: Mode[]) {
   ok(v.ok && v.kind === "transact", "a claim (the one-time account's transact, the relay as fee payer) is a payment the relay pays for");
   ok(v.ok && v.accounts.includes(oneTime.address), "the relay screens the one-time account like any other");
   kp.destroy();
+}
+
+// ------------------------------------------------------------------ the words (source)
+
+{
+  const { readFileSync } = await import("node:fs");
+  const files = [
+    "src/components/app/SolanaLinks.tsx",
+    "src/components/app/SolanaVault.tsx",
+    "src/components/app/SolanaClaimLanding.tsx",
+    "src/components/app/SolanaPayrollView.tsx",
+    "src/lib/solanaRings/claim.ts",
+    "src/lib/solanaRings/sentLinks.ts",
+  ];
+  /** A sentence that says who, the sender, the recipient or the payee is hidden or private. */
+  const HIDES_WHO = /\b(hide|hides|hidden|hiding|private|unlinkab\w*|anonymous|untraceable)\b[^.]*\b(who paid|whom|sender|recipient|payee|counterpart\w*)\b|\b(who paid|whom|sender|recipient|payee|counterpart\w*)\b[^.]*\b(hidden|private|unlinkab\w*)\b/i;
+  for (const f of files) {
+    const src = readFileSync(new URL(`../${f}`, import.meta.url), "utf8");
+    // the words people read: string literals and JSX text, not comments
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    ok(!code.includes("\u2014") && !/happy to/i.test(code), `${f}: no em dash, never "happy to"`);
+    for (const sentence of code.split(/(?<=[.!?])\s+/)) ok(!HIDES_WHO.test(sentence), `${f}: never says who is hidden: ${sentence.trim().slice(0, 80)}`);
+  }
+  const vault = readFileSync(new URL("../src/components/app/SolanaVault.tsx", import.meta.url), "utf8");
+  ok(vault.includes("Your private account, the link's one-time account and the account that claims it show on Solana."), "making a link says plainly which accounts show");
+  ok(!/<select\b/.test(readFileSync(new URL("../src/components/app/SolanaLinks.tsx", import.meta.url), "utf8")), "no native select");
 }
 
 console.log(`selftest-solana-claim-links: ${n} checks passed`);
