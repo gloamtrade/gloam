@@ -29,6 +29,10 @@
  *        and STRK don't move): the same message again (already received); a
  *        message for an account a stranger signs for (Starknet won't run it); a
  *        message to an account that isn't deployed.
+ *  C. Through Relay, from a chain CCTP doesn't serve: an address standing in for
+ *     Relay's router on Base, holding the 20 USDC it delivered, runs the two
+ *     calls Gloam puts in the order (relayHopCalls); the burn names the account
+ *     and Relay's router as its sender, and the relay brings it in as in B3.
  * The private add after that is the existing devnet e2e (e2e-starknet-devnet,
  * which runs the add with its approve already done, the way a bring-in leaves it).
  *
@@ -59,6 +63,7 @@ delete env.UPSTASH_REDIS_REST_TOKEN;
 const cctp = await import("../src/lib/starknetPrivacy/cctp");
 const server = await import("../src/lib/starknetPrivacy/cctpServer");
 const config = await import("../src/lib/starknetPrivacy/config");
+const cctpRelay = await import("../src/lib/starknetPrivacy/cctpRelay");
 const account = await import("../src/lib/starknetPrivacy/account");
 
 const SN_PORT = Number(env.CCTP_FORK_STARKNET_PORT ?? 5141);
@@ -267,6 +272,30 @@ try {
   ok(own.ok, "the same message with the account's own signature goes through");
   if (own.ok) await node.waitForTransaction(own.txHash);
   eq(await usdcOf(keys.address), approve * 2n, "and the account has both");
+
+  /* ------------------------------------------------------------------ C. through Relay, from a chain CCTP doesn't serve */
+  console.log("C. a bring-in through Relay: its router on Base runs Gloam's two calls with the USDC it delivered");
+  const router = privateKeyToAccount(generatePrivateKey()).address; // stands in for Relay's router: an address only
+  await evmRaw("anvil_impersonateAccount", [router]);
+  await evmRaw("anvil_setBalance", [router, toHex(10n ** 18n)]);
+  await send(minter, baseUsdc, encodeFunctionData({ abi: usdcAbi, functionName: "configureMinter", args: [router, 20_000_000n] }));
+  await send(router, baseUsdc, encodeFunctionData({ abi: usdcAbi, functionName: "mint", args: [router, 20_000_000n] }));
+  const hop = cctpRelay.relayHopCalls({ account: keys.address, amount: 20_000_000n, bps });
+  await send(router, hop[0]!.to, hop[0]!.data);
+  const fill = await send(router, hop[1]!.to, hop[1]!.data);
+  const hopLog = fill.logs.find((l) => l.address.toLowerCase() === cctp.EVM_MESSAGE_TRANSMITTER_V2.toLowerCase());
+  const hm = cctp.decodeBurnMessage(decodeEventLog({ abi: [sentEvent], data: hopLog!.data, topics: hopLog!.topics }).args.message as Hex)!;
+  ok(cctp.sameBytes32(hm.body.mintRecipient, keys.address) && cctp.sameBytes32(hm.body.messageSender, router) && hm.body.amount === 20_000_000n, "the burn names the Gloam account; its sender is Relay's router");
+  const hopFee = cctp.circleFee(20_000_000n, bps);
+  const hopMsg = cctp.encodeBurnMessage({ ...hm, nonce: keccak256(toHex(`gloam-e2e-relay-${Date.now()}`)), finalityThresholdExecuted: 1000, body: { ...hm.body, feeExecuted: hopFee, expirationBlock: BigInt((await node.getBlockNumber()) + 7_200) } });
+  const hopAtt = ("0x" + (await Promise.all(attesters.map((t) => sign({ hash: keccak256(hopMsg as Hex), privateKey: t.k, to: "hex" })))).map((x) => x.slice(2)).join("")) as Hex;
+  const hopApprove = 20_000_000n - hopFee - relayFee;
+  const before3 = await usdcOf(keys.address);
+  const hopOut = await sign1(userAcct, cctp.receiveOutsideCalls({ usdc: USDC, relay: relayKeys.address, pool: cfg.pool!, fee: relayFee, approve: hopApprove }));
+  const viaRelay = await server.cctpReceiveSend({ message: hopMsg, attestation: hopAtt, outside: hopOut, cfg, cctp: MAIN, relay: relayKeys.address, chain, env: envFee, rate: async () => "ok" });
+  ok(viaRelay.ok, `the relay brings it in${viaRelay.ok ? "" : `: ${viaRelay.code}`}`);
+  if (viaRelay.ok) await node.waitForTransaction(viaRelay.txHash);
+  eq((await usdcOf(keys.address)) - before3, hopApprove, "the account holds what Relay's burn minted, less the relay's fee");
 } finally {
   stop();
 }

@@ -36,8 +36,18 @@ export async function readCctpInfo(origin = ""): Promise<CctpInfo> {
   return (await res.json()) as CctpInfo;
 }
 
-/** A burn sent on the source chain, on its way to the account. */
-export type PendingBringIn = { domain: number; chainId: number; tx: string; amount: string; at: number };
+/**
+ * A burn sent on the source chain, on its way to the account. `chainId` is
+ * where the person paid; `domain` and `tx` are the CCTP burn's. A bring-in
+ * through Relay (lib/starknetPrivacy/cctpRelay) burns on Base in Relay's own
+ * transaction: until Relay names it, `tx` is empty and `relay` is its request id.
+ */
+export type PendingBringIn = { domain: number; chainId: number; tx: string; amount: string; at: number; relay?: string };
+
+/** What identifies a pending bring-in on this device: Relay's request id, else the burn's transaction. */
+export function pendingKey(p: Pick<PendingBringIn, "tx" | "relay">): string {
+  return p.relay ?? p.tx;
+}
 
 export type Attested = { message: string; attestation: string; nonce: string; minted: bigint; expirationBlock: bigint };
 
@@ -87,6 +97,26 @@ export async function waitForCircle(p: Pick<PendingBringIn, "domain" | "tx">, op
   }
 }
 
+/**
+ * Wait until Relay has filled order `requestId` on Base; the Base transaction
+ * that ran the burn. A refund or a failure stops here: the money went back to
+ * the wallet (Relay's refund), or to the wallet on Base if the calls couldn't run.
+ */
+export async function waitForRelay(requestId: string, opts: { origin?: string; timeoutMs?: number; pollMs?: number; onWait?: (s: number) => void }): Promise<string> {
+  const started = Date.now();
+  for (let tries = 0; ; tries++) {
+    if (tries) await sleep(opts.pollMs ?? 3_000);
+    opts.onWait?.(Math.floor((Date.now() - started) / 1000));
+    const res = await fetch(`${opts.origin ?? ""}/api/bridge/status?requestId=${encodeURIComponent(requestId)}`, { cache: "no-store" }).catch(() => null);
+    const body = res ? ((await res.json().catch(() => null)) as { ok?: boolean; data?: { stage?: string; outTx?: string | null } } | null) : null;
+    const stage = body?.data?.stage;
+    if (stage === "done" && typeof body?.data?.outTx === "string" && /^0x[0-9a-fA-F]{64}$/.test(body.data.outTx)) return body.data.outTx;
+    if (stage === "refunded") throw new StarknetRelayError("relay_refunded", "The bridge couldn't take it, so it sent your money back to your wallet. Nothing reached Starknet.");
+    if (stage === "failed") throw new StarknetRelayError("relay_failed", "The bridge couldn't finish it. If it reached Base, it is in your wallet there.");
+    if (Date.now() - started > (opts.timeoutMs ?? 30 * 60_000)) throw new StarknetRelayError("relay_slow", "The bridge hasn't delivered it yet. It is still on its way: come back to this page and it carries on.");
+  }
+}
+
 /** Ask Circle to sign an expired transfer again. */
 export async function askCircleAgain(nonce: string, origin = ""): Promise<boolean> {
   const res = await fetch(`${origin}${CCTP_PATHS.message}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ nonce }) });
@@ -121,9 +151,10 @@ export async function receiveIntoAccount(session: StarknetSession, token: Starkn
 
 /**
  * After the burn: wait for Circle, bring it in, then add it privately. Steps:
- * 0 waiting for Circle, 1 arriving on Starknet, 2 waiting for Starknet, 3
- * adding privately. `onArrived` runs once the mint landed (the page forgets the
- * pending burn then: from there the money is on the account).
+ * 0 waiting for Circle (and, through Relay, for its fill on Base first), 1
+ * arriving on Starknet, 2 waiting for Starknet, 3 adding privately.
+ * `onSettled` runs once the mint landed (the page forgets the pending burn
+ * then: from there the money is on the account), or once Relay sent it back.
  */
 export async function finishBringIn(input: {
   session: StarknetSession;
@@ -132,13 +163,29 @@ export async function finishBringIn(input: {
   pending: PendingBringIn;
   source: Pick<CctpSource, "fast" | "attestSeconds">;
   step: StepReporter;
-  onArrived?: () => void;
+  /** Relay named the Base transaction of a bring-in through Relay (keep it). */
+  onRelayed?: (p: PendingBringIn) => void;
+  /** The pending burn is settled (forget it): it arrived on the account, or Relay sent the money back. */
+  onSettled?: () => void;
   origin?: string;
   pollMs?: number;
 }): Promise<string> {
   const { session, token, step } = input;
   step(0);
-  let a = await waitForCircle(input.pending, {
+  let pending = input.pending;
+  if (!pending.tx && pending.relay) {
+    let tx: string;
+    try {
+      tx = await waitForRelay(pending.relay, { origin: input.origin, pollMs: input.pollMs, onWait: () => step(0, "The bridge is delivering it to Base") });
+    } catch (e) {
+      // Refunded or failed: nothing is on its way to Starknet any more.
+      if (e instanceof StarknetRelayError && (e.code === "relay_refunded" || e.code === "relay_failed")) input.onSettled?.();
+      throw e;
+    }
+    pending = { ...pending, tx };
+    input.onRelayed?.(pending);
+  }
+  let a = await waitForCircle(pending, {
     origin: input.origin,
     timeoutMs: attestWaitMs(input.source),
     pollMs: input.pollMs,
@@ -155,7 +202,7 @@ export async function finishBringIn(input: {
       // A fast transfer's signature lasts a day: an older one is signed again once.
       if (code === "cctp_expired" && tries === 0 && (await askCircleAgain(a.nonce, input.origin))) {
         step(0);
-        a = await waitForCircle(input.pending, { origin: input.origin, timeoutMs: attestWaitMs(input.source), pollMs: input.pollMs });
+        a = await waitForCircle(pending, { origin: input.origin, timeoutMs: attestWaitMs(input.source), pollMs: input.pollMs });
         step(1);
         continue;
       }
@@ -167,7 +214,7 @@ export async function finishBringIn(input: {
     }
   }
   if (landed) await session.confirm(landed.txHash);
-  input.onArrived?.();
+  input.onSettled?.();
   // Delivered by someone else: the money is on the account with no approve, so the plain add runs.
   const amount = landed ? landed.approved : await session.publicBalance(token);
   if (amount <= 0n) throw new StarknetRelayError("nothing_arrived", "The transfer arrived, but there is nothing on your Starknet account to add.");
@@ -184,7 +231,14 @@ export function pendingBringIns(account: string): PendingBringIn[] {
     if (!Array.isArray(raw)) return [];
     return raw.filter(
       (p): p is PendingBringIn =>
-        Boolean(p) && Number.isSafeInteger(p.domain) && Number.isSafeInteger(p.chainId) && typeof p.tx === "string" && /^\d+$/.test(String(p.amount)) && Number.isFinite(p.at)
+        Boolean(p) &&
+        Number.isSafeInteger(p.domain) &&
+        Number.isSafeInteger(p.chainId) &&
+        typeof p.tx === "string" &&
+        (p.relay === undefined || /^0x[0-9a-fA-F]{64}$/.test(String(p.relay))) &&
+        Boolean(p.tx || p.relay) &&
+        /^\d+$/.test(String(p.amount)) &&
+        Number.isFinite(p.at)
     );
   } catch {
     return [];
@@ -193,16 +247,17 @@ export function pendingBringIns(account: string): PendingBringIn[] {
 
 export function keepPendingBringIn(account: string, p: PendingBringIn): void {
   try {
-    const list = pendingBringIns(account).filter((x) => x.tx !== p.tx);
+    const list = pendingBringIns(account).filter((x) => pendingKey(x) !== pendingKey(p));
     globalThis.localStorage?.setItem(KEY(account), JSON.stringify([...list, p].slice(-10)));
   } catch {
     /* storage off: the transfer still arrives, it just isn't picked up again here */
   }
 }
 
-export function dropPendingBringIn(account: string, tx: string): void {
+/** Forget the pending bring-in with this key (pendingKey). */
+export function dropPendingBringIn(account: string, key: string): void {
   try {
-    const list = pendingBringIns(account).filter((x) => x.tx !== tx);
+    const list = pendingBringIns(account).filter((x) => pendingKey(x) !== key);
     if (list.length) globalThis.localStorage?.setItem(KEY(account), JSON.stringify(list));
     else globalThis.localStorage?.removeItem(KEY(account));
   } catch {
