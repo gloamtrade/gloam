@@ -40,6 +40,7 @@ const S = await import("../src/lib/starknetPrivacy/payrollStore");
 const SL = await import("../src/lib/starknetPrivacy/sentLinks");
 const { keysFromSeed } = await import("../src/lib/starknetPrivacy/account");
 const { codeFromHash, shortCodeFromHash } = await import("../src/lib/claimLink");
+const Sol = await import("../src/lib/solanaRings/claimLink");
 type PayrollRun = import("../src/lib/starknetPrivacy/payroll").PayrollRun;
 
 let checks = 0;
@@ -75,7 +76,8 @@ const secret = Uint8Array.from({ length: 16 }, (_, i) => (i * 37 + 11) % 256);
   // never another chain's
   eq(codeFromHash(`#sn=${body}`), null, "EVM's claim reader takes none of it");
   eq(shortCodeFromHash(`#sn=${body}`), null, "nor EVM's short-link reader");
-  ok(!/^#sol=/.test(`#sn=${body}`), "nor Solana's (#sol=)");
+  eq([Sol.solanaLinkKind(`#sn=${body}`), Sol.claimBodyFromHash(`#sn=${body}`)], [null, null], "nor Solana's (#sol=, #solreq=)");
+  eq(L.claimFromHash(`#sol=${body}`), null, "and a Solana link is never read as a Starknet one");
 
   const cut = body.slice(0, -3);
   eq(L.readClaimBody(cut), null, "a cut link is refused");
