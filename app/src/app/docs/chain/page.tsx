@@ -11,7 +11,7 @@ import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_LIVE_SINCE, ELYSIUM_RPC_DISPLAY, ELYSIUM
 import { BNB, BNB_LIVE_SINCE } from "@/lib/bnb";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { AppLink } from "@/components/AppLink";
-import { RINGS_PAYROLL_NOTE, RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAssets } from "@/lib/solanaRings/config";
+import { RINGS_PAYROLL_NOTE, RINGS_PRIVACY_NOTE, SOLANA_CLAIM_LINKS_ENABLED, SOLANA_NAME, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAssets } from "@/lib/solanaRings/config";
 
 export const metadata: Metadata = {
   title: "Networks",
@@ -1080,6 +1080,23 @@ export default function DocsNetworksPage() {
             </li>
             <li>
               <strong>Payroll.</strong> {RINGS_PAYROLL_NOTE}
+              {SOLANA_CLAIM_LINKS_ENABLED && " A person with no address gets a claim link."}
+            </li>
+            {SOLANA_CLAIM_LINKS_ENABLED && (
+              <li>
+                <strong>Claim links</strong>, a link anyone can claim into their
+                own private balance. Each one is a one-time private account whose
+                key rides in the link: making it pays that account privately, and
+                claiming it moves the money on. Both show on Solana like any
+                private payment: your private account, the one-time account and
+                the account that claims it, not the token or the amount. Until
+                someone claims it, you can take it back under Sent links.
+              </li>
+            )}
+            <li>
+              <strong>Payment requests</strong>, a link that fills in Pay with
+              your private address, the token and the amount. Nothing about it
+              goes on chain, and the note stays with the payer.
             </li>
             <li>
               <strong>Fees</strong>, Gloam&apos;s relay pays the Solana network
@@ -1093,7 +1110,7 @@ export default function DocsNetworksPage() {
             </li>
             <li>
               <strong>Not on Solana</strong>, proof of funds or payment,
-              private swaps and claim links.
+              {SOLANA_CLAIM_LINKS_ENABLED ? " and private swaps." : " private swaps and claim links."}
             </li>
             <li>
               <strong>In the app</strong>, <AppLink href="/app/solana">/app/solana</AppLink>

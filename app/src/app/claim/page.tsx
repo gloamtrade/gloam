@@ -17,19 +17,23 @@ import { assetLabel, formatAssetAmount } from "@/lib/shield";
 import { TokenLogo } from "@/components/app/TokenLogo";
 import { chainLogoSrc } from "@/lib/chainLogo";
 import { SHORT_CLAIM_PREFIX, readShortClaim } from "@gloamtrade/sdk";
+import { claimBodyFromHash, claimBodyIn, decodeClaim, type SolanaClaim } from "@/lib/solanaRings/claimLink";
+import { SolanaClaimLanding } from "@/components/app/SolanaClaimLanding";
 
 /**
  * Where a claim link lands (gloam.trade/c#<code>, or the older
  * gloam.trade/claim?net=...#claim=<code>; /c renders this page). Phone
  * first: what was sent, one button into the app to claim it, and what to
  * expect. The code stays in the fragment, so it never reaches a server; this
- * page only reads it in the browser.
+ * page only reads it in the browser. A Solana claim link (gloam.trade/c#sol=...)
+ * opens its own card (SolanaClaimLanding); the EVM links read as they always did.
  */
 
 type View =
   | { kind: "loading" }
   | { kind: "missing" }
-  | { kind: "ready"; code: string; net: NetworkKey; amount: string | null; symbol: string | null; locked: boolean; note?: string };
+  | { kind: "ready"; code: string; net: NetworkKey; amount: string | null; symbol: string | null; locked: boolean; note?: string }
+  | { kind: "solana"; body: string; claim: SolanaClaim };
 
 /**
  * A claim view for a code, with its amount and note when the code is not locked.
@@ -109,6 +113,17 @@ export default function ClaimPage() {
     const readLink = async () => {
       const n = ++reads.current;
       const current = () => !cancelled && n === reads.current;
+      // A Solana claim link: read here, nothing loaded for it.
+      const sol = claimBodyFromHash(window.location.hash);
+      if (sol) {
+        const read = decodeClaim(sol);
+        if (current()) {
+          setWalletBrowser(inWalletBrowser());
+          setLinkNet(null);
+          setView(read.ok ? { kind: "solana", body: read.body, claim: read.claim } : { kind: "missing" });
+        }
+        return;
+      }
       const code =
         codeFromHash(window.location.hash) ??
         (/^\/c\/?$/.test(window.location.pathname) ? shortCodeFromHash(window.location.hash) : null);
@@ -148,6 +163,20 @@ export default function ClaimPage() {
 
   /** A message pasted on the missing-payment screen: the whole link, or the rest of a link a chat app cut. */
   async function openPasted() {
+    const sol = claimBodyIn(pasted);
+    if (sol && !paymentCodeIn(pasted).startsWith("gloam")) {
+      const read = decodeClaim(sol);
+      if (read.ok) {
+        setPasteError(null);
+        ++reads.current;
+        setView({ kind: "solana", body: read.body, claim: read.claim });
+        return;
+      }
+      if (/sol=/.test(pasted)) {
+        setPasteError("That payment link is cut off or damaged. Paste the whole message the link came in, or ask the sender to send it again.");
+        return;
+      }
+    }
     const code = paymentCodeIn(pasted);
     if (!isClaimLink(code)) {
       setPasteError("That doesn't look like a Gloam payment. Paste the whole message the link came in.");
@@ -207,7 +236,11 @@ export default function ClaimPage() {
           </svg>
           Gloam
         </Link>
-        {net && <span className="text-[12.5px] text-mute">{realNet ? "Mainnet" : "Testnet"}</span>}
+        {view.kind === "solana" ? (
+          <span className="text-[12.5px] text-mute">{view.claim.network === "devnet" ? "Devnet" : "Mainnet"}</span>
+        ) : (
+          net && <span className="text-[12.5px] text-mute">{realNet ? "Mainnet" : "Testnet"}</span>
+        )}
       </header>
 
       <main className="mx-auto flex w-full max-w-[560px] flex-1 flex-col px-5 pb-10 pt-8">
@@ -262,6 +295,8 @@ export default function ClaimPage() {
             </Link>
           </div>
         )}
+
+        {view.kind === "solana" && <SolanaClaimLanding body={view.body} claim={view.claim} />}
 
         {view.kind === "ready" && (
           <>
@@ -340,11 +375,13 @@ export default function ClaimPage() {
         )}
 
         <p className="mt-auto pt-10 text-center text-[12.5px] leading-relaxed text-mute">
-          {realNet
-            ? `This link is on ${realNet.label} mainnet.`
-            : net
-              ? "This link is on a testnet."
-              : `Gloam runs on ${liveMainnetNames()}.`}{" "}
+          {view.kind === "solana"
+            ? `This link is on Solana ${view.claim.network}.`
+            : realNet
+              ? `This link is on ${realNet.label} mainnet.`
+              : net
+                ? "This link is on a testnet."
+                : `Gloam runs on ${liveMainnetNames()}.`}{" "}
           <Link href="/docs/private-pay" className="underline underline-offset-4">
             How private payments work
           </Link>

@@ -46,7 +46,7 @@ import {
   type Instruction,
   type Transaction,
 } from "@solana/kit";
-import type { LocalKeys, ShieldedKeypair, Wallet } from "@heliuslabs/spr";
+import type { LocalKeys, ShieldedAddress, ShieldedKeypair, Wallet } from "@heliuslabs/spr";
 import type { SprClient } from "@heliuslabs/spr/client";
 import { accountFromSeed, accountMessage, deriveAccount, isPlainSignature } from "./account";
 import { SNAPSHOT_PREFIX } from "./opened";
@@ -69,6 +69,7 @@ import {
   type Landing,
   type LandingDeps,
 } from "./landing";
+import { FAILED_ON_CHAIN, LAST_PAYMENT_LANDED, NOT_SAVED, NOT_SENT } from "./send";
 import { canSignOnly, signOnlySolana, signOrSendSolana, signSolanaMessage, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
 
 const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111" as Address;
@@ -766,6 +767,8 @@ export async function addToPrivate(s: RingsSession, asset: RingsAsset, amount: b
 export type SendOptions = StepOptions & {
   /** Called while it waits on Solana to learn whether a payment went through (up to about two minutes). */
   onChecking?: () => void;
+  /** Called each time the payment is handed to the relay: before then, nothing can have been sent. */
+  onHanded?: () => void;
 };
 
 /**
@@ -774,9 +777,9 @@ export type SendOptions = StepOptions & {
  * notes freed only after a refusal that sent nothing or once the chain shows
  * it never landed and never can.
  */
-async function relayed(s: RingsSession, build: (feePayer: Address) => Promise<Transaction>, opts: SendOptions = {}): Promise<string> {
+async function relayed(s: RingsSession, build: (feePayer: Address) => Promise<Transaction>, opts: SendOptions = {}, pendingId: string = s.address): Promise<string> {
   const { sendGuarded, pendingStore, pendingKey } = await import("./send");
-  const pending = pendingStore({ key: pendingKey(s.network, s.address), cipher: await accountCipher(s, PENDING_DOMAIN) });
+  const pending = pendingStore({ key: pendingKey(s.network, pendingId), cipher: await accountCipher(s, PENDING_DOMAIN) });
   return sendGuarded({
     build: async () => {
       const relay = await relayInfo();
@@ -786,6 +789,7 @@ async function relayed(s: RingsSession, build: (feePayer: Address) => Promise<Tr
     },
     send: async (wire) => {
       tell(opts, "sending");
+      opts.onHanded?.();
       const sent = await relay(wire);
       tell(opts, "waiting");
       return sent.signature;
@@ -897,6 +901,183 @@ export async function cashOut(s: RingsSession, to: string, asset: RingsAsset, am
   );
 }
 
+// ------------------------------------------------------------------ claim links (lib/solanaRings/claim, claimLink)
+
+/**
+ * A claim link's one-time account, open in this tab: a private account whose
+ * key comes from the link's secret alone (claimLink claimSeed). `main` is the
+ * main wallet of whoever opened it; the one-time account never uses it. Close
+ * it with closeClaimAccount.
+ */
+export type ClaimAccount = RingsSession;
+
+/** The keys of a claim's one-time account (claimLink claimSeed). Destroy them when done. */
+async function claimKeypair(claim: import("./claimLink").SolanaClaim): Promise<ShieldedKeypair> {
+  const { claimSeed } = await import("./claimLink");
+  const seed = await claimSeed(claim.secret, claim.network);
+  try {
+    return await accountFromSeed(seed);
+  } finally {
+    seed.fill(0);
+  }
+}
+
+/** A claim link's one-time account: its Solana address and its shielded address, from the link alone. */
+export async function claimDestination(body: string, network: RingsNetwork = SOLANA_RINGS_NETWORK): Promise<{ address: Address; shielded: ShieldedAddress }> {
+  const { decodeClaim } = await import("./claimLink");
+  const read = decodeClaim(body);
+  if (!read.ok || read.claim.network !== network) throw new Error("That claim link can't be read here.");
+  const keypair = await claimKeypair(read.claim);
+  try {
+    return { address: keypair.toSolanaSigner().address, shielded: keypair.shieldedAddress() };
+  } finally {
+    keypair.destroy();
+  }
+}
+
+/** Open the one-time account a claim link names. Nothing is sent and nothing is stored. */
+export async function openClaimAccount(claim: import("./claimLink").SolanaClaim, by: RingsSession): Promise<ClaimAccount> {
+  const keypair = await claimKeypair(claim);
+  const [client, spr] = await Promise.all([ringsClient(claim.network), import("@heliuslabs/spr")]);
+  const address = keypair.toSolanaSigner().address;
+  const e: ClaimAccount = {
+    network: claim.network,
+    index: -1,
+    main: by.main,
+    address,
+    keypair,
+    keys: spr.LocalKeys.fromKeypair(keypair, client.proofService),
+    wallet: new spr.Wallet({ identity: keypair.shieldedAddress() }),
+    client,
+  };
+  await knowAssets(e);
+  return e;
+}
+
+/** Forget a one-time account's keys, and the balance snapshot a claim from it kept. */
+export function closeClaimAccount(e: ClaimAccount): void {
+  try {
+    localStorage.removeItem(storeKey(e.network, e.address));
+  } catch {
+    // nothing kept
+  }
+  closeRingsAccount(e);
+}
+
+/** What a one-time account holds, read from Solana now (lib/solanaRings/claim linkState reads it). */
+export async function readClaimAccount(e: ClaimAccount): Promise<import("./claim").ClaimHolding> {
+  const spr = await import("@heliuslabs/spr");
+  await spr.syncWallet({ wallet: e.wallet, keys: e.keys, client: e.client });
+  const utxos = e.wallet.utxos();
+  const held = new Map<string, bigint>();
+  for (const u of utxos) {
+    if (u.spent) continue;
+    const mint = String(u.utxo.asset);
+    held.set(mint, (held.get(mint) ?? 0n) + BigInt(u.utxo.amount));
+  }
+  return { notes: utxos.length, unspent: ringsBalancesFrom([...held].map(([mint, amount]) => ({ mint, amount })), e.network) };
+}
+
+/**
+ * Pay a new claim link (its body): `amount` of `asset` from `s` to the link's
+ * one-time account, by its shielded address (it has no registry record, and
+ * never needs one). Public on chain: `s` and the one-time account. Hidden: the
+ * asset and the amount. Sent through the guarded path, as Pay is.
+ */
+export async function fundClaim(s: RingsSession, body: string, asset: RingsAsset, amount: bigint, opts?: SendOptions): Promise<string> {
+  const [{ buildTransferTransaction }, { shielded: to }] = await Promise.all([import("@heliuslabs/spr/wallet"), claimDestination(body, s.network)]);
+  return relayed(
+    s,
+    (feePayer) =>
+      buildTransferTransaction({
+        client: s.client,
+        wallet: s.wallet,
+        keys: s.keys,
+        feePayer,
+        recipient: to,
+        amount,
+        ...(asset.mint ? { asset: asset.mint as Address } : {}),
+      }),
+    opts
+  );
+}
+
+/**
+ * Claim a link into `to`'s private balance: everything its one-time account
+ * holds, one private transfer per asset, which the one-time account signs and
+ * Gloam's relay pays the fee for. The destination is `to`'s own shielded
+ * address, fixed by the proof and the signature. Public on chain: the one-time
+ * account and `to`. Hidden: the asset and the amount. The same call takes a
+ * link back, with the sender as `to`.
+ */
+export async function claimInto(to: RingsSession, e: ClaimAccount, opts?: SendOptions): Promise<import("./claim").ClaimResult> {
+  const [{ claimAll }, { buildTransferTransaction }, { pendingStore, pendingKey }] = await Promise.all([
+    import("./claim"),
+    import("@heliuslabs/spr/wallet"),
+    import("./send"),
+  ]);
+  const dest = to.keypair.shieldedAddress();
+  const pendingId = `${e.address}:${to.address}`;
+  const result = await claimAll({
+    read: () => readClaimAccount(e),
+    move: (assetId, amount) => {
+      const asset = ringsAssets(e.network).find((a) => a.id === assetId);
+      if (!asset) throw new Error("This link holds a token Gloam doesn't list on Solana.");
+      // the pending send is kept per link and per destination: a lost answer settles for this claimer only
+      return relayed(
+        e,
+        (feePayer) =>
+          buildTransferTransaction({
+            client: e.client,
+            wallet: e.wallet,
+            keys: e.keys,
+            feePayer,
+            recipient: dest,
+            amount,
+            ...(asset.mint ? { asset: asset.mint as Address } : {}),
+          }),
+        opts,
+        pendingId
+      );
+    },
+  });
+  if (result.state === "claimed") await syncRings(to).catch(() => undefined);
+  else {
+    // Nothing left to claim: a claim of it still marked in flight here has settled one way or the other.
+    const pending = pendingStore({ key: pendingKey(e.network, pendingId), cipher: await accountCipher(e, PENDING_DOMAIN) });
+    await pending.clear().catch(() => undefined);
+  }
+  return result;
+}
+
+/**
+ * Whether a payment's error says it surely went nowhere: the relay refused it
+ * before sending, Solana dropped it twice or failed it, or it was never built
+ * (lib/solanaRings/send). Anything else may have landed.
+ */
+export function surelyNotSent(e: unknown): boolean {
+  if (e instanceof RingsRelayError) return !e.maybeSent;
+  return e instanceof Error && [NOT_SENT, FAILED_ON_CHAIN, NOT_SAVED, LAST_PAYMENT_LANDED].includes(e.message);
+}
+
+/** This private account's sent links, sealed under a key from its viewing secret (lib/solanaRings/sentLinks). */
+export async function ringsSentLinksStore(s: RingsSession) {
+  const { solanaSentLinksStore, sentLinksKey, SENT_LINKS_DOMAIN } = await import("./sentLinks");
+  return solanaSentLinksStore({ key: sentLinksKey(s.network, s.address), cipher: await accountCipher(s, SENT_LINKS_DOMAIN) });
+}
+
+/** A payroll payment: a private account by its address, or a claim link (its body) paid at its one-time account. */
+export type PayrollPayment = { address: string; amount: bigint; link?: string };
+
+/** Where a payroll payment goes: the registered address, or a claim link's one-time account by its shielded address. */
+async function payrollDestination(network: RingsNetwork, p: PayrollPayment): Promise<Address | ShieldedAddress> {
+  if (!p.link) return p.address as Address;
+  const d = await claimDestination(p.link, network);
+  // the run names the one-time account by address: a link that derives another one is refused, not paid
+  if (d.address !== p.address) throw new Error("A claim link in this run doesn't match its account.");
+  return d.shielded;
+}
+
 // ------------------------------------------------------------------ payroll (lib/solanaRings/payroll)
 
 /**
@@ -939,9 +1120,11 @@ function containsBytes(hay: Uint8Array, needle: Uint8Array): boolean {
 export async function buildPayments(
   s: RingsSession,
   asset: RingsAsset,
-  payments: readonly { address: string; amount: bigint }[]
+  payments: readonly PayrollPayment[]
 ): Promise<{ wire: Uint8Array; nullifiers: string[]; blockhash: string }> {
   const relay = await relayInfo();
+  // a claim link's one-time account has no registry record: it is paid by its shielded address
+  const recipients = await Promise.all(payments.map((p) => payrollDestination(s.network, p)));
   await syncRings(s);
   const { buildMultiTransferTransaction } = await import("@heliuslabs/spr/wallet");
   const unspent = s.wallet.utxos().filter((u) => !u.spent);
@@ -950,7 +1133,7 @@ export async function buildPayments(
     wallet: s.wallet,
     keys: s.keys,
     feePayer: relay.address,
-    payments: payments.map((p) => ({ recipient: p.address as Address, amount: p.amount })),
+    payments: payments.map((p, i) => ({ recipient: recipients[i]!, amount: p.amount })),
     ...(asset.mint ? { asset: asset.mint as Address } : {}),
   });
   return checkedBuild(s, unspent, withRelayFee(tx, relay.price));

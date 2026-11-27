@@ -69,7 +69,10 @@ jobs:
       # place in the menus; bridged ZEC (its mint, shown only once its ring interface is
       # read as set up, priced, two places); Solana in /admin (the relay's history read
       # into accounts opened, bring-ins, wallet adds, payments and cash-outs, wallet adds
-      # reported and checked, the mainnet totals with Solana in). No network.
+      # reported and checked, the mainnet totals with Solana in); claim links and payment
+      # requests (the link format, no collision with EVM links, single use, take back,
+      # two claims at once, kept before paid, sent links sealed, payroll's link rows),
+      # with making links off and on (NEXT_PUBLIC_SOLANA_CLAIM_LINKS). No network.
       - name: App Solana self-tests
         working-directory: app
         run: |
@@ -77,11 +80,14 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-bridge-in.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-relay-add.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-payroll.mts
+          NEXT_PUBLIC_SOLANA_CLAIM_LINKS=1 ../mcp/node_modules/.bin/tsx scripts/selftest-solana-payroll.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-payroll-csv.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-site.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-opened.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-zec.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-metrics.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-claim-links.mts
+          NEXT_PUBLIC_SOLANA_CLAIM_LINKS=1 ../mcp/node_modules/.bin/tsx scripts/selftest-solana-claim-links.mts
 
       # Starknet (off by default): the core library behind NEXT_PUBLIC_STARKNET_ENABLED.
       # Config (pools only from the environment), private-account keys from a wallet

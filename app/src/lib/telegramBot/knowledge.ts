@@ -23,7 +23,7 @@ import {
 } from "@/lib/mainnet";
 import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET } from "@/lib/elysium";
 import { BNB, BNB_LIVE_SINCE } from "@/lib/bnb";
-import { RINGS_PAYROLL_NOTE, RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED, ringsAssets } from "@/lib/solanaRings/config";
+import { RINGS_PAYROLL_NOTE, RINGS_PRIVACY_NOTE, SOLANA_CLAIM_LINKS_ENABLED, SOLANA_NAME, SOLANA_RINGS_ENABLED, ringsAssets } from "@/lib/solanaRings/config";
 import { VAULT_SWAP_V2_ROUTER, swapV3Live } from "@/lib/vaultSwap";
 import { voteFacts } from "@/lib/vote/glim";
 import {
@@ -457,14 +457,20 @@ export function solanaFacts(): string | null {
   if (!SOLANA_RINGS_ENABLED) return null;
   return [
     `${SOLANA_NAME.toUpperCase()} (Gloam on Solana; it is not one of the vault mainnets above and works differently)`,
-    `- Gloam is live on ${SOLANA_NAME}, at gloam.trade/app/solana (Solana in the app's menu). It runs through Helius Privacy Rings, not the Gloam vault. Assets: ${joinNames(ringsAssets().map((a) => a.symbol))}. Add, pay privately, payroll and cash out work there.`,
+    `- Gloam is live on ${SOLANA_NAME}, at gloam.trade/app/solana (Solana in the app's menu). It runs through Helius Privacy Rings, not the Gloam vault. Assets: ${joinNames(ringsAssets().map((a) => a.symbol))}. Add, pay privately, ${SOLANA_CLAIM_LINKS_ENABLED ? "claim links, " : ""}payment requests, payroll and cash out work there.`,
     ...ringsAssets()
       .filter((a) => a.note)
       .map((a) => `- ${a.symbol} (mint ${a.mint}): ${a.note}`),
     `- ${RINGS_PRIVACY_NOTE} Adding money also shows the token and the amount, and a cash out shows the address it goes to, the token and the amount. Never say or suggest that Gloam on Solana hides who paid whom, the sender or the recipient.`,
     "- A person's Solana private account is its own key, opened by a signature from their main Solana wallet, so the same wallet reopens the same account on any device. Gloam's relay pays the Solana fees, so the private account never needs SOL of its own.",
     `- ${RINGS_PAYROLL_NOTE}`,
-    "- On Solana the proof is made by Helius's prover in an attested enclave, not on the person's device. Proof of funds or payment, private swaps and claim links are not on Solana, and the SDK and the MCP servers do not cover it. Never say or suggest a partnership with Helius or Solana.",
+    ...(SOLANA_CLAIM_LINKS_ENABLED
+      ? [
+          "- A Solana claim link (gloam.trade/c#sol=...) is a one-time account whose key rides in the link. Making it pays that account. Claiming it moves the money into the claimer's own balance. Whoever made it can take back one nobody claimed (Pay, Sent links). Like any Solana private payment, both steps show the accounts they move between, with the link's one-time account in the middle, and not the token or the amount. Gloam's relay pays the fees. A payroll row with no address gets one.",
+        ]
+      : []),
+    "- A Solana payment request is a link that fills in Pay with the private address, the token and the amount. It never goes on chain, and its note is only shown to the payer.",
+    `- On Solana the proof is made by Helius's prover in an attested enclave, not on the person's device. Proof of funds or payment${SOLANA_CLAIM_LINKS_ENABLED ? " and private swaps are" : ", private swaps and claim links are"} not on Solana, and the SDK and the MCP servers do not cover it. Never say or suggest a partnership with Helius or Solana.`,
     "- Bringing money over from a Solana wallet into a vault on another chain (the bridge) is a different thing and works as before.",
   ].join("\n");
 }
