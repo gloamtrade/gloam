@@ -148,6 +148,12 @@ export default function DocsStarknetPage() {
         </li>
         <li>Opening an account is free, with a daily cap.</li>
         <li>
+          Bringing USDC in from another network adds Gloam&apos;s fee for
+          receiving it on Starknet, shown before you sign. Cashing out to
+          another network adds Circle&apos;s fee, shown with the rest as one
+          figure.
+        </li>
+        <li>
           A claim link costs its amount and three fees (paying it, opening its
           one-time account, and the claim), so the person who claims it gets
           the whole amount.
@@ -196,17 +202,43 @@ export default function DocsStarknetPage() {
         other: a first payment to you shows your private account.
       </p>
 
+      <h2 id="networks">From and to other networks</h2>
+      <p>Add can bring USDC from another network into your private account:</p>
+      <ul>
+        <li>
+          From the networks Circle&apos;s CCTP serves (Base, Ethereum,
+          Arbitrum, OP Mainnet, Polygon, Avalanche, Unichain, World Chain,
+          Linea, Monad, HyperEVM, Sonic and X Layer), you sign once on that
+          network, Circle moves the USDC, and Gloam&apos;s relay receives it on
+          Starknet and adds it.
+        </li>
+        <li>
+          From Robinhood Chain, Tempo, BNB Chain and Elysium, one Relay order
+          takes the USDC through Base first. You still sign once.
+        </li>
+        <li>From a Solana wallet.</li>
+        <li>
+          Or send USDC on Starknet to your private account&apos;s address from
+          any wallet or exchange, then Add.
+        </li>
+      </ul>
+      <p>
+        Bringing money in is public, like funding the account from any wallet:
+        the send on the other network, the arrival on Starknet and the add can
+        all be seen. Cash out can send to any of the CCTP networks above. The
+        money leaves through a one-time account, so the cash out never names
+        your private account, and Circle delivers it on the other network.
+      </p>
+
       <h2 id="not-yet">Not on Starknet</h2>
       <ul>
         <li>
-          Proofs of funds and of payment for <Link href="/verify">/verify</Link>
+          A proof of funds or of a single payment for{" "}
+          <Link href="/verify">/verify</Link>. Instead, Prove can share every
+          payment between you and one other account, and that can&apos;t be
+          taken back.
         </li>
         <li>Private swaps</li>
-        <li>
-          Bringing money in from another network is coming. For now, USDC
-          reaches your private account&apos;s address from any wallet or
-          exchange that sends USDC on Starknet, and Add makes it private.
-        </li>
       </ul>
 
       <h2 id="sdk">SDK</h2>

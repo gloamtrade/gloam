@@ -354,7 +354,7 @@ export function decodeRequest(body: string): RequestRead {
 
 /** The request in a fragment ("#solreq=<body>"), or null. */
 export function requestBodyFromHash(hash: string): string | null {
-  const m = hash.match(new RegExp(`^#${REQUEST_KEY}=([1-9A-HJ-NP-Za-km-z]{40,600})$`));
+  const m = hash.match(new RegExp(`^#${REQUEST_KEY}=([1-9A-HJ-NP-Za-km-z]{40,700})$`));
   return m ? m[1]! : null;
 }
 
