@@ -15,7 +15,7 @@
  *   (lib/solanaRings/config), its fee relay as /api/solana/relay reports it
  *   (on, funded) and the relay account's SOL, read through /api/solana/rpc.
  *   While Gloam on Starknet is on (lib/starknetPrivacy/config), its relay as
- *   /api/starknet/relay reports it (on, funded) and the relay account's STRK,
+ *   /api/starknet/relay reports it (on, funded, moves) and the relay account's STRK,
  *   read through /api/starknet/rpc, and its prover route (/api/starknet/prove
  *   answering starknet_specVersion: reached, never a proof spent).
  * Networks: for every network people can see (lib/networks shownNetworks: no
@@ -340,10 +340,16 @@ export function judgeSolanaNetwork(r: { ms: number; httpStatus: number; health: 
 }
 
 export interface StarknetRelayRead {
-  /** /api/starknet/relay's answer: null when it did not answer at all. */
-  api: { ms: number; on: boolean; funded: boolean } | null;
+  /** /api/starknet/relay's answer: null when it did not answer at all. `moves` "off": it refuses every add, payment and cash out (no fee set). */
+  api: { ms: number; on: boolean; funded: boolean; moves?: "on" | "off" } | null;
   /** The relay account's STRK (base units), read through the site's Starknet RPC, or null when unread. */
   strk: bigint | null;
+}
+
+/** /api/starknet/relay's GET as the status check reads it: null unless it answered ok. No `moves` (an older relay): on. */
+export function starknetRelayApi(ms: number, body: unknown): StarknetRelayRead["api"] {
+  const v = body as { ok?: unknown; on?: unknown; funded?: unknown; moves?: unknown } | null | undefined;
+  return v && v.ok === true ? { ms, on: v.on === true, funded: v.funded === true, moves: v.moves === "off" ? "off" : "on" } : null;
 }
 
 /** Starknet's relay warns this many times above the line where it pauses (a few days of moves). */
@@ -351,8 +357,10 @@ export const STARKNET_WARN_TIMES = 3n;
 
 /**
  * Gloam's relay on Starknet. Off, or reporting itself unfunded (the app pauses
- * Starknet payments then): down. Its STRK under STARKNET_WARN_TIMES the line
- * at which it pauses: degraded, so it is topped up first.
+ * Starknet payments then): down. On but sending no moves (mainnet with no fee
+ * set: accounts open, every add, payment and cash out is refused): degraded.
+ * Its STRK under STARKNET_WARN_TIMES the line at which it pauses: degraded, so
+ * it is topped up first.
  */
 export function judgeStarknetRelay(r: StarknetRelayRead, low: bigint = STARKNET_RELAY_LOW_STRK[STARKNET_NETWORK]): Verdict {
   const detail = r.strk !== null ? `Gas ${amountText(r.strk, 18)} STRK` : null;
@@ -363,6 +371,7 @@ export function judgeStarknetRelay(r: StarknetRelayRead, low: bigint = STARKNET_
     const reason = r.strk === null ? "Paused: it reports too little STRK for fees." : r.strk < low ? "Out of STRK for fees: paused until it is topped up." : "Paused: it could not read its own balance.";
     return { status: "down", latencyMs: ms, reason, detail };
   }
+  if (r.api.moves === "off") return { status: "degraded", latencyMs: ms, reason: "Adds, payments and cash outs are off: no relay fee is set.", detail };
   if (r.strk !== null && r.strk < low * STARKNET_WARN_TIMES) return { status: "degraded", latencyMs: ms, reason: "Low on STRK for fees.", detail };
   if (ms > SLOW_MS) return slow(ms, detail);
   return ok(ms, detail);
@@ -647,8 +656,8 @@ const STARK_ADDRESS = /^0x[0-9a-fA-F]{1,64}$/;
 
 async function checkStarknetRelay(): Promise<Verdict> {
   const got = await timed(() => getJson(`${STATUS_SITE}${STARKNET_PROXY_PATHS.relay}`));
-  const v = got?.value as { ok?: unknown; on?: unknown; funded?: unknown; relayer?: unknown } | null | undefined;
-  const api = got && v && v.ok === true ? { ms: got.ms, on: v.on === true, funded: v.funded === true } : null;
+  const v = got?.value as { relayer?: unknown } | null | undefined;
+  const api = got ? starknetRelayApi(got.ms, got.value) : null;
   const relayer = typeof v?.relayer === "string" && STARK_ADDRESS.test(v.relayer) ? v.relayer : null;
   let strk: bigint | null = null;
   if (api && relayer) {

@@ -6,11 +6,13 @@ import {
   STARKNET_RELAY_LOW_STRK,
   relayAmounts,
   relayKeys,
+  relayMoves,
   relaySend,
-  relayStrk,
+  relayStrkCached,
   serverConfig,
   starknetRelayAttempt,
   starknetRelayChains,
+  starknetRelayInfoRate,
   starknetRelayRate,
   starknetUpstream,
 } from "@/lib/starknetPrivacy/server";
@@ -30,23 +32,34 @@ const refuse = (status: number, code: string, message: string) => NextResponse.j
 /**
  * Gloam's Starknet relay: a private account on Starknet never holds STRK, so
  * Gloam's relay account sends every one of its transactions and pays the fee.
- * GET says whether it is on and funded, names its address (proven transactions
- * pay it its fee inside the proof) and the fee. POST takes one call, checks it
+ * GET says whether it is on and funded, whether it sends moves (an add, a
+ * payment, a cash out: "off" on mainnet with no fee and no sponsored budget),
+ * names its address (proven transactions pay it its fee inside the proof) and
+ * the fee; its STRK is read at most every 20 seconds per instance, and each IP
+ * may ask 60 times a minute. POST takes one call, checks it
  * against lib/starknetPrivacy/relayPolicy and the chain (lib/starknetPrivacy/server
  * relaySend), counts it, and sends it; it answers with the transaction hash,
  * which the page then follows through /api/starknet/rpc.
  */
-export async function GET() {
+export async function GET(req: Request) {
+  const rate = await starknetRelayInfoRate(req);
+  if (!rate.allowed) {
+    return NextResponse.json(
+      { ok: false, error: { code: "rate_limited", message: "Too many requests. Try again in a little while." } },
+      { status: 429, headers: { ...NO_STORE, "Retry-After": String(rate.retryAfterSec) } }
+    );
+  }
   const cfg = serverConfig();
   const keys = relayKeys();
   const upstream = starknetUpstream(cfg);
-  const strk = keys && STARKNET_ENABLED ? await relayStrk(upstream, keys.address) : null;
+  const strk = keys && STARKNET_ENABLED ? await relayStrkCached(upstream, keys.address) : null;
   const { fee, maxApprove } = relayAmounts(cfg);
   return NextResponse.json(
     {
       ok: true,
       on: Boolean(STARKNET_ENABLED && keys && cfg.pool),
       funded: strk !== null && strk >= STARKNET_RELAY_LOW_STRK[cfg.network],
+      moves: relayMoves(cfg),
       relayer: keys?.address ?? null,
       network: cfg.network,
       pool: cfg.pool,

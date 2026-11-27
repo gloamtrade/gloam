@@ -51,6 +51,8 @@ type Receipt = { finality_status?: string; execution_status?: string; block_numb
 export type StarknetRelayInfo = {
   on: boolean;
   funded: boolean;
+  /** "off": the relay sends no add, payment or cash out (mainnet with no fee and no sponsored budget). Absent from an older relay: on. */
+  moves?: "on" | "off";
   relayer: string | null;
   network: string;
   pool: string | null;
@@ -146,14 +148,19 @@ export class StarknetSession {
   }
 
   /**
-   * Before a proven move: the relay is on and funded, and asks the fee the page
-   * showed (`token` null: a move with no fee, the open). Anything else stops the
-   * move here, before its proof is made, with the relay read again for the page.
+   * Before a proven move: the relay is on and funded, sends moves at all, and
+   * asks the fee the page showed (`token` null: a move with no fee, the open).
+   * Anything else stops the move here, before its proof is made, with the relay
+   * read again for the page.
    */
   private async checkRelay(token: StarknetToken | null): Promise<void> {
     const changed = await this.refreshRelay(token);
     if (!this.relayNow.on || !this.relayNow.funded || !this.relayNow.relayer) {
       throw new StarknetRelayError("relay_paused", "Private payments on Starknet are paused for a moment. Try again later.");
+    }
+    // The relay would refuse the move after its proof (fee_unset): say so before proving.
+    if (token && this.relayNow.moves === "off") {
+      throw new StarknetRelayError("moves_off", "Adding, paying and cashing out on Starknet aren't open yet. Nothing was sent. Try again later.");
     }
     if (changed && token) throw new StarknetRelayError("relay_changed", "Gloam's fee on Starknet just changed. Check it and try again.");
   }

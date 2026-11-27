@@ -34,7 +34,7 @@ import "server-only";
  */
 import { createHash, randomBytes } from "crypto";
 import { Account, RpcProvider, num, type Call } from "starknet";
-import { SharedCountUnavailable, addRateCount, clientIp } from "@/lib/mcpRemote/rateLimit";
+import { SharedCountUnavailable, addRateCount, clientIp, hitBatchedCount, hitRateLimit, type RateResult } from "@/lib/mcpRemote/rateLimit";
 import { kv1 } from "@/lib/partnersKv";
 import { STARKNET_NETWORK, STARKNET_STRK, sameStarknetAddress, starknetConfig, type StarknetNetwork, type StarknetNetworkConfig } from "./config";
 import { accountAddress } from "./account";
@@ -104,12 +104,26 @@ export const STARKNET_RELAY_LOW_STRK: Record<StarknetNetwork, bigint> = {
 export const STARKNET_PROXY_PER_IP_PER_MIN = 600;
 export const STARKNET_PROXY_ALL_PER_MIN = 20_000;
 
+/**
+ * How the proxy's counts reach Redis (hitBatchedCount): every read used to cost
+ * four Upstash commands (INCRBY and EXPIRE, per IP and for everyone). Now each
+ * instance sends an IP's count once it holds 15 unsent calls, and everyone's
+ * once it holds 100 or ten seconds have passed; an IP or a minute already used
+ * is refused in memory. Each instance may let through at most `slack` calls
+ * (and one batch) past a limit before it learns of it: 2.5% of an IP's 600, 0.5%
+ * of everyone's 20,000. Nothing reads these counts, so the time only keeps
+ * everyone's count in Redis close to the truth.
+ */
+export const STARKNET_PROXY_SYNC = {
+  perIp: { slack: 15, syncMs: 60_000 },
+  all: { slack: 100, syncMs: 10_000 },
+} as const;
+
 export async function starknetProxyRate(req: Request, calls: number, now = Date.now()): Promise<{ allowed: boolean; retryAfterSec: number }> {
-  const retryAfterSec = Math.max(1, 60 - (Math.floor(now / 1000) % 60));
-  const mine = await addRateCount(clientIp(req), "sn-proxy", calls, now);
-  if (mine > STARKNET_PROXY_PER_IP_PER_MIN) return { allowed: false, retryAfterSec };
-  const all = await addRateCount("all", "sn-proxy-all", calls, now);
-  return { allowed: all <= STARKNET_PROXY_ALL_PER_MIN, retryAfterSec };
+  const mine = await hitBatchedCount(clientIp(req), "sn-proxy", calls, STARKNET_PROXY_PER_IP_PER_MIN, STARKNET_PROXY_SYNC.perIp, now);
+  if (!mine.allowed) return { allowed: false, retryAfterSec: mine.retryAfterSec };
+  const all = await hitBatchedCount("all", "sn-proxy-all", calls, STARKNET_PROXY_ALL_PER_MIN, STARKNET_PROXY_SYNC.all, now);
+  return { allowed: all.allowed, retryAfterSec: all.retryAfterSec };
 }
 
 /**
@@ -487,7 +501,7 @@ export async function relaySend(input: {
   const move = decision.kind === "approve" || (decision.kind === "apply" && !decision.setup);
   const feeAsked = Object.values(ctx.minFee ?? {}).some((v) => v > 0n);
   const sponsored = cfg.network === "mainnet" && move && !feeAsked;
-  if (sponsored && relayCaps(cfg.network, input.env).sponsoredPerDay <= 0) {
+  if (sponsored && relayMoves(cfg, input.env) === "off") {
     return { ok: false, status: 503, code: "fee_unset", message: "Gloam's relay isn't set to send private moves on Starknet yet." };
   }
   // The pool's owner can change its code at once: until Gloam checks a new class nothing reaches the
@@ -564,6 +578,47 @@ export async function relayStrk(upstream: string, relay: string): Promise<bigint
   } catch {
     return null;
   }
+}
+
+/**
+ * How long one instance keeps the relay's STRK for GET /api/starknet/relay
+ * (each page load and each move reads it), and a failed read, so a slow node
+ * isn't asked again by every caller. Callers at the same moment share one read.
+ */
+export const RELAY_STRK_CACHE_MS = 20_000;
+export const RELAY_STRK_MISS_MS = 5_000;
+let strkCache: { key: string; at: number; ms: number; value: Promise<bigint | null> } | null = null;
+
+/** relayStrk, read at most once per RELAY_STRK_CACHE_MS on this instance. */
+export function relayStrkCached(upstream: string, relay: string, now = starknetRelayClock.now()): Promise<bigint | null> {
+  const key = `${upstream}|${relay}`;
+  if (strkCache && strkCache.key === key && now - strkCache.at < strkCache.ms) return strkCache.value;
+  const entry = { key, at: now, ms: RELAY_STRK_CACHE_MS, value: relayStrk(upstream, relay) };
+  void entry.value.then((v) => {
+    if (v === null) entry.ms = RELAY_STRK_MISS_MS;
+  });
+  strkCache = entry;
+  return entry.value;
+}
+
+/** GET /api/starknet/relay per IP a minute, counted on each instance (no Redis call). */
+export const STARKNET_RELAY_INFO_PER_IP_PER_MIN = 60;
+
+export function starknetRelayInfoRate(req: Request, now = starknetRelayClock.now()): Promise<RateResult> {
+  return hitRateLimit(clientIp(req), "sn-relay-info", STARKNET_RELAY_INFO_PER_IP_PER_MIN, now);
+}
+
+/**
+ * Whether the relay sends moves (an add, a payment, a cash out) at all. On
+ * mainnet a move needs the relay's fee (STARKNET_RELAY_FEE) or a sponsored
+ * budget (STARKNET_SPONSORED_MOVES_PER_DAY): with neither, relaySend refuses
+ * every one (fee_unset), so GET says "off" and the page stops before it proves.
+ * An account's open owes no fee and is not a move.
+ */
+export function relayMoves(cfg: StarknetNetworkConfig, env: Env = process.env): "on" | "off" {
+  if (cfg.network !== "mainnet") return "on";
+  const feeAsked = Object.values(relayAmounts(cfg, env).fee).some((v) => v > 0n);
+  return feeAsked || relayCaps(cfg.network, env).sponsoredPerDay > 0 ? "on" : "off";
 }
 
 /** The network this deployment serves. */
