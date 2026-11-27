@@ -222,7 +222,7 @@ try {
   const out = await sign1(userAcct, calls);
   const relayUsdc0 = await usdcOf(relayKeys.address);
   const chain = server.cctpChain(SN, relayKeys);
-  const envFee = { ...env, STARKNET_CCTP_FEE: "0.25" };
+  const envFee = { ...env, STARKNET_RELAY_FEE: "0.25", STARKNET_CCTP_FEE: "0.25" };
   const r = await server.cctpReceiveSend({ message: signedMsg, attestation, outside: out, cfg, cctp: MAIN, relay: relayKeys.address, chain, env: envFee, rate: async () => "ok" });
   ok(r.ok, `the relay sent it${r.ok ? "" : `: ${r.code} ${r.message}`}`);
   if (!r.ok) throw new Error("receive failed");
