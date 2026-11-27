@@ -74,6 +74,86 @@ export async function seedFromWalletSignature(signature: Uint8Array, index: numb
   return hkdf(signature, enc.encode(WALLET_SALT), `account/${index}`, 256);
 }
 
+/** secp256k1's group order: an EVM signature's s is canonical below half of it (EIP-2). */
+const SECP256K1_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+
+/**
+ * An EVM wallet's 65-byte signature (r, s, v) in one form, so the same key
+ * opens the same account whatever wallet app signs with it: wallets disagree
+ * on how they write v (27/28, or 0/1 from some hardware and mobile wallets,
+ * never on r and s), and a few return the high-s twin of the same signature.
+ * v becomes 27/28 and s the low one (its v flipped with it). A signature
+ * already in that form, as MetaMask, Rabby and Coinbase Wallet write it, is
+ * returned unchanged, so no account opened with one moves. Any other length
+ * or v is returned as it came.
+ */
+export function evmSignatureBytes(signature: string): Uint8Array {
+  const h = signature.startsWith("0x") ? signature.slice(2) : signature;
+  if (h.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(h)) throw new Error("That isn't a wallet signature.");
+  const b = new Uint8Array(h.length / 2);
+  for (let i = 0; i < b.length; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  if (b.length !== 65) return b;
+  let v = b[64]!;
+  if (v === 0 || v === 1) v += 27;
+  if (v !== 27 && v !== 28) return b;
+  let s = toBig(b.subarray(32, 64));
+  if (s > SECP256K1_N >> 1n) {
+    s = SECP256K1_N - s;
+    v = v === 27 ? 28 : 27;
+  }
+  const out = new Uint8Array(65);
+  out.set(b.subarray(0, 32), 0);
+  out.set(Uint8Array.from(s.toString(16).padStart(64, "0").match(/../g)!, (x) => parseInt(x, 16)), 32);
+  out[64] = v;
+  b.fill(0);
+  return out;
+}
+
+export class StarknetWalletError extends Error {
+  override readonly name = "StarknetWalletError";
+}
+
+/**
+ * The seed of private account `index` from a browser wallet (EVM): its
+ * signature of starknetAccountMessage(index), in one form (evmSignatureBytes).
+ * When `isNew` says no account is there yet, the wallet signs a second time and
+ * must sign the same way: a wallet that signs differently each time (some MPC
+ * and smart wallets) would open an account no later signature reopens, on
+ * another device or once this one forgets it. An account already there needs
+ * one signature: it reopened, so the wallet is steady.
+ */
+export async function seedFromWallet(
+  sign: (message: string) => Promise<string>,
+  index: number,
+  isNew: (seed: Uint8Array) => Promise<boolean>,
+  beforeSecond?: () => void
+): Promise<Uint8Array> {
+  const message = starknetAccountMessage(index);
+  const once = async () => {
+    const bytes = evmSignatureBytes(await sign(message));
+    try {
+      return await seedFromWalletSignature(bytes, index);
+    } finally {
+      bytes.fill(0);
+    }
+  };
+  const first = await once();
+  try {
+    if (!(await isNew(first))) return first;
+    beforeSecond?.();
+    const second = await once();
+    const same = second.length === first.length && second.every((x, i) => x === first[i]);
+    second.fill(0);
+    if (!same) {
+      throw new StarknetWalletError("This wallet signs differently each time, so it can't hold a private account here. Use another wallet, or sign in with email or a passkey.");
+    }
+    return first;
+  } catch (e) {
+    first.fill(0);
+    throw e;
+  }
+}
+
 /** The 32-byte seed of private account `index` from a Gloam wallet's root (passkey PRF output or backup code). */
 export async function seedFromGloamRoot(root: Uint8Array, kind: StarknetRootKind, index: number): Promise<Uint8Array> {
   checkIndex(index);

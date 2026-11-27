@@ -181,7 +181,7 @@ export function StarknetGate({ lead }: { lead?: ReactNode }) {
       <>
         <h2 className="t-title text-foreground">Open your private account</h2>
         <p className="mt-1.5 max-w-[56ch] text-[14px] leading-relaxed text-mute">
-          Your wallet signs one message. It opens the same private account on any device, so there is nothing to back up.
+          Your wallet signs one message, twice the first time. It opens the same private account on any device, so there is nothing to back up.
         </p>
         <div className="mt-5 flex items-center gap-3 rounded-[16px] border border-line py-2.5 pl-3 pr-3">
           <TokenLogo id="starknet" symbol="Starknet" size={32} network />

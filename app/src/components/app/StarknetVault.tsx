@@ -189,12 +189,12 @@ function RelayPaused() {
   );
 }
 
-/** Gloam's fee on a move, when it asks one. */
-function FeeLine({ fee, token }: { fee: bigint; token: StarknetToken }) {
+/** Gloam's fee on a move, when it asks one: from what is added (Add), or from the private balance (Pay, Cash out). */
+function FeeLine({ fee, token, from = "from your private balance" }: { fee: bigint; token: StarknetToken; from?: string }) {
   if (fee <= 0n) return null;
   return (
     <p className="tnum mt-3 text-[13px] text-mute">
-      Gloam&apos;s fee: {starkAmount(fee, token)} {token.symbol}, from your private balance
+      Gloam&apos;s fee: {starkAmount(fee, token)} {token.symbol}, {from}
     </p>
   );
 }
@@ -209,8 +209,10 @@ function StarknetAddView({ token }: { token: StarknetToken }) {
   const problem = starkAmountProblem(amount, token, balance);
   const value = parseStarkAmount(amount, token.decimals);
   const tooSmall = value !== null && sn.fee > 0n && value <= sn.fee ? `More than Gloam's fee of ${starkAmount(sn.fee, token)} ${token.symbol}` : null;
+  // The relay approves at most this much for one add, and refuses more before anything moves.
+  const tooBig = value !== null && sn.maxAdd > 0n && value > sn.maxAdd ? `One add moves at most ${starkAmount(sn.maxAdd, token)} ${token.symbol}` : null;
   const working = sn.task?.kind === "add";
-  const stop = !sn.relay?.funded ? "Paused for a moment" : !amount.trim() || !value ? "Enter an amount" : (problem ?? tooSmall);
+  const stop = !sn.relay?.funded ? "Paused for a moment" : !amount.trim() || !value ? "Enter an amount" : (problem ?? tooSmall ?? tooBig);
 
   return (
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -232,20 +234,22 @@ function StarknetAddView({ token }: { token: StarknetToken }) {
             disabled={working}
           />
         </div>
-        <FeeLine fee={sn.fee} token={token} />
+        <FeeLine fee={sn.fee} token={token} from="taken from what you add" />
         {!sn.relay?.funded && <RelayPaused />}
         <StarknetActionButton
           kind="add"
           label="Add privately"
           stop={stop}
           className="mt-5"
-          onClick={() =>
+          onClick={() => {
+            // The fee comes out of what is added (inside the proof): the private balance grows by the rest.
+            const fee = sn.fee;
             void sn.add(value!).then((hash) => {
               if (!hash) return;
               setAmount("");
-              show({ title: "Added privately", body: "It's in your private balance now.", amount: value!, hash });
-            })
-          }
+              show({ title: "Added privately", body: "It's in your private balance now.", amount: value! - fee, hash });
+            });
+          }}
         />
         <StarknetSteps task={working ? sn.task : null} className="mt-4" />
         <StarknetError kind="add" className="mt-4" />
@@ -291,10 +295,12 @@ function StarknetSpendView({ kind, token, onReceive }: { kind: "pay" | "cashout"
           : problem;
 
   if (balance !== null && balance === 0n && !working) {
+    // A move that spent the whole balance lands here: its success shows over the empty state.
     return (
       <section className="gl-card p-5 sm:p-7">
         <h2 className="t-title text-foreground">{pay ? "Pay privately" : "Cash out"}</h2>
         <StarknetEmptyBalance onReceive={onReceive} />
+        {modal}
       </section>
     );
   }
