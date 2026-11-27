@@ -282,7 +282,7 @@ test("a swap link opened with Solana picked leaves Solana, even for the EVM netw
   assert.equal(swapLinkMove(RH, RH, true), RH, "Solana picked: move, or the link shows Swap is not on Solana yet");
   assert.equal(swapLinkMove(null, RH, true), null, "not a swap link: stay");
   const hub = readFileSync(new URL("../src/components/app/VaultHub.tsx", import.meta.url), "utf8");
-  assert.match(hub, /const to = swapLinkMove\(swapLinkTo, networkKey, solana\);\s*if \(to\) setNetworkKey\(to\);/);
+  assert.match(hub, /const to = swapLinkMove\(swapLinkTo, networkKey, solana \|\| starknet\);\s*if \(to\) setNetworkKey\(to\);/, "Solana or Starknet picked: a swap link moves to its EVM network");
 });
 
 test("Swap asked for on a network without it: where swaps run, with a switch to each", () => {

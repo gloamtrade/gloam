@@ -138,7 +138,7 @@ export function VaultHub() {
     if (!settled || !swapLinkTo || switchedFor === hash) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the fragment is read after mount; this marks the link as moved for
     setSwitchedFor(hash);
-    // with Solana picked it moves even to the last EVM network, which leaves Solana
+    // with Solana or Starknet picked it moves even to the last EVM network, which leaves them
     const to = swapLinkMove(swapLinkTo, networkKey, solana || starknet);
     if (to) setNetworkKey(to);
   }, [settled, swapLinkTo, switchedFor, hash, networkKey, setNetworkKey, solana, starknet]);
