@@ -3,7 +3,7 @@ import { readCappedBody } from "@/lib/cspReport";
 import { STARKNET_ENABLED, STARKNET_NETWORK, sameStarknetAddress } from "@/lib/starknetPrivacy/config";
 import { STARKNET_PROVE_MAX_BODY, STARKNET_PROVE_METHODS } from "@/lib/starknetPrivacy/proxyPolicy";
 import { StarkscanProveError, starkscanProve } from "@/lib/starknetPrivacy/starkscanProver";
-import { serverConfig, starknetProveRate, starknetUpstream, starkscanRounds } from "@/lib/starknetPrivacy/server";
+import { serverConfig, starknetProveRate, starknetUpstream, starkscanAdmit, starkscanRounds } from "@/lib/starknetPrivacy/server";
 import { devnetMockProve } from "@/lib/starknetPrivacy/devnetProver";
 
 export const runtime = "nodejs";
@@ -78,7 +78,11 @@ export async function POST(req: Request) {
     if (STARKNET_NETWORK === "mainnet") {
       const key = (process.env.STARKSCAN_API_KEY ?? "").trim();
       if (!key || !cfg.starkscanProveUrl) return rpcError(call.id, -32603, "Proving on Starknet isn't set up yet.");
-      const result = await starkscanProve({ url: cfg.starkscanProveUrl, apiKey: key, timeoutMs: STARKSCAN_WAIT_MS, rounds: starkscanRounds() }, p.block_id as never, p.transaction);
+      const result = await starkscanProve(
+        { url: cfg.starkscanProveUrl, apiKey: key, timeoutMs: STARKSCAN_WAIT_MS, rounds: starkscanRounds(), admit: starkscanAdmit(req) },
+        p.block_id as never,
+        p.transaction
+      );
       return NextResponse.json({ jsonrpc: "2.0", id: call.id ?? null, result }, { headers: NO_STORE });
     }
     if (STARKNET_NETWORK === "devnet") {
@@ -90,6 +94,8 @@ export async function POST(req: Request) {
     if (e instanceof StarkscanProveError) {
       // The prover's own code on a failed job (10000: screening refused the deposit), so the SDK names it.
       if (e.prover) return NextResponse.json({ jsonrpc: "2.0", id: call.id ?? null, error: { code: e.prover.code, message: e.message, ...(e.prover.data !== undefined ? { data: e.prover.data } : {}) } }, { headers: NO_STORE });
+      // This caller's new proofs for the day are used: 429, which the SDK doesn't retry.
+      if (e.code === "limited") return rpcError(call.id, -32005, e.message, 429);
       // Busy, or still proving: the SDK retries the same body, which finds the same job.
       const code = e.code === "unavailable" || e.code === "timeout" ? -32005 : -32603;
       return rpcError(call.id, code, e.message);

@@ -220,8 +220,15 @@ const ctxBase = {
   const write = () => new CairoCustomEnum({ WriteOnce: { storage_address: "0x77", value: ["0x1", "0x2"] } });
   const fee = { [num.toHex(BigInt(USDC))]: 5_000n };
 
-  eq(policy.checkRelayCall([apply([write(), to(OUT, 250_000), to(RELAY, 5_000)])], { ...ctx, minFee: fee }, proof), { ok: true, kind: "apply", fee: { token: num.toHex(BigInt(USDC)), amount: 5_000n }, deposits: 0, withdrawals: 2, attestedAt: null }, "a cash out with the relay's fee is sent");
-  eq(policy.checkRelayCall([apply([from("0x99", 1_000_000), write()])], ctx, proof), { ok: true, kind: "apply", fee: null, deposits: 1, withdrawals: 0, attestedAt: null }, "an add with no fee asked is sent");
+  eq(policy.checkRelayCall([apply([write(), to(OUT, 250_000), to(RELAY, 5_000)])], { ...ctx, minFee: fee }, proof), { ok: true, kind: "apply", fee: { token: num.toHex(BigInt(USDC)), amount: 5_000n }, deposits: 0, withdrawals: 2, attestedAt: null, setup: false }, "a cash out with the relay's fee is sent");
+  eq(policy.checkRelayCall([apply([from("0x99", 1_000_000), write()])], ctx, proof), { ok: true, kind: "apply", fee: null, deposits: 1, withdrawals: 0, attestedAt: null, setup: false }, "an add with no fee asked is sent");
+  // An account's open (its viewing key and channels: WriteOnce, Append, EmitViewingKeySet) spends and moves
+  // nothing, so it has nothing to pay a fee from. With a fee asked it was refused (fee_missing), so no one
+  // could open an account while the relay charged one.
+  eq(policy.checkRelayCall([apply([write(), write()])], { ...ctx, minFee: fee }, proof), { ok: true, kind: "apply", fee: null, deposits: 0, withdrawals: 0, attestedAt: null, setup: true }, "an open owes no fee, even with one asked, and says it is an open");
+  const used = () => new CairoCustomEnum({ EmitNoteUsed: { nullifier: "0x5" } });
+  eq(policy.checkRelayCall([apply([write(), used()])], { ...ctx, minFee: fee }, proof), { ok: false, reason: "fee_missing" }, "a move that spends a note is no open: it pays the fee");
+  ok((policy.checkRelayCall([apply([write(), used()])], ctx, proof) as { setup?: boolean }).setup === false, "and isn't counted as one");
   // A deposit's screening attestation (Some = 0, issued_at, r, s) is read, not judged, here.
   const attested = (actionsList: CairoCustomEnum[], at: number): Call => {
     const c = apply(actionsList);

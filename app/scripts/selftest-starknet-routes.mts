@@ -118,6 +118,7 @@ const relayRoute = await import("../src/app/api/starknet/relay/route");
 const proveRoute = await import("../src/app/api/starknet/prove/route");
 const discoveryRoute = await import("../src/app/api/starknet/discovery/route");
 const keysRoute = await import("../src/app/api/starknet/discovery/ohttp-keys/route");
+const { kv1, resetMemoryKv } = await import("../src/lib/partnersKv");
 const { CallData, CairoCustomEnum, CairoOption, CairoOptionVariant } = await import("starknet");
 const { PrivacyPoolABI } = await import("@starkware-libs/starknet-privacy-sdk/abi");
 
@@ -211,6 +212,12 @@ function fakeChain(o: { deployed?: Set<string>; classes?: Record<string, string>
   return { chain, sent };
 }
 const okRate = async () => "ok" as const;
+// relaySend never sends one call twice (a second copy would revert and cost STRK): the checks
+// below send the same call again on purpose, so each starts with the store empty.
+const relaySend: typeof server.relaySend = (x) => {
+  resetMemoryKv();
+  return server.relaySend(x);
+};
 const pub = ec.starkCurve.getStarkKey("0x4242");
 const acct = account.accountAddress(pub);
 const NOW = 1_800_000_000_000;
@@ -229,42 +236,42 @@ const to = (addr: string, amount: number) => new CairoCustomEnum({ TransferTo: {
 const PROOF = { proofFacts: ["0x1", "0x2"], proof: "QUJD" };
 {
   let f = fakeChain();
-  let r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  let r = await relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(r.ok && r.decision.kind === "deploy" && f.sent.length === 1, "a new account's deploy is sent");
   f = fakeChain({ deployed: new Set([num.toHex(BigInt(acct))]) });
-  r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.code === "already_deployed" && f.sent.length === 0, "a deployed account's deploy is not paid for again");
 
   f = fakeChain({ deployed: new Set([num.toHex(BigInt(acct))]) });
-  r = await server.relaySend({ calls: [approveFor(acct, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [approveFor(acct, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(r.ok && r.decision.kind === "approve" && f.sent.length === 1, "a Gloam account's approve is sent");
   const other = "0x0700000000000000000000000000000000000000000000000000000000000001";
   f = fakeChain({ classes: { [num.toHex(BigInt(other))]: "0x123" } });
-  r = await server.relaySend({ calls: [approveFor(other, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [approveFor(other, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.status === 422 && f.sent.length === 0, "another account's approve is refused");
   f = fakeChain({ deployed: new Set([num.toHex(BigInt(acct))]) });
-  r = await server.relaySend({ calls: [approveFor(acct, 2_000_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [approveFor(acct, 2_000_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && /approve_amount/.test(r.message) && f.sent.length === 0, "an approve over the environment's cap is refused");
 
   const OUT = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd";
   f = fakeChain();
-  r = await server.relaySend({ calls: [applyCall([to(OUT, 250_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [applyCall([to(OUT, 250_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && /fee_missing/.test(r.message) && f.sent.length === 0, "a proof that doesn't pay the relay's fee is refused");
-  r = await server.relaySend({ calls: [applyCall([to(OUT, 250_000), to(RELAY, 10_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [applyCall([to(OUT, 250_000), to(RELAY, 10_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(r.ok && r.decision.kind === "apply" && f.sent.length === 1, "a cash out paying the fee is sent");
   eq(f.sent[0]?.proof, PROOF, "with its proof");
   eq(f.sent[0]?.calls.length, 1, "with no pool fee, the apply goes alone");
   const STRK_FEE = 4_500_000_000_000_000_000n;
   f = fakeChain({ poolFee: STRK_FEE });
   const cashOut = applyCall([to(OUT, 250_000), to(RELAY, 10_000)]);
-  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(r.ok && f.sent.length === 1, "the pool's own STRK fee is paid by the relay");
   const strkApprove = (amount: bigint) => ({ contractAddress: config.STARKNET_STRK, entrypoint: "approve", calldata: [num.toHex(BigInt(POOL)), num.toHex(amount), "0x0"] });
   eq(f.sent[0]?.calls, [strkApprove(STRK_FEE), cashOut, strkApprove(0n)], "in one transaction: approve exactly the fee, apply, approve 0");
   f = fakeChain({ poolFee: 11n * 10n ** 18n });
-  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.code === "pool_fee_high" && r.status === 503 && f.sent.length === 0, "a pool fee over the cap (10 STRK by default): paused, nothing sent");
-  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env: { ...env, STARKNET_MAX_POOL_FEE: "20" }, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env: { ...env, STARKNET_MAX_POOL_FEE: "20" }, now: NOW, rate: okRate });
   ok(r.ok && f.sent.length === 1, "a higher cap set in the environment lets it through");
 
   // The canonical pool: pinned to its class, and a deposit's screening attestation checked before paying.
@@ -276,34 +283,220 @@ const PROOF = { proofFacts: ["0x1", "0x2"], proof: "QUJD" };
   const add = applyCall([from(acct, 1_000_000), to(RELAY, 10_000)]);
   const nowS = NOW / 1000;
   f = fakeChain({ classes: { [poolKey]: PIN } });
-  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(r.ok && f.sent.length === 1, "the pool still on its pinned class: sent");
   f = fakeChain({ classes: { [poolKey]: "0xbad" } });
-  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.code === "pool_changed" && r.status === 503 && f.sent.length === 0, "the pool's code changed: paused until Gloam checks it");
   f = fakeChain();
-  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.code === "upstream_unavailable" && f.sent.length === 0, "the pool's class unread: nothing sent");
   f = fakeChain({ classes: { [poolKey]: PIN } });
-  r = await server.relaySend({ calls: [add], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [add], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.code === "screening_missing" && f.sent.length === 0, "a deposit with no screening attestation is refused before paying");
-  r = await server.relaySend({ calls: [attested(add, nowS - 30)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [attested(add, nowS - 30)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(r.ok && f.sent.length === 1, "a deposit with a fresh attestation is sent");
-  r = await server.relaySend({ calls: [attested(add, nowS - server.SCREENING_SEND_WINDOW_S - 1)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [attested(add, nowS - server.SCREENING_SEND_WINDOW_S - 1)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.code === "screening_expired" && r.status === 409 && f.sent.length === 1, "a stale attestation is refused, so the page proves again");
-  r = await server.relaySend({ calls: [attested(cashOut, nowS - 30)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [attested(cashOut, nowS - 30)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && /unexpected_screening/.test(r.message) && f.sent.length === 1, "an attestation on a move with no deposit is refused (the pool would revert)");
-  r = await server.relaySend({ calls: [add], proof: PROOF, cfg, relay: RELAY, chain: fakeChain().chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [add], proof: PROOF, cfg, relay: RELAY, chain: fakeChain().chain, env, now: NOW, rate: okRate });
   ok(r.ok, "a pool that isn't pinned isn't held to the canonical pool's screening rule");
 
   f = fakeChain();
-  r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async () => "limited" });
+  r = await relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async () => "limited" });
   ok(!r.ok && r.status === 429 && f.sent.length === 0, "over the limit: 429, nothing sent");
-  r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async () => "unavailable" });
+  r = await relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async () => "unavailable" });
   ok(!r.ok && r.status === 503 && f.sent.length === 0, "no shared count: 503, nothing sent");
   f = fakeChain({ sendThrows: `RPC: starknet_addInvokeTransaction failed ${"x".repeat(400)}` });
-  r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.status === 502 && r.message.length < 300 && !r.message.includes(SECRET.slice(2)), "a failed send says why, short, never with the key");
+}
+
+/* ------------------------------------------------------------------ the relay under load, and a changed pool */
+{
+  const { RpcError } = await import("starknet");
+  const PIN = "0xc1a55";
+  const pinned = { ...cfg, poolClassHash: PIN };
+  const poolKey = num.toHex(BigInt(POOL));
+  const acctKey = num.toHex(BigInt(acct));
+
+  // A node's refusal names its reason: starknet.js puts the whole request first, which the old cut kept
+  // instead of the reason (a nonce clash read "Starknet refused it: RPC: starknet_addInvokeTransaction with params {...").
+  const params = { invoke_transaction: { calldata: Array.from({ length: 40 }, (_, i) => `0x${i}`) } };
+  const nonceClash = new RpcError({ code: 52, message: "Invalid transaction nonce", data: "Account nonce: 1; got: 0." } as never, "starknet_addInvokeTransaction", params);
+  let f = fakeChain();
+  f.chain.send = async () => {
+    throw nonceClash;
+  };
+  let r = await relaySend({ calls: [account.deployAccountCall(ec.starkCurve.getStarkKey("0x77"))], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.code === "send_failed" && r.message.includes("52: Invalid transaction nonce: Account nonce: 1; got: 0.") && r.message.length < 300, "a refused send keeps the node's reason, short");
+
+  // The pool changed under its pin: an approve to it is not sent either (it would let the new code take the tokens).
+  f = fakeChain({ deployed: new Set([acctKey]), classes: { [poolKey]: "0xbad" } });
+  r = await relaySend({ calls: [approveFor(acct, 1_000_000n)], cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.code === "pool_changed" && r.status === 503 && f.sent.length === 0, "a changed pool pauses approves too");
+  f = fakeChain({ deployed: new Set([acctKey]), classes: { [poolKey]: PIN } });
+  r = await relaySend({ calls: [approveFor(acct, 1_000_000n)], cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(r.ok && f.sent.length === 1, "the pool on its pin: the approve is sent");
+
+  // Sends at once go one at a time: the relay is one account, and two sends at once read the same nonce.
+  resetMemoryKv();
+  let live = 0;
+  let most = 0;
+  const order: number[] = [];
+  const slow = fakeChain();
+  slow.chain.send = async (calls: Call[]) => {
+    live++;
+    most = Math.max(most, live);
+    await new Promise((res) => setTimeout(res, 15));
+    order.push(Number(BigInt((calls[0]!.calldata as string[])[1]!) % 1000n));
+    live--;
+    return "0xabc";
+  };
+  const many = await Promise.all(
+    [1, 2, 3, 4, 5].map((i) => server.relaySend({ calls: [account.deployAccountCall(ec.starkCurve.getStarkKey(num.toHex(9000 + i)))], cfg, relay: RELAY, chain: slow.chain, env, now: NOW, rate: okRate }))
+  );
+  ok(many.every((x) => x.ok) && most === 1 && order.length === 5, "five sends at once: all sent, never two at the same time");
+
+  // Across instances the lock is in the shared store: while another holds it, a send waits, then says busy.
+  resetMemoryKv();
+  await kv1(["SET", `gloam:starknet:v1:relay-lock:${num.toHex(BigInt(RELAY))}`, "someone-else", "NX", "EX", 30]);
+  f = fakeChain();
+  const t0 = Date.now();
+  r = await server.relaySend({ calls: [account.deployAccountCall(ec.starkCurve.getStarkKey("0x78"))], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate, lockWaitMs: 300 });
+  ok(!r.ok && r.code === "relay_busy" && r.status === 503 && f.sent.length === 0 && Date.now() - t0 >= 300, "another instance's send in flight: this one waits, then says busy, nothing sent");
+  await kv1(["DEL", `gloam:starknet:v1:relay-lock:${num.toHex(BigInt(RELAY))}`]);
+  r = await server.relaySend({ calls: [account.deployAccountCall(ec.starkCurve.getStarkKey("0x78"))], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate, lockWaitMs: 300 });
+  ok(r.ok && f.sent.length === 1, "once it is free, the send goes");
+
+  // The same call twice is sent once: under the lock a second copy would land and revert, paid by the relay.
+  resetMemoryKv();
+  f = fakeChain();
+  const cashOut = applyCall([to("0x0123", 250_000), to(RELAY, 10_000)]);
+  const both = await Promise.all([0, 1].map(() => server.relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate })));
+  ok(both.filter((x) => x.ok).length === 1 && both.some((x) => !x.ok && x.code === "already_sent" && x.status === 409) && f.sent.length === 1, "the same proven call sent twice at once goes out once");
+  f = fakeChain({ sendThrows: "refused" });
+  const again = applyCall([to("0x0124", 250_000), to(RELAY, 10_000)]);
+  r = await server.relaySend({ calls: [again], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  const g = fakeChain();
+  const r2 = await server.relaySend({ calls: [again], proof: PROOF, cfg, relay: RELAY, chain: g.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.code === "send_failed" && r2.ok && g.sent.length === 1, "a send the node refused can be sent again");
+  resetMemoryKv();
+}
+
+/* ------------------------------------------------------------------ an account's open */
+{
+  // An account's open owes no fee (it has nothing to pay one from) and is counted as an open.
+  const write = () => new CairoCustomEnum({ WriteOnce: { storage_address: "0x77", value: ["0x1", "0x2"] } });
+  const open = applyCall([write(), write()]);
+  const kinds: string[] = [];
+  const f = fakeChain();
+  let r = await server.relaySend({ calls: [open], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async (k) => (kinds.push(k), "ok") });
+  ok(r.ok && r.decision.kind === "apply" && r.decision.setup && f.sent.length === 1, "with the relay's fee on (0.01 USDC here), an open is still sent");
+  r = await server.relaySend({ calls: [applyCall([to("0x0123", 250_000), to(RELAY, 10_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async (k) => (kinds.push(k), "ok") });
+  eq(kinds, ["open", "move"], "an open is counted as an open, a move as a move");
+  const day = Date.UTC(2033, 0, 1, 12);
+  const openReq = post("/api/starknet/relay", {}, { "x-forwarded-for": "198.51.100.77" });
+  const opens: string[] = [];
+  for (let i = 0; i < 6; i++) opens.push(await server.starknetRelayRate(openReq, "open", day, "mainnet"));
+  eq(opens, ["ok", "ok", "ok", "ok", "ok", "limited"], "opens: five a day per IP, like deploys");
+}
+
+/* ------------------------------------------------------------------ mainnet: a move pays the relay's fee, or a sponsored budget */
+{
+  // With no fee set the relay paid about 7 STRK for any proven move, anyone's (StarkWare's prover is a
+  // public image). On mainnet a move now needs the fee, or STARKNET_SPONSORED_MOVES_PER_DAY.
+  const noFee: Record<string, string | undefined> = { ...env };
+  delete noFee.STARKNET_RELAY_FEE;
+  const write = () => new CairoCustomEnum({ WriteOnce: { storage_address: "0x77", value: ["0x1", "0x2"] } });
+  const open = applyCall([write(), write()]);
+  const cashOut = applyCall([to("0x0125", 250_000)]);
+  const acctKey = num.toHex(BigInt(acct));
+  const kinds: string[] = [];
+  const rate = async (k: string) => (kinds.push(k), "ok" as const);
+  let f = fakeChain({ deployed: new Set([acctKey]) });
+  let reads = 0;
+  const classHashAt = f.chain.classHashAt;
+  f.chain.classHashAt = async (a: string) => (reads++, classHashAt(a));
+  let r = await relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env: noFee, now: NOW, rate });
+  ok(!r.ok && r.code === "fee_unset" && r.status === 503 && f.sent.length === 0 && kinds.length === 0 && reads === 0, "mainnet, no relay fee set: a move is refused before anything is read, counted or sent");
+  r = await relaySend({ calls: [approveFor(acct, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env: { ...noFee, STARKNET_RELAY_FEE: "0" }, now: NOW, rate });
+  ok(!r.ok && r.code === "fee_unset" && f.sent.length === 0, "a fee of 0 is no fee: an add's approve is refused too (its add couldn't follow)");
+  r = await relaySend({ calls: [open], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env: noFee, now: NOW, rate });
+  ok(r.ok && f.sent.length === 1, "an account's open still goes (it owes no fee and has its own cap)");
+  const sponsor = { ...noFee, STARKNET_SPONSORED_MOVES_PER_DAY: "2" };
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env: sponsor, now: NOW, rate });
+  ok(r.ok && f.sent.length === 2, "with a sponsored budget set, a move with no fee goes");
+  r = await relaySend({ calls: [approveFor(acct, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env: sponsor, now: NOW, rate });
+  ok(r.ok && f.sent.length === 3, "and so does an add's approve");
+  eq(kinds, ["open", "sponsored", "approve"], "the move counted against the sponsored budget, the approve and the open not");
+
+  // The sponsored count is everyone's, for the day, and on mainnet it fails closed.
+  const day = Date.UTC(2035, 0, 1, 12);
+  const got: string[] = [];
+  for (let i = 0; i < 3; i++) got.push(await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": `198.51.100.${90 + i}` }), "sponsored", day, "mainnet", sponsor));
+  eq(got, ["ok", "ok", "day_used"], "two sponsored moves a day (2 set here), from any IPs, then the day is used");
+  const nodeEnv = env.NODE_ENV;
+  env.NODE_ENV = "production";
+  const shut = await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": "198.51.100.99" }), "sponsored", day + 86_400_000, "mainnet", sponsor);
+  env.NODE_ENV = nodeEnv;
+  eq(shut, "unavailable", "no shared count (production without Redis): no sponsored move");
+
+  // Devnet and Sepolia keep sending a move with no fee.
+  for (const network of ["sepolia", "devnet"] as const) {
+    kinds.length = 0;
+    f = fakeChain();
+    r = await relaySend({ calls: [cashOut], proof: PROOF, cfg: { ...cfg, network, poolClassHash: null }, relay: RELAY, chain: f.chain, env: noFee, now: NOW, rate });
+    ok(r.ok && f.sent.length === 1 && kinds[0] === "move", `${network}: a move with no fee is sent as before`);
+  }
+
+  // The route says so plainly.
+  const fee = env.STARKNET_RELAY_FEE;
+  delete env.STARKNET_RELAY_FEE;
+  const make = server.starknetRelayChains.make;
+  f = fakeChain();
+  server.starknetRelayChains.make = () => f.chain;
+  resetMemoryKv();
+  const res = await relayRoute.POST(post("/api/starknet/relay", { calls: [{ ...cashOut, calldata: (cashOut.calldata as string[]).map((x) => num.toHex(BigInt(x))) }], proof: PROOF }, { "x-forwarded-for": "198.51.100.120" }));
+  const body = (await res.json()) as { error?: { code: string; message: string } };
+  eq([res.status, body.error?.code, f.sent.length], [503, "fee_unset", 0], "the relay route refuses it, 503 fee_unset");
+  ok(/isn't set to send private moves on Starknet yet/.test(body.error?.message ?? ""), "with a message that says why");
+  server.starknetRelayChains.make = make;
+  env.STARKNET_RELAY_FEE = fee;
+}
+
+/* ------------------------------------------------------------------ mainnet: what a day of opens and moves can cost */
+{
+  eq(server.relayCaps("mainnet", {}), { opensPerIpPerDay: 5, opensPerDay: 20, appliesPerDay: 200, sponsoredPerDay: 0 }, "mainnet: 20 opens a day (5 per IP), 200 moves, none sponsored");
+  eq(server.relayCaps("devnet", {}), { opensPerIpPerDay: 5, opensPerDay: 300, appliesPerDay: 5_000, sponsoredPerDay: 0 }, "elsewhere, as before");
+  eq(server.relayCaps("sepolia", { STARKNET_SPONSORED_MOVES_PER_DAY: "9" }).sponsoredPerDay, 0, "a sponsored budget is mainnet only");
+  eq(
+    server.relayCaps("mainnet", { STARKNET_OPENS_PER_DAY: "3", STARKNET_OPENS_PER_IP_PER_DAY: "1", STARKNET_APPLIES_PER_DAY: "50", STARKNET_SPONSORED_MOVES_PER_DAY: "4" }),
+    { opensPerIpPerDay: 1, opensPerDay: 3, appliesPerDay: 50, sponsoredPerDay: 4 },
+    "each from the environment"
+  );
+  eq(server.relayCaps("mainnet", { STARKNET_OPENS_PER_DAY: "lots", STARKNET_APPLIES_PER_DAY: "-1" }), { opensPerIpPerDay: 5, opensPerDay: 20, appliesPerDay: 200, sponsoredPerDay: 0 }, "a value that isn't a whole number keeps the default");
+
+  const opens: string[] = [];
+  const d1 = Date.UTC(2035, 1, 1, 12);
+  for (let i = 0; i < 21; i++) opens.push(await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": `192.0.2.${i + 1}` }), "open", d1, "mainnet", {}));
+  ok(opens.slice(0, 20).every((x) => x === "ok") && opens[20] === "day_used", "21 opens from 21 IPs: the 21st waits for tomorrow");
+  const few: string[] = [];
+  for (let i = 0; i < 3; i++) few.push(await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": "192.0.2.200" }), "open", d1 + 86_400_000, "mainnet", { STARKNET_OPENS_PER_IP_PER_DAY: "2" }));
+  eq(few, ["ok", "ok", "limited"], "STARKNET_OPENS_PER_IP_PER_DAY holds one IP");
+
+  // 200 moves a day for everyone, even spread over the day (the per-minute caps never bite here).
+  const d2 = Date.UTC(2035, 2, 1, 0, 0, 30);
+  const moves: string[] = [];
+  for (let i = 0; i < 201; i++) moves.push(await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": `198.18.${Math.floor(i / 200)}.${(i % 200) + 1}` }), "move", d2 + i * 60_000, "mainnet", {}));
+  ok(moves.slice(0, 200).every((x) => x === "ok") && moves[200] === "day_used", "the 201st move of the day is refused");
+  const set: string[] = [];
+  for (let i = 0; i < 4; i++) set.push(await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": `198.19.0.${i + 1}` }), "move", d2 + 86_400_000 + i * 60_000, "mainnet", { STARKNET_APPLIES_PER_DAY: "3" }));
+  eq(set, ["ok", "ok", "ok", "day_used"], "STARKNET_APPLIES_PER_DAY sets it");
+  const approves: string[] = [];
+  for (let i = 0; i < 4; i++) approves.push(await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": `198.19.1.${i + 1}` }), "approve", d2 + 86_400_000 + i * 60_000, "mainnet", { STARKNET_APPLIES_PER_DAY: "3" }));
+  ok(approves.every((x) => x === "ok"), "approves aren't moves: they cost gas only and don't count against it");
 }
 
 /* ------------------------------------------------------------------ the relay route */
@@ -391,6 +584,56 @@ const RESULT = { proof: "UFJPT0Y=", proof_facts: ["0xa", "0xb"], l2_to_l1_messag
   res = await proveRoute.POST(post("/api/starknet/prove", call));
   let e = ((await res.json()) as { error: { code: number; message: string } }).error;
   eq([e.code, e.message, posts], [-32603, "Starknet is busy. Try again later.", 1], "quota used up: one request, a plain busy message, not retried");
+  // Starkscan's API puts an HTTP error's code at the top of its envelope ({ code, message, docSlug, requestId },
+  // read from api.starkscan.co on 2026-11-27), not under `error`. Read that way, the quota looked like a busy
+  // prover: -32005, which the SDK retries four times, then "The prover is busy".
+  posts = 0;
+  starkscan = () => {
+    posts++;
+    return new Response(JSON.stringify({ code: "prover_daily_budget_exhausted", message: "Daily prover budget exhausted", docSlug: "api/strk20-prover", requestId: "r1" }), { status: 429, headers: { "Retry-After": "3600" } });
+  };
+  res = await proveRoute.POST(post("/api/starknet/prove", call));
+  e = ((await res.json()) as { error: { code: number; message: string } }).error;
+  eq([e.code, e.message, posts], [-32603, "Starknet is busy. Try again later.", 1], "quota used up, in Starkscan's own envelope: the same plain busy answer, not retried");
+
+  // New proofs are counted, not requests: each new Starkscan key is one proof of the key's day (10 by
+  // default). The request limits (10 a minute, 300 a day per IP) sat far above that, so one caller could
+  // spend the whole day in a minute.
+  {
+    const day = Date.UTC(2034, 0, 1, 12);
+    server.starknetRelayClock.now = () => day;
+    let newJobs = 0;
+    starkscan = (url, init) => {
+      if ((init.method ?? "GET") === "POST") {
+        newJobs++;
+        return new Response(JSON.stringify({ jobId: "job_9", status: "succeeded", terminal: true, result: RESULT }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ jobId: "job_9", status: "succeeded", terminal: true, result: RESULT }), { status: 200 });
+    };
+    const at = (block: number, ip: string) =>
+      proveRoute.POST(post("/api/starknet/prove", { ...call, params: { ...call.params, block_id: { block_number: block } } }, { "x-forwarded-for": ip }));
+    const got: (number | string)[] = [];
+    for (let b = 300; b < 306; b++) {
+      const rr = await at(b, "198.51.100.40");
+      const j = (await rr.json()) as { result?: unknown; error?: { code: number } };
+      got.push(j.result ? "proved" : rr.status);
+    }
+    eq([got, newJobs], [["proved", "proved", "proved", "proved", "proved", 429], 5], "one IP: five new proofs a day, the sixth refused (429, not retried) before Starkscan");
+    newJobs = 0;
+    const rr = await at(300, "198.51.100.40");
+    ok(((await rr.json()) as { result?: unknown }).result !== undefined, "the same request again is the same Starkscan job: still answered");
+    env.STARKSCAN_DAILY_PROOFS = "7";
+    const more: (number | string)[] = [];
+    for (const [b, ip] of [[400, "198.51.100.41"], [401, "198.51.100.42"], [402, "198.51.100.43"]] as const) {
+      const r3 = await at(b, ip);
+      const j = (await r3.json()) as { result?: unknown; error?: { code: number; message: string } };
+      more.push(j.result ? "proved" : `${j.error?.code} ${j.error?.message}`);
+    }
+    eq(more, ["proved", "proved", "-32603 Starknet is busy. Try again later."], "Gloam's day of proofs used (7 set here): the route says busy itself, without asking Starkscan");
+    delete env.STARKSCAN_DAILY_PROOFS;
+    server.starknetRelayClock.now = () => Date.now();
+  }
+
 
   // A failed job passes the prover's own code on (10000: screening refused the deposit).
   starkscan = (url, init) =>
@@ -441,6 +684,11 @@ const RESULT = { proof: "UFJPT0Y=", proof_facts: ["0xa", "0xb"], l2_to_l1_messag
   eq(await code(scan.starkscanProve({ ...opts(() => job("queued")), apiKey: "" }, 1, TX)), "no_key", "no key, no request");
   eq(await code(scan.starkscanProve(opts(() => new Response(JSON.stringify({ error: { code: "prover_key_concurrency" } }), { status: 429 })), 1, TX)), "unavailable", "too many proofs at once: busy, so the SDK retries");
   eq(await code(scan.starkscanProve(opts(() => new Response(JSON.stringify({ error: { code: "prover_daily_budget_exhausted" } }), { status: 429 })), 1, TX)), "quota", "the day's quota used up says so");
+  eq(await code(scan.starkscanProve(opts(() => new Response(JSON.stringify({ code: "prover_daily_budget_exhausted", message: "Daily prover budget exhausted" }), { status: 429 })), 1, TX)), "quota", "and in Starkscan's own envelope (the code at the top)");
+  eq(await code(scan.starkscanProve(opts(() => new Response(JSON.stringify({ code: "prover_key_concurrency" }), { status: 429 })), 1, TX)), "unavailable", "too many at once in that envelope: still busy, retried");
+  let asked = 0;
+  eq(await code(scan.starkscanProve({ ...opts(() => (asked++, job("queued"))), admit: async () => "quota" }, 1, TX)), "quota", "a key the route won't admit is never sent");
+  eq(asked, 0, "Starkscan was never asked");
   const failed = await scan.starkscanProve(opts((u, i) => (i.method === "POST" ? job("queued") : job("failed", { error: { code: 55, message: "Account validation failed" } }))), 1, TX).catch((x: unknown) => x as InstanceType<typeof scan.StarkscanProveError>);
   eq((failed as InstanceType<typeof scan.StarkscanProveError>).prover, { code: 55 }, "a failed job carries the prover's own code");
 

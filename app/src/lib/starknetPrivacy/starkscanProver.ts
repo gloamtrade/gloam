@@ -35,7 +35,16 @@ export type StarkscanProveResult = {
   additional_data?: { signature?: { issued_at: number; sig_r: string; sig_s: string } };
 };
 
-export type StarkscanErrorCode = "no_key" | "no_scope" | "relay_off" | "rejected" | "failed" | "timeout" | "bad_answer" | "unavailable" | "lost" | "quota";
+export type StarkscanErrorCode = "no_key" | "no_scope" | "relay_off" | "rejected" | "failed" | "timeout" | "bad_answer" | "unavailable" | "lost" | "quota" | "limited";
+
+/**
+ * Whether a new Starkscan job may start under `idempotencyKey` (each new key
+ * is a new proof and one unit of the key's daily budget; a key already sent is
+ * a retry of the same job and costs nothing): "quota" when Gloam's day of
+ * proofs is used, "limited" when this caller's is, "unavailable" when the count
+ * can't be kept.
+ */
+export type StarkscanAdmit = (idempotencyKey: string) => Promise<"ok" | "limited" | "quota" | "unavailable">;
 
 export class StarkscanProveError extends Error {
   override readonly name = "StarkscanProveError";
@@ -81,6 +90,8 @@ export type StarkscanOptions = {
   sleep?: (ms: number) => Promise<void>;
   /** Where a body's round is kept (default: this process). */
   rounds?: StarkscanRounds;
+  /** Asked before every submit; a key it refuses is never sent (default: every key may go). */
+  admit?: StarkscanAdmit;
 };
 
 const MAX_BODY = 1024 * 1024;
@@ -137,6 +148,27 @@ function jobError(j: Job): string {
   return typeof e?.message === "string" ? e.message.slice(0, 300) : `The prover answered ${String(j.status ?? "with an error")}.`;
 }
 
+/**
+ * The code of a refused request. Starkscan's API answers an HTTP error with its
+ * envelope, the code at the top ({ code, message, docSlug, requestId }, read
+ * from api.starkscan.co on 2026-11-27); a job's own failure has it under
+ * `error`. Both are read.
+ */
+function httpErrorCode(j: (Job & { code?: unknown }) | null): string {
+  if (!j || typeof j !== "object") return "";
+  if (typeof j.code === "string") return j.code;
+  const e = j.error as { code?: unknown } | string | undefined;
+  if (typeof e === "string") return e;
+  return typeof e?.code === "string" ? e.code : "";
+}
+
+function httpErrorMessage(j: (Job & { message?: unknown }) | null): string | null {
+  if (!j || typeof j !== "object") return null;
+  if (typeof j.message === "string") return j.message.slice(0, 300);
+  const e = j.error as { message?: unknown } | undefined;
+  return typeof e?.message === "string" ? e.message.slice(0, 300) : null;
+}
+
 /** The prover's own code and data on a failed job, when it gave them. */
 function proverError(j: Job): { code: number; data?: unknown } | undefined {
   const e = j.error as { code?: unknown; data?: unknown } | undefined;
@@ -169,13 +201,13 @@ export async function starkscanProve(opts: StarkscanOptions, blockId: ProvingBlo
     }
   };
   const httpError = (status: number, j: Job | null): StarkscanProveError => {
-    const code = String((j?.error as { code?: unknown } | undefined)?.code ?? "");
+    const code = httpErrorCode(j);
     if (status === 403) return new StarkscanProveError("no_scope", "Gloam's Starkscan key can't prove yet.");
     if (status === 404) return new StarkscanProveError("relay_off", "Starkscan's prover is not on right now.");
     // Gloam's daily proof quota is used up: say busy, and never retry into it (it resets at UTC midnight).
     if (status === 429 && code === "prover_daily_budget_exhausted") return new StarkscanProveError("quota", "Starknet is busy. Try again later.");
     if (status === 429 || status === 503) return new StarkscanProveError("unavailable", "The prover is busy. Try again shortly.");
-    if (status >= 400 && status < 500) return new StarkscanProveError("rejected", j ? jobError(j) : `The prover refused it (${status}).`);
+    if (status >= 400 && status < 500) return new StarkscanProveError("rejected", httpErrorMessage(j) ?? `The prover refused it (${status}).`);
     return new StarkscanProveError("unavailable", `The prover answered ${status}.`);
   };
   const ask = async (url: string, init: RequestInit): Promise<Job> => {
@@ -198,6 +230,10 @@ export async function starkscanProve(opts: StarkscanOptions, blockId: ProvingBlo
   for (let fresh = 0; fresh < 3; fresh++) {
     const round = await rounds.get(digest);
     const idem = `gloam-${digest}-r${round}`;
+    const admitted = opts.admit ? await opts.admit(idem) : "ok";
+    if (admitted === "quota") throw new StarkscanProveError("quota", "Starknet is busy. Try again later.");
+    if (admitted === "limited") throw new StarkscanProveError("limited", "Too many proofs. Try again in a little while.");
+    if (admitted === "unavailable") throw new StarkscanProveError("unavailable", "Proving is paused for a moment. Try again shortly.");
     let job = await ask(opts.url, { method: "POST", headers: { ...headers, "Idempotency-Key": idem }, body });
     const id = typeof job.jobId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(job.jobId) ? job.jobId : null;
     if (!id && job.status !== "succeeded") throw new StarkscanProveError("bad_answer", "The prover gave no job.");
