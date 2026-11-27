@@ -469,12 +469,18 @@ importers:
       '@solana/kit':
         specifier: ^8.3.0
         version: 8.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+      '@starkware-libs/starknet-privacy-sdk':
+        specifier: file:../../app/vendor/starknet-privacy/starknet-privacy-sdk-0.14.4-rc.2-gloam.1.tgz
+        version: file:app/vendor/starknet-privacy/starknet-privacy-sdk-0.14.4-rc.2-gloam.1.tgz(typescript@5.9.3)
       '@types/node':
         specifier: ^20
         version: 20.19.43
       snarkjs:
         specifier: ^0.7.5
         version: 0.7.5
+      starknet:
+        specifier: 10.5.0
+        version: 10.5.0(typescript@5.9.3)(zod@4.6.7)
       typescript:
         specifier: ^5
         version: 5.9.3

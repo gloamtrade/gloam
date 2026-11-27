@@ -50,6 +50,12 @@
  *             asset and the amount; the two private accounts are visible), and
  *             the account derivation. The Solana client is the subpath
  *             @gloamtrade/sdk/solana (src/solana.ts), with @heliuslabs/spr
+ *   starknetInfo Starknet: its pool and asset, what a payment hides there (over
+ *             an open channel both sides and the amount; the first payment
+ *             shows the payee's private account), the account derivation and
+ *             the claim link format. The Starknet client is the subpath
+ *             @gloamtrade/sdk/starknet (src/starknet.ts). Not open yet: Gloam's
+ *             Starknet routes refuse until it opens
  *
  * Environment split: the crypto/math core is pure and runs anywhere. Proving
  * (snarkjs + artifacts) and storage (notes, keys) are injected, so the same core
@@ -58,7 +64,7 @@
  * sealedSwap) is retired: its on-chain path reverts on every live pool.
  */
 
-export const SDK_VERSION = "0.9.1";
+export const SDK_VERSION = "0.10.0";
 
 export * from "./intents.js";
 export * from "./rates.js";
@@ -93,3 +99,4 @@ export * from "./rpc.js";
 export * from "./api.js";
 export * from "./commerce.js";
 export * from "./solanaInfo.js";
+export * from "./starknetInfo.js";
