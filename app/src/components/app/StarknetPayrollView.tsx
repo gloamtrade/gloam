@@ -669,8 +669,6 @@ export function StarknetPayrollView(props: {
                         <StatusChip status="skipped" />
                       ) : waiting ? (
                         <StatusChip status="checking" />
-                      ) : r.link ? (
-                        <span className="inline-flex h-6 items-center rounded-full bg-surface px-2.5 text-[12px] font-medium text-soft">Claim link</span>
                       ) : r.first ? (
                         <span className="inline-flex h-6 items-center rounded-full bg-surface px-2.5 text-[12px] font-medium text-soft">First payment</span>
                       ) : null}
