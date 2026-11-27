@@ -100,7 +100,9 @@ jobs:
       # Starkscan's job API (key, Idempotency-Key, submit then poll) and its adapter as
       # the SDK's prover. Payroll: the list, the account checks, proofs sized to the
       # relay's cap, and every way a proof is left in flight against a fake chain, the
-      # sealed store and schedules. No network. The devnet end to end
+      # sealed store and schedules. Claim links: the link format (no collision with EVM
+      # or Solana links), claiming once, take back, link rows in a run, sent links sealed.
+      # No network. The devnet end to end
       # (scripts/e2e-starknet-devnet.mts) runs locally.
       - name: App Starknet self-tests
         working-directory: app
@@ -108,6 +110,7 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-core.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-routes.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-payroll.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-claim-links.mts
 
       # Every token amount the app shows: two places, cut down and never rounded up,
       # "<0.01" for dust, "0.00" for zero, thousands separators, 6- and 18-decimal
