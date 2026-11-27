@@ -392,6 +392,7 @@ const send = (chain: CctpChain, over: Partial<Parameters<typeof server.cctpRecei
   eq(await code(fakeChain(), { rate: async () => "day_used" }), "relay_day_used", "the day's count");
   eq(await code(fakeChain(), { rate: async () => "unavailable" }), "relay_unavailable", "no shared count on mainnet");
   eq(await code(fakeChain(), { env: { ...env, STARKNET_RELAY_FEE: "", STARKNET_CCTP_FEE: "" } }), "fee_unset", "mainnet with no fee");
+  eq(await code(fakeChain(), { env: { ...env, STARKNET_RELAY_FEE: "", STARKNET_CCTP_FEE: "0.25" } }), "fee_unset", "a receive fee but no add (the relay's moves are off): nothing brought in to wait");
   eq(await code(fakeChain(), { outside: outside({ caller: "0x1234" }) }), "not_relayable", "the policy first");
   eq(await code(fakeChain({ send: async () => Promise.reject(new Error("boom")) })), "send_failed", "a failed send says so");
   eq(await code(fakeChain()), "sent", "and once it failed, the same message can go again");
@@ -423,6 +424,11 @@ try {
   eq([info.on, info.fee, info.relayer], [true, "250000", num.toHex(BigInt(RELAY))], "on, the relay's fee, its address");
   eq(info.sources.find((x) => x.domain === 6)?.fastBps, 1.3, "Base's fast fee from Circle");
   eq(info.sources.find((x) => x.domain === 7)?.fastBps, 0, "Polygon burns standard: no fee");
+  env.STARKNET_RELAY_FEE = "";
+  env.STARKNET_CCTP_FEE = "0.25";
+  eq(((await (await route.GET()).json()) as { on: boolean }).on, false, "off while the relay sends no add");
+  env.STARKNET_RELAY_FEE = "0.25";
+  delete env.STARKNET_CCTP_FEE;
 
   // GET message
   const tx = "0x" + "aa".repeat(32);

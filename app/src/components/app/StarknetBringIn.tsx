@@ -131,7 +131,7 @@ export function StarknetBringIn({ source, token, onDone }: { source: CctpSource;
   const problem = starkAmountProblem(amount, token, balance);
   // One add moves at most the relay's cap: a bring-in over it would arrive and then wait for a second add.
   const cap = sn.maxAdd > 0n ? sn.maxAdd + receiveFee : 0n;
-  const stop = !sn.relay?.funded
+  const stop = !sn.relay?.funded || sn.relay.moves === "off"
     ? "Paused for a moment"
     : !canPay
       ? "Connect a browser wallet"

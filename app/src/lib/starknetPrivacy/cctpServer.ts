@@ -44,7 +44,7 @@ import {
   type IrisMessage,
   type StarknetCctp,
 } from "./cctp";
-import { relayAmounts, relayChain, wholeToBase, withRelayLock, type RelayChain } from "./server";
+import { relayAmounts, relayChain, relayMoves, wholeToBase, withRelayLock, type RelayChain } from "./server";
 
 type Env = Record<string, string | undefined>;
 
@@ -222,7 +222,7 @@ export async function cctpReceiveSend(input: {
   const token = cfg.tokens.find((t) => sameStarknetAddress(t.address, cctp.usdc));
   if (!cfg.pool || !token) return { ok: false, status: 503, code: "cctp_off", message: "Bringing money in to Starknet isn't on here." };
   const settings = cctpSettings(cfg.network, token.decimals, input.env);
-  if (settings.feeUnset) return { ok: false, status: 503, code: "fee_unset", message: "Gloam's relay isn't set to bring money in to Starknet yet." };
+  if (settings.feeUnset || relayMoves(cfg, input.env) === "off") return { ok: false, status: 503, code: "fee_unset", message: "Gloam's relay isn't set to bring money in to Starknet yet." };
   const maxApprove = relayAmounts(cfg, input.env).maxApprove[num.toHex(BigInt(token.address))] ?? 0n;
   const now = input.now ?? Date.now();
   const decision = checkCctpReceive(

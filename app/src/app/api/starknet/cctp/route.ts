@@ -4,7 +4,7 @@ import { readCappedBody } from "@/lib/cspReport";
 import { STARKNET_ENABLED, sameStarknetAddress } from "@/lib/starknetPrivacy/config";
 import { CCTP_SOURCES, starknetCctp, validAttestation } from "@/lib/starknetPrivacy/cctp";
 import { cctpFastFees, cctpReceiveRate, cctpReceiveSend, cctpSettings, starknetCctpChains } from "@/lib/starknetPrivacy/cctpServer";
-import { relayKeys, serverConfig, starknetRelayAttempt, starknetUpstream } from "@/lib/starknetPrivacy/server";
+import { relayKeys, relayMoves, serverConfig, starknetRelayAttempt, starknetUpstream } from "@/lib/starknetPrivacy/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,7 +38,8 @@ export async function GET() {
   return NextResponse.json(
     {
       ok: true,
-      on: on && !settings.feeUnset,
+      // Off when the relay sends no add (relayMoves): money brought in could only wait on the account.
+      on: on && !settings.feeUnset && relayMoves(cfg) === "on",
       network: cfg.network,
       relayer: keys?.address ?? null,
       fee: settings.fee.toString(),
