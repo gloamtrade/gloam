@@ -45,10 +45,13 @@ function ChainMark({ id, size = 22 }: { id: number; size?: number }) {
   );
 }
 
-/** The networks money can come from: EVM chains with Circle's CCTP that Circle prices (or needs no fee on). */
+/**
+ * The networks money can come from with Circle's CCTP: its EVM chains and
+ * Solana (StarknetBringInSolana), those Circle prices (or needs no fee on).
+ */
 export function bringInSources(info: { on: boolean; sources: { domain: number; fastBps: number | null }[] } | null): CctpSource[] {
   if (!info?.on) return [];
-  return CCTP_SOURCES.filter((s) => s.kind === "evm" && info.sources.some((x) => x.domain === s.domain));
+  return CCTP_SOURCES.filter((s) => info.sources.some((x) => x.domain === s.domain && (s.kind === "evm" || x.fastBps !== null)));
 }
 
 /**
