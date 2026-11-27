@@ -31,6 +31,9 @@ import { EMBEDDED_CONNECTOR_ID } from "@/lib/embeddedWallet";
 import { STARKNET_ENABLED, STARKNET_NETWORK, type StarknetToken } from "@/lib/starknetPrivacy/config";
 import type { StarknetRelayInfo, StarknetSession } from "@/lib/starknetPrivacy/session";
 import { forgetStarknetAccount, keepStarknetAccount, keptStarknetAccount, starknetKeepDb } from "@/lib/starknetPrivacy/keep";
+import type { PayrollDeps, Reach } from "@/lib/starknetPrivacy/payroll";
+import type { PayrollStore } from "@/lib/starknetPrivacy/payrollStore";
+import type { ScheduleStore } from "@/lib/starknetPrivacy/payrollSchedule";
 
 /** How a Gloam wallet opens its private account here (never a signature): what the wait's first step says, and the seed. */
 export type StarknetOpener = { first: string; seed: (index: number) => Promise<Uint8Array> };
@@ -39,6 +42,26 @@ export type StarknetTaskKind = "setup" | "restore" | "add" | "pay" | "cashout" |
 
 /** A wait, named step by step (the same shape SolanaSteps draws). */
 export type StarknetTask = { kind: StarknetTaskKind; steps: string[]; at: number; detail?: string };
+
+/** What a payroll run needs from the open account (components/app/StarknetPayrollView). */
+export type StarknetPayrollEngine = {
+  network: typeof STARKNET_NETWORK;
+  /** The paying private account. */
+  owner: string;
+  token: StarknetToken;
+  /** This account's runs, sealed in this browser. */
+  store(): Promise<PayrollStore>;
+  /** This account's payroll schedules, sealed in this browser. */
+  schedules(): Promise<ScheduleStore>;
+  /** Where each account stands for a payment from this one. */
+  reach(addresses: string[]): Promise<Map<string, Reach>>;
+  /** The engine's chain side (lib/starknetPrivacy/payrollSession). */
+  deps(): Promise<Pick<PayrollDeps, "prove" | "send" | "confirm" | "resolve">>;
+  /** Read the balances again; the private balance. */
+  sync(): Promise<bigint>;
+  /** Plain words for an error. */
+  message(e: unknown): string;
+};
 
 type StarknetCtx = {
   /** Starknet is the network picked (and on). */
@@ -69,6 +92,8 @@ type StarknetCtx = {
   add(amount: bigint): Promise<string | null>;
   pay(to: string, amount: bigint): Promise<string | null>;
   cashOut(to: string, amount: bigint): Promise<string | null>;
+  /** Payroll over the open account, or null until it is open. */
+  payroll: StarknetPayrollEngine | null;
   /** Close the private account in this tab and forget it on this device. */
   close(): void;
   clearError(): void;
@@ -329,6 +354,35 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
     [session, token, run, readBalances]
   );
 
+  const payroll = useMemo<StarknetPayrollEngine | null>(() => {
+    const s = session;
+    const t = token;
+    if (!s || !t) return null;
+    return {
+      network: STARKNET_NETWORK,
+      owner: s.address,
+      token: t,
+      store: async () => {
+        const st = await import("@/lib/starknetPrivacy/payrollStore");
+        return st.payrollStore({ key: st.payrollStoreKey(STARKNET_NETWORK, s.address), cipher: await st.runCipher(s.keys.viewingKey, s.address) });
+      },
+      schedules: async () => {
+        const [st, sc] = await Promise.all([import("@/lib/starknetPrivacy/payrollStore"), import("@/lib/starknetPrivacy/payrollSchedule")]);
+        return sc.scheduleStore({ key: sc.scheduleStoreKey(STARKNET_NETWORK, s.address), cipher: await st.runCipher(s.keys.viewingKey, s.address, sc.SCHEDULE_DOMAIN) });
+      },
+      reach: async (addresses) => (await import("@/lib/starknetPrivacy/payrollSession")).payrollReach(s, t, addresses),
+      deps: async () => (await import("@/lib/starknetPrivacy/payrollSession")).starknetPayrollDeps(s, t),
+      sync: async () => {
+        const [p, w] = await Promise.all([s.privateBalance(t), s.publicBalance(t)]);
+        setPrivate(p);
+        setPublic(w);
+        setRelay(s.relayInfo);
+        return p;
+      },
+      message: say,
+    };
+  }, [session, token]);
+
   const value = useMemo<StarknetCtx>(
     () => ({
       on,
@@ -353,6 +407,7 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
           return s.pay(to, t, amount, step);
         }),
       cashOut: (to, amount) => move("cashout", (s, t, step) => s.cashOut(to, t, amount, step)),
+      payroll,
       close: () => {
         if (mainAddress) kept.delete(mainAddress);
         const db = starknetKeepDb();
@@ -363,7 +418,7 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
       },
       clearError: () => setError(null),
     }),
-    [on, token, relay, mainAddress, gloam, session, privateBalance, publicBalance, restoring, task, error, setUp, refresh, move]
+    [on, token, relay, mainAddress, gloam, session, privateBalance, publicBalance, restoring, task, error, setUp, refresh, move, payroll]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
