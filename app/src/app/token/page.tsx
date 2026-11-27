@@ -482,18 +482,24 @@ function BuybacksSection({ live }: { live: TokenLive }) {
                   ))}
                 </dl>
                 <p className="mt-4 max-w-[62ch] text-[14px] leading-relaxed text-mute">
-                  {b.note} The burn also took {fmtUnits(toUnits(b.fromFees), decimals)} $GLOAM the treasury already held from
-                  Gloam&apos;s fees.
+                  {b.note}
+                  {toUnits(b.fromFees) > 0n && (
+                    <>
+                      {" "}The burn also took {fmtUnits(toUnits(b.fromFees), decimals)} $GLOAM the treasury already held from
+                      Gloam&apos;s fees.
+                    </>
+                  )}
                 </p>
                 <p className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-[13.5px] text-mute">
-                  {b.buyTxs.map((h, i) => (
+                  {b.buyTxs.filter((h) => h.toLowerCase() !== b.txHash.toLowerCase()).map((h, i, buys) => (
                     <ExtLink key={h} href={RH_TX(h)}>
-                      {b.buyTxs.length > 1 ? `Buy ${i + 1}` : "Buy"} <span className="tnum">{shortHash(h)}</span>{" "}
+                      {buys.length > 1 ? `Buy ${i + 1}` : "Buy"} <span className="tnum">{shortHash(h)}</span>{" "}
                       <span aria-hidden>↗</span>
                     </ExtLink>
                   ))}
                   <ExtLink href={RH_TX(b.txHash)}>
-                    Burn <span className="tnum">{shortHash(b.txHash)}</span> <span aria-hidden>↗</span>
+                    {b.buyTxs.some((h) => h.toLowerCase() === b.txHash.toLowerCase()) ? "Buy and burn" : "Burn"}{" "}
+                    <span className="tnum">{shortHash(b.txHash)}</span> <span aria-hidden>↗</span>
                   </ExtLink>
                 </p>
               </li>
