@@ -231,7 +231,8 @@ async function main() {
  * The page's own code (lib/starknetPrivacy/session) against Gloam's real routes
  * (/api/starknet/rpc, /relay, /prove, served from this process on PORT + 1),
  * with blocks made on a timer as on mainnet (SESSION_BLOCK_MS, default 300) and
- * a relay fee of 0.01. Every proof the prover is asked for and every relay
+ * a relay fee of 0.01 (and, last, the add a CCTP bring-in leaves: its approve
+ * already sent with the receive). Every proof the prover is asked for and every relay
  * refusal is counted, so a proof made and then refused shows. Each scenario
  * runs even when one before it failed; the failures are listed at the end.
  */
@@ -255,6 +256,7 @@ async function sessionThroughRoutes(input: { pool: string; relayer: { address: s
 
   const proofs: { ok: boolean; why?: string }[] = [];
   const refused: string[] = [];
+  let relayPosts = 0;
   let ip = "10.0.0.1";
   /** The next RPC call of this method answers "busy" (a node or proxy hiccup). */
   let failNext: string | null = null;
@@ -287,6 +289,7 @@ async function sessionThroughRoutes(input: { pool: string; relayer: { address: s
         const j = JSON.parse(text) as { error?: { message?: string } };
         proofs.push(j.error ? { ok: false, why: j.error.message } : { ok: true });
       }
+      if (path === "/api/starknet/relay" && method === "POST") relayPosts++;
       if (path === "/api/starknet/relay" && method === "POST" && out.status !== 200) refused.push((JSON.parse(text) as { error?: { code?: string } }).error?.code ?? String(out.status));
       res.writeHead(out.status, Object.fromEntries(out.headers));
       res.end(text);
@@ -620,6 +623,29 @@ async function sessionThroughRoutes(input: { pool: string; relayer: { address: s
       ok(threw, `session: deployed() says it can't tell, not ${String(said)}`);
       failNext = null;
       eq(await dave.deployed(), true, "session: and reads true once the node answers");
+    });
+
+    await scenario("a bring-in's add: the approve came with the receive, so the add only proves", async () => {
+      // What /api/starknet/cctp sends after Circle's receive_message (devnet has no CCTP): the
+      // account's own outside execution of the relay's fee and the pool's approve, sent by the relay.
+      const fee = one / 100n;
+      const approve = (4n * one) / 10n;
+      const { receiveOutsideCalls } = await import("../src/lib/starknetPrivacy/cctp");
+      const signed = await dave.outsideCall(receiveOutsideCalls({ usdc: token, relay: input.relayer.address, pool, fee, approve }));
+      const relayAcct = new Account({ provider: starknetProvider(URL), address: input.relayer.address, signer: input.relayer.private_key, cairoVersion: "1" });
+      const relay0 = await balanceOf(token, input.relayer.address);
+      const pub0 = await dave.publicBalance(tok);
+      const priv0 = await dave.privateBalance(tok);
+      await dave.confirm((await relayAcct.execute([signed])).transaction_hash);
+      eq((await balanceOf(token, input.relayer.address)) - relay0, fee, "session: the receive's fee reached the relay");
+      const posts = relayPosts;
+      const t = timeline("add after a bring-in");
+      await dave.add(tok, approve, t.step, { approved: true });
+      t.done();
+      eq(relayPosts - posts, 1, "session: one relay send (the proven add), no approve");
+      const addFee = BigInt(dave.relayInfo.fee[num.toHex(BigInt(token))] ?? "0");
+      eq(await dave.privateBalance(tok), priv0 + approve - addFee, "session: the private balance grew by what was approved less the add's fee");
+      eq(await dave.publicBalance(tok), pub0 - fee - approve, "session: the account kept the rest");
     });
 
     await scenario("every proof made was used", async () => {
