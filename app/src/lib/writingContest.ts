@@ -41,13 +41,13 @@ export function writingClosed(now = Date.now()): boolean {
   return now > Date.parse(WRITING_CONTEST.closesAt);
 }
 
-/** How an entry is judged: name, what it means, weight in percent. Quality (with the app flow) is 65, engagement 35. */
+/** How an entry is judged: name, what it means, weight in percent. Writing quality leads; engagement counts least (changed 28 Nov 2026, before judging). */
 export const WRITING_JUDGING: [string, string, number][] = [
-  ["A real flow in the app", "Your own screenshots or screen recording of Gloam on mainnet: a private payment, a cash out, a payroll run or a claim link. Testnet doesn’t count.", 25],
-  ["Accuracy", "Gets Gloam right. No invented features, no price talk.", 15],
-  ["Clarity", "A reader who has never heard of Gloam understands what it does and why privacy matters.", 15],
-  ["Originality", "Your own angle and your own words, not a rewrite of our docs.", 10],
-  ["Engagement", "Replies, reposts and quotes from real accounts, read when entries close. Bought engagement removes the entry.", 35],
+  ["Accuracy", "Gets Gloam right. No invented features, no price talk.", 25],
+  ["Clarity", "A reader who has never heard of Gloam understands what it does and why privacy matters.", 25],
+  ["Originality", "Your own angle and your own words, not a rewrite of our docs.", 25],
+  ["A real flow in the app", "Your own screenshots or screen recording of Gloam on mainnet: a private payment, a cash out, a payroll run or a claim link. Testnet doesn’t count.", 15],
+  ["Engagement", "Replies, reposts and quotes from real accounts, read when entries close. Bought engagement removes the entry.", 10],
 ];
 
 /** The share of the score that is engagement; the rest is quality. */
