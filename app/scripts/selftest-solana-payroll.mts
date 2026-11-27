@@ -651,7 +651,12 @@ eq(ringsExplorerTx("abc", "mainnet"), "https://solscan.io/tx/abc", "mainnet expl
   ok((await c1.seal("same")) !== (await c1.seal("same")), "a fresh nonce each time");
   await assert.rejects((await S.runCipher(secret, addr(5))).open(await c1.seal("hi")), "another account's address can't open it");
   await assert.rejects((await S.runCipher(Uint8Array.from(secret, (b) => b ^ 1), OWNER)).open(await c1.seal("hi")), "another secret can't open it");
-  const tampered = sealedBig.slice(0, -6) + (sealedBig.endsWith("A") ? "B" : "A") + sealedBig.slice(-5);
+  // Flip one bit of the ciphertext itself. Swapping in a base64 letter can leave the bytes as
+  // they were: the letter it put in was already there in about 1 run in 64.
+  const flipped = Buffer.from(body);
+  flipped[100] ^= 1;
+  const tampered = `gsp1.${ivB64}.${flipped.toString("base64")}`;
+  ok(tampered !== sealedBig, "the tampered list really differs");
   await assert.rejects(c1.open(tampered), "a changed byte fails to open");
   checks += 3;
   const real = S.payrollStore({ key: "real", cipher: c1, storage });

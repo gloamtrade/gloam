@@ -26,12 +26,13 @@
  *  - Turnkey's answers and failures read in plain words
  *
  * The Turnkey here is a stand-in holding local Ed25519 keys (node:crypto, RFC 8032,
- * deterministic like Turnkey's): no request leaves the process.
+ * deterministic like Turnkey's): no request leaves the process. Every key and byte
+ * string comes from a fixed seed, so a run that fails fails the same way again.
  *
  * Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-turnkey-solana.mts
  */
 import assert from "node:assert/strict";
-import { createHash, createPublicKey, generateKeyPairSync, sign as edSign, verify as edVerify, randomBytes, type KeyObject } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, sign as edSign, verify as edVerify, randomBytes, type KeyObject } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import {
@@ -39,11 +40,12 @@ import {
   address as asAddress,
   appendTransactionMessageInstructions,
   compileTransaction,
+  createKeyPairSignerFromPrivateKeyBytes,
   createNoopSigner,
   createTransactionMessage,
-  generateKeyPairSigner,
   getAddressDecoder,
   getAddressEncoder,
+  getBase58Decoder,
   getTransactionDecoder,
   getTransactionEncoder,
   partiallySignTransaction,
@@ -52,6 +54,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   type Address,
   type Blockhash,
+  type KeyPairSigner,
 } from "@solana/kit";
 import {
   DECLINED_KEY,
@@ -102,9 +105,15 @@ const same = (a: Uint8Array, b: Uint8Array) => Buffer.from(a).equals(Buffer.from
 
 const ORG = "sub-org-of-the-person";
 
-/** A Turnkey wallet's Ed25519 key, and its Solana address. */
-function solanaKey(): { key: KeyObject; publicKey: Uint8Array; address: string } {
-  const { privateKey } = generateKeyPairSync("ed25519");
+/** 32 bytes that are the same on every run (SHA-256 of a label). */
+const seeded = (label: string) => new Uint8Array(createHash("sha256").update(`selftest-turnkey-solana:${label}`).digest());
+
+/** An Ed25519 private key in PKCS#8 is this prefix and its 32-byte seed (RFC 8410). */
+const ED25519_PKCS8 = Buffer.from("302e020100300506032b657004220420", "hex");
+
+/** A Turnkey wallet's Ed25519 key, and its Solana address, from a fixed seed. */
+function solanaKey(label: string): { key: KeyObject; publicKey: Uint8Array; address: string } {
+  const privateKey = createPrivateKey({ key: Buffer.concat([ED25519_PKCS8, seeded(label)]), format: "der", type: "pkcs8" });
   const der = createPublicKey(privateKey).export({ format: "der", type: "spki" });
   const publicKey = new Uint8Array(der.subarray(der.length - 32));
   return { key: privateKey, publicKey, address: getAddressDecoder().decode(publicKey) };
@@ -156,7 +165,7 @@ function device(keys: Map<string, KeyObject>, address: string, mode: Parameters<
 
 /* ---------------------------------------------------------------- which account */
 
-const solA = solanaKey();
+const solA = solanaKey("a");
 const ETH_A = { address: "0x1111111111111111111111111111111111111111", addressFormat: "ADDRESS_FORMAT_ETHEREUM", path: "m/44'/60'/0'/0/0" };
 
 await test("the Solana account sits in the wallet the Ethereum account signs with, made there when it is missing", () => {
@@ -225,7 +234,7 @@ await test("it signs no message, so no private account ever opens from a Turnkey
 
 const BLOCKHASH = { blockhash: "EETubP5AKHgjPAhzPAFcb8BAY1hMH639CWCFTqi3hq1k" as Blockhash, lastValidBlockHeight: 100n };
 
-async function wireFor(version: "legacy" | 0, feePayer: string, otherSigner?: Awaited<ReturnType<typeof generateKeyPairSigner>>) {
+async function wireFor(version: "legacy" | 0, feePayer: string, otherSigner?: KeyPairSigner) {
   const payer = createNoopSigner(asAddress(feePayer));
   const program = asAddress("11111111111111111111111111111111");
   const accounts = [{ address: asAddress(feePayer), role: AccountRole.WRITABLE_SIGNER }];
@@ -246,7 +255,7 @@ await test("a transaction comes back with the Gloam account's signature in its s
   const d = device(keys, solA.address);
   const account = await connectSolana(d.found);
   for (const version of ["legacy", 0] as const) {
-    const cosigner = await generateKeyPairSigner();
+    const cosigner = await createKeyPairSignerFromPrivateKeyBytes(seeded(`cosigner-${version}`));
     const wire = await wireFor(version, solA.address, cosigner);
     const before = getTransactionDecoder().decode(wire);
     assert.equal(before.signatures[solA.address as Address], null, "unsigned to start");
@@ -275,7 +284,7 @@ await test("a transaction comes back with the Gloam account's signature in its s
 
 await test("a Turnkey that signs with another key, signs a hash or answers badly gets nothing signed", async () => {
   const wire = await wireFor(0, solA.address);
-  const stranger = solanaKey();
+  const stranger = solanaKey("stranger");
   const cases: [Map<string, KeyObject>, Parameters<typeof fakeTurnkey>[1], RegExp][] = [
     [new Map([[solA.address, stranger.key]]), "plain", /didn't check out/],
     [new Map([[solA.address, solA.key]]), "hashed", /didn't check out/],
@@ -312,7 +321,7 @@ await test("a transaction that doesn't ask the Gloam account to sign is refused,
   const keys = new Map([[solA.address, solA.key]]);
   const d = device(keys, solA.address);
   const account = await connectSolana(d.found);
-  const someoneElse = solanaKey();
+  const someoneElse = solanaKey("someone-else");
   const wire = await wireFor(0, someoneElse.address);
   const calls = d.calls.length;
   await assert.rejects(signOrSendSolana(d.found, account, wire, "solana:mainnet"), /doesn't ask your Gloam account/);
@@ -378,7 +387,7 @@ await test("it is found the way a wallet extension is, passes lib/solanaWallet's
 });
 
 await test("one Gloam account per page: the account layer's wallet signs again when the kit comes back; another person or a sign-out ends it", async () => {
-  const solB = solanaKey();
+  const solB = solanaKey("b");
   const keys = new Map([
     [solA.address, solA.key],
     [solB.address, solB.key],
@@ -424,7 +433,7 @@ await test("Solana addresses read back to their keys, leading zeros too; anythin
   const enc = getAddressEncoder();
   const dec = getAddressDecoder();
   for (let i = 0; i < 300; i++) {
-    const key = new Uint8Array(randomBytes(32));
+    const key = seeded(`address-${i}`);
     if (i % 3 === 0) key[0] = 0;
     if (i % 9 === 0) key[1] = 0;
     const a = dec.decode(key);
@@ -432,7 +441,20 @@ await test("Solana addresses read back to their keys, leading zeros too; anythin
     assert.ok(same(solanaPublicKey(a)!, new Uint8Array(enc.encode(a))));
   }
   assert.ok(same(solanaPublicKey("11111111111111111111111111111111")!, new Uint8Array(32)));
-  for (const bad of ["", "0x1234", "O0Il" + "1".repeat(40), "1".repeat(45), "abc", solA.address + "1"]) assert.equal(solanaPublicKey(bad), null, bad);
+  // letters that spell one byte too many or one too few, at an address's own length
+  const tooMany = getBase58Decoder().decode(new Uint8Array([1, ...new Uint8Array(32)]));
+  const tooFew = getBase58Decoder().decode(new Uint8Array(31).fill(255));
+  assert.deepEqual([tooMany.length, tooFew.length], [44, 43]);
+  for (const bad of ["", "0x1234", "O0Il" + "1".repeat(40), "1".repeat(45), "abc", tooMany, tooFew]) assert.equal(solanaPublicKey(bad), null, bad);
+  // A 43-letter address with a "1" after it is not junk: whenever its key times 58 fits in 32 bytes,
+  // it spells that other key, and kit reads it the same. It never reads back as the key it came from.
+  const short = seeded("short-address");
+  short[0] = 2;
+  const a43 = dec.decode(short);
+  assert.equal(a43.length, 43);
+  const next = solanaPublicKey(a43 + "1");
+  assert.ok(next && !same(next, short), "another key");
+  assert.ok(same(next, new Uint8Array(enc.encode(asAddress(a43 + "1")))), "the key kit reads");
   assert.throws(() => makeGloamSolanaWallet({ address: "nope", sign: async () => new Uint8Array(64) }));
 });
 
@@ -469,7 +491,7 @@ await test("it connects by itself only on Solana, with nothing else connected, o
 await test("the choice is kept in this browser per account, and storage that fails costs nothing", () => {
   const mem = new Map<string, string>();
   const storage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) };
-  const other = solanaKey().address;
+  const other = solanaKey("other").address;
   assert.equal(gloamAccountDeclined(storage, solA.address), false);
   setGloamAccountDeclined(storage, solA.address, true);
   assert.equal(mem.get(DECLINED_KEY), solA.address);
