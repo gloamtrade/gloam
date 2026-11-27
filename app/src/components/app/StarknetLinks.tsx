@@ -417,7 +417,7 @@ export function StarknetSentLinks({ links, token, refreshKey = 0 }: { links: Sta
           {error}
         </p>
       )}
-      <p className="mt-3 text-[12.5px] leading-relaxed text-mute">Kept in this browser only, sealed with your private account. Taking one back moves it into your private balance, less Gloam&apos;s fee the link carries.</p>
+      <p className="mt-3 text-[12.5px] leading-relaxed text-mute">Kept in this browser only, sealed with your private account. Taking one back returns the amount to your private balance; the fee it carried for its claim pays for that.</p>
     </section>
   );
 }
