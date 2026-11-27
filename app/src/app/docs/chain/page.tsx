@@ -1079,7 +1079,22 @@ export default function DocsNetworksPage() {
               out shows the address it goes to, the token and the amount.
             </li>
             <li>
-              <strong>Payroll.</strong> {RINGS_PAYROLL_NOTE}
+              <strong>Payroll.</strong> {RINGS_PAYROLL_NOTE} A person with no
+              address gets a claim link.
+            </li>
+            <li>
+              <strong>Claim links</strong>, a link anyone can claim into their
+              own private balance. Each one is a one-time private account whose
+              key rides in the link: making it pays that account privately, and
+              claiming it moves the money on. Both show on Solana like any
+              private payment: your private account, the one-time account and
+              the account that claims it, not the token or the amount. Until
+              someone claims it, you can take it back under Sent links.
+            </li>
+            <li>
+              <strong>Payment requests</strong>, a link that fills in Pay with
+              your private address, the token and the amount. Nothing about it
+              goes on chain, and the note stays with the payer.
             </li>
             <li>
               <strong>Fees</strong>, Gloam&apos;s relay pays the Solana network
@@ -1092,8 +1107,8 @@ export default function DocsNetworksPage() {
               enclave. On the other networks, proofs are made on your device.
             </li>
             <li>
-              <strong>Not on Solana</strong>, proof of funds or payment,
-              private swaps and claim links.
+              <strong>Not on Solana</strong>, proof of funds or payment, and
+              private swaps.
             </li>
             <li>
               <strong>In the app</strong>, <AppLink href="/app/solana">/app/solana</AppLink>

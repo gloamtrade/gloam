@@ -9,8 +9,8 @@ import { VAULT_ACTIONS, type VaultActionId, type VaultActionInfo } from "@/lib/v
 
 const LINES: Partial<Record<VaultActionId, string>> = {
   shield: "Move money from your Solana wallet into your private balance.",
-  pay: "Pay another Gloam private account. The token and the amount stay hidden.",
-  receive: "Share your private address to get paid. The token and the amount stay hidden.",
+  pay: "Pay a Gloam private account, or anyone by claim link. The token and the amount stay hidden.",
+  receive: "Share your private address, claim a payment, or ask for one. The token and the amount stay hidden.",
   cashout: "Back to any Solana address. The cash out shows on the explorer.",
 };
 
