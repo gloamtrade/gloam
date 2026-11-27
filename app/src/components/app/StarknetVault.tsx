@@ -189,12 +189,12 @@ function RelayPaused() {
   );
 }
 
-/** Gloam's fee on a move, when it asks one. */
-function FeeLine({ fee, token }: { fee: bigint; token: StarknetToken }) {
+/** Gloam's fee on a move, when it asks one: from what is added (Add), or from the private balance (Pay, Cash out). */
+function FeeLine({ fee, token, from = "from your private balance" }: { fee: bigint; token: StarknetToken; from?: string }) {
   if (fee <= 0n) return null;
   return (
     <p className="tnum mt-3 text-[13px] text-mute">
-      Gloam&apos;s fee: {starkAmount(fee, token)} {token.symbol}, from your private balance
+      Gloam&apos;s fee: {starkAmount(fee, token)} {token.symbol}, {from}
     </p>
   );
 }
@@ -234,20 +234,22 @@ function StarknetAddView({ token }: { token: StarknetToken }) {
             disabled={working}
           />
         </div>
-        <FeeLine fee={sn.fee} token={token} />
+        <FeeLine fee={sn.fee} token={token} from="taken from what you add" />
         {!sn.relay?.funded && <RelayPaused />}
         <StarknetActionButton
           kind="add"
           label="Add privately"
           stop={stop}
           className="mt-5"
-          onClick={() =>
+          onClick={() => {
+            // The fee comes out of what is added (inside the proof): the private balance grows by the rest.
+            const fee = sn.fee;
             void sn.add(value!).then((hash) => {
               if (!hash) return;
               setAmount("");
-              show({ title: "Added privately", body: "It's in your private balance now.", amount: value!, hash });
-            })
-          }
+              show({ title: "Added privately", body: "It's in your private balance now.", amount: value! - fee, hash });
+            });
+          }}
         />
         <StarknetSteps task={working ? sn.task : null} className="mt-4" />
         <StarknetError kind="add" className="mt-4" />
