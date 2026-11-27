@@ -148,6 +148,51 @@ const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
   eq(call.contractAddress, config.STARKNET_UDC, "deployed through the UDC");
 }
 
+/* ------------------------------------------------------------------ account: one signature form per wallet key, steady wallets only */
+{
+  const { privateKeyToAccount } = await import("viem/accounts");
+  // A throwaway test key: viem signs as MetaMask does (RFC 6979, v 27/28, low s).
+  const wallet = privateKeyToAccount(`0x${"11".repeat(32)}`);
+  const message = account.starknetAccountMessage(0);
+  const sig = await wallet.signMessage({ message });
+  const raw = Uint8Array.from(Buffer.from(sig.slice(2), "hex"));
+  eq(hex(account.evmSignatureBytes(sig)), hex(raw), "a signature in the usual form (v 27/28, low s) is unchanged, so no account opened with one moves");
+  const seed = await account.seedFromWalletSignature(raw, 0);
+  eq((await account.keysFromSeed(seed, 0)).address, "0x766fba38b07c994691f7e1b3b62dc9323ea5cec2576511c27eb8bf81d9eb22", "the test key's account is pinned");
+  const SECP_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+  const v01 = `${sig.slice(0, 130)}${(raw[64]! - 27).toString(16).padStart(2, "0")}`;
+  const highS = `${sig.slice(0, 66)}${(SECP_N - BigInt(`0x${sig.slice(66, 130)}`)).toString(16).padStart(64, "0")}${raw[64] === 27 ? "1c" : "1b"}`;
+  ok(hex(await account.seedFromWalletSignature(Uint8Array.from(Buffer.from(v01.slice(2), "hex")), 0)) !== hex(seed), "taken as it comes, v written 0/1 would open another account");
+  for (const [form, text] of [
+    ["v written 0/1", v01],
+    ["the high-s twin", highS],
+    ["no 0x", sig.slice(2)],
+  ] as const) {
+    eq(hex(await account.seedFromWalletSignature(account.evmSignatureBytes(text), 0)), hex(seed), `${form} opens the same account`);
+  }
+  throws(() => account.evmSignatureBytes("0x123"), "an odd-length signature is refused");
+
+  let signs = 0;
+  const steady = async (m: string) => {
+    signs++;
+    return wallet.signMessage({ message: m });
+  };
+  const once = await account.seedFromWallet(steady, 0, async () => false);
+  eq([hex(once), signs], [hex(seed), 1], "an account that is there opens with one signature");
+  signs = 0;
+  let told = 0;
+  const twice = await account.seedFromWallet(steady, 0, async () => true, () => told++);
+  eq([hex(twice), signs, told], [hex(seed), 2, 1], "a new account is signed for twice, and the page says why first");
+  const another = privateKeyToAccount(`0x${"22".repeat(32)}`);
+  let n = 0;
+  const unsteady = async (m: string) => (n++ % 2 ? another : wallet).signMessage({ message: m });
+  await assert.rejects(account.seedFromWallet(unsteady, 0, async () => true), account.StarknetWalletError, "a wallet that signs differently each time can't make a new account");
+  pass++;
+  n = 0;
+  eq(hex(await account.seedFromWallet(unsteady, 0, async () => false)), hex(seed), "reopening an account that is there needs no second signature");
+  await rejects(account.seedFromWallet(async () => "0x1234", 0, async () => false), "a signature of another length is refused");
+}
+
 /* ------------------------------------------------------------------ relay policy */
 const RELAY = "0x25a6c9f0c15ef30c139065096b4b8e563e6b86191fd600a4f0616df8f22fb77";
 const USDC = "0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb";
@@ -301,6 +346,139 @@ const ctxBase = {
   await rejects(actions.cashOut(ta, { token, self: alice.address, to: "bob", amount: 1n }), "a bad address is refused");
   await rejects(actions.add(ta, { token, self: alice.address, amount: 5n, fee: { recipient: RELAY, amount: 5n } }), "a fee as large as the add is refused");
   await rejects(actions.openAccount(ta, { self: alice.address, tokens: [] }), "opening with no token is refused");
+}
+
+/* ------------------------------------------------------------------ session: the relay and the proof's block, checked before proving */
+{
+  const session = await import("../src/lib/starknetPrivacy/session");
+  const cfgM = config.starknetConfig("mainnet", {});
+  const usdc = cfgM.tokens[0]!;
+  const keys = await account.keysFromSeed(enc.encode("fake-gloam-seed-alice"), 0);
+  const k = num.toHex(BigInt(usdc.address));
+  const info = (fee: string, extra: Partial<import("../src/lib/starknetPrivacy/session").StarknetRelayInfo> = {}) => ({
+    on: true,
+    funded: true,
+    relayer: RELAY,
+    network: "mainnet",
+    pool: cfgM.pool,
+    fee: { [k]: fee },
+    maxApprove: { [k]: "10000000000" },
+    ...extra,
+  });
+  eq(session.relayFee(info("10000"), usdc), { recipient: RELAY, amount: 10_000n }, "the relay's fee on USDC");
+  eq(session.relayFee(info("0"), usdc), null, "no fee when it asks none");
+  eq([session.waitText(0), session.waitText(1), session.waitText(4)], ["A few more blocks", "One more block", "4 more blocks"], "what a wait for blocks says");
+
+  let relayAnswer: unknown = info("10000");
+  const asked: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+    const path = String(url).replace("https://gloam.test", "");
+    asked.push(`${init?.method ?? "GET"} ${path}`);
+    if (path === "/api/starknet/relay" && (init?.method ?? "GET") === "GET") return Response.json(relayAnswer);
+    throw new Error(`no network in this self-test: ${path}`);
+  }) as typeof fetch;
+  type Fake = Record<string, unknown>;
+  const fresh = (pollMs = 1) => {
+    const s = new session.StarknetSession(cfgM, keys, info("10000"), "https://gloam.test", pollMs);
+    return { s, node: s.provider as unknown as Fake, t: s.transfers as unknown as Fake };
+  };
+  const OUT = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd";
+  try {
+    {
+      // The fee changed on the server since the page read it: the move stops before anything is proved or sent.
+      const { s } = fresh();
+      relayAnswer = info("20000");
+      asked.length = 0;
+      await assert.rejects(s.cashOut(OUT, usdc, 1_000n, () => {}), (e: Error & { code?: string }) => e.code === "relay_changed");
+      pass++;
+      eq(asked, ["GET /api/starknet/relay"], "a changed fee stops a cash out before any proof or send");
+      eq(s.feeFor(usdc)?.amount, 20_000n, "and the page then shows the new fee");
+      relayAnswer = info("20000", { funded: false });
+      await assert.rejects(s.pay(OUT, usdc, 1_000n, () => {}), (e: Error & { code?: string }) => e.code === "relay_paused");
+      pass++;
+      relayAnswer = info("20000", { relayer: "0x123" });
+      await assert.rejects(s.add(usdc, 1_000n, () => {}), (e: Error & { code?: string }) => e.code === "relay_changed");
+      pass++;
+      relayAnswer = info("20000", { relayer: "0x123" });
+      await assert.rejects(s.add(usdc, 10_000_000_001n, () => {}), (e: Error & { code?: string }) => e.code === "over_cap");
+      pass++;
+    }
+    {
+      // A node that can't answer is never "not deployed".
+      const { s, node } = fresh();
+      const answer: { e: unknown } = { e: null };
+      node.getClassHashAt = async () => {
+        if (answer.e) throw answer.e;
+        return "0x1";
+      };
+      eq(await s.deployed(), true, "deployed when the node has its class");
+      answer.e = Object.assign(new Error("Contract not found"), { code: 20 });
+      eq(await s.deployed(), false, "not deployed when the node says the contract isn't there");
+      answer.e = Object.assign(new Error("Block not found"), { code: 24 });
+      eq(await s.deployed(1_000), false, "not there at a block the node doesn't have yet");
+      answer.e = Object.assign(new Error("Too many requests"), { code: -32005 });
+      await rejects(s.deployed(), "a rate-limited read throws instead of saying not deployed");
+      await rejects(s.stillOpen(usdc), "so a kept account is never forgotten over a hiccup");
+    }
+    {
+      // An account deployed before this session (a reload after its deploy landed): the proof waits for a block that has it.
+      relayAnswer = info("10000");
+      const { s, node, t } = fresh();
+      let head = 1_000;
+      node.getBlockNumber = async () => head++;
+      node.getClassHashAt = async (_a: string, block?: number) => {
+        if (block !== undefined && block < 1_000) throw Object.assign(new Error("Contract not found"), { code: 20 });
+        return "0x1";
+      };
+      t.discoverRequirement = async () => "Register";
+      let provedAt: unknown = null;
+      t.build = (o: { provingBlockId?: unknown }) => {
+        provedAt = o.provingBlockId;
+        throw new Error("stop here");
+      };
+      const waits: string[] = [];
+      await rejects(
+        s.ensureOpen((at, d) => d && waits.push(d)),
+        "the open stops at the proof (faked)"
+      );
+      ok(typeof provedAt === "number" && provedAt >= 1_000, `the open proves at a block where the account is there (${String(provedAt)})`);
+      ok(waits.includes("A few more blocks"), "and says it is waiting for blocks meanwhile");
+    }
+    {
+      // A note offered at the proof's block but spent since (another tab, or just before a reload) holds the payment back.
+      const { s, t } = fresh();
+      const notes = (ids: number[]) => ({ notes: { get: () => ids.map((id) => ({ id: BigInt(id), amount: 1n })) } });
+      let atNotes = [1, 2];
+      let nowNotes = [2, 3];
+      t.discoverNotes = async (p: { blockIdentifier?: unknown }) => (p.blockIdentifier === "latest" ? notes(nowNotes) : notes(atNotes));
+      eq(await s.spentSince(1_000, usdc), true, "a note spent after the proof's block is caught");
+      atNotes = [2];
+      nowNotes = [2, 3];
+      eq(await s.spentSince(1_000, usdc), false, "a note that arrived since is not a spend");
+    }
+    {
+      // confirm asks at once: no sleep before the first look or after the receipt.
+      const { s, node } = fresh(60_000);
+      node.getTransactionReceipt = async () => ({ finality_status: "ACCEPTED_ON_L2", execution_status: "SUCCEEDED", block_number: 4_321 });
+      const t0 = Date.now();
+      eq(await s.confirm("0xabc"), 4_321, "confirm gives the transaction's block");
+      ok(Date.now() - t0 < 1_000, "with no fixed wait");
+      node.getTransactionReceipt = async () => ({ finality_status: "ACCEPTED_ON_L2", execution_status: "REVERTED", block_number: 4_322, revert_reason: "nullifier used" });
+      await rejects(s.confirm("0xdef"), "a reverted transaction throws");
+      const { s: s2, node: n2 } = fresh(1);
+      let calls = 0;
+      n2.getTransactionReceipt = async () => {
+        calls++;
+        if (calls === 1) throw Object.assign(new Error("Transaction hash not found"), { code: 29 });
+        if (calls === 2) return { finality_status: "PRE_CONFIRMED", execution_status: "SUCCEEDED", block_number: 4_323 };
+        return { finality_status: "ACCEPTED_ON_L2", execution_status: "SUCCEEDED", block_number: 4_323 };
+      };
+      eq([await s2.confirm("0x123"), calls], [4_323, 3], "it waits through not-yet-seen and pre-confirmed for accepted");
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 
 console.log(`\nselftest-starknet-core: ${pass} checks passed`);

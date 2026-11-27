@@ -57,6 +57,8 @@ type StarknetCtx = {
   publicBalance: bigint | null;
   /** The relay's fee per proven move, base units (0 when none). */
   fee: bigint;
+  /** Most one add may move (the relay's cap on an approve), base units; 0 while unknown. */
+  maxAdd: bigint;
   /** Reopening the account this device kept open (no prompt). */
   restoring: boolean;
   task: StarknetTask | null;
@@ -192,14 +194,15 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
           const opened = new s.StarknetSession(cfg, keys, relay, window.location.origin);
           const t = cfg.tokens[0];
           // Kept only once it was open; if it isn't any more (another network's record, a reset devnet), the person opens it again.
-          if (!t || !(await opened.deployed()) || !(await opened.ready(t))) {
+          // A node that can't answer throws (the error shows, the record stays for the next visit): that is never "gone".
+          if (!t || !(await opened.stillOpen(t))) {
             await forgetStarknetAccount(db).catch(() => {});
             return false;
           }
           if (!live) return false;
           kept.set(owner, opened);
+          // The balances are read by the session's effect, below, without holding this wait open.
           setSession(opened);
-          await readBalances(opened).catch(() => {});
           return true;
         });
       } finally {
@@ -228,7 +231,15 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!session || !on) return;
     // The balances are read from Starknet after the account opens; they land once the reads answer.
-    void readBalances(session).catch(() => {});
+    // A read that fails says so where Refresh is, instead of a balance that loads forever.
+    let live = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the balances (and a failed read) are set once Starknet answers, never in this pass
+    readBalances(session).catch((e: unknown) => {
+      if (live) setError({ kind: "refresh", message: say(e) });
+    });
+    return () => {
+      live = false;
+    };
   }, [session, on, readBalances]);
 
   const run = useCallback(
@@ -267,23 +278,30 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
           // A Gloam wallet's signatures are Turnkey's to keep: its private account never comes from one.
           throw new Error("Open your private account with your passkey or backup code.");
         } else {
-          const sig = await signMessageAsync({ message: a.starknetAccountMessage(0) });
-          const bytes = hexBytes(sig);
-          seed = await a.seedFromWalletSignature(bytes, 0);
-          bytes.fill(0);
+          // A new account is signed for twice, so a wallet that signs differently each time never makes one it can't reopen.
+          seed = await a.seedFromWallet(
+            (message) => signMessageAsync({ message }),
+            0,
+            async (first) => !(await new s.StarknetSession(cfg, await a.keysFromSeed(first, 0, cfg.accountClassHash), relay, window.location.origin).deployed()),
+            () => step(0, "Sign once more, so Gloam knows your wallet signs the same way each time")
+          );
         }
         try {
           const keys = await a.keysFromSeed(seed, 0, cfg.accountClassHash);
           const opened = new s.StarknetSession(cfg, keys, relay, window.location.origin);
-          // With an opener the first step is its own; the session's steps follow it.
-          await opened.ensureOpen((at, detail) => step(open ? at + 1 : at, detail));
+          try {
+            // With an opener the first step is its own; the session's steps follow it.
+            await opened.ensureOpen((at, detail) => step(open ? at + 1 : at, detail));
+          } finally {
+            setRelay(opened.relayInfo);
+          }
           kept.set(owner, opened);
           restoredFor.current = owner;
+          // The balances are read by the session's effect: the wait ends as soon as the account is open.
           setSession(opened);
           // Stay open on this device: the next visit reopens it with no prompt (until Sign out).
           const db = starknetKeepDb();
           if (db) await keepStarknetAccount(db, { network: STARKNET_NETWORK, owner, index: 0, seed }).catch(() => {});
-          await readBalances(opened);
           return true;
         } finally {
           seed.fill(0);
@@ -291,7 +309,7 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
       }, steps);
       return done === true;
     },
-    [on, mainAddress, gloam, relay, run, signMessageAsync, readBalances]
+    [on, mainAddress, gloam, relay, run, signMessageAsync]
   );
 
   const refresh = useCallback(async () => (session ? (await run("refresh", () => readBalances(session))) === true : false), [session, run, readBalances]);
@@ -302,7 +320,10 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
       const t = token;
       if (!s || !t) return null;
       const hash = await run(kind, (step) => work(s, t, step));
-      if (hash) await readBalances(s).catch(() => {});
+      // The relay as the move last read it (a new fee, a pause), and the balances after it,
+      // whether it went through or not: a move that failed late may still have landed.
+      setRelay(s.relayInfo);
+      await readBalances(s).catch(() => {});
       return hash;
     },
     [session, token, run, readBalances]
@@ -319,6 +340,7 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
       privateBalance,
       publicBalance,
       fee: relay && token ? BigInt(relay.fee[`0x${BigInt(token.address).toString(16)}`] ?? "0") : 0n,
+      maxAdd: relay && token ? BigInt(relay.maxApprove[`0x${BigInt(token.address).toString(16)}`] ?? "0") : 0n,
       restoring,
       task,
       error,
@@ -345,13 +367,6 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
-}
-
-function hexBytes(hex: string): Uint8Array {
-  const h = hex.startsWith("0x") ? hex.slice(2) : hex;
-  const out = new Uint8Array(h.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
-  return out;
 }
 
 /** Amount helpers, two places shown (lib/amountShort), every decimal kept for inputs. */
