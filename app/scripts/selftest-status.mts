@@ -6,7 +6,8 @@
  *    days across a year end, days with no checks left out of the uptime
  *  - the verdicts: a stale or stopped chain, a slow RPC, a vault or verifier
  *    with no answer, a verifier that takes an empty proof; the relay per
- *    network paused, out of gas, low on gas, waiting for gas, at its cap; a
+ *    network paused, out of gas, low on gas, waiting for gas, at its cap;
+ *    Starknet's relay sending no moves (no fee set) as degraded; a
  *    check made per network failing on some or all; Glim's webhook; Turnkey
  *  - the parts: the networks people can see only (no hidden testnet), every
  *    group filled
@@ -206,6 +207,17 @@ assert.equal(snOut.reason, "Out of STRK for fees: paused until it is topped up."
 assert.equal(snOut.detail, "Gas 12 STRK");
 assert.equal(checks.judgeStarknetRelay({ api: snOn, strk: 50n * STRK }, snLow).status, "degraded", "under three times the line: top it up");
 assert.equal(checks.judgeStarknetRelay({ api: snOn, strk: 200n * STRK }, snLow).status, "operational");
+// On, funded, but refusing every add, payment and cash out (mainnet, no relay fee set): degraded, saying why.
+const snNoMoves = checks.judgeStarknetRelay({ api: { ...snOn, moves: "off" }, strk: 200n * STRK }, snLow);
+assert.equal(snNoMoves.status, "degraded", "moves off is not operational");
+assert.equal(snNoMoves.reason, "Adds, payments and cash outs are off: no relay fee is set.");
+assert.equal(snNoMoves.detail, "Gas 200 STRK");
+assert.equal(checks.judgeStarknetRelay({ api: { ...snOn, moves: "on" }, strk: 200n * STRK }, snLow).status, "operational");
+assert.equal(checks.judgeStarknetRelay({ api: { ...snOn, funded: false, moves: "off" }, strk: 12n * STRK }, snLow).status, "down", "out of STRK still reads down");
+assert.equal(checks.judgeStarknetRelay({ api: { ...snOn, on: false, moves: "off" }, strk: 200n * STRK }, snLow).reason, "Paused.");
+assert.deepEqual(checks.starknetRelayApi(90, { ok: true, on: true, funded: true, moves: "off" }), { ms: 90, on: true, funded: true, moves: "off" }, "the check reads moves off");
+assert.equal(checks.starknetRelayApi(90, { ok: true, on: true, funded: true })?.moves, "on", "a relay that doesn't say (older): on");
+assert.equal(checks.starknetRelayApi(90, { ok: false, error: { code: "rate_limited" } }), null, "a refused GET is no answer");
 assert.equal(checks.judgeStarknetNetwork(null).status, "down");
 assert.equal(checks.judgeStarknetNetwork({ ms: 100, httpStatus: 200, ageSec: 4, block: 18_540_000 }).detail, "Latest block 4 s ago");
 assert.equal(checks.judgeStarknetNetwork({ ms: 100, httpStatus: 200, ageSec: 90, block: 1 }).status, "degraded");
