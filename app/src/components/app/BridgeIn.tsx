@@ -36,7 +36,7 @@ import { MAINNET_ENABLED, type GloamChainId } from "@/lib/networks";
 import { originChain } from "@/lib/originChains";
 import { useVaultStatus } from "@/lib/passkey";
 import { dropUnsentNote, formatFeePercent, saveLocalNote, updateLocalNote, type LocalNote } from "@/lib/shield";
-import { connectSolana, paySolana, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
+import { connectSolana, paySolana, preferredSolanaWallet, rememberSolanaWallet, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
 import { track } from "@/lib/track";
 import type { TrackEvent } from "@/lib/trackEvents";
 import { failedBeforeSend, solanaDeclined, solanaSurelyNotSent, surelyNotSent, walletDeclined, walletErrorText } from "@/lib/walletErrors";
@@ -304,7 +304,7 @@ function BridgeSheet({
   const solWallets = useSolanaWallets();
   const vault = useVaultStatus();
   const [solName, setSolName] = useState("");
-  const solWallet = chain.kind === "svm" ? (solWallets.find((w) => w.name === solName) ?? solWallets[0] ?? null) : null;
+  const solWallet = chain.kind === "svm" ? preferredSolanaWallet(solWallets, { picked: solName, evmName: connector?.name }) : null;
   const switchable = connector?.type === "injected" || connector?.type === "walletConnect";
   const canPrivate =
     !demo &&
@@ -717,7 +717,9 @@ function BridgeSheet({
           step === "connect"
             ? solanaDeclined(msg)
               ? `${payerName} didn't connect. Nothing moved.`
-              : `Couldn't connect ${payerName}. Try again.`
+              : solWallets.length > 1
+                ? `Couldn't connect ${payerName}. If you use another wallet, pick it above.`
+                : `Couldn't connect ${payerName}. Open it, unlock it and try again.`
             : step === "prepare"
               ? "Couldn't prepare your private deposit. Try again."
               : msg || "Something went wrong. Try again.",
@@ -1195,7 +1197,10 @@ function BridgeSheet({
                     type="button"
                     role="radio"
                     aria-checked={solWallet?.name === w.name}
-                    onClick={() => setSolName(w.name)}
+                    onClick={() => {
+                      setSolName(w.name);
+                      rememberSolanaWallet(w.name);
+                    }}
                     className={`inline-flex h-10 items-center gap-2 rounded-full border pl-1.5 pr-3.5 text-[14px] transition-colors ${
                       solWallet?.name === w.name ? "border-foreground text-foreground" : "border-line text-soft hover:bg-surface"
                     }`}

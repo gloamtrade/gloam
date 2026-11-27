@@ -92,6 +92,45 @@ export function useSolanaWallets(): SolanaWallet[] {
   return useSyncExternalStore(subscribe, () => snapshot, () => EMPTY);
 }
 
+const PAYER_KEY = "gloam:solana-payer";
+
+/** Remember the Solana wallet someone picked to pay with, for next time. Never throws. */
+export function rememberSolanaWallet(name: string): void {
+  try {
+    window.localStorage.setItem(PAYER_KEY, name);
+  } catch {
+    /* private window or blocked storage: the pick lasts this visit */
+  }
+}
+
+function rememberedSolanaWallet(): string | null {
+  try {
+    return window.localStorage.getItem(PAYER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Which Solana wallet pays when there are several in the browser. The first one
+ * the browser announces is often one that isn't set up (Phantom installed,
+ * never used), so it goes, in order: the one picked here, the one picked last
+ * time, the one with the same name as the connected EVM wallet ("OKX Wallet"),
+ * one that already shares an account with this site, then the first.
+ */
+export function preferredSolanaWallet(
+  wallets: readonly SolanaWallet[],
+  opts: { picked?: string | null; evmName?: string | null; remembered?: string | null } = {}
+): SolanaWallet | null {
+  if (wallets.length === 0) return null;
+  const byName = (n: string | null | undefined) => (n ? wallets.find((w) => w.name === n) : undefined);
+  const remembered = opts.remembered !== undefined ? opts.remembered : typeof window === "undefined" ? null : rememberedSolanaWallet();
+  const evm = (opts.evmName ?? "").trim().toLowerCase();
+  const sameAsEvm = evm ? wallets.find((w) => w.name.toLowerCase() === evm || w.name.toLowerCase().startsWith(evm.split(" ")[0]!)) : undefined;
+  const authorized = wallets.find((w) => (w.wallet.accounts ?? []).some((a) => a.chains?.includes(CHAIN)));
+  return byName(opts.picked) ?? byName(remembered) ?? sameAsEvm ?? authorized ?? wallets[0]!;
+}
+
 /** Ask the wallet to connect. Returns its Solana mainnet account. */
 export async function connectSolana(w: SolanaWallet): Promise<SolanaAccount> {
   const connect = w.wallet.features["standard:connect"];
