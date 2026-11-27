@@ -34,7 +34,7 @@ import "server-only";
  */
 import { createHash, randomBytes } from "crypto";
 import { Account, RpcProvider, num, type Call } from "starknet";
-import { SharedCountUnavailable, addRateCount, clientIp } from "@/lib/mcpRemote/rateLimit";
+import { SharedCountUnavailable, addRateCount, clientIp, hitBatchedCount } from "@/lib/mcpRemote/rateLimit";
 import { kv1 } from "@/lib/partnersKv";
 import { STARKNET_NETWORK, STARKNET_STRK, sameStarknetAddress, starknetConfig, type StarknetNetwork, type StarknetNetworkConfig } from "./config";
 import { accountAddress } from "./account";
@@ -104,12 +104,26 @@ export const STARKNET_RELAY_LOW_STRK: Record<StarknetNetwork, bigint> = {
 export const STARKNET_PROXY_PER_IP_PER_MIN = 600;
 export const STARKNET_PROXY_ALL_PER_MIN = 20_000;
 
+/**
+ * How the proxy's counts reach Redis (hitBatchedCount): every read used to cost
+ * four Upstash commands (INCRBY and EXPIRE, per IP and for everyone). Now each
+ * instance sends an IP's count once it holds 15 unsent calls, and everyone's
+ * once it holds 100 or ten seconds have passed; an IP or a minute already used
+ * is refused in memory. Each instance may let through at most `slack` calls
+ * (and one batch) past a limit before it learns of it: 2.5% of an IP's 600, 0.5%
+ * of everyone's 20,000. Nothing reads these counts, so the time only keeps
+ * everyone's count in Redis close to the truth.
+ */
+export const STARKNET_PROXY_SYNC = {
+  perIp: { slack: 15, syncMs: 60_000 },
+  all: { slack: 100, syncMs: 10_000 },
+} as const;
+
 export async function starknetProxyRate(req: Request, calls: number, now = Date.now()): Promise<{ allowed: boolean; retryAfterSec: number }> {
-  const retryAfterSec = Math.max(1, 60 - (Math.floor(now / 1000) % 60));
-  const mine = await addRateCount(clientIp(req), "sn-proxy", calls, now);
-  if (mine > STARKNET_PROXY_PER_IP_PER_MIN) return { allowed: false, retryAfterSec };
-  const all = await addRateCount("all", "sn-proxy-all", calls, now);
-  return { allowed: all <= STARKNET_PROXY_ALL_PER_MIN, retryAfterSec };
+  const mine = await hitBatchedCount(clientIp(req), "sn-proxy", calls, STARKNET_PROXY_PER_IP_PER_MIN, STARKNET_PROXY_SYNC.perIp, now);
+  if (!mine.allowed) return { allowed: false, retryAfterSec: mine.retryAfterSec };
+  const all = await hitBatchedCount("all", "sn-proxy-all", calls, STARKNET_PROXY_ALL_PER_MIN, STARKNET_PROXY_SYNC.all, now);
+  return { allowed: all.allowed, retryAfterSec: all.retryAfterSec };
 }
 
 /**
