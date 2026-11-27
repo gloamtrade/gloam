@@ -34,9 +34,7 @@ import Module from "node:module";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import Module from "node:module";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Account, CallData, OutsideExecutionVersion, ec, hash, num, outsideExecution, type Call } from "starknet";
 import { ScreeningCallMockProofProvider } from "@starkware-libs/starknet-privacy-sdk/testing";
 import type { StarknetAccountKeys } from "../src/lib/starknetPrivacy/account";
@@ -58,13 +56,7 @@ const URL = `http://127.0.0.1:${PORT}`;
 process.env.NEXT_PUBLIC_STARKNET_ENABLED = "1";
 process.env.NEXT_PUBLIC_STARKNET_NETWORK = "devnet";
 process.env.NEXT_PUBLIC_STARKNET_DEVNET_RPC = URL;
-for (const k of ["STARKNET_RPC_URL", "STARKNET_PROVER_URL", "STARKSCAN_API_KEY", "UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN", "VERCEL"]) delete process.env[k];
-const stub = fileURLToPath(new globalThis.URL("./server-only-stub.cjs", import.meta.url));
-const M = Module as unknown as { _resolveFilename: (req: string, ...rest: unknown[]) => string };
-const resolveName = M._resolveFilename;
-M._resolveFilename = function (req: string, ...rest: unknown[]) {
-  return req === "server-only" ? stub : resolveName.call(this, req, ...rest);
-};
+for (const k of ["STARKNET_RPC_URL", "STARKNET_PROVER_URL", "STARKSCAN_API_KEY", "VERCEL"]) delete process.env[k];
 const { keysFromSeed, deployAccountCall } = await import("../src/lib/starknetPrivacy/account");
 const { starknetConfig, STARKNET_ACCOUNT_CLASS_HASH } = await import("../src/lib/starknetPrivacy/config");
 const { starknetProvider, discoveryFor, gloamTransfers } = await import("../src/lib/starknetPrivacy/client");
@@ -250,10 +242,10 @@ async function sessionThroughRoutes(input: { pool: string; relayer: { address: s
   // devnet's own predeployed account and its published throwaway key, in this process only
   env.GLOAM_STARKNET_RELAYER_ADDRESS = input.relayer.address;
   env.GLOAM_STARKNET_RELAYER_SECRET = input.relayer.private_key;
-  // The relay's fee is set once both accounts are open: relayPolicy (server side) asks it on every
-  // apply, an open's too, and an open has nothing to pay it from. SESSION_OPEN_WITH_FEE=1 shows that.
-  if (env.SESSION_OPEN_WITH_FEE === "1") env.STARKNET_RELAY_FEE = "0.01";
-  else delete env.STARKNET_RELAY_FEE;
+  // The relay asks 0.01 a move (an open owes none). SESSION_NO_FEE=1 leaves it off, to time the
+  // moves alone (the balance checks, which count the fee, then fail).
+  if (env.SESSION_NO_FEE === "1") delete env.STARKNET_RELAY_FEE;
+  else env.STARKNET_RELAY_FEE = "0.01";
   const routes: Record<string, Record<string, (req: Request) => Promise<Response>>> = {
     "/api/starknet/rpc": (await import("../src/app/api/starknet/rpc/route")) as never,
     "/api/starknet/relay": (await import("../src/app/api/starknet/relay/route")) as never,
@@ -365,12 +357,7 @@ async function sessionThroughRoutes(input: { pool: string; relayer: { address: s
     });
 
     await admin.execute({ contractAddress: token, entrypoint: "transfer", calldata: CallData.compile([dave.address, num.toHex(2n * one), "0x0"]) }).then((r) => starknetProvider(URL).waitForTransaction(r.transaction_hash));
-    // From here the relay asks 0.01 a move (read again by each move, as the page does).
-    // SESSION_NO_FEE=1 leaves it off, to time the moves alone (the balance checks then fail).
-    if (env.SESSION_NO_FEE !== "1") env.STARKNET_RELAY_FEE = "0.01";
-    eq((await readRelayInfo(origin)).fee[num.toHex(BigInt(token))] ?? "0", env.SESSION_NO_FEE === "1" ? "0" : (one / 100n).toString(), "session: the relay asks 0.01 a move");
-    // The page reads the relay again (as a reload would): a session without that keeps the fee it opened with.
-    await (dave as { refreshRelay?: () => Promise<unknown> }).refreshRelay?.();
+    eq(info.fee[num.toHex(BigInt(token))] ?? "0", env.SESSION_NO_FEE === "1" ? "0" : (one / 100n).toString(), "session: the relay asks 0.01 a move");
 
     await scenario("add 1.0 with the relay's fee", async () => {
       ip = "10.0.0.3";
