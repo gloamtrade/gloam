@@ -9,6 +9,8 @@ import { BNB_ENABLED } from "@/lib/bnb";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED, ringsAssets } from "@/lib/solanaRings/config";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
+import { STARKNET_DOCS_NAME, STARKNET_DOCS_NOTE } from "./starknet/starknetDocs";
 
 /** The mainnets with a pool in, as words: "Robinhood Chain and Tempo" until Base and Ethereum are in. */
 const MAINNETS = liveMainnetNames();
@@ -49,6 +51,13 @@ export default function DocsOverviewPage() {
         <p>
           Gloam is on <strong>{SOLANA_NAME}</strong> too, through Helius Privacy
           Rings. {RINGS_PRIVACY_NOTE} See <Link href="/docs/chain#solana">{SOLANA_NAME}</Link>.
+        </p>
+      )}
+      {STARKNET_ENABLED && (
+        <p>
+          Gloam is on <strong>{STARKNET_DOCS_NAME}</strong> too, through
+          Starknet&apos;s own privacy pool. {STARKNET_DOCS_NOTE} See{" "}
+          <Link href="/docs/starknet">{STARKNET_DOCS_NAME}</Link>.
         </p>
       )}
       <p>
@@ -122,6 +131,14 @@ export default function DocsOverviewPage() {
             <AppLink href="/app/solana">{SOLANA_NAME}</AppLink>: add, pay, run payroll
             and cash out {joinNames(ringsAssets().map((a) => a.symbol))}, with the
             token and the amount of each private payment hidden
+          </li>
+        )}
+        {STARKNET_ENABLED && (
+          <li>
+            <Link href="/docs/starknet">{STARKNET_DOCS_NAME}</Link>: add, pay, run payroll,
+            send claim links and cash out USDC. Over a channel already open a payment
+            hides both sides and the amount; the first payment to someone shows their
+            private account
           </li>
         )}
         <li>Cash out to any wallet, with a real proof made in your browser</li>
