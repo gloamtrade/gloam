@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { readCappedBody } from "@/lib/cspReport";
 import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
-import { cctpSourceByDomain, mintedAmount, starknetCctp } from "@/lib/starknetPrivacy/cctp";
-import { cctpLookRate, irisBurn, irisReattest } from "@/lib/starknetPrivacy/cctpServer";
+import { CCTP_STARKNET_DOMAIN, cctpSourceByDomain, mintedAmount, starknetCctp } from "@/lib/starknetPrivacy/cctp";
+import { irisOutboundFrom } from "@/lib/starknetPrivacy/cctpOut";
+import { cctpLookRate, irisBurn, irisGet, irisReattest } from "@/lib/starknetPrivacy/cctpServer";
 import { serverConfig } from "@/lib/starknetPrivacy/server";
 
 export const runtime = "nodejs";
@@ -20,6 +21,8 @@ const TX = /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{64,90})$/;
  * calls Circle itself): GET ?domain=<source domain>&tx=<source transaction>.
  * Answers pending until Circle signs, then the message, its attestation and
  * what it mints to whom. Only burns to Starknet from a listed source.
+ * GET ?domain=25&tx=<Starknet transaction>: a cash out's burn to another chain,
+ * pending or signed, and how Circle's delivery there stands.
  * POST { nonce } asks Circle to sign an expired fast transfer again.
  */
 export async function GET(req: Request) {
@@ -29,6 +32,21 @@ export async function GET(req: Request) {
   const u = new URL(req.url);
   const domain = Number(u.searchParams.get("domain"));
   const tx = u.searchParams.get("tx") ?? "";
+  if (domain === CCTP_STARKNET_DOMAIN) {
+    if (!/^0x[0-9a-fA-F]{1,64}$/.test(tx)) return refuse(400, "bad_request", "Send ?domain=25&tx=<a Starknet transaction>.");
+    if (!(await cctpLookRate(req))) return refuse(429, "rate_limited", "Too many requests. Try again in a little while.");
+    let r;
+    try {
+      r = await irisGet(cctp, `/v2/messages/${CCTP_STARKNET_DOMAIN}?transactionHash=0x${tx.slice(2).padStart(64, "0")}`);
+    } catch {
+      return refuse(502, "circle_unavailable", "Circle is slow to answer. Trying again.");
+    }
+    if (r.status === 404) return NextResponse.json({ ok: true, status: "pending" }, { headers: NO_STORE });
+    if (r.status !== 200) return refuse(502, "circle_unavailable", "Circle is slow to answer. Trying again.");
+    const out = irisOutboundFrom(r.json);
+    if (!out) return refuse(404, "not_a_cash_out", "That transaction has no USDC transfer from Starknet.");
+    return NextResponse.json({ ok: true, ...out }, { headers: NO_STORE });
+  }
   const source = Number.isSafeInteger(domain) ? cctpSourceByDomain(domain) : null;
   if (!source || !TX.test(tx)) return refuse(400, "bad_request", "Send ?domain=<a listed source>&tx=<its transaction>.");
   if (source.kind === "evm" ? !tx.startsWith("0x") : tx.startsWith("0x")) return refuse(400, "bad_request", "That isn't a transaction on that chain.");

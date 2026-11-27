@@ -350,6 +350,7 @@ function fakeChain(over: Partial<CctpChain> & { sent?: Sent[] } = {}): CctpChain
           ? MAIN.classHashes!.tokenMessengerMinter
           : config.STARKNET_ACCOUNT_CLASS_HASH,
     nonceUsed: async () => false,
+    poolFeeAmount: async () => 45n * 10n ** 17n,
     blockNumber: async () => 18_600_000,
     estimate: async () => 3n * 10n ** 18n,
     send: async (calls) => {

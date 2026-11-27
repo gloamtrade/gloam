@@ -22,6 +22,7 @@ import { SuccessModal } from "./SuccessModal";
 import { TokenLogo } from "./TokenLogo";
 import { parseStarkAmount, useStarknet } from "./StarknetAccount";
 import { StarknetClaimCard, StarknetClaimLead, StarknetPayOrLink, useStarknetClaimInHash } from "./StarknetLinks";
+import { StarknetCashOutNetPicker, StarknetCashOutTo, cashOutDestinations, type StarknetCashOutNet } from "./StarknetCashOutTo";
 import { StarknetAddFromPicker, StarknetBringIn, StarknetBringInPending, StarknetBringInRelay, bringInRelaySources, bringInSources, type StarknetAddFrom } from "./StarknetBringIn";
 import {
   STARKNET_NAME,
@@ -331,9 +332,13 @@ function StarknetSpendView({ kind, token, onReceive }: { kind: "pay" | "cashout"
   const sn = useStarknet()!;
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
+  const [net, setNet] = useState<StarknetCashOutNet>("starknet");
   const { show, modal } = useSuccess(token);
   const balance = sn.privateBalance;
   const pay = kind === "pay";
+  // A cash out can also go to another network with Circle's CCTP, when Gloam's relay does it.
+  const destinations = pay ? [] : cashOutDestinations(sn.cctp);
+  const dest = net === "starknet" ? null : (destinations.find((d) => d.chainId === net) ?? null);
   const problem = starkAmountProblem(amount, token, balance, sn.fee);
   const value = parseStarkAmount(amount, token.decimals);
   const working = sn.task?.kind === kind;
@@ -367,44 +372,71 @@ function StarknetSpendView({ kind, token, onReceive }: { kind: "pay" | "cashout"
       <p className="mt-1.5 max-w-[56ch] text-[14px] leading-relaxed text-mute">
         {pay
           ? "Pay another private account on Starknet. The first payment to someone shows their private account; after that, nothing about a payment shows."
-          : `Send from your private balance to any ${STARKNET_NAME} address. A cash out shows where it went and how much, never which account it came from.`}
+          : dest
+            ? `Send from your private balance to any address on ${dest.name}. Circle delivers it there, so nothing is needed on ${dest.name}.`
+            : `Send from your private balance to any ${STARKNET_NAME} address. A cash out shows where it went and how much, never which account it came from.`}
       </p>
-      <div className="mt-5 space-y-3">
-        <StarknetAddressField label={pay ? "To (their private account)" : "To (any Starknet address)"} value={to} onChange={setTo} placeholder="0x..." disabled={working} />
-        <StarknetAmountCard
-          id={`sn-${kind}-amount`}
-          label={pay ? "Pay" : "Cash out"}
-          balanceLabel="Private balance"
-          balance={balance}
-          token={token}
-          amount={amount}
-          onAmount={setAmount}
-          problem={problem}
-          disabled={working}
-        />
-      </div>
-      <FeeLine fee={sn.fee} token={token} />
-      {!sn.relay?.funded && <RelayPaused />}
-      <StarknetActionButton
-        kind={kind}
-        label={pay ? "Pay privately" : "Cash out"}
-        stop={stop}
-        className="mt-5"
-        onClick={() =>
-          void (pay ? sn.pay(to, value!) : sn.cashOut(to, value!)).then((hash) => {
-            if (!hash) return;
-            setAmount("");
-            show({
-              title: pay ? "Paid privately" : "Cashed out",
-              body: pay ? "They'll see it in their private balance." : "It's on its way to that address.",
-              amount: value!,
-              hash,
-            });
-          })
-        }
-      />
-      <StarknetSteps task={working ? sn.task : null} className="mt-4" />
-      <StarknetError kind={kind} className="mt-4" />
+      {destinations.length > 0 && (
+        <div className="mt-5">
+          <StarknetCashOutNetPicker value={dest ? dest.chainId : "starknet"} onChange={setNet} destinations={destinations} disabled={working} />
+        </div>
+      )}
+      {dest ? (
+        <div className="mt-3">
+          <StarknetCashOutTo
+            key={dest.chainId}
+            dest={dest}
+            token={token}
+            onDone={(r) =>
+              show({
+                title: "Cashed out",
+                body: r.delivered ? `It arrived at that address on ${dest.name}.` : `It's on its way to that address on ${dest.name}. Circle delivers it in a few minutes.`,
+                amount: r.arrives,
+                hash: r.hash,
+              })
+            }
+          />
+        </div>
+      ) : (
+        <>
+          <div className={destinations.length > 0 ? "mt-3 space-y-3" : "mt-5 space-y-3"}>
+            <StarknetAddressField label={pay ? "To (their private account)" : "To (any Starknet address)"} value={to} onChange={setTo} placeholder="0x..." disabled={working} />
+            <StarknetAmountCard
+              id={`sn-${kind}-amount`}
+              label={pay ? "Pay" : "Cash out"}
+              balanceLabel="Private balance"
+              balance={balance}
+              token={token}
+              amount={amount}
+              onAmount={setAmount}
+              problem={problem}
+              disabled={working}
+            />
+          </div>
+          <FeeLine fee={sn.fee} token={token} />
+          {!sn.relay?.funded && <RelayPaused />}
+          <StarknetActionButton
+            kind={kind}
+            label={pay ? "Pay privately" : "Cash out"}
+            stop={stop}
+            className="mt-5"
+            onClick={() =>
+              void (pay ? sn.pay(to, value!) : sn.cashOut(to, value!)).then((hash) => {
+                if (!hash) return;
+                setAmount("");
+                show({
+                  title: pay ? "Paid privately" : "Cashed out",
+                  body: pay ? "They'll see it in their private balance." : "It's on its way to that address.",
+                  amount: value!,
+                  hash,
+                });
+              })
+            }
+          />
+          <StarknetSteps task={working ? sn.task : null} className="mt-4" />
+          <StarknetError kind={kind} className="mt-4" />
+        </>
+      )}
       {modal}
     </section>
   );

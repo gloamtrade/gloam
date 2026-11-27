@@ -134,6 +134,12 @@ type StarknetCtx = {
   pendingBringIns: PendingBringIn[];
   /** Bring USDC in from another network and add it privately; the add's hash, or null. */
   bringIn(plan: StarknetBringInPlan): Promise<string | null>;
+  /**
+   * Cash out `amount` to `recipient` on another network (a CCTP destination's
+   * chain id) with Circle's CCTP; the Starknet transaction, what arrives, and
+   * whether Circle's delivery was seen. Null when it didn't go.
+   */
+  cashOutTo(chainId: number, recipient: string, amount: bigint): Promise<{ hash: string; arrives: bigint; delivered: boolean } | null>;
   /** Close the private account in this tab and forget it on this device. */
   close(): void;
   clearError(): void;
@@ -527,6 +533,30 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
     [session, token, cctp, run, readBalances]
   );
 
+  const cashOutTo = useCallback(
+    async (chainId: number, recipient: string, amount: bigint) => {
+      const s = session;
+      const t = token;
+      const info = cctp;
+      if (!s || !t || !info?.on) return null;
+      const { cctpDestinationByChain } = await import("@/lib/starknetPrivacy/cctpOut");
+      const dest = cctpDestinationByChain(chainId);
+      if (!dest) return null;
+      const done = await run(
+        "cashout",
+        async (step) => {
+          const c = await import("@/lib/starknetPrivacy/cctpOutClient");
+          return c.cashOutToChain({ session: s, token: t, info, dest, recipient, amount, step, origin: window.location.origin });
+        },
+        ["Waiting for Starknet", "Cashing out", "Waiting for Circle", `Arriving on ${dest.name}`]
+      );
+      setRelay(s.relayInfo);
+      await readBalances(s).catch(() => {});
+      return done ? { hash: done.txHash, arrives: done.arrives, delivered: done.delivered } : null;
+    },
+    [session, token, cctp, run, readBalances]
+  );
+
   const value = useMemo<StarknetCtx>(
     () => ({
       on,
@@ -556,6 +586,7 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
       cctp,
       pendingBringIns,
       bringIn,
+      cashOutTo,
       close: () => {
         if (mainAddress) kept.delete(mainAddress);
         const db = starknetKeepDb();
@@ -566,7 +597,7 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
       },
       clearError: () => setError(null),
     }),
-    [on, token, relay, mainAddress, gloam, session, privateBalance, publicBalance, restoring, task, error, setUp, refresh, move, payroll, links, cctp, pendingBringIns, bringIn]
+    [on, token, relay, mainAddress, gloam, session, privateBalance, publicBalance, restoring, task, error, setUp, refresh, move, payroll, links, cctp, pendingBringIns, bringIn, cashOutTo]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

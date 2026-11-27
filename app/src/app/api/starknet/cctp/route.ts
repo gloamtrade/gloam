@@ -4,6 +4,8 @@ import { readCappedBody } from "@/lib/cspReport";
 import { STARKNET_ENABLED, sameStarknetAddress } from "@/lib/starknetPrivacy/config";
 import { CCTP_SOURCES, starknetCctp, validAttestation } from "@/lib/starknetPrivacy/cctp";
 import { cctpFastFees, cctpReceiveRate, cctpReceiveSend, cctpSettings, starknetCctpChains } from "@/lib/starknetPrivacy/cctpServer";
+import { CCTP_DESTINATIONS } from "@/lib/starknetPrivacy/cctpOut";
+import { cctpOutFees } from "@/lib/starknetPrivacy/cctpOutServer";
 import { relayKeys, relayMoves, serverConfig, starknetRelayAttempt, starknetUpstream } from "@/lib/starknetPrivacy/server";
 
 export const runtime = "nodejs";
@@ -21,9 +23,10 @@ const refuse = (status: number, code: string, message: string) => NextResponse.j
  * Bringing USDC in to a Gloam private account on Starknet with Circle's CCTP
  * (lib/starknetPrivacy/cctp says how and who pays what).
  *
- * GET: whether it is on, the relay's fee on a receive, and Circle's fast
- * transfer fee from each source (basis points; null where Circle didn't
- * answer). POST { message, attestation, outside }: Circle's signed message and
+ * GET: whether it is on, the relay's fee on a receive (and on a cash out's
+ * burn), Circle's fast transfer fee from each source (basis points; null where
+ * Circle didn't answer), and for each destination of a cash out Circle's fast
+ * fee from Starknet and its forwarding fee (base units). POST { message, attestation, outside }: Circle's signed message and
  * the account's outside execution; the relay checks them (lib/starknetPrivacy
  * cctpServer cctpReceiveSend) and sends both as one transaction.
  */
@@ -34,7 +37,10 @@ export async function GET() {
   const token = cctp ? cfg.tokens.find((t) => sameStarknetAddress(t.address, cctp.usdc)) : undefined;
   const on = Boolean(STARKNET_ENABLED && cctp && keys && cfg.pool && token);
   const settings = cctpSettings(cfg.network, token?.decimals ?? 6);
-  const fees = on && cctp ? await cctpFastFees(cctp).catch(() => ({}) as Record<number, number | null>) : {};
+  const [fees, out] =
+    on && cctp
+      ? await Promise.all([cctpFastFees(cctp).catch(() => ({}) as Record<number, number | null>), cctpOutFees(cctp).catch(() => ({}) as Awaited<ReturnType<typeof cctpOutFees>>)])
+      : [{}, {} as Awaited<ReturnType<typeof cctpOutFees>>];
   return NextResponse.json(
     {
       ok: true,
@@ -44,6 +50,10 @@ export async function GET() {
       relayer: keys?.address ?? null,
       fee: settings.fee.toString(),
       sources: CCTP_SOURCES.map((s) => ({ domain: s.domain, chainId: s.chainId, fastBps: s.fast ? ((fees as Record<number, number | null>)[s.domain] ?? null) : 0 })),
+      destinations: CCTP_DESTINATIONS.map((d) => {
+        const f = out[d.domain];
+        return { domain: d.domain, chainId: d.chainId, fastBps: f?.fastBps ?? null, forward: f?.forward ? { low: f.forward.low.toString(), med: f.forward.med.toString(), high: f.forward.high.toString() } : null };
+      }),
     },
     { headers: NO_STORE }
   );

@@ -45,6 +45,7 @@ import {
   type StarknetCctp,
 } from "./cctp";
 import { relayAmounts, relayChain, relayMoves, wholeToBase, withRelayLock, type RelayChain } from "./server";
+import type { RelayProof } from "./relayPolicy";
 
 type Env = Record<string, string | undefined>;
 
@@ -149,11 +150,11 @@ export async function cctpReceiveRate(req: Request, settings: CctpSettings, netw
 // ------------------------------------------------------------------ the receive
 
 /** What the receive reads on chain before sending, and sends: injectable for tests. */
-export type CctpChain = Pick<RelayChain, "classHashAt" | "send"> & {
+export type CctpChain = Pick<RelayChain, "classHashAt" | "send" | "poolFeeAmount"> & {
   nonceUsed(messageTransmitter: string, nonce: string): Promise<boolean>;
   blockNumber(): Promise<number>;
-  /** The whole transaction's cost in STRK (FRI); throws when it wouldn't run. */
-  estimate(calls: Call[]): Promise<bigint>;
+  /** The whole transaction's cost in STRK (FRI), with its proof when it carries one; throws when it wouldn't run. */
+  estimate(calls: Call[], proof?: RelayProof): Promise<bigint>;
 };
 
 export const starknetCctpChains = {
@@ -166,14 +167,15 @@ export function cctpChain(upstream: string, keys: { address: string; secret: str
   const account = new Account({ provider, address: keys.address, signer: keys.secret, cairoVersion: "1" });
   return {
     classHashAt: base.classHashAt,
-    send: (calls) => base.send(calls),
+    poolFeeAmount: base.poolFeeAmount,
+    send: (calls, proof) => base.send(calls, proof),
     async nonceUsed(mt, nonce) {
       const r = await provider.callContract({ contractAddress: mt, entrypoint: "is_nonce_used", calldata: nonceCalldata(nonce) });
       return BigInt(r[0] ?? "0x0") !== 0n;
     },
     blockNumber: () => provider.getBlockNumber(),
-    async estimate(calls) {
-      const fee = await account.estimateInvokeFee(calls, { blockIdentifier: "pre_confirmed" });
+    async estimate(calls, proof) {
+      const fee = await account.estimateInvokeFee(calls, { blockIdentifier: "pre_confirmed", ...(proof ? { proofFacts: proof.proofFacts as string[], proof: proof.proof } : {}) });
       return BigInt(fee.overall_fee);
     },
   };
