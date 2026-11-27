@@ -221,6 +221,8 @@ const solReqBody = Sol.encodeRequest({ network: "mainnet", to: "9wPkC6bZ3mWtq8Fx
   ok(banner.includes("The name comes from the link. Check the account with them before you pay."), "the name is what the link says");
   const nameless = text(renderToString(h(StarknetRequestBanner, { request: { ...base, name: "", amount: null }, token, onDismiss: () => {} })));
   ok(nameless.includes("Someone asked to be paid in USDC") && !nameless.includes("The name comes from the link"), "no name: no warning about it, and no amount: the token");
+  const noteless = text(renderToString(h(StarknetRequestBanner, { request: { ...base, note: "" }, token, onDismiss: () => {} })));
+  ok(/To 0x68b8\.\.\.e656 ?\./.test(noteless) && !noteless.includes("The note stays with you"), "no note: nothing said about one");
   const lead = text(renderToString(h(StarknetRequestLead, { request: base, token })));
   ok(lead.includes("Ada asked for 25.00 USDC") && lead.includes("Open your private account on Starknet below."), "before the account is open, the lead says what is asked");
 }

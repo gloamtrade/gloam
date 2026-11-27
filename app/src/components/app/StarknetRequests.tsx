@@ -328,7 +328,7 @@ export function StarknetRequestBanner({ request, token, onDismiss }: { request: 
         </button>
       </div>
       <p className="mt-2 text-[12.5px] leading-relaxed text-mute">
-        To <span className="tnum">{shortStark(request.to)}</span>. Check the details below, then press Pay privately. The note stays with you: a payment on Starknet carries none.
+        To <span className="tnum">{shortStark(request.to)}</span>.{request.note && " The note stays with you: a payment on Starknet carries none."}
       </p>
       {reach === "closed" ? (
         <p className="mt-2 text-[12.5px] leading-relaxed text-warn">That private account isn&apos;t open on {STARKNET_NAME} yet. Ask them to open it in Gloam first.</p>
