@@ -11,7 +11,7 @@ import { STARKNET_DOCS_NAME } from "./starknetDocs";
 export const metadata: Metadata = {
   title: "Starknet",
   description:
-    "Gloam on Starknet, through Starknet's own privacy pool: how your private account works, exactly what is public and what is hidden, the pool's auditor key, fees, limits, payroll, claim links, the SDK and the MCP tools.",
+    "Gloam on Starknet, through Starknet's own privacy pool: how your private account works, exactly what is public and what is hidden, the pool's auditor key, fees, limits, payroll, claim links, payment requests, the SDK and the MCP tools.",
 };
 
 export default function DocsStarknetPage() {
@@ -168,7 +168,7 @@ export default function DocsStarknetPage() {
         <li>An add has a cap per transaction. The app says it when you go over.</li>
       </ul>
 
-      <h2 id="payroll">Payroll and claim links</h2>
+      <h2 id="payroll">Payroll, claim links and requests</h2>
       <p>
         <strong>Payroll</strong> pays up to {PAYROLL_MAX_ROWS} people in a run,
         and up to {PAYROLL_PROOF_MAX} in one proof, as many as fit, with
@@ -185,6 +185,15 @@ export default function DocsStarknetPage() {
         private account, which shows that account, as a first payment does.
         A link is claimed once. Until someone claims it, you can take it back
         under Sent links.
+      </p>
+      <p id="requests">
+        <strong>Payment requests</strong> (made under Receive) are links that
+        ask to be paid into your private account, with an amount or none, a
+        note and your name. Opening one fills in Pay on {STARKNET_DOCS_NAME};
+        the payer checks it and pays. Nothing about a request goes on chain. A
+        Starknet payment carries no note, so the note is only shown to the
+        payer, and the name is only what the link says. The payment is like any
+        other: a first payment to you shows your private account.
       </p>
 
       <h2 id="not-yet">Not on Starknet</h2>

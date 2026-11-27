@@ -490,13 +490,14 @@ export function starknetFacts(): string | null {
   const tokens = starknetConfig().tokens.map((t) => t.symbol);
   return [
     `${name.toUpperCase()} (Gloam on Starknet; it is not one of the vault mainnets above and works differently)`,
-    `- Gloam is on ${name}: pick ${name} in the app's network menu. It runs on Starknet's own privacy pool (STRK20), not the Gloam vault. ${tokens.length ? `Asset: ${joinNames(tokens)}.` : ""} Add, pay privately, payroll, claim links and cash out work there.`,
+    `- Gloam is on ${name}: pick ${name} in the app's network menu. It runs on Starknet's own privacy pool (STRK20), not the Gloam vault. ${tokens.length ? `Asset: ${joinNames(tokens)}.` : ""} Add, pay privately, payroll, claim links, payment requests and cash out work there.`,
     `- ${STARKNET_PRIVACY_NOTE} Never say or suggest that the first payment to someone hides who was paid: it shows their private account. A payroll with several first payments shows those accounts together.`,
     "- A person's Starknet private account is its own Starknet account, opened from their Gloam key (a wallet's signature over a fixed text, or a Gloam wallet's passkey or backup code), so the same wallet, passkey or code reopens it on any device. Gloam's relay deploys it and sends every transaction, so it never needs STRK.",
     `- ${STARKNET_PRIVACY.auditor}`,
     `- ${STARKNET_PRIVACY.prover} ${STARKNET_PRIVACY.screening}`,
     "- Fees: Gloam's relay pays Starknet's fees. On mainnet each add, payment and cash out pays Gloam's relay fee (0.25 USDC), shown in the app before each move. Opening an account is free, with a daily cap.",
     "- Proofs come from a few a day for now. When they are used, the app says Starknet is busy and nothing is sent: try again later. Each move waits about 10 blocks before its proof.",
+    "- A Starknet payment request is a link that fills in Pay with the private account and the amount. It never goes on chain. Starknet payments carry no note, so its note is only shown to the payer. Paying it is like any payment there: a first payment shows the payee's private account.",
     "- A Starknet claim link (gloam.trade/c#sn=...) is a one-time private account whose key rides in the link. Paying it shows that one-time account. Claiming it moves the money into the claimer's own private account, which shows that account. Whoever made it can take back one nobody claimed. A payroll row with no account gets one.",
     "- Not on Starknet: proof of funds or payment, and private swaps. Money reaches a Starknet private account by sending USDC on Starknet to its address, then Add. Don't promise bringing money in from other networks or give dates.",
     "- The SDK (@gloamtrade/sdk/starknet) and the local MCP server (gloam_starknet_* tools) open the same private account for servers and agents. Never say or suggest a partnership with StarkWare, Starknet or Starkscan.",

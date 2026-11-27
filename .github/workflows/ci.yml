@@ -102,6 +102,8 @@ jobs:
       # relay's cap, and every way a proof is left in flight against a fake chain, the
       # sealed store and schedules. Claim links: the link format (no collision with EVM
       # or Solana links), claiming once, take back, link rows in a run, sent links sealed.
+      # Payment requests: the link format (no other link reads it, it reads no other),
+      # Pay filled from it, what its banner says, and Receive's Request a payment.
       # @gloamtrade/sdk/starknet against the app byte for byte (the account from a wallet
       # signature or a Gloam root, keys, claim links, the calls the relay sends). The public
       # site's Starknet copy (docs, llms.txt, the hosted MCP, Glim), off and on.
@@ -114,6 +116,7 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-routes.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-payroll.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-claim-links.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-requests.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-sdk.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-site.mts
 

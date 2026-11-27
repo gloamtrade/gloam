@@ -136,7 +136,7 @@ export default function DocsOverviewPage() {
         {STARKNET_ENABLED && (
           <li>
             <Link href="/docs/starknet">{STARKNET_DOCS_NAME}</Link>: add, pay, run payroll,
-            send claim links and cash out USDC. Over a channel already open a payment
+            send claim links and payment requests, and cash out USDC. Over a channel already open a payment
             hides both sides and the amount; the first payment to someone shows their
             private account
           </li>
