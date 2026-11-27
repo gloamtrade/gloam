@@ -162,20 +162,31 @@ export function StarknetLinkView({ engine, links, balance, fee }: { engine: Star
       try {
         const store = await links.linkRuns();
         const deps = { ...(await engine.deps()), ...(await links.linkDeps()) };
-        await store.save(start);
-        const done = await runPayroll(start, {
-          ...deps,
-          message: engine.message,
-          save: (x) => store.save(x),
-          sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-          now: () => Date.now(),
-          stopRequested: () => stopRef.current,
-          onChange: (x, d) => {
-            const row = x.rows[0];
-            setStep(row?.link?.open ? 2 : row?.link?.id ? 1 : 0);
-            setDetail(d ?? null);
-          },
+        // The stored copy is the truth (another tab may have moved it on); a new one is saved before anything.
+        const fresh = (await store.load()).find((r) => r.id === start.id) ?? start;
+        await store.save(fresh);
+        const { withRunLock } = await import("@/lib/starknetPrivacy/payrollStore");
+        let done: PayrollRun = fresh;
+        // One spender at a time per account: payroll runs and links take the same lock.
+        const ran = await withRunLock(engine.owner, async () => {
+          done = await runPayroll(fresh, {
+            ...deps,
+            message: engine.message,
+            save: (x) => store.save(x),
+            sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+            now: () => Date.now(),
+            stopRequested: () => stopRef.current,
+            onChange: (x, d) => {
+              const row = x.rows[0];
+              setStep(row?.link?.open ? 2 : row?.link?.id ? 1 : 0);
+              setDetail(d ?? null);
+            },
+          });
         });
+        if (!ran) {
+          setError("A payroll run or another link is paying in another tab. Finish it there first.");
+          return;
+        }
         const row = done.rows[0];
         if (done.state === "done" && row?.status === "paid" && row.link?.id) {
           const l = (await (await links.sentLinks()).load()).find((x) => x.id === row.link!.id);
