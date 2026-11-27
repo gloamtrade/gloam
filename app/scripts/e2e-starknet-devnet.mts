@@ -495,6 +495,119 @@ async function sessionThroughRoutes(input: { pool: string; relayer: { address: s
       eq(await dave.privateBalance(tok), was.dave - 36n * c - 2n * fee, "payroll: dave paid both runs and two fees");
     });
 
+    await scenario("claim links: make one, claim it, take one back, a payroll pays one", async () => {
+      ip = "10.0.0.5";
+      const P = await import("../src/lib/starknetPrivacy/payroll");
+      const S = await import("../src/lib/starknetPrivacy/payrollStore");
+      const SL = await import("../src/lib/starknetPrivacy/sentLinks");
+      const L = await import("../src/lib/starknetPrivacy/claimLink");
+      const { starknetPayrollDeps } = await import("../src/lib/starknetPrivacy/payrollSession");
+      const { starknetLinkDeps, linkSession, claimInto, readLink } = await import("../src/lib/starknetPrivacy/claimSession");
+      const { relayFee } = await import("../src/lib/starknetPrivacy/session");
+      const C = await import("../src/lib/starknetPrivacy/claim");
+      const node = starknetProvider(URL);
+      // More in dave's private balance for three links.
+      await dave.add(tok, (9n * one) / 10n, () => {});
+      await dave.refreshRelay(tok);
+      const fee = relayFee(dave.relayInfo, tok)?.amount ?? 0n;
+      ok(fee > 0n, "links: the relay asks a fee");
+      const erin = new StarknetSession(cfg, erinKeys, info, origin, POLL);
+      const gina = await sessionFor("gina");
+      const mem = new Map<string, string>();
+      const storage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v) };
+      const sent = SL.sentLinksStore({ key: SL.sentLinksKey("devnet", dave.address), cipher: await S.runCipher(dave.keys.viewingKey, dave.address, SL.SENT_LINKS_DOMAIN), storage });
+      const runs = S.payrollStore({ key: "links-runs", cipher: await S.runCipher(dave.keys.viewingKey, dave.address), storage });
+      const engine = (run: import("../src/lib/starknetPrivacy/payroll").PayrollRun) =>
+        P.runPayroll(run, {
+          ...starknetPayrollDeps(dave, tok),
+          ...starknetLinkDeps(dave, tok, sent, origin, POLL),
+          save: (x) => runs.save(x),
+          message: (e) => (e instanceof Error ? e.message : String(e)),
+          sleep: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 2_000))),
+          now: () => Date.now(),
+          stopRequested: () => false,
+        });
+      const oneLink = (id: string, name: string, amount: bigint) =>
+        P.newRun({ id, network: "devnet", owner: dave.address, token: tok.address, rows: [{ line: 1, name, address: "", amountInput: "", amount, error: null, link: true }], now: Date.now() });
+      const shows = async (h: string, who: string) => {
+        const tx = (await node.getTransactionByHash(h)) as unknown as { calldata: string[] };
+        const r = (await node.getTransactionReceipt(h)) as unknown as { events: { keys: string[]; data: string[] }[] };
+        return [...tx.calldata, ...r.events.flatMap((e) => [...e.keys, ...e.data])].map((x) => BigInt(x)).includes(BigInt(who));
+      };
+      const c = one / 100n;
+
+      // 1. A link of 0.04: kept, its account opened (one proof), paid (one proof).
+      const was = { dave: await dave.privateBalance(tok), erin: await erin.privateBalance(tok), relay: await balanceOf(token, input.relayer.address) };
+      const from = proofs.length;
+      const t = timeline("make a link");
+      const made = await engine(oneLink("link-1", "Erin", 4n * c));
+      t.done();
+      eq([made.state, made.rows[0]!.status], ["done", "paid"], "links: the link is paid");
+      eq(proofs.length - from, 2, "links: two proofs to make it (its account's open, the payment)");
+      const link1 = (await sent.load()).find((l) => l.id === made.rows[0]!.link!.id)!;
+      eq([link1.state, link1.address], ["paid", made.rows[0]!.address], "links: kept under Sent links, marked paid");
+      const url = SL.sentLinkUrl(link1, "https://www.gloam.trade");
+      const claim = L.claimFromHash(new globalThis.URL(url).hash)!;
+      eq([claim.network, claim.amount], ["devnet", 4n * c], "links: the URL carries the network and the amount");
+      eq(await dave.privateBalance(tok), was.dave - 4n * c - 3n * fee, "links: dave paid 0.04 and Gloam's fee three times (the proof, the link's open, its claim)");
+      eq((await balanceOf(token, input.relayer.address)) - was.relay, 2n * fee, "links: the relay got two fees now (the proof and the open)");
+      const a = await linkSession(cfg, info, origin, claim.secret, POLL);
+      eq(BigInt(a.address), BigInt(link1.address), "links: the link's secret opens its account");
+      eq(await readLink(a, tok), { open: true, balance: 4n * c + fee }, "links: it holds 0.04 and its claim's fee");
+      eq([await shows(made.rows[0]!.txHash!, link1.address), await shows(made.rows[0]!.txHash!, dave.address)], [true, false], "links: paying it shows the link's account, never dave");
+
+      // 2. Erin claims it, from her own device: one proof, she gets exactly 0.04.
+      // (Each person here has an address of their own: devnet's discovery reads the pool directly, many reads a move.)
+      ip = "10.0.0.6";
+      const from2 = proofs.length;
+      const r = await claimInto(await linkSession(cfg, info, origin, claim.secret, POLL), erin.address, tok, () => {});
+      ok(r.state === "claimed" && r.amount === 4n * c, `links: claimed 0.04 (${JSON.stringify(r, big)})`);
+      eq(proofs.length - from2, 1, "links: one proof to claim");
+      eq(await erin.privateBalance(tok), was.erin + 4n * c, "links: erin got the whole 0.04");
+      eq((await balanceOf(token, input.relayer.address)) - was.relay, 3n * fee, "links: the claim paid the relay the fee the link carried");
+      eq(await readLink(a, tok), { open: true, balance: 0n }, "links: the link is empty");
+      const ch = (r as { txHash: string }).txHash;
+      eq([await shows(ch, erin.address), await shows(ch, link1.address), await shows(ch, dave.address)], [true, false, false], "links: the claim shows erin's account, never the link or dave");
+
+      // 3. The same link again: empty, nothing proven.
+      ip = "10.0.0.7";
+      const from3 = proofs.length;
+      const again = await claimInto(await linkSession(cfg, info, origin, claim.secret, POLL), gina.address, tok, () => {});
+      eq([again, C.claimMessage(again)], [{ state: "empty", open: true }, C.LINK_EMPTY], "links: used once; a second claim finds it empty");
+      eq(proofs.length - from3, 0, "links: and makes no proof");
+
+      // 4. A link nobody used, taken back.
+      ip = "10.0.0.8";
+      const made2 = await engine(oneLink("link-2", "Nobody", 3n * c));
+      const link2 = (await sent.load()).find((l) => l.id === made2.rows[0]!.link!.id)!;
+      const daveBefore = await dave.privateBalance(tok);
+      ip = "10.0.0.9";
+      const back = await claimInto(await linkSession(cfg, info, origin, L.bytesOf(link2.secret), POLL), dave.address, tok, () => {});
+      ok(back.state === "claimed" && back.amount === 3n * c, "links: taken back");
+      eq(await dave.privateBalance(tok), daveBefore + 3n * c, "links: dave has the 0.03 back");
+
+      // 5. A payroll with a link row: erin by account, Hal by link. One payment proof, one open.
+      ip = "10.0.0.10";
+      const rows = P.checkRecipients(
+        P.parseStarknetPayrollCsv(`name,address,amount\nErin,${erin.address},0.01\nHal,,0.02`, tok, { links: true }).rows,
+        new Map([[P.starknetAddressText(erin.address)!, "ready" as const]]),
+        dave.address
+      );
+      eq(P.summarize(rows, await dave.privateBalance(tok), fee).proofs, 2, "links: the estimate says two proofs (the payment, the link's open)");
+      const from5 = proofs.length;
+      const pr = await engine(P.newRun({ id: "link-payroll", network: "devnet", owner: dave.address, token: tok.address, rows, now: Date.now() }));
+      eq([pr.state, pr.proofs, proofs.length - from5], ["done", 1, 2], "links: one payment proof for both, and the link's open");
+      eq(BigInt(pr.feesPaid), 3n * fee, "links: the run paid the fee for its proof, the link's open and its claim");
+      const hal = (await sent.load()).find((l) => l.id === pr.rows[1]!.link!.id)!;
+      eq([hal.name, hal.state, hal.runId], ["Hal", "paid", "link-payroll"], "links: Hal's link is under Sent links, from that run");
+      ip = "10.0.0.11";
+      const ginaWas = await gina.privateBalance(tok);
+      const hr = await claimInto(await linkSession(cfg, info, origin, L.bytesOf(hal.secret), POLL), gina.address, tok, () => {});
+      ok(hr.state === "claimed", "links: Hal's link claimed (by whoever holds it)");
+      eq(await gina.privateBalance(tok), ginaWas + 2n * c, "links: 0.02 arrived whole");
+      log(`session: links: ${proofs.length - from} proofs for three links (two made alone, one in a payroll), two claims and a take back`);
+    });
+
     await scenario("a node hiccup is not 'not deployed'", async () => {
       failNext = "starknet_getClassHashAt";
       let threw = false;
