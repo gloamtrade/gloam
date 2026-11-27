@@ -395,6 +395,106 @@ async function sessionThroughRoutes(input: { pool: string; relayer: { address: s
       eq(await balanceOf(token, OUT), one / 10n, "session: the cash-out address got 0.1");
     });
 
+    await scenario("payroll: three people in one proof, Gloam's fee once", async () => {
+      ip = "10.0.0.4";
+      const P = await import("../src/lib/starknetPrivacy/payroll");
+      const S = await import("../src/lib/starknetPrivacy/payrollStore");
+      const { payrollReach, starknetPayrollDeps } = await import("../src/lib/starknetPrivacy/payrollSession");
+      const { relayFee } = await import("../src/lib/starknetPrivacy/session");
+      const frank = await sessionFor("frank");
+      const gina = await sessionFor("gina");
+      await frank.ensureOpen(() => {});
+      await gina.ensureOpen(() => {});
+      const erin = new StarknetSession(cfg, erinKeys, info, origin, POLL);
+      const never = (await keysFromSeed(new TextEncoder().encode(`e2e-session-never-${RUN}`), 0, cfg.accountClassHash)).address;
+      const norm = (a: string) => P.starknetAddressText(a)!;
+
+      const reach = await payrollReach(dave, tok, [erin.address, frank.address, gina.address, never].map(norm));
+      eq(
+        [reach.get(norm(erin.address)), reach.get(norm(frank.address)), reach.get(norm(gina.address)), reach.get(norm(never))],
+        ["ready", "first", "first", "closed"],
+        "payroll: erin was paid before, frank and gina are new, the last never opened an account"
+      );
+      const list = [`name,address,amount`, `Erin,${erin.address},0.05`, `Frank,${frank.address},0.06`, `Gina,${gina.address},0.07`, `Never,${never},0.01`].join("\n");
+      const rows = P.checkRecipients(P.parseStarknetPayrollCsv(list, tok).rows, reach, dave.address);
+      eq(rows.map((r) => r.error), [null, null, null, P.NOT_OPEN], "payroll: an account that never opened is skipped, said plainly");
+      await dave.refreshRelay(tok);
+      const fee = relayFee(dave.relayInfo, tok)?.amount ?? 0n;
+      ok(fee > 0n, "payroll: the relay asks a fee");
+      const summary = P.summarize(rows, await dave.privateBalance(tok), fee);
+      eq([summary.ready, summary.proofs, summary.fees, summary.first, summary.short], [3, 1, fee, 2, 0n], "payroll: three people, about one proof, one fee, two first payments");
+
+      const mem = new Map<string, string>();
+      const store = S.payrollStore({
+        key: S.payrollStoreKey("devnet", dave.address),
+        cipher: await S.runCipher(dave.keys.viewingKey, dave.address),
+        storage: { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => void mem.set(k, v) },
+      });
+      const engine = (run: import("../src/lib/starknetPrivacy/payroll").PayrollRun) =>
+        P.runPayroll(run, {
+          ...starknetPayrollDeps(dave, tok),
+          save: (x) => store.save(x),
+          message: (e) => (e instanceof Error ? e.message : String(e)),
+          sleep: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 2_000))),
+          now: () => Date.now(),
+          stopRequested: () => false,
+        });
+      const was = {
+        dave: await dave.privateBalance(tok),
+        erin: await erin.privateBalance(tok),
+        frank: await frank.privateBalance(tok),
+        gina: await gina.privateBalance(tok),
+        relay: await balanceOf(token, input.relayer.address),
+      };
+      const from = proofs.length;
+      const t = timeline("payroll of three");
+      const out = await engine(P.newRun({ id: "e2e-1", network: "devnet", owner: dave.address, token: tok.address, rows, now: Date.now() }));
+      t.done();
+      eq([out.state, out.error], ["done", undefined], "payroll: the run is done");
+      eq([out.proofs, BigInt(out.feesPaid)], [1, fee], "payroll: one proof sent, one fee paid");
+      eq(proofs.length - from, 1, "payroll: the prover was asked for one proof for three people");
+      eq(out.rows.map((r) => r.status), ["paid", "paid", "paid", "skipped"], "payroll: three paid, one skipped");
+      const hash = out.rows[0]!.txHash!;
+      ok(out.rows.slice(0, 3).every((r) => r.txHash === hash), "payroll: all three in one transaction");
+      const c = one / 100n;
+      eq(await dave.privateBalance(tok), was.dave - 18n * c - fee, "payroll: dave paid 0.18 and the fee once");
+      eq([await erin.privateBalance(tok), await frank.privateBalance(tok), await gina.privateBalance(tok)], [was.erin + 5n * c, was.frank + 6n * c, was.gina + 7n * c], "payroll: each got exactly their amount");
+      eq((await balanceOf(token, input.relayer.address)) - was.relay, fee, "payroll: the relay got its fee once");
+      const stored = (await store.load())[0]!;
+      ok(stored.id === "e2e-1" && stored.state === "done" && !P.runOpen(stored), "payroll: the sealed run reads back done");
+      ok(![...mem.values()].some((v) => v.includes("Frank")), "payroll: the stored run is sealed");
+
+      // What the transaction shows: the two new payees (the channels it opened), never dave or erin.
+      const shows = async (h: string, who: string) => {
+        const node = starknetProvider(URL);
+        const tx = (await node.getTransactionByHash(h)) as unknown as { calldata: string[] };
+        const r = (await node.getTransactionReceipt(h)) as unknown as { events: { keys: string[]; data: string[] }[] };
+        const all = [...tx.calldata, ...r.events.flatMap((e) => [...e.keys, ...e.data])].map((x) => BigInt(x));
+        return all.includes(BigInt(who));
+      };
+      eq(
+        [await shows(hash, frank.address), await shows(hash, gina.address), await shows(hash, erin.address), await shows(hash, dave.address)],
+        [true, true, false, false],
+        "payroll: the first payments show frank and gina together, never erin or dave"
+      );
+      const gas = (await starknetProvider(URL).getTransactionReceipt(hash)) as unknown as { execution_resources?: { l2_gas?: number } };
+      log(`session: payroll of three used ${gas.execution_resources?.l2_gas ?? "?"} L2 gas`);
+
+      // Again, every channel open now: still one proof, and it names nobody.
+      const again = P.checkRecipients(P.parseStarknetPayrollCsv(list, tok).rows, await payrollReach(dave, tok, [erin.address, frank.address, gina.address, never].map(norm)), dave.address);
+      ok(again.slice(0, 3).every((r) => !r.error && !r.first), "payroll: no first payments the second time");
+      const from2 = proofs.length;
+      const out2 = await engine(P.newRun({ id: "e2e-2", network: "devnet", owner: dave.address, token: tok.address, rows: again, now: Date.now() }));
+      eq([out2.state, out2.proofs, proofs.length - from2], ["done", 1, 1], "payroll: the second run, one proof");
+      const hash2 = out2.rows[0]!.txHash!;
+      eq(
+        [await shows(hash2, frank.address), await shows(hash2, gina.address), await shows(hash2, erin.address), await shows(hash2, dave.address)],
+        [false, false, false, false],
+        "payroll: over open channels the transaction names nobody"
+      );
+      eq(await dave.privateBalance(tok), was.dave - 36n * c - 2n * fee, "payroll: dave paid both runs and two fees");
+    });
+
     await scenario("a node hiccup is not 'not deployed'", async () => {
       failNext = "starknet_getClassHashAt";
       let threw = false;
