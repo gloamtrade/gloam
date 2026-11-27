@@ -83,7 +83,8 @@ const mine = async (n: number) => {
 
 const devnet = spawn(
   process.env.STARKNET_DEVNET_BIN ?? "starknet-devnet",
-  ["--lite-mode", "--seed", "42", "--block-generation-on", "transaction", "--state-archive-capacity", "full", "--chain-id", "SN_DEVNET", "--proof-mode", "none", "--port", String(PORT)],
+  // STARKNET_DEVNET_BLOCK_SECONDS=2 makes blocks on a timer, as mainnet does, to time the session's moves.
+  ["--lite-mode", "--seed", "42", "--block-generation-on", process.env.STARKNET_DEVNET_BLOCK_SECONDS ?? "transaction", "--state-archive-capacity", "full", "--chain-id", "SN_DEVNET", "--proof-mode", "none", "--port", String(PORT)],
   { stdio: ["ignore", "ignore", "inherit"] }
 );
 const stop = () => {
@@ -305,8 +306,8 @@ async function sessionThroughRoutes(input: { pool: string; relayer: { address: s
   await new Promise<void>((r) => server.listen(PORT + 1, "127.0.0.1", () => r()));
   const origin = `http://127.0.0.1:${PORT + 1}`;
   const BLOCK_MS = Number(env.SESSION_BLOCK_MS ?? 300);
-  const POLL = env.SESSION_POLL_MS ? Number(env.SESSION_POLL_MS) : BLOCK_MS < 1_000 ? 150 : undefined;
-  const miner = setInterval(() => void rpc("devnet_createBlock").catch(() => {}), BLOCK_MS);
+  const POLL = env.SESSION_POLL_MS ? Number(env.SESSION_POLL_MS) : BLOCK_MS < 1_000 && !env.STARKNET_DEVNET_BLOCK_SECONDS ? 150 : undefined;
+  const miner = process.env.STARKNET_DEVNET_BLOCK_SECONDS ? null : setInterval(() => void rpc("devnet_createBlock").catch(() => {}), BLOCK_MS);
   const failed: string[] = [];
   const scenario = async (name: string, f: () => Promise<void>) => {
     try {
@@ -365,8 +366,9 @@ async function sessionThroughRoutes(input: { pool: string; relayer: { address: s
 
     await admin.execute({ contractAddress: token, entrypoint: "transfer", calldata: CallData.compile([dave.address, num.toHex(2n * one), "0x0"]) }).then((r) => starknetProvider(URL).waitForTransaction(r.transaction_hash));
     // From here the relay asks 0.01 a move (read again by each move, as the page does).
-    env.STARKNET_RELAY_FEE = "0.01";
-    eq((await readRelayInfo(origin)).fee[num.toHex(BigInt(token))], (one / 100n).toString(), "session: the relay asks 0.01 a move");
+    // SESSION_NO_FEE=1 leaves it off, to time the moves alone (the balance checks then fail).
+    if (env.SESSION_NO_FEE !== "1") env.STARKNET_RELAY_FEE = "0.01";
+    eq((await readRelayInfo(origin)).fee[num.toHex(BigInt(token))] ?? "0", env.SESSION_NO_FEE === "1" ? "0" : (one / 100n).toString(), "session: the relay asks 0.01 a move");
     // The page reads the relay again (as a reload would): a session without that keeps the fee it opened with.
     await (dave as { refreshRelay?: () => Promise<unknown> }).refreshRelay?.();
 
@@ -426,7 +428,7 @@ async function sessionThroughRoutes(input: { pool: string; relayer: { address: s
     });
     log(`session: ${proofs.length} proofs, relay refusals ${JSON.stringify(refused)}`);
   } finally {
-    clearInterval(miner);
+    if (miner) clearInterval(miner);
     server.close();
   }
   assert.deepEqual(failed, [], `session scenarios failed:\n  ${failed.join("\n  ")}`);
