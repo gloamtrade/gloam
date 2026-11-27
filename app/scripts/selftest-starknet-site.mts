@@ -132,6 +132,7 @@ const SOURCES = [
   "src/lib/telegramBot/knowledge.ts",
   "src/lib/mcpRemote/tools.ts",
   "src/app/llms.txt/route.ts",
+  "src/components/Landing.tsx",
   "../packages/sdk/src/starknetInfo.ts",
   "../packages/sdk/src/starknet.ts",
   "../packages/sdk/README.md",
@@ -161,7 +162,7 @@ for (const f of SOURCES) {
   for (const f of walk(join(APP, "src"))) {
     const rel = f.slice(APP.length);
     const src = readFileSync(f, "utf8");
-    if (!/\/docs\/starknet|STARKNET_DOCS_|starknetFacts|starknetView|starknetLine/.test(src)) continue;
+    if (!/\/docs\/starknet|STARKNET_DOCS_|starknetFacts|starknetView|starknetLine|Also on Starknet/.test(src)) continue;
     if (rel === "src/app/docs/starknet/starknetDocs.ts") continue;
     ok(/STARKNET_ENABLED/.test(src), `${rel}: gated by STARKNET_ENABLED`);
   }
