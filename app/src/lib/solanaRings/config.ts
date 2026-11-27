@@ -15,6 +15,17 @@ export type RingsNetwork = "mainnet" | "devnet";
 
 export const SOLANA_RINGS_ENABLED = process.env.NEXT_PUBLIC_SOLANA_RINGS_ENABLED === "1";
 
+/**
+ * Making claim links on Solana (Pay > Claim link, and a payroll row with no
+ * address): off unless NEXT_PUBLIC_SOLANA_CLAIM_LINKS is "1". It stays off
+ * until scripts/e2e-solana-claim-links.mts has run on devnet, the first live
+ * check that paying an unregistered shielded address (a link's one-time
+ * account) reaches the Rings indexer. Off or on, a link already made can be
+ * claimed and taken back (the claim page, Receive > Claim a payment, Sent
+ * links), and payment requests, which never touch the chain, work.
+ */
+export const SOLANA_CLAIM_LINKS_ENABLED = process.env.NEXT_PUBLIC_SOLANA_CLAIM_LINKS === "1";
+
 export const SOLANA_RINGS_NETWORK: RingsNetwork =
   process.env.NEXT_PUBLIC_SOLANA_RINGS_NETWORK === "devnet" ? "devnet" : "mainnet";
 

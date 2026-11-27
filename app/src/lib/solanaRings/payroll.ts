@@ -10,10 +10,12 @@
  *  - The list: name, Solana private address, amount; a header is optional.
  *    Every row is checked before anyone is paid: a Solana address, an amount
  *    above zero within the asset's decimals, and a Rings registry record (a
- *    Gloam private account on Solana). Bad rows are flagged and skipped. A
- *    row with no address gets a claim link instead (lib/solanaRings/claimLink),
- *    as on the other chains: the run pays the link's one-time account, and the
- *    link is shared after the run. The run keeps the link, sealed with it.
+ *    Gloam private account on Solana). Bad rows are flagged and skipped. While
+ *    claim links are on (config SOLANA_CLAIM_LINKS_ENABLED), a row with no
+ *    address gets a claim link instead (lib/solanaRings/claimLink), as on the
+ *    other chains: the run pays the link's one-time account, and the link is
+ *    shared after the run. The run keeps the link, sealed with it. Off, a row
+ *    with no address is flagged as before.
  *  - Batches: one Privacy Rings transfer pays up to PAYROLL_BATCH_MAX people
  *    (the SDK's buildMultiTransferTransaction, one private output each). A
  *    batch lands whole or not at all. When the SDK says a batch is too large
@@ -31,7 +33,7 @@
  */
 import { isAddress } from "@solana/kit";
 import { readAmountText } from "@/lib/amountText";
-import type { RingsAsset, RingsNetwork } from "./config";
+import { SOLANA_CLAIM_LINKS_ENABLED, type RingsAsset, type RingsNetwork } from "./config";
 
 // ------------------------------------------------------------------ limits
 
@@ -149,12 +151,22 @@ export function isSolanaAddressText(v: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v) && isAddress(v);
 }
 
+/** Said for a row with no address while claim links are off. */
+export const NO_ADDRESS = "Add their Solana private address.";
+
 /**
  * Parse a pasted or uploaded list into rows, each checked on its own (the
  * registry check comes after, in checkRecipients). Columns: name, address,
  * amount; a header row is optional and may name them in another order.
+ * `links`: a row with no address gets a claim link (on while claim links are
+ * on); without it, such a row is flagged.
  */
-export function parseSolanaPayrollCsv(text: string, asset: Pick<RingsAsset, "decimals" | "symbol">): { rows: DraftRow[]; error: string | null } {
+export function parseSolanaPayrollCsv(
+  text: string,
+  asset: Pick<RingsAsset, "decimals" | "symbol">,
+  opts: { links?: boolean } = {}
+): { rows: DraftRow[]; error: string | null } {
+  const links = opts.links ?? SOLANA_CLAIM_LINKS_ENABLED;
   const lines = text
     .replace(/^﻿/, "")
     .replace(/\r\n?/g, "\n")
@@ -202,9 +214,11 @@ export function parseSolanaPayrollCsv(text: string, asset: Pick<RingsAsset, "dec
       : cells.length > width
         ? 'This row has more cells than the list has columns. Put an amount with a comma in quotes, like "1,250", and use a dot for decimals.'
         : null;
-    const link = !error && !address;
+    const link = !error && !address && links;
     if (link) {
       // no address: a claim link, made when the run starts
+    } else if (!error && !address) {
+      error = NO_ADDRESS;
     } else if (!error && !isSolanaAddressText(address)) {
       error = /^0x[0-9a-fA-F]{40}$/.test(address)
         ? "That is an EVM address. Use their Gloam private address on Solana."

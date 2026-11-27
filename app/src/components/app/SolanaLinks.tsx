@@ -29,7 +29,7 @@ import {
   type SolanaSentLink,
   type SolanaSentLinkStatus,
 } from "@/lib/solanaRings/sentLinks";
-import { ringsAssets, SOLANA_RINGS_NETWORK, type RingsAsset } from "@/lib/solanaRings/config";
+import { ringsAssets, SOLANA_CLAIM_LINKS_ENABLED, SOLANA_RINGS_NETWORK, type RingsAsset } from "@/lib/solanaRings/config";
 import type { LinkState } from "@/lib/solanaRings/claim";
 import { amountTextError } from "@/lib/amountText";
 import { Spinner } from "@/components/ui/Spinner";
@@ -223,6 +223,8 @@ export function SolanaSentLinks() {
   }, [open, scope, tick, runCheck]);
 
   if (!open || !scope) return null;
+  // With making links off (config SOLANA_CLAIM_LINKS_ENABLED), the list shows only once it has a link to copy or take back.
+  if (!SOLANA_CLAIM_LINKS_ENABLED && !list?.length) return null;
 
   function toggle() {
     const next = !isOpen;

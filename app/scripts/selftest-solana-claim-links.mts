@@ -25,6 +25,10 @@
  *    one-time account; the results file carries the link.
  *  - The relay pays a claim like any payment: a transact the one-time account
  *    signs, the relay as fee payer.
+ *  - The flag (NEXT_PUBLIC_SOLANA_CLAIM_LINKS, off unless "1", as the shell
+ *    sets it; CI runs both): off, nothing makes a link (Pay, payroll) and the
+ *    docs and Glim say claim links are not on Solana; on or off, a link already
+ *    made can be claimed and taken back, and requests work.
  *
  * No network. Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-solana-claim-links.mts
  */
@@ -59,6 +63,7 @@ M._resolveFilename = function (req: string, ...rest: unknown[]) {
 const env = process.env as Record<string, string | undefined>;
 env.NEXT_PUBLIC_SOLANA_RINGS_ENABLED = "1";
 env.NEXT_PUBLIC_SOLANA_RINGS_NETWORK = "mainnet";
+const LINKS_ON = env.NEXT_PUBLIC_SOLANA_CLAIM_LINKS === "1";
 
 const L = await import("../src/lib/solanaRings/claimLink");
 const C = await import("../src/lib/solanaRings/claim");
@@ -616,7 +621,8 @@ function claimerTab(w: World, dest: string, modes: Mode[]) {
 
 {
   const a1 = getBase58Decoder().decode(Uint8Array.from({ length: 32 }, (_, j) => (j * 7 + 3) % 256));
-  const parsed = P.parseSolanaPayrollCsv(`name,address,amount\nAda,${a1},10\nTunde,,5\nBad,,0`, USDC);
+  // the engine pays link rows whichever way the flag is; the list only makes them while it is on (checked below)
+  const parsed = P.parseSolanaPayrollCsv(`name,address,amount\nAda,${a1},10\nTunde,,5\nBad,,0`, USDC, { links: true });
   const [ada, tunde, bad] = parsed.rows;
   ok(!ada!.link && !tunde!.error && tunde!.link === true, "no address: a claim link");
   ok(Boolean(bad!.error) && !bad!.link, "a link row still needs a good amount");
@@ -691,6 +697,54 @@ function claimerTab(w: World, dest: string, modes: Mode[]) {
   kp.destroy();
 }
 
+// ------------------------------------------------------------------ the flag
+
+{
+  const { readFileSync } = await import("node:fs");
+  const config = await import("../src/lib/solanaRings/config");
+  const src = (f: string) => readFileSync(new URL(`../${f}`, import.meta.url), "utf8");
+  eq(config.SOLANA_CLAIM_LINKS_ENABLED, LINKS_ON, `the flag reads ${LINKS_ON ? "on" : "off"} from NEXT_PUBLIC_SOLANA_CLAIM_LINKS`);
+
+  // payroll: a row with no address follows the flag
+  const blank = P.parseSolanaPayrollCsv("Tunde,,5", USDC).rows[0]!;
+  ok(LINKS_ON ? blank.link === true && !blank.error : blank.error === P.NO_ADDRESS && !blank.link, `payroll: no address is ${LINKS_ON ? "a claim link" : "an error, as before"}`);
+
+  // Pay offers a claim link only while it is on; making one refuses while off
+  const vault = src("src/components/app/SolanaVault.tsx");
+  ok(/kind === "pay" && SOLANA_CLAIM_LINKS_ENABLED && \(/.test(vault), "Pay's claim link choice shows only with the flag");
+  ok(/const byLink = SOLANA_CLAIM_LINKS_ENABLED && kind === "pay"/.test(vault), "and Pay never makes a link without it");
+  ok(/if \(!SOLANA_CLAIM_LINKS_ENABLED\) throw new Error\("Claim links are not on Solana yet\."\)/.test(src("src/components/app/SolanaAccount.tsx")), "the account refuses to make a link with the flag off");
+  ok(/SOLANA_CLAIM_LINKS_ENABLED[\s\S]{0,80}leave it blank and they get a claim link/.test(src("src/components/app/SolanaPayrollView.tsx")), "payroll says blank means a claim link only with the flag");
+
+  // claiming, take back and requests never wait on it
+  const links = src("src/components/app/SolanaLinks.tsx");
+  const claimCard = links.slice(links.indexOf("export function SolanaClaimCard"), links.indexOf("export function SolanaRequestCard"));
+  const requestCard = links.slice(links.indexOf("export function SolanaRequestCard"));
+  ok(claimCard.length > 100 && !claimCard.includes("SOLANA_CLAIM_LINKS_ENABLED"), "Claim a payment works with the flag off");
+  ok(requestCard.length > 100 && !requestCard.includes("SOLANA_CLAIM_LINKS_ENABLED"), "requests work with the flag off");
+  ok(!src("src/components/app/SolanaClaimLanding.tsx").includes("SOLANA_CLAIM_LINKS_ENABLED"), "the claim page claims with the flag off");
+  ok(/if \(!SOLANA_CLAIM_LINKS_ENABLED && !list\?\.length\) return null;/.test(links), "Sent links stay while they hold a link (only an empty list hides with the flag off)");
+  ok(/\{kind === "pay" && <SolanaSentLinks \/>\}/.test(vault), "Sent links sit under Pay either way");
+  ok(!/SOLANA_CLAIM_LINKS_ENABLED/.test(src("src/components/app/VaultHub.tsx")), "a claim link opens on Solana either way");
+
+  // what the docs, Glim and the Vault's lines say
+  const { solanaFacts } = await import("../src/lib/telegramBot/knowledge");
+  const facts = solanaFacts() ?? "";
+  if (LINKS_ON) {
+    ok(facts.includes("A Solana claim link (gloam.trade/c#sol=...)") && facts.includes("claim links, payment requests"), "Glim, on: claim links work on Solana, and what shows");
+    ok(!facts.includes("claim links are not on Solana"), "Glim, on: never says they aren't");
+  } else {
+    ok(facts.includes("Proof of funds or payment, private swaps and claim links are not on Solana"), "Glim, off: claim links are not on Solana, as before");
+    ok(!facts.includes("A Solana claim link") && !facts.includes("claim links, payment requests"), "Glim, off: never says they are live");
+  }
+  ok(facts.includes("A Solana payment request is a link that fills in Pay"), "Glim: requests work either way");
+  const chain = src("src/app/docs/chain/page.tsx");
+  ok(/SOLANA_CLAIM_LINKS_ENABLED \? " and private swaps\." : " private swaps and claim links\."/.test(chain), "the docs list claim links under Not on Solana while the flag is off");
+  ok(/\{SOLANA_CLAIM_LINKS_ENABLED && \(\s*<li>\s*<strong>Claim links<\/strong>/.test(chain), "and describe them only while it is on");
+  const pay = SOLANA_VAULT_ACTIONS.find((a) => a.id === "pay")!.line;
+  ok(LINKS_ON ? pay.includes("claim link") : !pay.includes("claim link"), `the Vault's Pay line ${LINKS_ON ? "names" : "doesn't name"} claim links`);
+}
+
 // ------------------------------------------------------------------ the words (source)
 
 {
@@ -717,4 +771,4 @@ function claimerTab(w: World, dest: string, modes: Mode[]) {
   ok(!/<select\b/.test(readFileSync(new URL("../src/components/app/SolanaLinks.tsx", import.meta.url), "utf8")), "no native select");
 }
 
-console.log(`selftest-solana-claim-links: ${n} checks passed`);
+console.log(`selftest-solana-claim-links (making links ${LINKS_ON ? "on" : "off"}): ${n} checks passed`);

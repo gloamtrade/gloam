@@ -6,11 +6,16 @@
  * send are not on Solana yet.
  */
 import { VAULT_ACTIONS, type VaultActionId, type VaultActionInfo } from "@/lib/vaultHub";
+import { SOLANA_CLAIM_LINKS_ENABLED } from "./config";
 
 const LINES: Partial<Record<VaultActionId, string>> = {
   shield: "Move money from your Solana wallet into your private balance.",
-  pay: "Pay a Gloam private account, or anyone by claim link. The token and the amount stay hidden.",
-  receive: "Share your private address, claim a payment, or ask for one. The token and the amount stay hidden.",
+  pay: SOLANA_CLAIM_LINKS_ENABLED
+    ? "Pay a Gloam private account, or anyone by claim link. The token and the amount stay hidden."
+    : "Pay another Gloam private account. The token and the amount stay hidden.",
+  receive: SOLANA_CLAIM_LINKS_ENABLED
+    ? "Share your private address, claim a payment, or ask for one. The token and the amount stay hidden."
+    : "Share your private address, or ask to be paid. The token and the amount stay hidden.",
   cashout: "Back to any Solana address. The cash out shows on the explorer.",
 };
 

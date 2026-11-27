@@ -10,7 +10,7 @@
  * twice. The account comes from SolanaAccount (its payroll engine).
  */
 import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
-import { RINGS_PAYROLL_NOTE, ringsAssets, ringsExplorerTx, shownAssets } from "@/lib/solanaRings/config";
+import { RINGS_PAYROLL_NOTE, SOLANA_CLAIM_LINKS_ENABLED, ringsAssets, ringsExplorerTx, shownAssets } from "@/lib/solanaRings/config";
 import {
   addressesToCheck,
   checkRecipients,
@@ -35,8 +35,10 @@ import { SolanaGate, SolanaSteps, preferredAsset, useSolanaUsd, usd } from "./So
 
 const storeLib = () => import("@/lib/solanaRings/payrollStore");
 
-// a blank address gets a claim link, as on the other chains
-const TEMPLATE = "name,address,amount\nAda Obi,PASTE_THEIR_SOLANA_PRIVATE_ADDRESS,250\nTunde Bello,,180";
+// with claim links on, a blank address gets a claim link, as on the other chains
+const TEMPLATE = SOLANA_CLAIM_LINKS_ENABLED
+  ? "name,address,amount\nAda Obi,PASTE_THEIR_SOLANA_PRIVATE_ADDRESS,250\nTunde Bello,,180"
+  : "name,address,amount\nAda Obi,PASTE_THEIR_SOLANA_PRIVATE_ADDRESS,250\nTunde Bello,PASTE_THEIR_SOLANA_PRIVATE_ADDRESS,180";
 
 const STATUS_LABEL: Record<RowStatus, string> = {
   queued: "Waiting",
@@ -606,7 +608,10 @@ export function SolanaPayrollView(props: {
               <UploadGlyph className="h-6 w-6 text-foreground" />
               <p className="mt-3 text-[17px] text-foreground">{dragging ? "Drop it here" : "Drop your team’s CSV"}</p>
               <p className="mt-1.5 max-w-[42ch] text-[13.5px] leading-relaxed text-mute">
-                One line per person, up to {PAYROLL_MAX_ROWS}. Put their Gloam private address on Solana, or leave it blank and they get a claim link instead.
+                One line per person, up to {PAYROLL_MAX_ROWS}.{" "}
+                {SOLANA_CLAIM_LINKS_ENABLED
+                  ? "Put their Gloam private address on Solana, or leave it blank and they get a claim link instead."
+                  : "Each one needs a Gloam private address on Solana."}
               </p>
               <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5" aria-label="Columns">
                 {["name", "address", "amount"].map((c) => (

@@ -31,7 +31,7 @@ import { useNetwork } from "./NetworkProvider";
 import { useDemo } from "@/lib/demo";
 import { displayAmount } from "@/lib/amountShort";
 import { ringsAmount } from "@/lib/solanaRings/amount";
-import { RINGS_PROXY_PATHS, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAssets, ringsBalancesFrom, type RingsAsset, type RingsNetwork } from "@/lib/solanaRings/config";
+import { RINGS_PROXY_PATHS, SOLANA_CLAIM_LINKS_ENABLED, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAssets, ringsBalancesFrom, type RingsAsset, type RingsNetwork } from "@/lib/solanaRings/config";
 import type { RelayStatus, RingsSession } from "@/lib/solanaRings/client";
 import type { PayrollDeps } from "@/lib/solanaRings/payroll";
 import type { PayrollStore } from "@/lib/solanaRings/payrollStore";
@@ -795,6 +795,8 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
   const makeLink = useCallback(
     (asset: RingsAsset, amount: bigint) =>
       run("link", ["Making the link", "Paying it privately", "Updating your private balance"], async (step, detail) => {
+        // claiming stays open either way; making a new link waits on its flag
+        if (!SOLANA_CLAIM_LINKS_ENABLED) throw new Error("Claim links are not on Solana yet.");
         const [{ newClaim, encodeClaim }, { makeSolanaSentLink }] = await Promise.all([import("@/lib/solanaRings/claimLink"), import("@/lib/solanaRings/sentLinks")]);
         const body = encodeClaim(newClaim(network, asset, amount));
         const rec = makeSolanaSentLink({ body });

@@ -16,7 +16,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { RINGS_PRIVACY_NOTE, addFeePayer, ringsAssets, ringsExplorerTx, type RingsAsset } from "@/lib/solanaRings/config";
+import { RINGS_PRIVACY_NOTE, SOLANA_CLAIM_LINKS_ENABLED, addFeePayer, ringsAssets, ringsExplorerTx, type RingsAsset } from "@/lib/solanaRings/config";
 import { canSignOnly } from "@/lib/solanaWallet";
 import { ADD_FIRST, addAssetHref, type VaultActionId, type VaultActionInfo } from "@/lib/vaultHub";
 import { SOLANA_VAULT_ACTIONS } from "@/lib/solanaRings/vaultActions";
@@ -464,7 +464,8 @@ function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onRecei
   const have = sol.balances?.[asset.id] ?? null;
   const problem = amountProblem(amount, asset, have);
   const value = parseSolAmount(amount, asset.decimals);
-  const byLink = kind === "pay" && style === "link";
+  // Making a link waits on its flag (config SOLANA_CLAIM_LINKS_ENABLED); claiming one never does.
+  const byLink = SOLANA_CLAIM_LINKS_ENABLED && kind === "pay" && style === "link";
   const working = sol.task?.kind === (byLink ? "link" : kind);
   const target = byLink ? "" : to.trim();
   const shape = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(target);
@@ -496,7 +497,9 @@ function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onRecei
       <h2 className="t-title text-foreground">{title}</h2>
       <p className="mt-1 text-[14px] leading-relaxed text-mute">
         {kind === "pay"
-          ? "Send from your private balance to a Gloam private account on Solana, or to anyone by claim link."
+          ? SOLANA_CLAIM_LINKS_ENABLED
+            ? "Send from your private balance to a Gloam private account on Solana, or to anyone by claim link."
+            : "Send from your private balance to another Gloam private account on Solana."
           : "From your private balance back to any Solana address."}
       </p>
 
@@ -511,7 +514,7 @@ function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onRecei
         <SolanaEmptyBalance onReceive={onReceive} />
       ) : (
         <>
-          {kind === "pay" && (
+          {kind === "pay" && SOLANA_CLAIM_LINKS_ENABLED && (
             <div className="mt-6">
               <p id="sol-pay-to" className="text-[13px] text-mute">
                 To
@@ -559,7 +562,7 @@ function SolanaSpendView({ kind, onReceive }: { kind: "pay" | "cashout"; onRecei
             </div>
           )}
           {!byLink && (
-          <div className={kind === "pay" ? "mt-5" : "mt-6"}>
+          <div className={kind === "pay" && SOLANA_CLAIM_LINKS_ENABLED ? "mt-5" : "mt-6"}>
             <div className="flex items-baseline justify-between gap-3">
               <label htmlFor={`sol-${kind}-to`} className="text-[13px] text-mute">
                 {kind === "pay" ? "To a Gloam private address" : "To"}
