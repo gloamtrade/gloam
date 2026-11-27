@@ -391,6 +391,56 @@ const RESULT = { proof: "UFJPT0Y=", proof_facts: ["0xa", "0xb"], l2_to_l1_messag
   res = await proveRoute.POST(post("/api/starknet/prove", call));
   let e = ((await res.json()) as { error: { code: number; message: string } }).error;
   eq([e.code, e.message, posts], [-32603, "Starknet is busy. Try again later.", 1], "quota used up: one request, a plain busy message, not retried");
+  // Starkscan's API puts an HTTP error's code at the top of its envelope ({ code, message, docSlug, requestId },
+  // read from api.starkscan.co on 2026-11-27), not under `error`. Read that way, the quota looked like a busy
+  // prover: -32005, which the SDK retries four times, then "The prover is busy".
+  posts = 0;
+  starkscan = () => {
+    posts++;
+    return new Response(JSON.stringify({ code: "prover_daily_budget_exhausted", message: "Daily prover budget exhausted", docSlug: "api/strk20-prover", requestId: "r1" }), { status: 429, headers: { "Retry-After": "3600" } });
+  };
+  res = await proveRoute.POST(post("/api/starknet/prove", call));
+  e = ((await res.json()) as { error: { code: number; message: string } }).error;
+  eq([e.code, e.message, posts], [-32603, "Starknet is busy. Try again later.", 1], "quota used up, in Starkscan's own envelope: the same plain busy answer, not retried");
+
+  // New proofs are counted, not requests: each new Starkscan key is one proof of the key's day (10 by
+  // default). The request limits (10 a minute, 300 a day per IP) sat far above that, so one caller could
+  // spend the whole day in a minute.
+  {
+    const day = Date.UTC(2034, 0, 1, 12);
+    server.starknetRelayClock.now = () => day;
+    let newJobs = 0;
+    starkscan = (url, init) => {
+      if ((init.method ?? "GET") === "POST") {
+        newJobs++;
+        return new Response(JSON.stringify({ jobId: "job_9", status: "succeeded", terminal: true, result: RESULT }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ jobId: "job_9", status: "succeeded", terminal: true, result: RESULT }), { status: 200 });
+    };
+    const at = (block: number, ip: string) =>
+      proveRoute.POST(post("/api/starknet/prove", { ...call, params: { ...call.params, block_id: { block_number: block } } }, { "x-forwarded-for": ip }));
+    const got: (number | string)[] = [];
+    for (let b = 300; b < 306; b++) {
+      const rr = await at(b, "198.51.100.40");
+      const j = (await rr.json()) as { result?: unknown; error?: { code: number } };
+      got.push(j.result ? "proved" : rr.status);
+    }
+    eq([got, newJobs], [["proved", "proved", "proved", "proved", "proved", 429], 5], "one IP: five new proofs a day, the sixth refused (429, not retried) before Starkscan");
+    newJobs = 0;
+    const rr = await at(300, "198.51.100.40");
+    ok(((await rr.json()) as { result?: unknown }).result !== undefined, "the same request again is the same Starkscan job: still answered");
+    env.STARKSCAN_DAILY_PROOFS = "7";
+    const more: (number | string)[] = [];
+    for (const [b, ip] of [[400, "198.51.100.41"], [401, "198.51.100.42"], [402, "198.51.100.43"]] as const) {
+      const r3 = await at(b, ip);
+      const j = (await r3.json()) as { result?: unknown; error?: { code: number; message: string } };
+      more.push(j.result ? "proved" : `${j.error?.code} ${j.error?.message}`);
+    }
+    eq(more, ["proved", "proved", "-32603 Starknet is busy. Try again later."], "Gloam's day of proofs used (7 set here): the route says busy itself, without asking Starkscan");
+    delete env.STARKSCAN_DAILY_PROOFS;
+    server.starknetRelayClock.now = () => Date.now();
+  }
+
 
   // A failed job passes the prover's own code on (10000: screening refused the deposit).
   starkscan = (url, init) =>
@@ -441,6 +491,11 @@ const RESULT = { proof: "UFJPT0Y=", proof_facts: ["0xa", "0xb"], l2_to_l1_messag
   eq(await code(scan.starkscanProve({ ...opts(() => job("queued")), apiKey: "" }, 1, TX)), "no_key", "no key, no request");
   eq(await code(scan.starkscanProve(opts(() => new Response(JSON.stringify({ error: { code: "prover_key_concurrency" } }), { status: 429 })), 1, TX)), "unavailable", "too many proofs at once: busy, so the SDK retries");
   eq(await code(scan.starkscanProve(opts(() => new Response(JSON.stringify({ error: { code: "prover_daily_budget_exhausted" } }), { status: 429 })), 1, TX)), "quota", "the day's quota used up says so");
+  eq(await code(scan.starkscanProve(opts(() => new Response(JSON.stringify({ code: "prover_daily_budget_exhausted", message: "Daily prover budget exhausted" }), { status: 429 })), 1, TX)), "quota", "and in Starkscan's own envelope (the code at the top)");
+  eq(await code(scan.starkscanProve(opts(() => new Response(JSON.stringify({ code: "prover_key_concurrency" }), { status: 429 })), 1, TX)), "unavailable", "too many at once in that envelope: still busy, retried");
+  let asked = 0;
+  eq(await code(scan.starkscanProve({ ...opts(() => (asked++, job("queued"))), admit: async () => "quota" }, 1, TX)), "quota", "a key the route won't admit is never sent");
+  eq(asked, 0, "Starkscan was never asked");
   const failed = await scan.starkscanProve(opts((u, i) => (i.method === "POST" ? job("queued") : job("failed", { error: { code: 55, message: "Account validation failed" } }))), 1, TX).catch((x: unknown) => x as InstanceType<typeof scan.StarkscanProveError>);
   eq((failed as InstanceType<typeof scan.StarkscanProveError>).prover, { code: 55 }, "a failed job carries the prover's own code");
 

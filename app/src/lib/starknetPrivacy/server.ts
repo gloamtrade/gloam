@@ -13,6 +13,7 @@ import "server-only";
  *  - STARKNET_PROVER_URL: a proving service that speaks the SDK's protocol
  *    (StarkWare's transaction prover run for Sepolia, say).
  *  - STARKSCAN_API_KEY: Starkscan's prover relay, mainnet (prove scope on it).
+ *  - STARKSCAN_DAILY_PROOFS: that key's proofs a UTC day (default 10).
  *  - STARKNET_MAX_APPROVE: the most one approve may allow, in whole tokens (default 10,000).
  *  - STARKNET_RELAY_FEE: what each proven transaction pays the relay, in whole
  *    tokens, withdrawn inside the proof (default 0: no fee).
@@ -25,7 +26,7 @@ import { SharedCountUnavailable, addRateCount, clientIp } from "@/lib/mcpRemote/
 import { STARKNET_NETWORK, STARKNET_STRK, sameStarknetAddress, starknetConfig, type StarknetNetwork, type StarknetNetworkConfig } from "./config";
 import { accountAddress } from "./account";
 import { checkRelayCall, type RelayContext, type RelayDecision, type RelayProof } from "./relayPolicy";
-import type { StarkscanRounds } from "./starkscanProver";
+import type { StarkscanAdmit, StarkscanRounds } from "./starkscanProver";
 
 type Env = Record<string, string | undefined>;
 
@@ -159,6 +160,41 @@ export function starkscanRounds(now = () => starknetRelayClock.now()): Starkscan
   return {
     get: (digest) => addRateCount(digest, "sn-prove-round", 0, now(), DAY),
     next: (digest) => addRateCount(digest, "sn-prove-round", 1, now(), DAY),
+  };
+}
+
+/**
+ * New Starkscan jobs, each one proof out of Gloam's key's daily budget
+ * (STARKSCAN_DAILY_PROOFS, default 10, what Starkscan provisioned on
+ * 2026-11-26). The request limits above count every call, retries and polls of
+ * one job included, and sit far above that budget, so one caller could spend
+ * the whole day's proofs in a minute. These count only keys Starkscan hasn't
+ * seen yet: per IP a day, and for everyone a day, so the route says "busy"
+ * itself once the day is used instead of asking Starkscan again.
+ */
+export const STARKNET_PROVE_JOBS = { perIpPerDay: 5 } as const;
+
+export function starkscanDailyProofs(env: Env = process.env): number {
+  const n = Number((env.STARKSCAN_DAILY_PROOFS ?? "").trim());
+  return Number.isSafeInteger(n) && n > 0 ? n : 10;
+}
+
+/** What /api/starknet/prove asks before each Starkscan submit (lib/starknetPrivacy/starkscanProver). */
+export function starkscanAdmit(req: Request, now = () => starknetRelayClock.now(), network: StarknetNetwork = STARKNET_NETWORK, env: Env = process.env): StarkscanAdmit {
+  const ip = clientIp(req);
+  const strict = { failClosed: network === "mainnet" };
+  return async (key) => {
+    try {
+      const t = now();
+      // A key already sent is the same job (Starkscan answers it again for free).
+      if ((await addRateCount(key, "sn-prove-key", 0, t, DAY, strict)) > 0) return "ok";
+      if ((await addRateCount(ip, "sn-prove-job", 1, t, DAY, strict)) > STARKNET_PROVE_JOBS.perIpPerDay) return "limited";
+      if ((await addRateCount("all", "sn-prove-job-all", 1, t, DAY, strict)) > starkscanDailyProofs(env)) return "quota";
+      await addRateCount(key, "sn-prove-key", 1, t, DAY, strict);
+      return "ok";
+    } catch (e) {
+      return e instanceof SharedCountUnavailable ? "unavailable" : "limited";
+    }
   };
 }
 
