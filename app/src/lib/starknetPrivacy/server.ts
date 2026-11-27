@@ -14,6 +14,8 @@ import "server-only";
  *    (StarkWare's transaction prover run for Sepolia, say).
  *  - STARKSCAN_API_KEY: Starkscan's prover relay, mainnet (prove scope on it).
  *  - STARKSCAN_DAILY_PROOFS: that key's proofs a UTC day (default 10).
+ *  - STARKSCAN_PROOFS_PER_IP_PER_DAY: new proofs one IP may start a UTC day
+ *    (default 5). Raised for a test run from one machine, lowered back after.
  *  - STARKNET_MAX_APPROVE: the most one approve may allow, in whole tokens (default 10,000).
  *  - STARKNET_RELAY_FEE: what each proven transaction pays the relay, in whole
  *    tokens, withdrawn inside the proof (default 0: no fee). On mainnet a move
@@ -260,6 +262,13 @@ export function starkscanDailyProofs(env: Env = process.env): number {
   return Number.isSafeInteger(n) && n > 0 ? n : 10;
 }
 
+/** New proofs one IP may start a day: STARKSCAN_PROOFS_PER_IP_PER_DAY, else 5, never above the key's day. */
+export function starkscanProofsPerIp(env: Env = process.env): number {
+  const n = Number((env.STARKSCAN_PROOFS_PER_IP_PER_DAY ?? "").trim());
+  const per = Number.isSafeInteger(n) && n > 0 ? n : STARKNET_PROVE_JOBS.perIpPerDay;
+  return Math.min(per, starkscanDailyProofs(env));
+}
+
 /** What /api/starknet/prove asks before each Starkscan submit (lib/starknetPrivacy/starkscanProver). */
 export function starkscanAdmit(req: Request, now = () => starknetRelayClock.now(), network: StarknetNetwork = STARKNET_NETWORK, env: Env = process.env): StarkscanAdmit {
   const ip = clientIp(req);
@@ -269,7 +278,7 @@ export function starkscanAdmit(req: Request, now = () => starknetRelayClock.now(
       const t = now();
       // A key already sent is the same job (Starkscan answers it again for free).
       if ((await addRateCount(key, "sn-prove-key", 0, t, DAY, strict)) > 0) return "ok";
-      if ((await addRateCount(ip, "sn-prove-job", 1, t, DAY, strict)) > STARKNET_PROVE_JOBS.perIpPerDay) return "limited";
+      if ((await addRateCount(ip, "sn-prove-job", 1, t, DAY, strict)) > starkscanProofsPerIp(env)) return "limited";
       if ((await addRateCount("all", "sn-prove-job-all", 1, t, DAY, strict)) > starkscanDailyProofs(env)) return "quota";
       await addRateCount(key, "sn-prove-key", 1, t, DAY, strict);
       return "ok";

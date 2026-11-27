@@ -869,5 +869,14 @@ const RESULT = { proof: "UFJPT0Y=", proof_facts: ["0xa", "0xb"], l2_to_l1_messag
   eq(config.starknetEnv().NEXT_PUBLIC_STARKNET_POOL, POOL, "and reads the pool");
 }
 
+/* ------------------------------------------------------------------ proofs per IP a day */
+{
+  eq(server.starkscanProofsPerIp({}), 5, "one IP starts 5 new proofs a day by default");
+  eq(server.starkscanProofsPerIp({ STARKSCAN_PROOFS_PER_IP_PER_DAY: "20", STARKSCAN_DAILY_PROOFS: "30" }), 20, "STARKSCAN_PROOFS_PER_IP_PER_DAY raises it");
+  eq(server.starkscanProofsPerIp({ STARKSCAN_PROOFS_PER_IP_PER_DAY: "50", STARKSCAN_DAILY_PROOFS: "30" }), 30, "never above the key's day");
+  eq(server.starkscanProofsPerIp({ STARKSCAN_PROOFS_PER_IP_PER_DAY: "0" }), 5, "zero or junk keeps the default");
+  eq(server.starkscanProofsPerIp({ STARKSCAN_PROOFS_PER_IP_PER_DAY: "x" }), 5, "junk keeps the default");
+}
+
 globalThis.fetch = realFetch;
 console.log(`selftest-starknet-routes: ${pass} checks passed`);
