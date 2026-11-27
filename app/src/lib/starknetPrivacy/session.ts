@@ -408,14 +408,29 @@ export class StarknetSession {
     return this.sendProven(r);
   }
 
-  /** Cash out `amount` to the public address `to`. Steps: 0 waiting for Starknet, 1 cashing out. */
-  async cashOut(to: string, token: StarknetToken, amount: bigint, step: StepReporter): Promise<string> {
+  /**
+   * Cash out `amount` to the public address `to`. Steps: 0 waiting for Starknet,
+   * 1 cashing out. `send` hands the proven call to another of Gloam's relay
+   * routes and returns its transaction hash (a cash out to another chain sends
+   * it with the burn that follows it, lib/starknetPrivacy/cctpOut); the session
+   * waits for it either way.
+   */
+  async cashOut(
+    to: string,
+    token: StarknetToken,
+    amount: bigint,
+    step: StepReporter,
+    opts: { send?: (proven: { call: Call; proof: { proofFacts: readonly string[]; data: string } }) => Promise<string> } = {}
+  ): Promise<string> {
     step(0);
     await this.checkRelay(token);
     const at = await this.settleSpend(token, (left) => step(0, waitText(left)));
     step(1);
     const r = await cashOutAction(this.transfers, { token: token.address, self: this.keys.address, to, amount, fee: this.feeFor(token), provingBlockId: at });
-    return this.sendProven(r);
+    if (!opts.send) return this.sendProven(r);
+    const hash = await opts.send(r.callAndProof);
+    await this.confirm(hash);
+    return hash;
   }
 }
 

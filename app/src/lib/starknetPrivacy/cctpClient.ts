@@ -26,6 +26,8 @@ export type CctpInfo = {
   fee: string;
   /** Circle's fast fee per source domain in basis points (0: none; null: Circle didn't answer). */
   sources: { domain: number; chainId: number; fastBps: number | null }[];
+  /** For a cash out to another chain: Circle's fast fee from Starknet and its forwarding fee there (base units, strings). */
+  destinations?: { domain: number; chainId: number; fastBps: number | null; forward: { low: string; med: string; high: string } | null }[];
 };
 
 export const CCTP_OFF: CctpInfo = { on: false, network: "", relayer: null, fee: "0", sources: [] };

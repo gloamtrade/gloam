@@ -91,7 +91,7 @@ const BASE = cctp.cctpSourceByDomain(6)!;
 
 const devnet = spawn(
   env.STARKNET_DEVNET_BIN ?? `${homedir()}/Desktop/Projects/workspace/gloam-night/scratch-starknet/tools/devnet/starknet-devnet`,
-  ["--seed", "42", "--port", String(SN_PORT), "--accounts", "3", "--initial-balance", "1000000000000000000000", "--fork-network", "https://mainnet.nodes.starknet.org/rpc/v0_10", "--fork-block", String(FORK_BLOCK)],
+  ["--seed", "42", "--port", String(SN_PORT), "--accounts", "3", "--initial-balance", "1000000000000000000000", "--fork-network", env.CCTP_FORK_STARKNET_RPC ?? "https://mainnet.nodes.starknet.org/rpc/v0_10", "--fork-block", String(FORK_BLOCK)],
   { stdio: ["ignore", "ignore", "inherit"] }
 );
 const anvil = spawn(`${homedir()}/.foundry/bin/anvil`, ["--fork-url", env.CCTP_FORK_BASE_RPC ?? "https://mainnet.base.org", "--port", String(EVM_PORT), "--silent"], { stdio: "ignore" });
