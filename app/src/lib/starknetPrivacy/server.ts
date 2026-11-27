@@ -108,9 +108,13 @@ export async function starknetProxyRate(req: Request, calls: number, now = Date.
 export const STARKNET_RELAY_LIMITS = {
   attempt: { perIpPerMin: 30 },
   deploy: { perIpPerDay: 5, allPerDay: 300 },
+  /** An account's open pays the relay no fee (it has nothing to pay from): held like a deploy. */
+  open: { perIpPerDay: 5, allPerDay: 300 },
   transact: { perIpPerMin: 10, perIpPerDay: 200, allPerMin: 120, allPerDay: 5_000 },
   prove: { perIpPerMin: 10, perIpPerDay: 300 },
 } as const;
+
+export type RelayRateKind = "deploy" | "open" | "transact";
 
 const DAY = 86_400;
 
@@ -133,15 +137,16 @@ export function starknetRelayAttempt(req: Request, now = starknetRelayClock.now(
 }
 
 /** One more relayed transaction of `kind`, charged once it passed every check. */
-export function starknetRelayRate(req: Request, kind: "deploy" | "transact", now = starknetRelayClock.now(), network: StarknetNetwork = STARKNET_NETWORK): Promise<StarknetRate> {
+export function starknetRelayRate(req: Request, kind: RelayRateKind, now = starknetRelayClock.now(), network: StarknetNetwork = STARKNET_NETWORK): Promise<StarknetRate> {
   const ip = clientIp(req);
   const strict = { failClosed: network === "mainnet" };
   return counted(async () => {
-    if (kind === "deploy") {
-      // A local devnet's STRK is free: its deploys are held only by the overall count.
-      const perIp = network === "devnet" ? STARKNET_RELAY_LIMITS.deploy.allPerDay : STARKNET_RELAY_LIMITS.deploy.perIpPerDay;
-      if ((await addRateCount(ip, "sn-relay-deploy", 1, now, DAY, strict)) > perIp) return false;
-      return (await addRateCount("all", "sn-relay-deploy-all", 1, now, DAY, strict)) <= STARKNET_RELAY_LIMITS.deploy.allPerDay;
+    if (kind === "deploy" || kind === "open") {
+      const l = STARKNET_RELAY_LIMITS[kind];
+      // A local devnet's STRK is free: its deploys and opens are held only by the overall count.
+      const perIp = network === "devnet" ? l.allPerDay : l.perIpPerDay;
+      if ((await addRateCount(ip, `sn-relay-${kind}`, 1, now, DAY, strict)) > perIp) return false;
+      return (await addRateCount("all", `sn-relay-${kind}-all`, 1, now, DAY, strict)) <= l.allPerDay;
     }
     const t = STARKNET_RELAY_LIMITS.transact;
     if ((await addRateCount(ip, "sn-relay-tx", 1, now)) > t.perIpPerMin) return false;
@@ -291,7 +296,7 @@ export async function relaySend(input: {
   chain: RelayChain;
   env?: Env;
   now?: number;
-  rate: (kind: "deploy" | "transact") => Promise<StarknetRate>;
+  rate: (kind: RelayRateKind) => Promise<StarknetRate>;
 }): Promise<RelaySendResult> {
   const { cfg, chain } = input;
   const decision = checkRelayCall(input.calls, relayContext(cfg, input.relay, input.env, input.now), input.proof);
@@ -329,7 +334,8 @@ export async function relaySend(input: {
     const cls = await chain.classHashAt(accountAddress(decision.publicKey, cfg.accountClassHash));
     if (cls) return { ok: false, status: 409, code: "already_deployed", message: "That account is already set up." };
   }
-  const rate = await input.rate(decision.kind === "deploy" ? "deploy" : "transact");
+  const kind: RelayRateKind = decision.kind === "deploy" ? "deploy" : decision.kind === "apply" && decision.setup ? "open" : "transact";
+  const rate = await input.rate(kind);
   if (rate === "unavailable") return { ok: false, status: 503, code: "relay_unavailable", message: "Gloam's Starknet relay is paused for a moment. Try again shortly." };
   if (rate === "limited") return { ok: false, status: 429, code: "rate_limited", message: "Too many requests. Try again in a little while." };
   try {

@@ -23,7 +23,10 @@
  *     actions are decoded and must carry no Invoke or InvokeWithComputation (no
  *     external call rides on the relay's STRK), move only listed tokens, stay
  *     under MAX_ACTIONS, and, when the relay asks a fee, withdraw at least that
- *     fee of a listed token to the relay itself. The pool takes its own STRK
+ *     fee of a listed token to the relay itself. An account's open (only its
+ *     viewing key and channels: nothing spent, nothing moved) has nothing to pay
+ *     a fee from, so it owes none; the route holds opens to a deploy's tight
+ *     daily counts instead. The pool takes its own STRK
  *     fee (get_fee_amount) from its caller: the route (lib/starknetPrivacy/server
  *     relaySend) reads it, refuses one above the relay's cap, and wraps the apply
  *     in approve(pool, exactly that fee) and approve(pool, 0) in the same
@@ -75,6 +78,12 @@ export type RelayDecision =
       withdrawals: number;
       /** The screening attestation's issued_at (unix seconds), or null when the call carries none. */
       attestedAt: number | null;
+      /**
+       * Only registers a viewing key and opens channels (an account's open): it
+       * spends no note and moves no token, so it has nothing to pay the relay's
+       * fee from. It owes none, and the route counts it like a deploy.
+       */
+      setup: boolean;
     }
   | { ok: false; reason: string };
 
@@ -211,9 +220,11 @@ function checkApply(entrypoint: string, cd: bigint[], ctx: RelayContext, proof?:
   let fee: { token: string; amount: bigint } | null = null;
   let deposits = 0;
   let withdrawals = 0;
+  let setup = true;
   for (const a of actions) {
     const v = a.activeVariant();
     if (v === "Invoke" || v === "InvokeWithComputation") return no("no_external_calls");
+    if (!SETUP_ACTIONS.has(v)) setup = false;
     if (v === "TransferFrom" || v === "TransferTo") {
       const x = a.unwrap() as { token: bigint | string; amount: bigint | string; to_addr?: bigint | string };
       const listed = listedToken(ctx.cfg, x.token);
@@ -229,10 +240,13 @@ function checkApply(entrypoint: string, cd: bigint[], ctx: RelayContext, proof?:
     }
   }
   const asks = Object.entries(ctx.minFee ?? {}).filter(([, v]) => v > 0n);
-  if (asks.length) {
+  if (asks.length && !setup) {
     if (!fee) return no("fee_missing");
     const min = ctx.minFee?.[fee.token] ?? 0n;
     if (min <= 0n || fee.amount < min) return no("fee_too_low");
   }
-  return { ok: true, kind: "apply", fee, deposits, withdrawals, attestedAt };
+  return { ok: true, kind: "apply", fee, deposits, withdrawals, attestedAt, setup };
 }
+
+/** What an account's open is made of: its viewing key and its channels, nothing spent or moved. */
+const SETUP_ACTIONS = new Set(["WriteOnce", "Append", "EmitViewingKeySet"]);

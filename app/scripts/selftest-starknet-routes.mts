@@ -306,6 +306,24 @@ const PROOF = { proofFacts: ["0x1", "0x2"], proof: "QUJD" };
   ok(!r.ok && r.status === 502 && r.message.length < 300 && !r.message.includes(SECRET.slice(2)), "a failed send says why, short, never with the key");
 }
 
+/* ------------------------------------------------------------------ an account's open */
+{
+  // An account's open owes no fee (it has nothing to pay one from) and is counted as an open.
+  const write = () => new CairoCustomEnum({ WriteOnce: { storage_address: "0x77", value: ["0x1", "0x2"] } });
+  const open = applyCall([write(), write()]);
+  const kinds: string[] = [];
+  const f = fakeChain();
+  let r = await server.relaySend({ calls: [open], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async (k) => (kinds.push(k), "ok") });
+  ok(r.ok && r.decision.kind === "apply" && r.decision.setup && f.sent.length === 1, "with the relay's fee on (0.01 USDC here), an open is still sent");
+  r = await server.relaySend({ calls: [applyCall([to("0x0123", 250_000), to(RELAY, 10_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async (k) => (kinds.push(k), "ok") });
+  eq(kinds, ["open", "transact"], "an open is counted as an open, a move as a move");
+  const day = Date.UTC(2033, 0, 1, 12);
+  const openReq = post("/api/starknet/relay", {}, { "x-forwarded-for": "198.51.100.77" });
+  const opens: string[] = [];
+  for (let i = 0; i < 6; i++) opens.push(await server.starknetRelayRate(openReq, "open", day, "mainnet"));
+  eq(opens, ["ok", "ok", "ok", "ok", "ok", "limited"], "opens: five a day per IP, like deploys");
+}
+
 /* ------------------------------------------------------------------ the relay route */
 {
   const f = fakeChain();
