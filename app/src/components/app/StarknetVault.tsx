@@ -209,8 +209,10 @@ function StarknetAddView({ token }: { token: StarknetToken }) {
   const problem = starkAmountProblem(amount, token, balance);
   const value = parseStarkAmount(amount, token.decimals);
   const tooSmall = value !== null && sn.fee > 0n && value <= sn.fee ? `More than Gloam's fee of ${starkAmount(sn.fee, token)} ${token.symbol}` : null;
+  // The relay approves at most this much for one add, and refuses more before anything moves.
+  const tooBig = value !== null && sn.maxAdd > 0n && value > sn.maxAdd ? `One add moves at most ${starkAmount(sn.maxAdd, token)} ${token.symbol}` : null;
   const working = sn.task?.kind === "add";
-  const stop = !sn.relay?.funded ? "Paused for a moment" : !amount.trim() || !value ? "Enter an amount" : (problem ?? tooSmall);
+  const stop = !sn.relay?.funded ? "Paused for a moment" : !amount.trim() || !value ? "Enter an amount" : (problem ?? tooSmall ?? tooBig);
 
   return (
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -291,10 +293,12 @@ function StarknetSpendView({ kind, token, onReceive }: { kind: "pay" | "cashout"
           : problem;
 
   if (balance !== null && balance === 0n && !working) {
+    // A move that spent the whole balance lands here: its success shows over the empty state.
     return (
       <section className="gl-card p-5 sm:p-7">
         <h2 className="t-title text-foreground">{pay ? "Pay privately" : "Cash out"}</h2>
         <StarknetEmptyBalance onReceive={onReceive} />
+        {modal}
       </section>
     );
   }
