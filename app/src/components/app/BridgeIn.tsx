@@ -36,7 +36,7 @@ import { MAINNET_ENABLED, type GloamChainId } from "@/lib/networks";
 import { originChain } from "@/lib/originChains";
 import { useVaultStatus } from "@/lib/passkey";
 import { dropUnsentNote, formatFeePercent, saveLocalNote, updateLocalNote, type LocalNote } from "@/lib/shield";
-import { connectSolana, paySolana, preferredSolanaWallet, rememberSolanaWallet, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
+import { connectSolana, paySolana, preferredSolanaWallet, readSolanaBalance, reconnectSolana, rememberSolanaWallet, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
 import { track } from "@/lib/track";
 import type { TrackEvent } from "@/lib/trackEvents";
 import { failedBeforeSend, solanaDeclined, solanaSurelyNotSent, surelyNotSent, walletDeclined, walletErrorText } from "@/lib/walletErrors";
@@ -304,7 +304,46 @@ function BridgeSheet({
   const solWallets = useSolanaWallets();
   const vault = useVaultStatus();
   const [solName, setSolName] = useState("");
-  const solWallet = chain.kind === "svm" ? preferredSolanaWallet(solWallets, { picked: solName, evmName: connector?.name }) : null;
+  // Solana wallets already connected to this site, found with a silent reconnect (no prompt):
+  // the one that pays by default, and its account, so its balance shows and Continue asks nothing.
+  const [solAccounts, setSolAccounts] = useState<Record<string, SolanaAccount>>({});
+  const solActive = open && chain.kind === "svm";
+  useEffect(() => {
+    if (!solActive || solWallets.length === 0) return;
+    let live = true;
+    void Promise.all(
+      solWallets.map(async (w) => {
+        const acct = await Promise.race([reconnectSolana(w), new Promise<null>((r) => window.setTimeout(() => r(null), 4000))]);
+        return [w.name, acct] as const;
+      })
+    ).then((rows) => {
+      if (!live) return;
+      const found: Record<string, SolanaAccount> = {};
+      for (const [n, a] of rows) if (a) found[n] = a;
+      setSolAccounts((prev) => ({ ...found, ...prev }));
+    });
+    return () => {
+      live = false;
+    };
+  }, [solActive, solWallets]);
+  const solWallet =
+    chain.kind === "svm" ? preferredSolanaWallet(solWallets, { picked: solName, evmName: connector?.name, trusted: Object.keys(solAccounts) }) : null;
+  const solAccount = solWallet ? (solAccounts[solWallet.name] ?? null) : null;
+  const [solConnectError, setSolConnectError] = useState<string | null>(null);
+  /** Pick a Solana wallet: remembered for next time, and connected now so its balance shows. */
+  async function pickSolWallet(w: SolanaWallet) {
+    setSolName(w.name);
+    rememberSolanaWallet(w.name);
+    setSolConnectError(null);
+    if (solAccounts[w.name]) return;
+    try {
+      const acct = await connectSolana(w);
+      setSolAccounts((prev) => ({ ...prev, [w.name]: acct }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message.split("\n")[0]! : "";
+      setSolConnectError(solanaDeclined(msg) ? `${w.name} didn't connect.` : `Couldn't connect ${w.name}. Open it, unlock it and try again, or pick another wallet.`);
+    }
+  }
   const switchable = connector?.type === "injected" || connector?.type === "walletConnect";
   const canPrivate =
     !demo &&
@@ -372,8 +411,27 @@ function BridgeSheet({
     query: { enabled: balanceReadable && nativeToken, retry: 1 },
   });
   const srcRead = nativeToken ? srcCoin : srcToken;
-  const srcBalance: bigint | null = balanceReadable && !srcRead.isError ? (nativeToken ? srcCoin.data?.value : srcToken.data) ?? null : null;
-  const srcLoading = balanceReadable && srcRead.isLoading;
+  // The paying Solana wallet's balance of the picked token, once it is connected.
+  const solOwner = solActive ? (solAccount?.address ?? null) : null;
+  const solKey = solOwner ? `${solOwner}:${token.address}` : null;
+  const [solBal, setSolBal] = useState<{ key: string; value: bigint | null } | null>(null);
+  useEffect(() => {
+    if (!solOwner || !solKey) return;
+    let live = true;
+    void readSolanaBalance(solOwner, token.address).then((value) => live && setSolBal({ key: solKey, value }));
+    return () => {
+      live = false;
+    };
+  }, [solOwner, solKey, token.address]);
+  const srcBalance: bigint | null =
+    chain.kind === "svm"
+      ? solKey && solBal?.key === solKey
+        ? solBal.value
+        : null
+      : balanceReadable && !srcRead.isError
+        ? ((nativeToken ? srcCoin.data?.value : srcToken.data) ?? null)
+        : null;
+  const srcLoading = chain.kind === "svm" ? Boolean(solKey && solBal?.key !== solKey) : balanceReadable && srcRead.isLoading;
   // Not private, from an EVM chain, with a wallet that can switch there: the wallet
   // signs the bridge to itself. A deposit address stays one tap away, for an exchange.
   const walletPays =
@@ -680,8 +738,13 @@ function BridgeSheet({
     try {
       let account: SolanaAccount | null = null;
       if (wallet) {
-        setPriv({ kind: "working", text: `Connecting ${wallet.name}…` });
-        account = await connectSolana(wallet);
+        account = solAccounts[wallet.name] ?? null;
+        if (!account) {
+          setPriv({ kind: "working", text: `Connecting ${wallet.name}…` });
+          account = await connectSolana(wallet);
+          const got = account;
+          setSolAccounts((prev) => ({ ...prev, [wallet.name]: got }));
+        }
       }
       step = "prepare";
       const key = `${network.key}:${dest.token.address}:${wei}`;
@@ -1197,10 +1260,7 @@ function BridgeSheet({
                     type="button"
                     role="radio"
                     aria-checked={solWallet?.name === w.name}
-                    onClick={() => {
-                      setSolName(w.name);
-                      rememberSolanaWallet(w.name);
-                    }}
+                    onClick={() => void pickSolWallet(w)}
                     className={`inline-flex h-10 items-center gap-2 rounded-full border pl-1.5 pr-3.5 text-[14px] transition-colors ${
                       solWallet?.name === w.name ? "border-foreground text-foreground" : "border-line text-soft hover:bg-surface"
                     }`}
@@ -1211,6 +1271,12 @@ function BridgeSheet({
                   </button>
                 ))}
               </div>
+            )}
+
+            {privately && chain.kind === "svm" && solConnectError && (
+              <p role="alert" className="text-[13px] text-danger">
+                {solConnectError}
+              </p>
             )}
 
             {privately ? (

@@ -114,21 +114,64 @@ function rememberedSolanaWallet(): string | null {
 /**
  * Which Solana wallet pays when there are several in the browser. The first one
  * the browser announces is often one that isn't set up (Phantom installed,
- * never used), so it goes, in order: the one picked here, the one picked last
- * time, the one with the same name as the connected EVM wallet ("OKX Wallet"),
- * one that already shares an account with this site, then the first.
+ * never used), so it goes, in order: the one picked here; a wallet already
+ * connected to this site (`trusted`, from a silent reconnect), the one picked
+ * last time or named like the connected EVM wallet ("OKX Wallet") first; then
+ * the last pick, the EVM name, one already sharing an account, the first.
  */
 export function preferredSolanaWallet(
   wallets: readonly SolanaWallet[],
-  opts: { picked?: string | null; evmName?: string | null; remembered?: string | null } = {}
+  opts: { picked?: string | null; evmName?: string | null; remembered?: string | null; trusted?: readonly string[] } = {}
 ): SolanaWallet | null {
   if (wallets.length === 0) return null;
   const byName = (n: string | null | undefined) => (n ? wallets.find((w) => w.name === n) : undefined);
   const remembered = opts.remembered !== undefined ? opts.remembered : typeof window === "undefined" ? null : rememberedSolanaWallet();
   const evm = (opts.evmName ?? "").trim().toLowerCase();
   const sameAsEvm = evm ? wallets.find((w) => w.name.toLowerCase() === evm || w.name.toLowerCase().startsWith(evm.split(" ")[0]!)) : undefined;
+  const trusted = opts.trusted ?? [];
+  const isTrusted = (w: SolanaWallet | undefined) => (w && trusted.includes(w.name) ? w : undefined);
+  const anyTrusted = wallets.find((w) => trusted.includes(w.name));
   const authorized = wallets.find((w) => (w.wallet.accounts ?? []).some((a) => a.chains?.includes(CHAIN)));
-  return byName(opts.picked) ?? byName(remembered) ?? sameAsEvm ?? authorized ?? wallets[0]!;
+  return (
+    byName(opts.picked) ??
+    isTrusted(byName(remembered)) ??
+    isTrusted(sameAsEvm) ??
+    anyTrusted ??
+    byName(remembered) ??
+    sameAsEvm ??
+    authorized ??
+    wallets[0]!
+  );
+}
+
+/**
+ * A Solana wallet's balance of one token, in base units, read through Gloam's
+ * RPC (/api/solana/rpc; no Solana node in the page). SOL by the system program
+ * id, any other by its mint (SPL or Token-2022). Null when the read fails.
+ */
+export async function readSolanaBalance(owner: string, mint: string): Promise<bigint | null> {
+  const native = mint === "11111111111111111111111111111111";
+  const call = native
+    ? { jsonrpc: "2.0", id: 1, method: "getBalance", params: [owner, { commitment: "confirmed" }] }
+    : { jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner", params: [owner, { mint }, { encoding: "jsonParsed", commitment: "confirmed" }] };
+  try {
+    const res = await fetch("/api/solana/rpc", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(call), cache: "no-store" });
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      result?: { value?: number | { account?: { data?: { parsed?: { info?: { tokenAmount?: { amount?: string } } } } } }[] };
+      error?: unknown;
+    };
+    if (json.error || !json.result) return null;
+    const v = json.result.value;
+    if (native) return typeof v === "number" ? BigInt(v) : null;
+    if (!Array.isArray(v)) return null;
+    return v.reduce((sum, a) => {
+      const amt = a.account?.data?.parsed?.info?.tokenAmount?.amount;
+      return sum + (amt && /^\d+$/.test(amt) ? BigInt(amt) : BigInt(0));
+    }, BigInt(0));
+  } catch {
+    return null;
+  }
 }
 
 /** Ask the wallet to connect. Returns its Solana mainnet account. */
