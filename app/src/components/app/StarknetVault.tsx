@@ -21,6 +21,7 @@ import { ActionTile, BalancePane, QuickRow, type Holding } from "./VaultHome";
 import { SuccessModal } from "./SuccessModal";
 import { TokenLogo } from "./TokenLogo";
 import { parseStarkAmount, useStarknet } from "./StarknetAccount";
+import { StarknetClaimCard, StarknetClaimLead, StarknetPayOrLink, useStarknetClaimInHash } from "./StarknetLinks";
 import {
   STARKNET_NAME,
   StarknetActionButton,
@@ -151,12 +152,19 @@ export function StarknetVaultHome({ missing }: { missing?: string | null }) {
 
 export function StarknetVaultPanel({ id, onReceive }: { id: VaultActionId; onReceive: () => void }) {
   const sn = useStarknet();
+  const claim = useStarknetClaimInHash();
   if (!sn) return null;
-  if (!sn.address || !sn.token) return <StarknetGate />;
+  if (!sn.address || !sn.token) return <StarknetGate lead={id === "receive" && claim ? <StarknetClaimLead claim={claim} token={sn.token} /> : undefined} />;
   if (id === "shield") return <StarknetAddView token={sn.token} />;
-  if (id === "pay") return <StarknetSpendView kind="pay" token={sn.token} onReceive={onReceive} />;
+  if (id === "pay") return <StarknetPayOrLink spend={<StarknetSpendView kind="pay" token={sn.token} onReceive={onReceive} />} />;
   if (id === "cashout") return <StarknetSpendView kind="cashout" token={sn.token} onReceive={onReceive} />;
-  if (id === "receive") return <StarknetReceiveView />;
+  if (id === "receive")
+    return (
+      <div className="space-y-6">
+        {claim && <StarknetClaimCard claim={claim} />}
+        <StarknetReceiveView />
+      </div>
+    );
   return null;
 }
 
