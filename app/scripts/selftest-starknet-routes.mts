@@ -395,12 +395,108 @@ const PROOF = { proofFacts: ["0x1", "0x2"], proof: "QUJD" };
   let r = await server.relaySend({ calls: [open], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async (k) => (kinds.push(k), "ok") });
   ok(r.ok && r.decision.kind === "apply" && r.decision.setup && f.sent.length === 1, "with the relay's fee on (0.01 USDC here), an open is still sent");
   r = await server.relaySend({ calls: [applyCall([to("0x0123", 250_000), to(RELAY, 10_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async (k) => (kinds.push(k), "ok") });
-  eq(kinds, ["open", "transact"], "an open is counted as an open, a move as a move");
+  eq(kinds, ["open", "move"], "an open is counted as an open, a move as a move");
   const day = Date.UTC(2033, 0, 1, 12);
   const openReq = post("/api/starknet/relay", {}, { "x-forwarded-for": "198.51.100.77" });
   const opens: string[] = [];
   for (let i = 0; i < 6; i++) opens.push(await server.starknetRelayRate(openReq, "open", day, "mainnet"));
   eq(opens, ["ok", "ok", "ok", "ok", "ok", "limited"], "opens: five a day per IP, like deploys");
+}
+
+/* ------------------------------------------------------------------ mainnet: a move pays the relay's fee, or a sponsored budget */
+{
+  // With no fee set the relay paid about 7 STRK for any proven move, anyone's (StarkWare's prover is a
+  // public image). On mainnet a move now needs the fee, or STARKNET_SPONSORED_MOVES_PER_DAY.
+  const noFee: Record<string, string | undefined> = { ...env };
+  delete noFee.STARKNET_RELAY_FEE;
+  const write = () => new CairoCustomEnum({ WriteOnce: { storage_address: "0x77", value: ["0x1", "0x2"] } });
+  const open = applyCall([write(), write()]);
+  const cashOut = applyCall([to("0x0125", 250_000)]);
+  const acctKey = num.toHex(BigInt(acct));
+  const kinds: string[] = [];
+  const rate = async (k: string) => (kinds.push(k), "ok" as const);
+  let f = fakeChain({ deployed: new Set([acctKey]) });
+  let reads = 0;
+  const classHashAt = f.chain.classHashAt;
+  f.chain.classHashAt = async (a: string) => (reads++, classHashAt(a));
+  let r = await relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env: noFee, now: NOW, rate });
+  ok(!r.ok && r.code === "fee_unset" && r.status === 503 && f.sent.length === 0 && kinds.length === 0 && reads === 0, "mainnet, no relay fee set: a move is refused before anything is read, counted or sent");
+  r = await relaySend({ calls: [approveFor(acct, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env: { ...noFee, STARKNET_RELAY_FEE: "0" }, now: NOW, rate });
+  ok(!r.ok && r.code === "fee_unset" && f.sent.length === 0, "a fee of 0 is no fee: an add's approve is refused too (its add couldn't follow)");
+  r = await relaySend({ calls: [open], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env: noFee, now: NOW, rate });
+  ok(r.ok && f.sent.length === 1, "an account's open still goes (it owes no fee and has its own cap)");
+  const sponsor = { ...noFee, STARKNET_SPONSORED_MOVES_PER_DAY: "2" };
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env: sponsor, now: NOW, rate });
+  ok(r.ok && f.sent.length === 2, "with a sponsored budget set, a move with no fee goes");
+  r = await relaySend({ calls: [approveFor(acct, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env: sponsor, now: NOW, rate });
+  ok(r.ok && f.sent.length === 3, "and so does an add's approve");
+  eq(kinds, ["open", "sponsored", "approve"], "the move counted against the sponsored budget, the approve and the open not");
+
+  // The sponsored count is everyone's, for the day, and on mainnet it fails closed.
+  const day = Date.UTC(2035, 0, 1, 12);
+  const got: string[] = [];
+  for (let i = 0; i < 3; i++) got.push(await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": `198.51.100.${90 + i}` }), "sponsored", day, "mainnet", sponsor));
+  eq(got, ["ok", "ok", "day_used"], "two sponsored moves a day (2 set here), from any IPs, then the day is used");
+  const nodeEnv = env.NODE_ENV;
+  env.NODE_ENV = "production";
+  const shut = await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": "198.51.100.99" }), "sponsored", day + 86_400_000, "mainnet", sponsor);
+  env.NODE_ENV = nodeEnv;
+  eq(shut, "unavailable", "no shared count (production without Redis): no sponsored move");
+
+  // Devnet and Sepolia keep sending a move with no fee.
+  for (const network of ["sepolia", "devnet"] as const) {
+    kinds.length = 0;
+    f = fakeChain();
+    r = await relaySend({ calls: [cashOut], proof: PROOF, cfg: { ...cfg, network, poolClassHash: null }, relay: RELAY, chain: f.chain, env: noFee, now: NOW, rate });
+    ok(r.ok && f.sent.length === 1 && kinds[0] === "move", `${network}: a move with no fee is sent as before`);
+  }
+
+  // The route says so plainly.
+  const fee = env.STARKNET_RELAY_FEE;
+  delete env.STARKNET_RELAY_FEE;
+  const make = server.starknetRelayChains.make;
+  f = fakeChain();
+  server.starknetRelayChains.make = () => f.chain;
+  resetMemoryKv();
+  const res = await relayRoute.POST(post("/api/starknet/relay", { calls: [{ ...cashOut, calldata: (cashOut.calldata as string[]).map((x) => num.toHex(BigInt(x))) }], proof: PROOF }, { "x-forwarded-for": "198.51.100.120" }));
+  const body = (await res.json()) as { error?: { code: string; message: string } };
+  eq([res.status, body.error?.code, f.sent.length], [503, "fee_unset", 0], "the relay route refuses it, 503 fee_unset");
+  ok(/isn't set to send private moves on Starknet yet/.test(body.error?.message ?? ""), "with a message that says why");
+  server.starknetRelayChains.make = make;
+  env.STARKNET_RELAY_FEE = fee;
+}
+
+/* ------------------------------------------------------------------ mainnet: what a day of opens and moves can cost */
+{
+  eq(server.relayCaps("mainnet", {}), { opensPerIpPerDay: 5, opensPerDay: 20, appliesPerDay: 200, sponsoredPerDay: 0 }, "mainnet: 20 opens a day (5 per IP), 200 moves, none sponsored");
+  eq(server.relayCaps("devnet", {}), { opensPerIpPerDay: 5, opensPerDay: 300, appliesPerDay: 5_000, sponsoredPerDay: 0 }, "elsewhere, as before");
+  eq(server.relayCaps("sepolia", { STARKNET_SPONSORED_MOVES_PER_DAY: "9" }).sponsoredPerDay, 0, "a sponsored budget is mainnet only");
+  eq(
+    server.relayCaps("mainnet", { STARKNET_OPENS_PER_DAY: "3", STARKNET_OPENS_PER_IP_PER_DAY: "1", STARKNET_APPLIES_PER_DAY: "50", STARKNET_SPONSORED_MOVES_PER_DAY: "4" }),
+    { opensPerIpPerDay: 1, opensPerDay: 3, appliesPerDay: 50, sponsoredPerDay: 4 },
+    "each from the environment"
+  );
+  eq(server.relayCaps("mainnet", { STARKNET_OPENS_PER_DAY: "lots", STARKNET_APPLIES_PER_DAY: "-1" }), { opensPerIpPerDay: 5, opensPerDay: 20, appliesPerDay: 200, sponsoredPerDay: 0 }, "a value that isn't a whole number keeps the default");
+
+  const opens: string[] = [];
+  const d1 = Date.UTC(2035, 1, 1, 12);
+  for (let i = 0; i < 21; i++) opens.push(await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": `192.0.2.${i + 1}` }), "open", d1, "mainnet", {}));
+  ok(opens.slice(0, 20).every((x) => x === "ok") && opens[20] === "day_used", "21 opens from 21 IPs: the 21st waits for tomorrow");
+  const few: string[] = [];
+  for (let i = 0; i < 3; i++) few.push(await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": "192.0.2.200" }), "open", d1 + 86_400_000, "mainnet", { STARKNET_OPENS_PER_IP_PER_DAY: "2" }));
+  eq(few, ["ok", "ok", "limited"], "STARKNET_OPENS_PER_IP_PER_DAY holds one IP");
+
+  // 200 moves a day for everyone, even spread over the day (the per-minute caps never bite here).
+  const d2 = Date.UTC(2035, 2, 1, 0, 0, 30);
+  const moves: string[] = [];
+  for (let i = 0; i < 201; i++) moves.push(await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": `198.18.${Math.floor(i / 200)}.${(i % 200) + 1}` }), "move", d2 + i * 60_000, "mainnet", {}));
+  ok(moves.slice(0, 200).every((x) => x === "ok") && moves[200] === "day_used", "the 201st move of the day is refused");
+  const set: string[] = [];
+  for (let i = 0; i < 4; i++) set.push(await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": `198.19.0.${i + 1}` }), "move", d2 + 86_400_000 + i * 60_000, "mainnet", { STARKNET_APPLIES_PER_DAY: "3" }));
+  eq(set, ["ok", "ok", "ok", "day_used"], "STARKNET_APPLIES_PER_DAY sets it");
+  const approves: string[] = [];
+  for (let i = 0; i < 4; i++) approves.push(await server.starknetRelayRate(post("/api/starknet/relay", {}, { "x-forwarded-for": `198.19.1.${i + 1}` }), "approve", d2 + 86_400_000 + i * 60_000, "mainnet", { STARKNET_APPLIES_PER_DAY: "3" }));
+  ok(approves.every((x) => x === "ok"), "approves aren't moves: they cost gas only and don't count against it");
 }
 
 /* ------------------------------------------------------------------ the relay route */

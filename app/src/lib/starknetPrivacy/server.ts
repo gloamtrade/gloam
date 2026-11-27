@@ -16,7 +16,18 @@ import "server-only";
  *  - STARKSCAN_DAILY_PROOFS: that key's proofs a UTC day (default 10).
  *  - STARKNET_MAX_APPROVE: the most one approve may allow, in whole tokens (default 10,000).
  *  - STARKNET_RELAY_FEE: what each proven transaction pays the relay, in whole
- *    tokens, withdrawn inside the proof (default 0: no fee).
+ *    tokens, withdrawn inside the proof (default 0: no fee). On mainnet a move
+ *    (an add, a payment, a cash out) must pay it: with no fee set, the relay
+ *    refuses every move and its approve (fee_unset) unless
+ *    STARKNET_SPONSORED_MOVES_PER_DAY says how many it pays for.
+ *  - STARKNET_SPONSORED_MOVES_PER_DAY: mainnet only, the moves a day the relay
+ *    sends without a fee, for everyone (default 0: none). Counted in Redis;
+ *    without it, none are sent.
+ *  - STARKNET_APPLIES_PER_DAY: the moves a day the relay sends, for everyone,
+ *    fee or not (default 200 on mainnet, 5,000 elsewhere).
+ *  - STARKNET_OPENS_PER_DAY, STARKNET_OPENS_PER_IP_PER_DAY: account opens a
+ *    day, for everyone and per IP (defaults 20 and 5 on mainnet, 300 and 5
+ *    elsewhere). An open pays no fee, so these are what it can cost.
  *  - STARKNET_MAX_POOL_FEE: the most STRK the relay lets the pool take per
  *    apply_actions, in whole STRK (default 10). Mainnet's pool asked 4.5 on
  *    2026-11-26; above the cap the relay pauses instead of paying.
@@ -105,29 +116,66 @@ export async function starknetProxyRate(req: Request, calls: number, now = Date.
  * The relay's limits. A deploy is the dearest call (the relay pays an account's
  * deploy), so it is held tightest. A proof is held per minute and per day per
  * IP. On mainnet the daily counts fail closed: without the shared count the
- * relay pays nothing and says it is unavailable.
+ * relay pays nothing and says it is unavailable. What a day of opens and moves
+ * may cost on mainnet is set by relayCaps.
  */
 export const STARKNET_RELAY_LIMITS = {
   attempt: { perIpPerMin: 30 },
   deploy: { perIpPerDay: 5, allPerDay: 300 },
-  /** An account's open pays the relay no fee (it has nothing to pay from): held like a deploy. */
+  /** An account's open pays the relay no fee (it has nothing to pay from): held like a deploy (relayCaps). */
   open: { perIpPerDay: 5, allPerDay: 300 },
   transact: { perIpPerMin: 10, perIpPerDay: 200, allPerMin: 120, allPerDay: 5_000 },
   prove: { perIpPerMin: 10, perIpPerDay: 300 },
 } as const;
 
-export type RelayRateKind = "deploy" | "open" | "transact";
+/**
+ * What a relayed transaction is counted as: a deploy, an account's open, an
+ * approve, a move that pays the relay's fee, or a move the relay pays for
+ * (mainnet, STARKNET_SPONSORED_MOVES_PER_DAY).
+ */
+export type RelayRateKind = "deploy" | "open" | "approve" | "move" | "sponsored";
+
+/**
+ * The relay's daily caps that bound what it spends. Each mainnet open or move
+ * costs it about 7 STRK (the pool's 4.5 STRK fee and gas, 2026-11-26), and
+ * StarkWare's transaction prover is a public image, so anyone can prove an open
+ * or a move and hand it to the relay. On mainnet: 20 opens a day (5 per IP),
+ * 200 moves a day, and no move without the relay's fee unless sponsored.
+ */
+export type RelayCaps = { opensPerIpPerDay: number; opensPerDay: number; appliesPerDay: number; sponsoredPerDay: number };
+
+const MAINNET_CAPS = { opensPerDay: 20, appliesPerDay: 200 } as const;
+
+/** A whole number from the environment (0 allowed), or null when unset or not one. */
+function countFrom(v: string | undefined): number | null {
+  const t = (v ?? "").trim();
+  if (!/^\d{1,9}$/.test(t)) return null;
+  return Number(t);
+}
+
+export function relayCaps(network: StarknetNetwork, env: Env = process.env): RelayCaps {
+  const main = network === "mainnet";
+  return {
+    opensPerIpPerDay: countFrom(env.STARKNET_OPENS_PER_IP_PER_DAY) ?? STARKNET_RELAY_LIMITS.open.perIpPerDay,
+    opensPerDay: countFrom(env.STARKNET_OPENS_PER_DAY) ?? (main ? MAINNET_CAPS.opensPerDay : STARKNET_RELAY_LIMITS.open.allPerDay),
+    appliesPerDay: countFrom(env.STARKNET_APPLIES_PER_DAY) ?? (main ? MAINNET_CAPS.appliesPerDay : STARKNET_RELAY_LIMITS.transact.allPerDay),
+    // Sponsored moves are a mainnet budget: elsewhere a move with no fee goes as before.
+    sponsoredPerDay: main ? (countFrom(env.STARKNET_SPONSORED_MOVES_PER_DAY) ?? 0) : 0,
+  };
+}
 
 const DAY = 86_400;
 
 /** The clock the limits count by (self-tests hold it still across a burst). */
 export const starknetRelayClock = { now: (): number => Date.now() };
 
-export type StarknetRate = "ok" | "limited" | "unavailable";
+/** "limited": this IP's count is used; "day_used": everyone's count for the day is. */
+export type StarknetRate = "ok" | "limited" | "day_used" | "unavailable";
 
-async function counted(f: () => Promise<boolean>): Promise<StarknetRate> {
+async function counted(f: () => Promise<boolean | StarknetRate>): Promise<StarknetRate> {
   try {
-    return (await f()) ? "ok" : "limited";
+    const r = await f();
+    return r === true ? "ok" : r === false ? "limited" : r;
   } catch (e) {
     return e instanceof SharedCountUnavailable ? "unavailable" : "limited";
   }
@@ -139,22 +187,34 @@ export function starknetRelayAttempt(req: Request, now = starknetRelayClock.now(
 }
 
 /** One more relayed transaction of `kind`, charged once it passed every check. */
-export function starknetRelayRate(req: Request, kind: RelayRateKind, now = starknetRelayClock.now(), network: StarknetNetwork = STARKNET_NETWORK): Promise<StarknetRate> {
+export function starknetRelayRate(
+  req: Request,
+  kind: RelayRateKind,
+  now = starknetRelayClock.now(),
+  network: StarknetNetwork = STARKNET_NETWORK,
+  env: Env = process.env
+): Promise<StarknetRate> {
   const ip = clientIp(req);
   const strict = { failClosed: network === "mainnet" };
+  const caps = relayCaps(network, env);
   return counted(async () => {
     if (kind === "deploy" || kind === "open") {
-      const l = STARKNET_RELAY_LIMITS[kind];
+      const l = kind === "open" ? { perIpPerDay: caps.opensPerIpPerDay, allPerDay: caps.opensPerDay } : STARKNET_RELAY_LIMITS.deploy;
       // A local devnet's STRK is free: its deploys and opens are held only by the overall count.
       const perIp = network === "devnet" ? l.allPerDay : l.perIpPerDay;
       if ((await addRateCount(ip, `sn-relay-${kind}`, 1, now, DAY, strict)) > perIp) return false;
-      return (await addRateCount("all", `sn-relay-${kind}-all`, 1, now, DAY, strict)) <= l.allPerDay;
+      return (await addRateCount("all", `sn-relay-${kind}-all`, 1, now, DAY, strict)) <= l.allPerDay || "day_used";
     }
     const t = STARKNET_RELAY_LIMITS.transact;
     if ((await addRateCount(ip, "sn-relay-tx", 1, now)) > t.perIpPerMin) return false;
     if ((await addRateCount(ip, "sn-relay-tx-day", 1, now, DAY, strict)) > t.perIpPerDay) return false;
     if ((await addRateCount("all", "sn-relay-tx-all", 1, now)) > t.allPerMin) return false;
-    return (await addRateCount("all", "sn-relay-tx-all-day", 1, now, DAY, strict)) <= t.allPerDay;
+    if ((await addRateCount("all", "sn-relay-tx-all-day", 1, now, DAY, strict)) > t.allPerDay) return "day_used";
+    if (kind === "approve") return true;
+    // Every move, fee or not, under the day's cap for everyone; one the relay pays for under its own.
+    if ((await addRateCount("all", "sn-relay-move-all-day", 1, now, DAY, strict)) > caps.appliesPerDay) return "day_used";
+    if (kind === "sponsored" && (await addRateCount("all", "sn-relay-sponsored-all-day", 1, now, DAY, { failClosed: true })) > caps.sponsoredPerDay) return "day_used";
+    return true;
   });
 }
 
@@ -418,8 +478,18 @@ export async function relaySend(input: {
   lockWaitMs?: number;
 }): Promise<RelaySendResult> {
   const { cfg, chain } = input;
-  const decision = checkRelayCall(input.calls, relayContext(cfg, input.relay, input.env, input.now), input.proof);
+  const ctx = relayContext(cfg, input.relay, input.env, input.now);
+  const decision = checkRelayCall(input.calls, ctx, input.proof);
   if (!decision.ok) return { ok: false, status: 422, code: "not_relayable", message: `Gloam's relay doesn't send this: ${decision.reason}.` };
+  // On mainnet a move pays the relay's fee: with none set, the relay would pay about 7 STRK for any
+  // proven move, anyone's. It sends one only within a sponsored budget, and no approve (step one of an
+  // add) it couldn't follow. An account's open owes no fee and has its own cap.
+  const move = decision.kind === "approve" || (decision.kind === "apply" && !decision.setup);
+  const feeAsked = Object.values(ctx.minFee ?? {}).some((v) => v > 0n);
+  const sponsored = cfg.network === "mainnet" && move && !feeAsked;
+  if (sponsored && relayCaps(cfg.network, input.env).sponsoredPerDay <= 0) {
+    return { ok: false, status: 503, code: "fee_unset", message: "Gloam's relay isn't set to send private moves on Starknet yet." };
+  }
   // The pool's owner can change its code at once: until Gloam checks a new class nothing reaches the
   // pool, and no approve lets the changed pool take an account's tokens either.
   if ((decision.kind === "apply" || decision.kind === "approve") && cfg.poolClassHash) {
@@ -455,10 +525,12 @@ export async function relaySend(input: {
     const cls = await chain.classHashAt(accountAddress(decision.publicKey, cfg.accountClassHash));
     if (cls) return { ok: false, status: 409, code: "already_deployed", message: "That account is already set up." };
   }
-  const kind: RelayRateKind = decision.kind === "deploy" ? "deploy" : decision.kind === "apply" && decision.setup ? "open" : "transact";
+  const kind: RelayRateKind =
+    decision.kind === "deploy" ? "deploy" : decision.kind === "approve" ? "approve" : decision.setup ? "open" : sponsored ? "sponsored" : "move";
   const rate = await input.rate(kind);
   if (rate === "unavailable") return { ok: false, status: 503, code: "relay_unavailable", message: "Gloam's Starknet relay is paused for a moment. Try again shortly." };
   if (rate === "limited") return { ok: false, status: 429, code: "rate_limited", message: "Too many requests. Try again in a little while." };
+  if (rate === "day_used") return { ok: false, status: 503, code: "relay_day_used", message: "Gloam's Starknet relay has sent all it sends today. Try again tomorrow." };
 
   const digest = sendDigest(input.calls, input.proof);
   const out = await withRelayLock(
