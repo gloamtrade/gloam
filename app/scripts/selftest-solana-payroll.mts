@@ -89,7 +89,7 @@ const OWNER = addr(999);
   eq(rows[0]!.line, 2, "lines count from 1, the header included");
   eq(rows[1]!.amount, 1_250_500_000n, "a quoted 1,250.50 reads as 1250.5");
   ok(rows[2]!.error?.includes("more cells"), "an unquoted 1,25 shifts the row: refused, not read as 1 or 125");
-  ok(rows[3]!.error?.includes("Solana private address"), "a missing address says so");
+  ok(!rows[3]!.error && rows[3]!.link === true && rows[3]!.amount === 10_000_000n, "a missing address gets a claim link, as on the other chains");
   ok(rows[4]!.error?.includes("EVM address"), "an EVM address is named as one");
   ok(rows[5]!.error?.includes("Not a Solana address"), "junk is not an address");
   ok(rows[6]!.error?.includes("above zero"), "zero is refused");
@@ -131,8 +131,9 @@ const OWNER = addr(999);
   eq(checked[1]!.amount, null, "a flagged row adds nothing to the total");
 
   const sum = P.summarize(checked, 300_000_000n);
-  eq(sum, { ready: 2, skipped: 10, total: 255_000_000n, short: 0n }, "two people ready (Ada and her second line), 255 USDC, covered");
-  eq(P.summarize(checked, 255_000_000n - 1n).short, 1n, "short by exactly what is missing");
+  eq(checked[3]!.error, null, "a claim link row needs no registry record");
+  eq(sum, { ready: 3, skipped: 9, total: 265_000_000n, short: 0n }, "three ready (Ada, her second line and a claim link), 265 USDC, covered");
+  eq(P.summarize(checked, 265_000_000n - 1n).short, 1n, "short by exactly what is missing");
 }
 
 // ------------------------------------------------------------------ pacing

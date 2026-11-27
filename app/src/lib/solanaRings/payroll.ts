@@ -10,7 +10,10 @@
  *  - The list: name, Solana private address, amount; a header is optional.
  *    Every row is checked before anyone is paid: a Solana address, an amount
  *    above zero within the asset's decimals, and a Rings registry record (a
- *    Gloam private account on Solana). Bad rows are flagged and skipped.
+ *    Gloam private account on Solana). Bad rows are flagged and skipped. A
+ *    row with no address gets a claim link instead (lib/solanaRings/claimLink),
+ *    as on the other chains: the run pays the link's one-time account, and the
+ *    link is shared after the run. The run keeps the link, sealed with it.
  *  - Batches: one Privacy Rings transfer pays up to PAYROLL_BATCH_MAX people
  *    (the SDK's buildMultiTransferTransaction, one private output each). A
  *    batch lands whole or not at all. When the SDK says a batch is too large
@@ -61,6 +64,10 @@ export type DraftRow = {
   error: string | null;
   /** A plain note that doesn't stop the row (the same address on another line). */
   note?: string;
+  /** No address: this person gets a claim link. */
+  link?: boolean;
+  /** The claim link made for the run (its body), and its one-time account as `address`: set just before the run starts. */
+  linkBody?: string;
 };
 
 const CSV_DELIMITERS = ["\t", ";", ","] as const;
@@ -195,8 +202,10 @@ export function parseSolanaPayrollCsv(text: string, asset: Pick<RingsAsset, "dec
       : cells.length > width
         ? 'This row has more cells than the list has columns. Put an amount with a comma in quotes, like "1,250", and use a dot for decimals.'
         : null;
-    if (!error && !address) error = "Add their Solana private address.";
-    else if (!error && !isSolanaAddressText(address)) {
+    const link = !error && !address;
+    if (link) {
+      // no address: a claim link, made when the run starts
+    } else if (!error && !isSolanaAddressText(address)) {
       error = /^0x[0-9a-fA-F]{40}$/.test(address)
         ? "That is an EVM address. Use their Gloam private address on Solana."
         : "Not a Solana address. Copy their private address again from Gloam.";
@@ -204,8 +213,8 @@ export function parseSolanaPayrollCsv(text: string, asset: Pick<RingsAsset, "dec
     const read = readPayrollAmount(amountInput, asset.decimals);
     const amount = !error && "amount" in read ? read.amount : null;
     if (!error && "error" in read) error = read.error;
-    const row: DraftRow = { line: i, name, address, amountInput, amount, error };
-    if (!error) {
+    const row: DraftRow = { line: i, name, address, amountInput, amount, error, ...(link && !error ? { link: true } : {}) };
+    if (!error && !link) {
       const prior = seen.get(address);
       if (prior !== undefined) row.note = `Same address as line ${prior}. Both lines are paid.`;
       else seen.set(address, i);
@@ -226,7 +235,7 @@ export const OWN_ACCOUNT = "That is your own private account.";
  */
 export function checkRecipients(rows: readonly DraftRow[], registered: ReadonlyMap<string, boolean>, owner: string): DraftRow[] {
   return rows.map((r) => {
-    if (r.error) return r;
+    if (r.error || r.link) return r;
     if (r.address === owner) return { ...r, error: OWN_ACCOUNT, amount: null };
     if (registered.get(r.address) !== true) return { ...r, error: NOT_SET_UP, amount: null };
     return r;
@@ -235,7 +244,7 @@ export function checkRecipients(rows: readonly DraftRow[], registered: ReadonlyM
 
 /** The addresses the registry check still has to read. */
 export function addressesToCheck(rows: readonly DraftRow[], known: ReadonlyMap<string, boolean>): string[] {
-  return [...new Set(rows.filter((r) => !r.error && !known.has(r.address)).map((r) => r.address))];
+  return [...new Set(rows.filter((r) => !r.error && !r.link && !known.has(r.address)).map((r) => r.address))];
 }
 
 export type DraftSummary = { ready: number; skipped: number; total: bigint; short: bigint };
@@ -275,6 +284,8 @@ export type RunRow = {
   /** Why it was skipped, or the last error on it. */
   reason?: string;
   signature?: string;
+  /** A claim link's body, for a row with no address: `address` is then its one-time account. Bearer. */
+  link?: string;
 };
 
 /** A batch handed (or about to be handed) to the relay. */
@@ -307,6 +318,7 @@ export type PayrollRun = {
 };
 
 export function newRun(args: { id: string; network: RingsNetwork; owner: string; asset: string; rows: readonly DraftRow[]; now: number }): PayrollRun {
+  if (args.rows.some((r) => r.link && !r.error && (!r.linkBody || !r.address))) throw new Error("Make the claim links first.");
   return {
     v: 1,
     id: args.id,
@@ -321,6 +333,7 @@ export function newRun(args: { id: string; network: RingsNetwork; owner: string;
       amount: r.amount !== null && !r.error ? r.amount.toString() : "0",
       status: r.error || r.amount === null ? "skipped" : "queued",
       ...(r.error ? { reason: r.error } : {}),
+      ...(r.link && !r.error && r.linkBody ? { link: r.linkBody } : {}),
     })),
     inflight: null,
     state: "paused",
@@ -410,8 +423,8 @@ export type InflightResult =
 export type PayrollDeps = {
   /** Persist the run. Before a send it must resolve only once the run is stored; if it throws, nothing is sent. */
   save(run: PayrollRun): Promise<void>;
-  /** Build and sign one private transfer paying `payments`. Nothing is sent. */
-  build(payments: { address: string; amount: bigint }[]): Promise<Built>;
+  /** Build and sign one private transfer paying `payments` (a claim link's one-time account with its `link`). Nothing is sent. */
+  build(payments: { address: string; amount: bigint; link?: string }[]): Promise<Built>;
   /** Hand a built transfer to the relay; its signature. Rejects with a RelayRefusal when the relay says no. */
   send(wire: Uint8Array): Promise<string>;
   /** After a refusal that sent nothing: free the notes the build set aside. */
@@ -536,7 +549,12 @@ export async function runPayroll(run: PayrollRun, deps: PayrollDeps): Promise<Pa
 
     let built: Built;
     try {
-      built = await deps.build(idx.map((i) => ({ address: run.rows[i]!.address, amount: BigInt(run.rows[i]!.amount) })));
+      built = await deps.build(
+        idx.map((i) => {
+          const row = run.rows[i]!;
+          return { address: row.address, amount: BigInt(row.amount), ...(row.link ? { link: row.link } : {}) };
+        })
+      );
     } catch (e) {
       if (deps.tooBig(e) && size > 1) {
         size = Math.max(1, Math.floor(Math.min(size, idx.length) / 2));
@@ -625,19 +643,26 @@ const CSV_STATUS: Record<RowStatus, string> = {
   unknown: "unknown",
 };
 
-/** The run as a CSV: row, name, address, amount, asset, status, signature, reason. */
-export function resultsCsv(run: PayrollRun, asset: Pick<RingsAsset, "decimals" | "symbol">): string {
-  const head = ["row", "name", "address", "amount", "asset", "status", "signature", "reason"];
+/**
+ * The run as a CSV: row, name, address, amount, asset, status, signature,
+ * reason, and a claim_link column when the run has claim links (each paid
+ * row's link, which is bearer: the file is money while a link is unclaimed).
+ * `linkFor` writes a link's body as the link to share.
+ */
+export function resultsCsv(run: PayrollRun, asset: Pick<RingsAsset, "decimals" | "symbol">, linkFor?: (body: string) => string): string {
+  const withLinks = run.rows.some((r) => r.link);
+  const head = ["row", "name", "address", "amount", "asset", "status", "signature", "reason", ...(withLinks ? ["claim_link"] : [])];
   const lines = run.rows.map((r) =>
     [
       String(r.line),
       r.name,
-      r.address,
+      r.link ? "claim link" : r.address,
       r.status === "skipped" ? "" : formatUnits(BigInt(r.amount), asset.decimals),
       asset.symbol,
       CSV_STATUS[r.status],
       r.signature ?? "",
       r.status === "paid" ? "" : (r.reason ?? ""),
+      ...(withLinks ? [r.link && r.status === "paid" ? (linkFor ? linkFor(r.link) : r.link) : ""] : []),
     ]
       .map(csvCell)
       .join(",")
@@ -657,7 +682,14 @@ export function isRun(v: unknown): v is PayrollRun {
     (r!.network === "mainnet" || r!.network === "devnet") &&
     Array.isArray(r!.rows) &&
     r!.rows.every(
-      (x) => x && typeof x.address === "string" && typeof x.amount === "string" && /^\d+$/.test(x.amount) && typeof x.status === "string" && x.status in CSV_STATUS
+      (x) =>
+        x &&
+        typeof x.address === "string" &&
+        typeof x.amount === "string" &&
+        /^\d+$/.test(x.amount) &&
+        typeof x.status === "string" &&
+        x.status in CSV_STATUS &&
+        (x.link === undefined || typeof x.link === "string")
     ) &&
     (r!.inflight === null ||
       (typeof r!.inflight === "object" &&

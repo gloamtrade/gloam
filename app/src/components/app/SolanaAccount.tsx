@@ -48,10 +48,17 @@ import {
   type SolanaWallet,
 } from "@/lib/solanaWallet";
 import { isGloamAccount } from "@/lib/turnkeySolana";
+import type { ClaimResult, LinkState } from "@/lib/solanaRings/claim";
+import type { SolanaSentLinksStore } from "@/lib/solanaRings/sentLinks";
+import { dropSolanaClaim } from "@/lib/solanaRings/claimKeep";
 
 const lib = () => import("@/lib/solanaRings/client");
 
-export type SolanaTaskKind = "connect" | "setup" | "add" | "pay" | "cashout" | "refresh";
+/** "link": making a claim link; "claim": claiming one; "takeback": taking one of yours back (Sent links). */
+export type SolanaTaskKind = "connect" | "setup" | "add" | "pay" | "cashout" | "refresh" | "link" | "claim" | "takeback";
+
+/** What a claim link's one-time account holds now (lib/solanaRings/claim). */
+export type SolanaLinkRead = { state: LinkState; unspent: Record<string, bigint> };
 
 /**
  * A wait, named step by step: what it is doing now, and what comes after.
@@ -123,6 +130,22 @@ type SolanaCtx = {
   add(asset: RingsAsset, amount: bigint): Promise<string | null>;
   pay(to: string, asset: RingsAsset, amount: bigint): Promise<string | null>;
   cashOut(to: string, asset: RingsAsset, amount: bigint): Promise<string | null>;
+  /**
+   * Make a claim link for `amount` of `asset`: kept here (sealed, under Sent
+   * links) before it is paid, then paid privately to its one-time account.
+   * The link's body, or null with the error kept.
+   */
+  makeLink(asset: RingsAsset, amount: bigint): Promise<{ body: string; signature: string } | null>;
+  /** Read a claim link (its body): what its one-time account holds now. Throws with plain words. */
+  readLink(body: string): Promise<SolanaLinkRead>;
+  /** Read several links' one-time accounts, one at a time: null for one that couldn't be read. */
+  readLinks(bodies: readonly string[]): Promise<(LinkState | null)[]>;
+  /** Claim a link into this private balance, or (`takeBack`, a sent link's id) take one of yours back. Null with the error kept. */
+  claimLink(body: string, takeBack?: string): Promise<ClaimResult | null>;
+  /** This account's sent links, sealed in this browser; null until the account is open. */
+  sentLinks: (() => Promise<SolanaSentLinksStore>) | null;
+  /** Goes up whenever a sent link is added or changes, so the list reads again. */
+  linksTick: number;
   clearError(): void;
   setBalances(b: Record<string, bigint>): void;
   payroll: SolanaPayrollEngine | null;
@@ -311,6 +334,8 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
   const [task, setTask] = useState<SolanaTask | null>(null);
   const [error, setError] = useState<{ kind: SolanaTaskKind; message: string } | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [linksTick, setLinksTick] = useState(0);
+  const bumpLinks = useCallback(() => setLinksTick((n) => n + 1), []);
   const restoreTried = useRef(false);
   const hook = useRef<{ ask?: () => void; answer?: () => void }>({});
   const busy = useRef(false);
@@ -320,6 +345,8 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
   }, [session]);
   // The pretend balance the demo moves, kept for the life of the provider.
   const [demoBal] = useState(() => demoStore(demoBalances(network)));
+  // The demo's sent links (in memory, sealed with nothing) and the links it claimed.
+  const [demoLinks] = useState(() => demoLinkStore(network));
 
   // The visit's account follows every change, so the next mount starts where this one is.
   useEffect(() => {
@@ -634,6 +661,8 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
     const w = kept.main?.wallet;
     if (tellWallet && w) void disconnectSolana(w);
     forgetWallet(browserStorage());
+    // a claim link this tab held goes too, so the next person here never sees it
+    dropSolanaClaim();
     const db = browserKeepDb();
     if (db) void forgetAccount(db).catch(() => {});
     restoreTried.current = true;
@@ -754,6 +783,136 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
   const pay = useCallback((to: string, asset: RingsAsset, amount: bigint) => spend("pay", to, asset, amount), [spend]);
   const cashOut = useCallback((to: string, asset: RingsAsset, amount: bigint) => spend("cashout", to, asset, amount), [spend]);
 
+  // ---------------------------------------------------------------- claim links
+
+  const sentLinks = useMemo<(() => Promise<SolanaSentLinksStore>) | null>(() => {
+    if (demo) return demoOpen ? async () => demoLinks.store : null;
+    if (!session) return null;
+    return async () => (await lib()).ringsSentLinksStore(session);
+  }, [demo, demoOpen, demoLinks, session]);
+
+  const makeLink = useCallback(
+    (asset: RingsAsset, amount: bigint) =>
+      run("link", ["Making the link", "Paying it privately", "Updating your private balance"], async (step, detail) => {
+        const [{ newClaim, encodeClaim }, { makeSolanaSentLink }] = await Promise.all([import("@/lib/solanaRings/claimLink"), import("@/lib/solanaRings/sentLinks")]);
+        const body = encodeClaim(newClaim(network, asset, amount));
+        const rec = makeSolanaSentLink({ body });
+        if (demo) {
+          await demoLinks.store.add(rec);
+          await sleep(900);
+          step(1);
+          await sleep(2200);
+          step(2);
+          demoBal.set({ ...demoBal.get(), [asset.id]: (demoBal.get()[asset.id] ?? 0n) - amount });
+          setBalancesState({ ...demoBal.get() });
+          bumpLinks();
+          return { body, signature: demoSig() };
+        }
+        const s = sessionRef.current;
+        if (!s) throw new Error("Open your private account first.");
+        const [l, { payNewLink }] = await Promise.all([lib(), import("@/lib/solanaRings/claim")]);
+        const store = await l.ringsSentLinksStore(s);
+        try {
+          // Kept before anything is sent, and dropped only if the payment surely went nowhere (lib/solanaRings/claim).
+          const signature = await payNewLink({
+            keep: async () => {
+              await store.add(rec);
+              bumpLinks();
+              step(1);
+            },
+            forget: () => store.remove(rec.id),
+            pay: (handed) => l.fundClaim(s, body, asset, amount, { onStep: (_step, label) => detail(label), onHanded: handed }),
+            surelyNotSent: l.surelyNotSent,
+          });
+          step(2);
+          setBalancesState(l.ringsBalances(s));
+          return { body, signature };
+        } finally {
+          bumpLinks();
+        }
+      }),
+    [run, demo, network, demoBal, demoLinks, bumpLinks]
+  );
+
+  const readLink = useCallback(
+    async (body: string): Promise<SolanaLinkRead> => {
+      const { decodeClaim } = await import("@/lib/solanaRings/claimLink");
+      const read = decodeClaim(body);
+      if (!read.ok) throw new Error(read.why === "unknown" ? "This link is from a newer Gloam. Reload the page and try again." : "This link is cut off or damaged. Ask the sender to send it again.");
+      if (read.claim.network !== network) throw new Error(`This link is for Solana ${read.claim.network}, and this is Gloam on Solana ${network}.`);
+      if (demo) {
+        await sleep(700);
+        const used = demoLinks.claimed.has(body);
+        return { state: used ? "used" : "unused", unspent: used ? {} : { [read.claim.asset.id]: read.claim.amount } };
+      }
+      const s = sessionRef.current;
+      if (!s) throw new Error("Open your private account first.");
+      const [l, { linkState }] = await Promise.all([lib(), import("@/lib/solanaRings/claim")]);
+      const e = await l.openClaimAccount(read.claim, s);
+      try {
+        const h = await l.readClaimAccount(e);
+        return { state: linkState(h), unspent: { ...h.unspent } };
+      } finally {
+        l.closeClaimAccount(e);
+      }
+    },
+    [demo, demoLinks, network]
+  );
+
+  const readLinks = useCallback(
+    async (bodies: readonly string[]) => {
+      const out: (LinkState | null)[] = [];
+      for (const b of bodies) out.push(await readLink(b).then((r) => r.state, () => null));
+      return out;
+    },
+    [readLink]
+  );
+
+  const claimLink = useCallback(
+    (body: string, takeBack?: string) =>
+      run(takeBack ? "takeback" : "claim", [takeBack ? "Opening your link" : "Opening the link", takeBack ? "Taking it back privately" : "Claiming it privately", "Updating your private balance"], async (step, detail) => {
+        const { decodeClaim } = await import("@/lib/solanaRings/claimLink");
+        const read = decodeClaim(body);
+        if (!read.ok) throw new Error("This link is cut off or damaged. Ask the sender to send it again.");
+        if (read.claim.network !== network) throw new Error(`This link is for Solana ${read.claim.network}, and this is Gloam on Solana ${network}.`);
+        let result: ClaimResult;
+        if (demo) {
+          await sleep(800);
+          step(1);
+          await sleep(2400);
+          if (demoLinks.claimed.has(body)) result = { state: "used" };
+          else {
+            demoLinks.claimed.add(body);
+            demoBal.set({ ...demoBal.get(), [read.claim.asset.id]: (demoBal.get()[read.claim.asset.id] ?? 0n) + read.claim.amount });
+            result = { state: "claimed", moved: [{ assetId: read.claim.asset.id, amount: read.claim.amount, signature: demoSig() }] };
+          }
+          step(2);
+          setBalancesState({ ...demoBal.get() });
+        } else {
+          const s = sessionRef.current;
+          if (!s) throw new Error("Open your private account first.");
+          const l = await lib();
+          const e = await l.openClaimAccount(read.claim, s);
+          try {
+            step(1);
+            result = await l.claimInto(s, e, { onStep: (_step, label) => detail(label) });
+          } finally {
+            l.closeClaimAccount(e);
+          }
+          step(2);
+          setBalancesState(l.ringsBalances(s));
+        }
+        if (takeBack && sentLinks) {
+          const store = await sentLinks();
+          if (result.state === "claimed") await store.markTakenBack(takeBack).catch(() => undefined);
+          else if (result.state === "used") await store.markUsed([takeBack]).catch(() => undefined);
+          bumpLinks();
+        }
+        return result;
+      }),
+    [run, demo, network, demoLinks, demoBal, sentLinks, bumpLinks]
+  );
+
   const setBalances = useCallback(
     (b: Record<string, bigint>) => {
       if (demo) demoBal.set({ ...b });
@@ -794,14 +953,45 @@ export function SolanaAccountProvider({ children }: { children: ReactNode }) {
       add,
       pay,
       cashOut,
+      makeLink,
+      readLink,
+      readLinks,
+      claimLink,
+      sentLinks,
+      linksTick,
       clearError: () => setError(null),
       setBalances,
       payroll,
     }),
-    [on, demo, network, wallets, relay, ready, main, returning, restoring, address, session, balances, walletBalances, task, error, connect, setUp, disconnect, refresh, add, pay, cashOut, setBalances, payroll]
+    [on, demo, network, wallets, relay, ready, main, returning, restoring, address, session, balances, walletBalances, task, error, connect, setUp, disconnect, refresh, add, pay, cashOut, makeLink, readLink, readLinks, claimLink, sentLinks, linksTick, setBalances, payroll]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+/** The demo's sent links, in this tab's memory and sealed with nothing, and the links it has claimed. */
+function demoLinkStore(network: RingsNetwork): { store: SolanaSentLinksStore; claimed: Set<string> } {
+  const memory = new Map<string, string>();
+  const plain = { seal: async (t: string) => t, open: async (t: string) => t };
+  const storage = { getItem: (k: string) => memory.get(k) ?? null, setItem: (k: string, v: string) => void memory.set(k, v) };
+  let store: SolanaSentLinksStore | null = null;
+  const lazy = async () => {
+    if (!store) {
+      const { solanaSentLinksStore, sentLinksKey } = await import("@/lib/solanaRings/sentLinks");
+      store = solanaSentLinksStore({ key: sentLinksKey(network, DEMO_PRIVATE_ADDRESS), cipher: plain, storage });
+    }
+    return store;
+  };
+  return {
+    store: {
+      load: async () => (await lazy()).load(),
+      add: async (r) => (await lazy()).add(r),
+      remove: async (id) => (await lazy()).remove(id),
+      markUsed: async (ids, now) => (await lazy()).markUsed(ids, now),
+      markTakenBack: async (id, now) => (await lazy()).markTakenBack(id, now),
+    },
+    claimed: new Set<string>(),
+  };
 }
 
 function realPayrollEngine(s: RingsSession): SolanaPayrollEngine {
