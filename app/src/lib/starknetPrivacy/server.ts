@@ -21,8 +21,10 @@ import "server-only";
  *    apply_actions, in whole STRK (default 10). Mainnet's pool asked 4.5 on
  *    2026-11-26; above the cap the relay pauses instead of paying.
  */
+import { createHash, randomBytes } from "crypto";
 import { Account, RpcProvider, num, type Call } from "starknet";
 import { SharedCountUnavailable, addRateCount, clientIp } from "@/lib/mcpRemote/rateLimit";
+import { kv1 } from "@/lib/partnersKv";
 import { STARKNET_NETWORK, STARKNET_STRK, sameStarknetAddress, starknetConfig, type StarknetNetwork, type StarknetNetworkConfig } from "./config";
 import { accountAddress } from "./account";
 import { checkRelayCall, type RelayContext, type RelayDecision, type RelayProof } from "./relayPolicy";
@@ -230,10 +232,21 @@ export type RelayChain = {
  */
 export const starknetRelayChains = { make: (upstream: string, keys: { address: string; secret: string }): RelayChain => relayChain(upstream, keys) };
 
-/** The relay's node reads and its account, over `upstream`. */
-export function relayChain(upstream: string, keys: { address: string; secret: string }): RelayChain {
+/** How long a send waits for the node to count it before the next send may read the nonce. */
+export const RELAY_NONCE_WAIT_MS = 12_000;
+
+/**
+ * The relay's node reads and its account, over `upstream`. A send reads the
+ * relay's nonce at the pre-confirmed block (what the sequencer has already run,
+ * not only the last sealed block: starknet.js reads "latest" by default, so a
+ * second send within a block of the first took the same nonce and was
+ * refused), estimates there, and then waits until the node counts it, so the
+ * next send, under relaySend's lock, reads the next nonce.
+ */
+export function relayChain(upstream: string, keys: { address: string; secret: string }, waitMs = RELAY_NONCE_WAIT_MS): RelayChain {
   const provider = new RpcProvider({ nodeUrl: upstream, batch: 0 });
   const account = new Account({ provider, address: keys.address, signer: keys.secret, cairoVersion: "1" });
+  const nonceAt = async (tag: "pre_confirmed" | "latest") => BigInt(await provider.getNonceForAddress(keys.address, tag));
   return {
     async classHashAt(address) {
       try {
@@ -247,10 +260,112 @@ export function relayChain(upstream: string, keys: { address: string; secret: st
       return BigInt(r[0] ?? "0x0");
     },
     async send(calls, proof) {
-      const r = await account.execute(calls, proof ? { proofFacts: proof.proofFacts as string[], proof: proof.proof } : {});
+      let tag: "pre_confirmed" | "latest" = "pre_confirmed";
+      let nonce: bigint;
+      try {
+        nonce = await nonceAt(tag);
+      } catch {
+        tag = "latest";
+        nonce = await nonceAt(tag);
+      }
+      const r = await account.execute(calls, { ...(proof ? { proofFacts: proof.proofFacts as string[], proof: proof.proof } : {}), nonce, blockIdentifier: tag });
+      const until = Date.now() + waitMs;
+      while (Date.now() < until) {
+        if ((await nonceAt(tag).catch(() => nonce)) > nonce) break;
+        await new Promise((res) => setTimeout(res, 250));
+      }
       return r.transaction_hash;
     },
   };
+}
+
+/**
+ * The node's own reason for refusing a send (starknet.js puts the whole
+ * request first, which pushed the reason past any cut), short.
+ */
+export function sendFailure(e: unknown): string {
+  const base = (e as { baseError?: { code?: unknown; message?: unknown; data?: unknown } } | null)?.baseError;
+  let why: string;
+  if (base && typeof base.message === "string") {
+    const data = base.data === undefined ? "" : typeof base.data === "string" ? base.data : JSON.stringify(base.data);
+    why = `${typeof base.code === "number" ? `${base.code}: ` : ""}${base.message}${data ? `: ${data}` : ""}`;
+  } else why = e instanceof Error ? e.message : "send failed";
+  return why.replace(/\s+/g, " ").slice(0, 240);
+}
+
+// ------------------------------------------------------------------ one send at a time
+
+/** How long a send may hold the relay's lock before it lapses on its own, and how long the next one waits for it. */
+export const RELAY_LOCK_TTL_S = 30;
+export const RELAY_LOCK_WAIT_MS = 20_000;
+/** A call already sent is refused for this long (a second copy would revert and still cost the relay STRK). */
+export const RELAY_SENT_TTL_S = 900;
+
+const relayKey = (...parts: string[]) => `gloam:starknet:v1:${parts.join(":")}`;
+const localQueues = new Map<string, Promise<unknown>>();
+
+/**
+ * Run `fn` as the relay's only send: one at a time in this process, and across
+ * instances under a lock in the shared store (Redis in production). The relay
+ * is one account, so two sends at once read the same nonce and one is refused.
+ * Without the shared store (a local run) the process queue alone holds it.
+ * "busy" when the lock stays taken past `waitMs`.
+ */
+export async function withRelayLock<T>(relay: string, fn: () => Promise<T>, waitMs = RELAY_LOCK_WAIT_MS): Promise<T | "busy"> {
+  const id = num.toHex(BigInt(relay));
+  const prev = localQueues.get(id) ?? Promise.resolve();
+  let done!: () => void;
+  const mine = new Promise<void>((r) => (done = r));
+  const queued = prev.then(() => mine);
+  localQueues.set(id, queued);
+  try {
+    await prev;
+    const lock = relayKey("relay-lock", id);
+    const token = randomBytes(12).toString("hex");
+    const deadline = Date.now() + waitMs;
+    let shared = true;
+    for (;;) {
+      let got: unknown;
+      try {
+        got = await kv1(["SET", lock, token, "NX", "EX", RELAY_LOCK_TTL_S]);
+      } catch {
+        // No shared store here: the process queue holds the sends of this instance.
+        shared = false;
+        break;
+      }
+      if (got === "OK") break;
+      if (Date.now() >= deadline) return "busy";
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    try {
+      return await fn();
+    } finally {
+      if (shared && (await kv1(["GET", lock]).catch(() => null)) === token) await kv1(["DEL", lock]).catch(() => {});
+    }
+  } finally {
+    done();
+    if (localQueues.get(id) === queued) localQueues.delete(id);
+  }
+}
+
+/** Mark `calls` (with their proof) as sent; false when they already were, within RELAY_SENT_TTL_S. */
+async function markSent(digest: string): Promise<boolean> {
+  try {
+    return (await kv1(["SET", relayKey("sent", digest), "1", "NX", "EX", RELAY_SENT_TTL_S])) === "OK";
+  } catch {
+    return true;
+  }
+}
+
+async function unmarkSent(digest: string): Promise<void> {
+  await kv1(["DEL", relayKey("sent", digest)]).catch(() => {});
+}
+
+function sendDigest(calls: Call[], proof?: RelayProof): string {
+  const h = createHash("sha256");
+  for (const c of calls) h.update(`${num.toHex(BigInt(c.contractAddress))}|${c.entrypoint}|${((c.calldata ?? []) as string[]).map((x) => num.toHex(BigInt(x))).join(",")};`);
+  if (proof) h.update(`|${proof.proofFacts.map((x) => num.toHex(BigInt(x))).join(",")}`);
+  return h.digest("hex").slice(0, 40);
 }
 
 /** Most STRK the relay lets the pool take per apply_actions, base units. */
@@ -284,9 +399,11 @@ export function withPoolFee(apply: Call, pool: string, fee: bigint): Call[] {
 
 /**
  * Check a proposed call against the relay's rules, then the chain (an approve
- * only from a Gloam account; the pool still the class it was pinned to, its
- * STRK fee under the cap, a deposit's screening attestation fresh), then send
- * it. `rate` charges the day's buckets only once everything else passed.
+ * only from a Gloam account; for an apply or an approve the pool still the
+ * class it was pinned to; its STRK fee under the cap, a deposit's screening
+ * attestation fresh), then send it, one send at a time (withRelayLock) and
+ * never the same call twice. `rate` charges the day's buckets only once
+ * everything else passed.
  */
 export async function relaySend(input: {
   calls: Call[];
@@ -297,28 +414,32 @@ export async function relaySend(input: {
   env?: Env;
   now?: number;
   rate: (kind: RelayRateKind) => Promise<StarknetRate>;
+  /** How long to wait for another send to finish (withRelayLock). */
+  lockWaitMs?: number;
 }): Promise<RelaySendResult> {
   const { cfg, chain } = input;
   const decision = checkRelayCall(input.calls, relayContext(cfg, input.relay, input.env, input.now), input.proof);
   if (!decision.ok) return { ok: false, status: 422, code: "not_relayable", message: `Gloam's relay doesn't send this: ${decision.reason}.` };
+  // The pool's owner can change its code at once: until Gloam checks a new class nothing reaches the
+  // pool, and no approve lets the changed pool take an account's tokens either.
+  if ((decision.kind === "apply" || decision.kind === "approve") && cfg.poolClassHash) {
+    const cls = await chain.classHashAt(cfg.pool!);
+    if (!cls) return { ok: false, status: 502, code: "upstream_unavailable", message: "Starknet is slow to answer. Try again." };
+    if (!sameStarknetAddress(cls, cfg.poolClassHash)) return { ok: false, status: 503, code: "pool_changed", message: "Private payments on Starknet are paused for a moment." };
+  }
   if (decision.kind === "approve") {
     const cls = await chain.classHashAt(decision.account);
     if (!cls || !sameStarknetAddress(cls, cfg.accountClassHash)) return { ok: false, status: 422, code: "not_relayable", message: "Gloam's relay only sends for a Gloam account." };
   }
+  const stale = () => decision.kind === "apply" && decision.attestedAt !== null && Math.floor((input.now ?? Date.now()) / 1000) - decision.attestedAt > SCREENING_SEND_WINDOW_S;
+  const expired: RelaySendResult = { ok: false, status: 409, code: "screening_expired", message: "That took too long to send. Try again." };
   let send = input.calls;
   if (decision.kind === "apply") {
     if (cfg.poolClassHash) {
-      const cls = await chain.classHashAt(cfg.pool!);
-      if (!cls) return { ok: false, status: 502, code: "upstream_unavailable", message: "Starknet is slow to answer. Try again." };
-      // The pool's owner can change its code at once: a new class waits for Gloam to check it.
-      if (!sameStarknetAddress(cls, cfg.poolClassHash)) return { ok: false, status: 503, code: "pool_changed", message: "Private payments on Starknet are paused for a moment." };
       // The canonical pool takes a screening attestation with a deposit and refuses one without.
-      const nowS = Math.floor((input.now ?? Date.now()) / 1000);
       if (decision.deposits > 0 && decision.attestedAt === null) return { ok: false, status: 422, code: "screening_missing", message: "Starknet's deposit check didn't come back. Try again." };
       if (decision.deposits === 0 && decision.attestedAt !== null) return { ok: false, status: 422, code: "not_relayable", message: "Gloam's relay doesn't send this: unexpected_screening." };
-      if (decision.attestedAt !== null && nowS - decision.attestedAt > SCREENING_SEND_WINDOW_S) {
-        return { ok: false, status: 409, code: "screening_expired", message: "That took too long to send. Try again." };
-      }
+      if (stale()) return expired;
     }
     let fee: bigint;
     try {
@@ -338,14 +459,28 @@ export async function relaySend(input: {
   const rate = await input.rate(kind);
   if (rate === "unavailable") return { ok: false, status: 503, code: "relay_unavailable", message: "Gloam's Starknet relay is paused for a moment. Try again shortly." };
   if (rate === "limited") return { ok: false, status: 429, code: "rate_limited", message: "Too many requests. Try again in a little while." };
-  try {
-    const txHash = await chain.send(send, input.proof);
-    return { ok: true, txHash: num.toHex(BigInt(txHash)), decision };
-  } catch (e) {
-    // The node's reason, cut short; never the relay's key or the request.
-    const why = e instanceof Error ? e.message.replace(/\s+/g, " ").slice(0, 240) : "send failed";
-    return { ok: false, status: 502, code: "send_failed", message: `Starknet refused it: ${why}` };
-  }
+
+  const digest = sendDigest(input.calls, input.proof);
+  const out = await withRelayLock(
+    input.relay,
+    async (): Promise<RelaySendResult> => {
+      // The wait for the lock counts against a deposit's attestation too.
+      if (cfg.poolClassHash && stale()) return expired;
+      // A second copy of a call already sent would revert, and the relay would still pay for it.
+      if (!(await markSent(digest))) return { ok: false, status: 409, code: "already_sent", message: "That was already sent." };
+      try {
+        const txHash = await chain.send(send, input.proof);
+        return { ok: true, txHash: num.toHex(BigInt(txHash)), decision };
+      } catch (e) {
+        await unmarkSent(digest);
+        // The node's reason, cut short; never the relay's key.
+        return { ok: false, status: 502, code: "send_failed", message: `Starknet refused it: ${sendFailure(e)}` };
+      }
+    },
+    input.lockWaitMs
+  );
+  if (out === "busy") return { ok: false, status: 503, code: "relay_busy", message: "Gloam's Starknet relay is busy. Try again in a moment." };
+  return out;
 }
 
 /** The relay's STRK, to say whether it can pay. */

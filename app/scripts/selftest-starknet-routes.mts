@@ -118,6 +118,7 @@ const relayRoute = await import("../src/app/api/starknet/relay/route");
 const proveRoute = await import("../src/app/api/starknet/prove/route");
 const discoveryRoute = await import("../src/app/api/starknet/discovery/route");
 const keysRoute = await import("../src/app/api/starknet/discovery/ohttp-keys/route");
+const { kv1, resetMemoryKv } = await import("../src/lib/partnersKv");
 const { CallData, CairoCustomEnum, CairoOption, CairoOptionVariant } = await import("starknet");
 const { PrivacyPoolABI } = await import("@starkware-libs/starknet-privacy-sdk/abi");
 
@@ -211,6 +212,12 @@ function fakeChain(o: { deployed?: Set<string>; classes?: Record<string, string>
   return { chain, sent };
 }
 const okRate = async () => "ok" as const;
+// relaySend never sends one call twice (a second copy would revert and cost STRK): the checks
+// below send the same call again on purpose, so each starts with the store empty.
+const relaySend: typeof server.relaySend = (x) => {
+  resetMemoryKv();
+  return server.relaySend(x);
+};
 const pub = ec.starkCurve.getStarkKey("0x4242");
 const acct = account.accountAddress(pub);
 const NOW = 1_800_000_000_000;
@@ -229,42 +236,42 @@ const to = (addr: string, amount: number) => new CairoCustomEnum({ TransferTo: {
 const PROOF = { proofFacts: ["0x1", "0x2"], proof: "QUJD" };
 {
   let f = fakeChain();
-  let r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  let r = await relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(r.ok && r.decision.kind === "deploy" && f.sent.length === 1, "a new account's deploy is sent");
   f = fakeChain({ deployed: new Set([num.toHex(BigInt(acct))]) });
-  r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.code === "already_deployed" && f.sent.length === 0, "a deployed account's deploy is not paid for again");
 
   f = fakeChain({ deployed: new Set([num.toHex(BigInt(acct))]) });
-  r = await server.relaySend({ calls: [approveFor(acct, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [approveFor(acct, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(r.ok && r.decision.kind === "approve" && f.sent.length === 1, "a Gloam account's approve is sent");
   const other = "0x0700000000000000000000000000000000000000000000000000000000000001";
   f = fakeChain({ classes: { [num.toHex(BigInt(other))]: "0x123" } });
-  r = await server.relaySend({ calls: [approveFor(other, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [approveFor(other, 1_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.status === 422 && f.sent.length === 0, "another account's approve is refused");
   f = fakeChain({ deployed: new Set([num.toHex(BigInt(acct))]) });
-  r = await server.relaySend({ calls: [approveFor(acct, 2_000_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [approveFor(acct, 2_000_000_000n)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && /approve_amount/.test(r.message) && f.sent.length === 0, "an approve over the environment's cap is refused");
 
   const OUT = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd";
   f = fakeChain();
-  r = await server.relaySend({ calls: [applyCall([to(OUT, 250_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [applyCall([to(OUT, 250_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && /fee_missing/.test(r.message) && f.sent.length === 0, "a proof that doesn't pay the relay's fee is refused");
-  r = await server.relaySend({ calls: [applyCall([to(OUT, 250_000), to(RELAY, 10_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [applyCall([to(OUT, 250_000), to(RELAY, 10_000)])], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(r.ok && r.decision.kind === "apply" && f.sent.length === 1, "a cash out paying the fee is sent");
   eq(f.sent[0]?.proof, PROOF, "with its proof");
   eq(f.sent[0]?.calls.length, 1, "with no pool fee, the apply goes alone");
   const STRK_FEE = 4_500_000_000_000_000_000n;
   f = fakeChain({ poolFee: STRK_FEE });
   const cashOut = applyCall([to(OUT, 250_000), to(RELAY, 10_000)]);
-  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(r.ok && f.sent.length === 1, "the pool's own STRK fee is paid by the relay");
   const strkApprove = (amount: bigint) => ({ contractAddress: config.STARKNET_STRK, entrypoint: "approve", calldata: [num.toHex(BigInt(POOL)), num.toHex(amount), "0x0"] });
   eq(f.sent[0]?.calls, [strkApprove(STRK_FEE), cashOut, strkApprove(0n)], "in one transaction: approve exactly the fee, apply, approve 0");
   f = fakeChain({ poolFee: 11n * 10n ** 18n });
-  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.code === "pool_fee_high" && r.status === 503 && f.sent.length === 0, "a pool fee over the cap (10 STRK by default): paused, nothing sent");
-  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env: { ...env, STARKNET_MAX_POOL_FEE: "20" }, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env: { ...env, STARKNET_MAX_POOL_FEE: "20" }, now: NOW, rate: okRate });
   ok(r.ok && f.sent.length === 1, "a higher cap set in the environment lets it through");
 
   // The canonical pool: pinned to its class, and a deposit's screening attestation checked before paying.
@@ -276,34 +283,106 @@ const PROOF = { proofFacts: ["0x1", "0x2"], proof: "QUJD" };
   const add = applyCall([from(acct, 1_000_000), to(RELAY, 10_000)]);
   const nowS = NOW / 1000;
   f = fakeChain({ classes: { [poolKey]: PIN } });
-  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(r.ok && f.sent.length === 1, "the pool still on its pinned class: sent");
   f = fakeChain({ classes: { [poolKey]: "0xbad" } });
-  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.code === "pool_changed" && r.status === 503 && f.sent.length === 0, "the pool's code changed: paused until Gloam checks it");
   f = fakeChain();
-  r = await server.relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [cashOut], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.code === "upstream_unavailable" && f.sent.length === 0, "the pool's class unread: nothing sent");
   f = fakeChain({ classes: { [poolKey]: PIN } });
-  r = await server.relaySend({ calls: [add], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [add], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.code === "screening_missing" && f.sent.length === 0, "a deposit with no screening attestation is refused before paying");
-  r = await server.relaySend({ calls: [attested(add, nowS - 30)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [attested(add, nowS - 30)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(r.ok && f.sent.length === 1, "a deposit with a fresh attestation is sent");
-  r = await server.relaySend({ calls: [attested(add, nowS - server.SCREENING_SEND_WINDOW_S - 1)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [attested(add, nowS - server.SCREENING_SEND_WINDOW_S - 1)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.code === "screening_expired" && r.status === 409 && f.sent.length === 1, "a stale attestation is refused, so the page proves again");
-  r = await server.relaySend({ calls: [attested(cashOut, nowS - 30)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [attested(cashOut, nowS - 30)], proof: PROOF, cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && /unexpected_screening/.test(r.message) && f.sent.length === 1, "an attestation on a move with no deposit is refused (the pool would revert)");
-  r = await server.relaySend({ calls: [add], proof: PROOF, cfg, relay: RELAY, chain: fakeChain().chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [add], proof: PROOF, cfg, relay: RELAY, chain: fakeChain().chain, env, now: NOW, rate: okRate });
   ok(r.ok, "a pool that isn't pinned isn't held to the canonical pool's screening rule");
 
   f = fakeChain();
-  r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async () => "limited" });
+  r = await relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async () => "limited" });
   ok(!r.ok && r.status === 429 && f.sent.length === 0, "over the limit: 429, nothing sent");
-  r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async () => "unavailable" });
+  r = await relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: async () => "unavailable" });
   ok(!r.ok && r.status === 503 && f.sent.length === 0, "no shared count: 503, nothing sent");
   f = fakeChain({ sendThrows: `RPC: starknet_addInvokeTransaction failed ${"x".repeat(400)}` });
-  r = await server.relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  r = await relaySend({ calls: [account.deployAccountCall(pub)], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
   ok(!r.ok && r.status === 502 && r.message.length < 300 && !r.message.includes(SECRET.slice(2)), "a failed send says why, short, never with the key");
+}
+
+/* ------------------------------------------------------------------ the relay under load, and a changed pool */
+{
+  const { RpcError } = await import("starknet");
+  const PIN = "0xc1a55";
+  const pinned = { ...cfg, poolClassHash: PIN };
+  const poolKey = num.toHex(BigInt(POOL));
+  const acctKey = num.toHex(BigInt(acct));
+
+  // A node's refusal names its reason: starknet.js puts the whole request first, which the old cut kept
+  // instead of the reason (a nonce clash read "Starknet refused it: RPC: starknet_addInvokeTransaction with params {...").
+  const params = { invoke_transaction: { calldata: Array.from({ length: 40 }, (_, i) => `0x${i}`) } };
+  const nonceClash = new RpcError({ code: 52, message: "Invalid transaction nonce", data: "Account nonce: 1; got: 0." } as never, "starknet_addInvokeTransaction", params);
+  let f = fakeChain();
+  f.chain.send = async () => {
+    throw nonceClash;
+  };
+  let r = await relaySend({ calls: [account.deployAccountCall(ec.starkCurve.getStarkKey("0x77"))], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.code === "send_failed" && r.message.includes("52: Invalid transaction nonce: Account nonce: 1; got: 0.") && r.message.length < 300, "a refused send keeps the node's reason, short");
+
+  // The pool changed under its pin: an approve to it is not sent either (it would let the new code take the tokens).
+  f = fakeChain({ deployed: new Set([acctKey]), classes: { [poolKey]: "0xbad" } });
+  r = await relaySend({ calls: [approveFor(acct, 1_000_000n)], cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.code === "pool_changed" && r.status === 503 && f.sent.length === 0, "a changed pool pauses approves too");
+  f = fakeChain({ deployed: new Set([acctKey]), classes: { [poolKey]: PIN } });
+  r = await relaySend({ calls: [approveFor(acct, 1_000_000n)], cfg: pinned, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  ok(r.ok && f.sent.length === 1, "the pool on its pin: the approve is sent");
+
+  // Sends at once go one at a time: the relay is one account, and two sends at once read the same nonce.
+  resetMemoryKv();
+  let live = 0;
+  let most = 0;
+  const order: number[] = [];
+  const slow = fakeChain();
+  slow.chain.send = async (calls: Call[]) => {
+    live++;
+    most = Math.max(most, live);
+    await new Promise((res) => setTimeout(res, 15));
+    order.push(Number(BigInt((calls[0]!.calldata as string[])[1]!) % 1000n));
+    live--;
+    return "0xabc";
+  };
+  const many = await Promise.all(
+    [1, 2, 3, 4, 5].map((i) => server.relaySend({ calls: [account.deployAccountCall(ec.starkCurve.getStarkKey(num.toHex(9000 + i)))], cfg, relay: RELAY, chain: slow.chain, env, now: NOW, rate: okRate }))
+  );
+  ok(many.every((x) => x.ok) && most === 1 && order.length === 5, "five sends at once: all sent, never two at the same time");
+
+  // Across instances the lock is in the shared store: while another holds it, a send waits, then says busy.
+  resetMemoryKv();
+  await kv1(["SET", `gloam:starknet:v1:relay-lock:${num.toHex(BigInt(RELAY))}`, "someone-else", "NX", "EX", 30]);
+  f = fakeChain();
+  const t0 = Date.now();
+  r = await server.relaySend({ calls: [account.deployAccountCall(ec.starkCurve.getStarkKey("0x78"))], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate, lockWaitMs: 300 });
+  ok(!r.ok && r.code === "relay_busy" && r.status === 503 && f.sent.length === 0 && Date.now() - t0 >= 300, "another instance's send in flight: this one waits, then says busy, nothing sent");
+  await kv1(["DEL", `gloam:starknet:v1:relay-lock:${num.toHex(BigInt(RELAY))}`]);
+  r = await server.relaySend({ calls: [account.deployAccountCall(ec.starkCurve.getStarkKey("0x78"))], cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate, lockWaitMs: 300 });
+  ok(r.ok && f.sent.length === 1, "once it is free, the send goes");
+
+  // The same call twice is sent once: under the lock a second copy would land and revert, paid by the relay.
+  resetMemoryKv();
+  f = fakeChain();
+  const cashOut = applyCall([to("0x0123", 250_000), to(RELAY, 10_000)]);
+  const both = await Promise.all([0, 1].map(() => server.relaySend({ calls: [cashOut], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate })));
+  ok(both.filter((x) => x.ok).length === 1 && both.some((x) => !x.ok && x.code === "already_sent" && x.status === 409) && f.sent.length === 1, "the same proven call sent twice at once goes out once");
+  f = fakeChain({ sendThrows: "refused" });
+  const again = applyCall([to("0x0124", 250_000), to(RELAY, 10_000)]);
+  r = await server.relaySend({ calls: [again], proof: PROOF, cfg, relay: RELAY, chain: f.chain, env, now: NOW, rate: okRate });
+  const g = fakeChain();
+  const r2 = await server.relaySend({ calls: [again], proof: PROOF, cfg, relay: RELAY, chain: g.chain, env, now: NOW, rate: okRate });
+  ok(!r.ok && r.code === "send_failed" && r2.ok && g.sent.length === 1, "a send the node refused can be sent again");
+  resetMemoryKv();
 }
 
 /* ------------------------------------------------------------------ an account's open */

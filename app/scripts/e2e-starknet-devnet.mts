@@ -20,12 +20,18 @@
  *    (`scarb build`), its target/dev in STARKNET_POOL_ARTIFACTS.
  * Proofs are the SDK's mock (the pool contract runs for real; devnet runs with
  * --proof-mode none). The pool's screener is the SDK's test screener key.
+ * Every transaction goes out through the server's own relaySend and relayChain
+ * (lib/starknetPrivacy/server: the lock, the nonce read at the pre-confirmed
+ * block, the estimate there with the proof's facts), and both opens go with
+ * the relay's fee asked (an open owes none).
  *
  * Run from app/:
  *   STARKNET_POOL_ARTIFACTS=<repo>/target/dev ../mcp/node_modules/.bin/tsx scripts/e2e-starknet-devnet.mts
  */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import Module from "node:module";
+import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Account, CallData, OutsideExecutionVersion, ec, hash, num, outsideExecution, type Call } from "starknet";
@@ -35,6 +41,15 @@ import { starknetConfig, STARKNET_ACCOUNT_CLASS_HASH } from "../src/lib/starknet
 import { starknetProvider, discoveryFor, gloamTransfers } from "../src/lib/starknetPrivacy/client";
 import { openAccount, add, pay, cashOut, approveCall, privateBalance } from "../src/lib/starknetPrivacy/actions";
 import { checkRelayCall, type RelayContext, type RelayProof } from "../src/lib/starknetPrivacy/relayPolicy";
+
+const stub = fileURLToPath(new globalThis.URL("./server-only-stub.cjs", import.meta.url));
+const M = Module as unknown as { _resolveFilename: (req: string, ...rest: unknown[]) => string };
+const resolveFilename = M._resolveFilename;
+M._resolveFilename = function (req: string, ...rest: unknown[]) {
+  return req === "server-only" ? stub : resolveFilename.call(this, req, ...rest);
+};
+delete process.env.UPSTASH_REDIS_REST_URL;
+delete process.env.UPSTASH_REDIS_REST_TOKEN;
 
 const PORT = Number(process.env.STARKNET_DEVNET_PORT ?? 5071);
 const URL = `http://127.0.0.1:${PORT}`;
@@ -70,7 +85,10 @@ async function main() {
     await new Promise((r) => setTimeout(r, 100));
   }
   const node = starknetProvider(URL);
+  const server = await import("../src/lib/starknetPrivacy/server");
   const pre = (await rpc("devnet_getPredeployedAccounts")).result as { address: string; private_key: string }[];
+  // devnet's own throwaway account (seed 42) is the relay.
+  const relayKeys = { address: num.toHex(BigInt(pre[2].address)), secret: pre[2].private_key };
   const admin = new Account({ provider: node, address: pre[0].address, signer: pre[0].private_key, cairoVersion: "1" });
   const relay = new Account({ provider: node, address: pre[2].address, signer: pre[2].private_key, cairoVersion: "1" });
   eq(num.toHex(BigInt(await node.getClassHashAt(pre[0].address))), num.toHex(BigInt(STARKNET_ACCOUNT_CLASS_HASH)), "devnet's accounts use Gloam's account class");
@@ -105,7 +123,17 @@ async function main() {
   async function relaySend(label: string, calls: Call[], proof?: RelayProof, minFee?: Record<string, bigint>) {
     const d = checkRelayCall(calls, ctx(minFee), proof);
     assert.ok(d.ok, `${label}: relay policy refused it: ${JSON.stringify(d, big)} calls ${JSON.stringify(calls, big)}`);
-    const r = await relay.execute(calls, proof ? { proofFacts: proof.proofFacts as string[], proof: proof.proof } : {});
+    const out = await server.relaySend({
+      calls,
+      proof,
+      cfg,
+      relay: relayKeys.address,
+      chain: server.relayChain(URL, relayKeys),
+      env: { STARKNET_MAX_APPROVE: "10", ...(minFee ? { STARKNET_RELAY_FEE: "0.01" } : {}) },
+      rate: async () => "ok",
+    });
+    assert.ok(out.ok, `${label}: the relay refused it: ${JSON.stringify(out, big)}`);
+    const r = { transaction_hash: out.txHash };
     const receipt = await node.waitForTransaction(r.transaction_hash);
     assert.ok(receipt.isSuccess(), `${label}: ${JSON.stringify(receipt)}`);
     const tx = (await node.getTransactionByHash(r.transaction_hash)) as unknown as { calldata: string[]; sender_address: string };
@@ -133,8 +161,12 @@ async function main() {
   const proofOf = (r: { callAndProof: { proof: { proofFacts: readonly string[]; data: string } } }): RelayProof => ({ proofFacts: r.callAndProof.proof.proofFacts, proof: r.callAndProof.proof.data });
   const sendProven = (label: string, r: Awaited<ReturnType<typeof add>>, minFee?: Record<string, bigint>) => relaySend(label, [r.callAndProof.call], proofOf(r), minFee);
 
-  await sendProven("alice-open", await openAccount(alice.t, { self: alice.keys.address, tokens: [TOKEN] }));
-  await sendProven("bob-open", await openAccount(bob.t, { self: bob.keys.address, tokens: [TOKEN] }));
+  // With the relay's fee asked, an open still goes (it spends nothing to pay one from) and says it is an open.
+  const openFee = { [num.toHex(BigInt(TOKEN))]: ONE / 100n };
+  for (const [label, who] of [["alice-open", alice], ["bob-open", bob]] as const) {
+    const d = await sendProven(label, await openAccount(who.t, { self: who.keys.address, tokens: [TOKEN] }), openFee);
+    ok(d.ok && d.kind === "apply" && d.setup && d.fee === null, `${label}: a real open owes no fee and is counted as an open`);
+  }
 
   // Alice's money arrives on her account (a bridge in the app), then the approve she signs, sent by the relay.
   await admin.execute({ contractAddress: TOKEN, entrypoint: "transfer", calldata: CallData.compile([alice.keys.address, num.toHex(ONE), "0x0"]) }).then((r) => node.waitForTransaction(r.transaction_hash));
