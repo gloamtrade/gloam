@@ -109,7 +109,13 @@ export function StarknetPayrollPage() {
   const sn = useStarknet();
   if (!sn) return null;
   if (!sn.address || !sn.payroll) return <StarknetGate />;
-  return <StarknetPayrollView engine={sn.payroll} balance={sn.privateBalance} fee={sn.fee} relayFunded={sn.relay?.funded !== false} />;
+  const relayNote =
+    sn.relay?.funded === false
+      ? `Private payments on ${STARKNET_NAME} are paused for a moment. Try again later.`
+      : sn.relay?.moves === "off"
+        ? `Paying on ${STARKNET_NAME} isn't open yet. Try again later.`
+        : null;
+  return <StarknetPayrollView engine={sn.payroll} balance={sn.privateBalance} fee={sn.fee} relayNote={relayNote} />;
 }
 
 export function StarknetPayrollView(props: {
@@ -118,9 +124,11 @@ export function StarknetPayrollView(props: {
   balance: bigint | null;
   /** Gloam's fee per proof, base units (0 when none). */
   fee: bigint;
-  relayFunded: boolean;
+  /** Why the relay can't pay right now (paused, or moves not open), or null. */
+  relayNote: string | null;
 }) {
-  const { engine, balance, fee, relayFunded } = props;
+  const { engine, balance, fee, relayNote } = props;
+  const relayFunded = relayNote === null;
   const token = engine.token;
   const [store, setStore] = useState<PayrollStore | null>(null);
   const [run, setRun] = useState<PayrollRun | null>(null);
@@ -456,7 +464,7 @@ export function StarknetPayrollView(props: {
                   <button type="button" className="btn btn-ink btn-lg btn-block" disabled={!relayFunded} onClick={() => void execute(run)}>
                     Resume
                   </button>
-                  {!relayFunded && <p className="text-[12.5px] text-warn">Private payments on {STARKNET_NAME} are paused for a moment. Try again later.</p>}
+                  {relayNote && <p className="text-[12.5px] text-warn">{relayNote}</p>}
                 </>
               ) : null}
               <button type="button" className="btn btn-ghost btn-block" onClick={() => exportRun(run)}>
@@ -685,7 +693,7 @@ export function StarknetPayrollView(props: {
             </p>
           </div>
           <PrivacyLines first={summary.first} proofs={summary.proofs} />
-          {!relayFunded && <p className="mt-3 text-[12.5px] leading-relaxed text-warn">Private payments on {STARKNET_NAME} are paused for a moment. Try again later.</p>}
+          {relayNote && <p className="mt-3 text-[12.5px] leading-relaxed text-warn">{relayNote}</p>}
           <button
             type="button"
             className="btn btn-ink btn-lg btn-block mt-5"

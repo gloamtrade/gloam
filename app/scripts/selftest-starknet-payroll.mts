@@ -176,6 +176,56 @@ const ONE = 1_000_000n;
   eq(await fitCount(10, async (n) => 8 + Math.min(n, 2) * 25 + Math.max(0, n - 2) * 2), 5, "uneven costs settle on the most that fit");
 }
 
+// ------------------------------------------------------------------ the page's chain side, before any proof
+
+{
+  const { starknetPayrollDeps } = await import("../src/lib/starknetPrivacy/payrollSession");
+  const { StarknetRelayError } = await import("../src/lib/starknetPrivacy/session");
+  const token = { symbol: "USDC", name: "USD Coin", address: "0x1234", decimals: 6 };
+  const fake = (info: Record<string, unknown>, changed = false, relay?: () => Promise<string>) => {
+    const calls: string[] = [];
+    const s = {
+      cfg: { discovery: { kind: "indexer" }, pool: "0x99" },
+      address: OWNER,
+      relayInfo: { on: true, funded: true, relayer: "0x5", moves: "on", fee: {}, maxApprove: {}, network: "devnet", pool: "0x99", ...info },
+      refreshRelay: async () => (calls.push("refresh"), changed),
+      settle: async () => (calls.push("settle"), 100),
+      relay: relay ?? (async () => "0xabc"),
+    };
+    return { deps: starknetPayrollDeps(s as never, token), calls };
+  };
+  const stops = async (info: Record<string, unknown>, changed: boolean, code: string, label: string) => {
+    const f = fake(info, changed);
+    let got: unknown = null;
+    try {
+      await f.deps.prove([{ address: addr(1), amount: 1n }], () => {});
+    } catch (e) {
+      got = e;
+    }
+    ok(got instanceof StarknetRelayError && got.code === code, `${label}: stops with ${code}`);
+    eq(f.calls, ["refresh"], `${label}: before waiting or proving anything`);
+  };
+  await stops({ funded: false }, false, "relay_paused", "a relay out of STRK");
+  await stops({ moves: "off" }, false, "moves_off", "moves not open");
+  await stops({}, true, "relay_changed", "a fee that changed since the page read it");
+
+  const refusal = async (e: unknown) => {
+    try {
+      await fake({}, false, async () => {
+        throw e;
+      }).deps.send({ count: 1, spends: [], change: [], provedAt: 1, fee: 0n, payload: { callAndProof: { call: { contractAddress: "0x1", entrypoint: "apply_actions", calldata: [] }, proof: { proofFacts: [], data: "" } } } });
+    } catch (x) {
+      return x as { status: number; code: string; message: string; maybeSent: boolean };
+    }
+    return null;
+  };
+  eq(await refusal(new StarknetRelayError("rate_limited", "Too many")), { status: 429, code: "rate_limited", message: "Too many", maybeSent: false }, "a 429 sent nothing");
+  eq((await refusal(new StarknetRelayError("already_sent", "x")))?.maybeSent, true, "already sent: it may have landed");
+  eq((await refusal(new StarknetRelayError("relay_failed", "x")))?.maybeSent, true, "no answer the page could read: it may have landed");
+  eq((await refusal(new TypeError("Failed to fetch")))?.maybeSent, true, "the request failed: it may have reached the relay");
+  eq((await refusal(new StarknetRelayError("not_relayable", "x")))?.maybeSent, false, "a refusal by policy sent nothing");
+}
+
 // ------------------------------------------------------------------ the engine
 
 type Build = { id: number; spends: string[]; change: string[]; provedAt: number; payments: { address: string; amount: bigint }[]; landed: boolean; reverted: boolean; hash: string };

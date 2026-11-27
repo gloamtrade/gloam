@@ -101,6 +101,8 @@ export function starknetPayrollDeps(s: StarknetSession, token: StarknetToken): P
       const changed = await s.refreshRelay(token);
       const info = s.relayInfo;
       if (!info.on || !info.funded || !info.relayer) throw new StarknetRelayError("relay_paused", "Private payments on Starknet are paused for a moment. Try again later.");
+      // The relay would refuse it after its proof (fee_unset): say so before proving.
+      if (info.moves === "off") throw new StarknetRelayError("moves_off", "Paying on Starknet isn't open yet. Nothing was sent. Try again later.");
       if (changed) throw new StarknetRelayError("relay_changed", "Gloam's fee on Starknet just changed. Check it and resume.");
       // 2. The block to prove at.
       const blind = !confirmed && s.cfg.discovery.kind === "indexer";
