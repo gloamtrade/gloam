@@ -191,7 +191,7 @@ export function paydaysAhead(
   return paydaysFrom(s.cadence, cursorFor(s), count, s.endsOn);
 }
 
-export function scheduleState(s: PayrollSchedule, today: string = isoDay()): ScheduleState {
+export function scheduleState(s: Pick<PayrollSchedule, "cadence" | "startsOn" | "paidThrough" | "endsOn" | "paused">, today: string = isoDay()): ScheduleState {
   const payday = nextPayday(s);
   if (!payday || (s.endsOn && today > s.endsOn)) return { status: "ended", payday: null, owed: 0, late: 0 };
   const late = daysBetween(payday, today);
