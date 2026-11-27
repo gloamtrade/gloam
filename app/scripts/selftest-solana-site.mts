@@ -105,6 +105,7 @@ ok(text.includes(config.RINGS_PRIVACY_NOTE) === ON, `${MODE}: llms.txt ${ON ? "c
 ok(/Privacy Rings|\/app\/solana/.test(text) === ON, `${MODE}: llms.txt ${ON ? "names" : "never names"} Gloam on Solana`);
 if (ON) {
   ok(text.includes(`Gloam is on ${NAME} too, through Helius Privacy Rings, in the app at ${SITE}/app/solana.`), `${MODE}: llms.txt links the Solana app`);
+  ok(text.includes("The SDK (@gloamtrade/sdk/solana) and the local MCP server (@gloamtrade/mcp, gloam_solana_* tools) cover it; the hosted MCP server only lists it."), `${MODE}: llms.txt says the SDK and the local MCP server cover Solana, the hosted one only lists it`);
   // the summary line, which says amounts and payees stay hidden, never names Solana
   const summary = text.split("\n").find((l) => l.startsWith("> "))!;
   ok(!/Solana/.test(summary), `${MODE}: the summary that says payees are hidden leaves Solana out`);
@@ -197,6 +198,7 @@ if (ON) {
 const glim = knowledgeBlock();
 ok((solanaFacts() !== null) === ON && glim.includes(config.RINGS_PRIVACY_NOTE) === ON, `${MODE}: Glim ${ON ? "knows" : "says nothing about"} Gloam on Solana`);
 if (ON) ok(glim.includes("Never say or suggest that Gloam on Solana hides who paid whom, the sender or the recipient."), `${MODE}: and is told never to say it hides who paid whom`);
+if (ON) ok(glim.includes("the local MCP server (@gloamtrade/mcp 0.11.0 or later, the gloam_solana_* tools with GLOAM_AGENT_SOLANA_KEY) cover Solana") && glim.includes("The hosted MCP server only lists it.") && !/MCP servers do not cover/.test(glim), `${MODE}: Glim says the SDK and the local MCP server cover Solana, the hosted one only lists it`);
 
 // ---------------------------------------------------------------- the banner (source)
 

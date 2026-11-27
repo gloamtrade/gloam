@@ -472,7 +472,7 @@ export function solanaFacts(): string | null {
         ]
       : []),
     "- A Solana payment request is a link that fills in Pay with the private address, the token and the amount. It never goes on chain, and its note is only shown to the payer.",
-    `- On Solana the proof is made by Helius's prover in an attested enclave, not on the person's device. Proof of funds or payment${SOLANA_CLAIM_LINKS_ENABLED ? " and private swaps are" : ", private swaps and claim links are"} not on Solana. Developers and agents reach Solana through the SDK (@gloamtrade/sdk/solana) and the npm MCP server (@gloamtrade/mcp). Never say or suggest a partnership with Helius or Solana.`,
+    `- On Solana the proof is made by Helius's prover in an attested enclave, not on the person's device. Proof of funds or payment${SOLANA_CLAIM_LINKS_ENABLED ? " and private swaps are" : ", private swaps and claim links are"} not on Solana. The SDK (@gloamtrade/sdk 0.9.0 or later, @gloamtrade/sdk/solana) and the local MCP server (@gloamtrade/mcp 0.11.0 or later, the gloam_solana_* tools with GLOAM_AGENT_SOLANA_KEY) cover Solana for servers and agents: the same private account as the app, under spending limits. The hosted MCP server only lists it. Never say or suggest a partnership with Helius or Solana.`,
     "- Bringing money over from a Solana wallet into a vault on another chain (the bridge) is a different thing and works as before.",
   ].join("\n");
 }
