@@ -4,6 +4,7 @@
  *
  * Private payment tools for AI agents across Gloam's networks: private
  * stablecoin payments on Tempo, Robinhood Chain, Base, Ethereum, Elysium and BNB Chain,
+ * plus Solana and Starknet (not open yet) with their own tools,
  * on mainnet and testnet. The tools live in src/server.ts; this file
  * loads settings and connects them to stdio.
  *
@@ -45,6 +46,9 @@ async function serve() {
     key?.fill(0);
     solanaAccountIndex(process.env);
     solanaBaseUrl(process.env);
+    const { starknetAccountIndex, starknetBaseUrl } = await import("./starknet.js");
+    starknetAccountIndex(process.env);
+    starknetBaseUrl(process.env);
   } catch (e) {
     log(`Gloam MCP: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);
@@ -78,6 +82,7 @@ async function serve() {
     log(`Signer: Tempo access key ${setup.keyAddress} for account ${setup.owner}. On Tempo the protocol enforces the owner's limits; on Robinhood Chain the key signs as itself.`);
   }
   log(solanaKey ? "Solana: GLOAM_AGENT_SOLANA_KEY is set; the gloam_solana_* tools can add, pay and cash out (spending limits apply)." : "Solana: no GLOAM_AGENT_SOLANA_KEY; the gloam_solana_* tools read only.");
+  log(`Starknet: not open on Gloam yet; the gloam_starknet_* tools say so and send nothing until it opens${setup.mode === "none" ? "" : " (then the agent key opens its account, spending limits apply)"}.`);
   if (process.env.GLOAM_EXPOSE_NOTE_SECRETS?.trim() === "1") {
     log("WARNING: GLOAM_EXPOSE_NOTE_SECRETS=1. Note secrets are passed to and from the agent. This is unsafe.");
   }

@@ -1,5 +1,6 @@
 import { defineChain, zeroAddress, type Address, type Chain } from "viem";
 import { SOLANA_MAINNET_CHAIN_ID } from "./solanaInfo.js";
+import { STARKNET_MAINNET_LIST_ID } from "./starknetInfo.js";
 import { base, baseSepolia, bsc, mainnet as ethereum, sepolia } from "viem/chains";
 import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, mainnetPoolFor, type MainnetChainId } from "./mainnet.js";
 import type { HistoryRpc, LogCanary } from "./rpc.js";
@@ -953,6 +954,7 @@ export function networkName(chainId: number): string {
   if (chainId === ETHEREUM_SEPOLIA_CHAIN_ID) return "Ethereum Sepolia";
   if (chainId === ELYSIUM_TESTNET_CHAIN_ID) return "Elysium testnet";
   if (chainId === SOLANA_MAINNET_CHAIN_ID) return "Solana";
+  if (chainId === STARKNET_MAINNET_LIST_ID) return "Starknet";
   return `chain ${chainId}`;
 }
 

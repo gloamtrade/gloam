@@ -24,6 +24,8 @@ import {
 import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET } from "@/lib/elysium";
 import { BNB, BNB_LIVE_SINCE } from "@/lib/bnb";
 import { RINGS_PAYROLL_NOTE, RINGS_PRIVACY_NOTE, SOLANA_CLAIM_LINKS_ENABLED, SOLANA_NAME, SOLANA_RINGS_ENABLED, ringsAssets } from "@/lib/solanaRings/config";
+import { STARKNET_PRIVACY, STARKNET_PRIVACY_NOTE } from "@gloamtrade/sdk";
+import { STARKNET_ENABLED, STARKNET_NETWORK, starknetConfig } from "@/lib/starknetPrivacy/config";
 import { VAULT_SWAP_V2_ROUTER, swapV3Live } from "@/lib/vaultSwap";
 import { voteFacts } from "@/lib/vote/glim";
 import {
@@ -476,6 +478,32 @@ export function solanaFacts(): string | null {
 }
 
 /**
+ * What Glim knows about Gloam on Starknet, only while it is on
+ * (NEXT_PUBLIC_STARKNET_ENABLED, lib/starknetPrivacy/config). Off, Glim says
+ * nothing about it: no "coming", no date, no plan. On Starknet the first
+ * payment to someone shows their private account, so Glim must never say a
+ * payment there always hides who was paid.
+ */
+export function starknetFacts(): string | null {
+  if (!STARKNET_ENABLED) return null;
+  const name = STARKNET_NETWORK === "mainnet" ? "Starknet" : STARKNET_NETWORK === "sepolia" ? "Starknet Sepolia" : "Starknet devnet";
+  const tokens = starknetConfig().tokens.map((t) => t.symbol);
+  return [
+    `${name.toUpperCase()} (Gloam on Starknet; it is not one of the vault mainnets above and works differently)`,
+    `- Gloam is on ${name}: pick ${name} in the app's network menu. It runs on Starknet's own privacy pool (STRK20), not the Gloam vault. ${tokens.length ? `Asset: ${joinNames(tokens)}.` : ""} Add, pay privately, payroll, claim links and cash out work there.`,
+    `- ${STARKNET_PRIVACY_NOTE} Never say or suggest that the first payment to someone hides who was paid: it shows their private account. A payroll with several first payments shows those accounts together.`,
+    "- A person's Starknet private account is its own Starknet account, opened from their Gloam key (a wallet's signature over a fixed text, or a Gloam wallet's passkey or backup code), so the same wallet, passkey or code reopens it on any device. Gloam's relay deploys it and sends every transaction, so it never needs STRK.",
+    `- ${STARKNET_PRIVACY.auditor}`,
+    `- ${STARKNET_PRIVACY.prover} ${STARKNET_PRIVACY.screening}`,
+    "- Fees: Gloam's relay pays Starknet's fees. On mainnet each add, payment and cash out pays Gloam's relay fee (0.25 USDC), shown in the app before each move. Opening an account is free, with a daily cap.",
+    "- Proofs come from a few a day for now. When they are used, the app says Starknet is busy and nothing is sent: try again later. Each move waits about 10 blocks before its proof.",
+    "- A Starknet claim link (gloam.trade/c#sn=...) is a one-time private account whose key rides in the link. Paying it shows that one-time account. Claiming it moves the money into the claimer's own private account, which shows that account. Whoever made it can take back one nobody claimed. A payroll row with no account gets one.",
+    "- Not on Starknet: proof of funds or payment, and private swaps. Money reaches a Starknet private account by sending USDC on Starknet to its address, then Add. Don't promise bringing money in from other networks or give dates.",
+    "- The SDK (@gloamtrade/sdk/starknet) and the local MCP server (gloam_starknet_* tools) open the same private account for servers and agents. Never say or suggest a partnership with StarkWare, Starknet or Starkscan.",
+  ].join("\n");
+}
+
+/**
  * Elysium testnet (99801), only while NEXT_PUBLIC_ELYSIUM_TESTNET_ENABLED is on
  * and its pool is in (lib/elysium.ts). Null otherwise.
  */
@@ -734,6 +762,7 @@ export function knowledgeBlock(): string {
   const elysium = elysiumFacts();
   const bnb = bnbFacts();
   const solana = solanaFacts();
+  const starknet = starknetFacts();
   const block = [
     about().trim(),
     ...(base ? [base] : []),
@@ -742,6 +771,7 @@ export function knowledgeBlock(): string {
     ...(elysium ? [elysium] : []),
     ...(bnb ? [bnb] : []),
     ...(solana ? [solana] : []),
+    ...(starknet ? [starknet] : []),
     TOKEN.trim(),
     ...[voteFacts()].filter((v): v is string => v !== null),
     CRYPTO_TALK.trim(),

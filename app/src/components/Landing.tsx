@@ -7,6 +7,7 @@ import { FlowField } from "@/components/ui/FlowField";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { SOLANA_NAME, SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
 import { CursorReveal } from "@/components/ui/CursorReveal";
 import { SealStream } from "@/components/landing/SealStream";
 import { PayrollLive } from "@/components/landing/PayrollLive";
@@ -245,6 +246,8 @@ export function Landing() {
                 showing the number. Live on {liveMainnetNames()} mainnet{SHOW_TESTNETS ? ", and on testnet" : ""}.
                 {/* Solana hides the token and the amount only, and Helius's prover makes its proofs, so it gets its own line */}
                 {SOLANA_RINGS_ENABLED ? ` Also on ${SOLANA_NAME}: the token and the amount stay hidden, and Helius's prover makes the proof, not your device.` : null}
+                {/* Starknet shows the payee on a first payment, and Starkscan's prover makes its proofs: its own line too, only while it is on */}
+                {STARKNET_ENABLED ? " Also on Starknet: once a channel to someone is open, payments hide both sides and the amount. The first one shows their private account, and Starkscan's prover makes the proof." : null}
               </p>
             </div>
             <LiveProduct />

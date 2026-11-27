@@ -6,6 +6,8 @@ import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK } from "@/lib/solanaRings/config";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
+import { STARKNET_DOCS_NAME, STARKNET_DOCS_NOTE } from "../starknet/starknetDocs";
 
 /** Gloam itself runs on Helius Privacy Rings on Solana mainnet once its Solana flag is on (lib/solanaRings/config). */
 const RINGS_ON_MAINNET = SOLANA_RINGS_ENABLED && SOLANA_RINGS_NETWORK === "mainnet";
@@ -49,8 +51,11 @@ export default function DocsComparePage() {
       title="How Gloam compares"
       lede="Privacy onchain splits into two jobs. Some apps share secrets between many people. A payment has one owner. Gloam does the second job, and that choice decides who can see your money."
       glance={[
-        { label: "Who holds a key", value: "only you" },
-        { label: "Proofs made", value: SOLANA_RINGS_ENABLED ? "on your device; on Solana, by Helius's prover" : "on your device" },
+        { label: "Who holds a key", value: STARKNET_ENABLED ? "only you; on Starknet an auditor key can read" : "only you" },
+        {
+          label: "Proofs made",
+          value: `${SOLANA_RINGS_ENABLED ? "on your device; on Solana, by Helius's prover" : "on your device"}${STARKNET_ENABLED ? "; on Starknet, by Starkscan's prover" : ""}`,
+        },
         { label: "Networks", value: `${MAINNETS} (mainnet)` },
         { label: "New cryptography", value: "none, by design" },
       ]}
@@ -104,6 +109,13 @@ export default function DocsComparePage() {
           <>
             {" "}
             Gloam on Solana is the exception: see <a href="#solana">{SOLANA_NAME}</a>.
+          </>
+        )}
+        {STARKNET_ENABLED && (
+          <>
+            {" "}
+            {SOLANA_RINGS_ENABLED ? "So is Gloam on Starknet" : "Gloam on Starknet is the exception"}: see{" "}
+            <a href="#starknet">{STARKNET_DOCS_NAME}</a>.
           </>
         )}
       </p>
@@ -279,6 +291,20 @@ export default function DocsComparePage() {
             prover, in an attested enclave, not on your device. Everything else
             on this page about Gloam means the vault on {MAINNETS}. See{" "}
             <Link href="/docs/chain#solana">{SOLANA_NAME}</Link>.
+          </p>
+        </>
+      )}
+
+      {STARKNET_ENABLED && (
+        <>
+          <h3 id="starknet">Gloam on {STARKNET_DOCS_NAME}</h3>
+          <p>
+            On Starknet, Gloam runs on Starknet&apos;s own privacy pool, with
+            its own account layer on top. {STARKNET_DOCS_NOTE} So there, a key
+            other than yours can read your private activity: the pool&apos;s
+            auditor key, which cannot spend. Everything else on this page about
+            Gloam means the vault on {MAINNETS}. See{" "}
+            <Link href="/docs/starknet">{STARKNET_DOCS_NAME}</Link>.
           </p>
         </>
       )}

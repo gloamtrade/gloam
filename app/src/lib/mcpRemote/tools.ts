@@ -15,7 +15,7 @@ import { parseUnits, type Address } from "viem";
 import { swapMainnets, swapRouterFor, vaultSwapRouter } from "@/lib/vaultSwap";
 import { SWAP_PUBLIC_LINE, SWAP_QUOTE_PER_MINUTE, SwapQuoteError, quoteSwapServer, type SwapQuote } from "@/lib/swapQuote";
 import { knownTokens, shieldTokensFor } from "@/lib/tokens";
-import { SDK_VERSION, redactRpcUrl } from "@gloamtrade/sdk";
+import { SDK_VERSION, STARKNET_FEES, STARKNET_PRIVACY, STARKNET_PRIVACY_NOTE, redactRpcUrl } from "@gloamtrade/sdk";
 import { formatGwei, maxGasPriceWei } from "@/lib/relay/gasCeiling";
 import { fetchOnchainMetrics } from "@/lib/onchainMetrics";
 import {
@@ -35,6 +35,10 @@ import { findSecret, secretWarning } from "./safety";
 import { HUNT_INPUT_MAX, countHuntStep, huntEnabled, huntMcpArg, huntMcpPiecesArg, huntSubject, mcpHuntFinal } from "@/lib/hunt";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAssets } from "@/lib/solanaRings/config";
+import { STARKNET_ENABLED, STARKNET_NETWORK, starknetConfig } from "@/lib/starknetPrivacy/config";
+
+/** "Starknet" (or its testnet or devnet), as the app names it. */
+const STARKNET_NAME = STARKNET_NETWORK === "mainnet" ? "Starknet" : STARKNET_NETWORK === "sepolia" ? "Starknet Sepolia" : "Starknet devnet";
 
 export const SITE = "https://www.gloam.trade";
 export const MCP_URL = `${SITE}/mcp`;
@@ -231,7 +235,8 @@ export const TOOLS: Tool[] = [
       (MAINNET_ENABLED
       ? `The networks Gloam runs on, mainnets first, with each vault (pool) address, the private swap routers (${swapMainnets()} mainnet), the assets you can deposit (on mainnet: ${MAINNET_DEPOSITS_TEXT}; on testnet: OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain, and more on Base Sepolia and Ethereum Sepolia${ELYSIUM_TESTNET_ON ? ", and test USDC on Elysium testnet" : ""}), explorers, RPCs and the testnet faucets.`
       : "The networks Gloam runs on, with each vault (pool) address, the assets you can deposit (OUSD and PathUSD on Tempo, USDG and ETH on Robinhood Chain), explorers, RPCs and faucets.") +
-      (SOLANA_RINGS_ENABLED ? ` With no network given, also Gloam on ${SOLANA_NAME} (Helius Privacy Rings: in the app, the SDK and the local MCP server), listed apart.` : ""),
+      (SOLANA_RINGS_ENABLED ? ` With no network given, also Gloam on ${SOLANA_NAME} (Helius Privacy Rings: in the app, the SDK and the local MCP server), listed apart.` : "") +
+      (STARKNET_ENABLED ? ` With no network given, also Gloam on ${STARKNET_NAME} (Starknet's privacy pool: in the app, the SDK and the local MCP server), listed apart.` : ""),
     inputSchema: {
       type: "object",
       properties: { network: { ...NETWORK_PROP, description: `${NETWORK_PROP.description} ${LEAVE_OUT}` } },
@@ -385,6 +390,7 @@ function info(ctx: ToolContext) {
     status: STATUS,
     whatIsPublic: WHAT_IS_PUBLIC,
     ...(SOLANA_RINGS_ENABLED ? { solana: solanaView(ctx.origin) } : {}),
+    ...(STARKNET_ENABLED ? { starknet: starknetView(ctx.origin) } : {}),
     links: { ...appLinks(ctx.origin), github: "https://github.com/gloamtrade/gloam", email: "hello@gloam.trade" },
   };
 }
@@ -476,12 +482,39 @@ function solanaView(origin: string) {
   };
 }
 
+/**
+ * Gloam on Starknet, only while it is on (lib/starknetPrivacy/config). Listed
+ * apart from the networks: it has no Gloam vault, runs on Starknet's own
+ * privacy pool, and none of this server's other tools cover it.
+ */
+const LOCAL_STARKNET = "@gloamtrade/mcp 0.12.0 or later, the gloam_starknet_* tools with GLOAM_AGENT_PRIVATE_KEY";
+const SDK_STARKNET = "@gloamtrade/sdk 0.10.0 or later, @gloamtrade/sdk/starknet";
+
+function starknetView(origin: string) {
+  const cfg = starknetConfig();
+  return {
+    name: STARKNET_NAME,
+    network: STARKNET_NETWORK,
+    how: "Starknet's own privacy pool (STRK20), with Gloam's account layer and relay on top. There is no Gloam vault on Starknet.",
+    pool: cfg.pool,
+    privacy: STARKNET_PRIVACY_NOTE,
+    auditor: STARKNET_PRIVACY.auditor,
+    prover: STARKNET_PRIVACY.prover,
+    assets: cfg.tokens.map((t) => ({ symbol: t.symbol, address: t.address, decimals: t.decimals })),
+    fees: STARKNET_FEES,
+    app: `${origin}/app/vault (pick ${STARKNET_NAME} in the network menu)`,
+    docs: `${origin}/docs/starknet`,
+    agents: `The local MCP server (${LOCAL_STARKNET}) and the SDK (${SDK_STARKNET}) open the same private account as the app from the same wallet: balance, add, pay and cash out on ${STARKNET_NAME}, under spending limits. This server only lists it.`,
+  };
+}
+
 function networks(args: Args, ctx: ToolContext) {
   const only = optNetwork(args);
   const keys = only ? [only] : NETWORK_KEYS;
   return {
     networks: keys.map((k) => networkView(k, ctx.origin)),
     ...(SOLANA_RINGS_ENABLED && !only ? { solana: solanaView(ctx.origin) } : {}),
+    ...(STARKNET_ENABLED && !only ? { starknet: starknetView(ctx.origin) } : {}),
     status: STATUS,
   };
 }
