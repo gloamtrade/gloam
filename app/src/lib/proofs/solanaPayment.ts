@@ -289,7 +289,7 @@ export async function verifySolanaPayment(p: SolanaPaymentProof, deps: SolanaPay
         ? `${net} has no such transaction.`
         : at && !at.ok && at.why === "failed"
           ? "That transaction failed, so it paid nothing."
-          : "That transaction is not a private payment in Solana Privacy Rings."
+          : "That transaction is not a private payment in Solana's private pool."
     );
     expiry();
     return finish();
@@ -301,7 +301,7 @@ export async function verifySolanaPayment(p: SolanaPaymentProof, deps: SolanaPay
     "A private payment on Solana",
     out ? "pass" : "fail",
     out
-      ? `${paidAt ? `${when(paidAt)}. ` : ""}A transact in Solana Privacy Rings (${SHIELDED_POOL_PROGRAM.slice(0, 4)}…${SHIELDED_POOL_PROGRAM.slice(-4)}), which succeeded.`
+      ? `${paidAt ? `${when(paidAt)}. ` : ""}A private transfer in Solana's private pool (${SHIELDED_POOL_PROGRAM.slice(0, 4)}…${SHIELDED_POOL_PROGRAM.slice(-4)}), which succeeded.`
       : "That transaction has no such payment in it."
   );
   if (!out) {

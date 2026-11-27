@@ -193,7 +193,7 @@ ok(undated.ok && undated.payments.every((p) => p.at === undefined), "without eve
 const text = sc.encodeStarknetChannel(received);
 ok(text.startsWith("gloamsnpay1:"), "its prefix");
 eq(sc.decodeStarknetChannel(text), received, "it decodes to the same disclosure");
-ok(chain.isChainProofText(text) && chain.decodeChainProof(text).kind === "starknet-channel", "the verify page's dispatcher reads it");
+ok(chain.isChainProofText(text) && (await chain.decodeChainProof(text)).kind === "starknet-channel", "the verify page's dispatcher reads it");
 assert.throws(() => sc.decodeStarknetChannel(sc.encodeStarknetChannel({ ...received, sender: "alice" })), /damaged/);
 pass++;
 

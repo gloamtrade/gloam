@@ -201,7 +201,7 @@ const failed = (r: Awaited<ReturnType<typeof pay.verifySolanaPayment>>, label: s
   const text = pay.encodeSolanaPayment(good);
   ok(text.startsWith("gloamsolpay1:"), "its prefix");
   eq(pay.decodeSolanaPayment(text), good, "it decodes to the same proof");
-  ok(chain.isChainProofText(text) && chain.decodeChainProof(text).kind === "solana-payment", "the verify page's dispatcher reads it");
+  ok(chain.isChainProofText(text) && (await chain.decodeChainProof(text)).kind === "solana-payment", "the verify page's dispatcher reads it");
   assert.throws(() => pay.decodeSolanaPayment(text.slice(0, 40)), /damaged/);
   pass++;
   assert.throws(() => pay.decodeSolanaPayment(pay.encodeSolanaPayment({ ...good, amount: "-1" })), /damaged/);

@@ -4,8 +4,8 @@ import { Suspense } from "react";
 import { AppShell } from "@/components/app/AppShell";
 import { DiscloseView } from "@/components/app/DiscloseView";
 import { SolanaOr } from "@/components/app/SolanaOr";
-import { SolanaNotHere } from "@/components/app/SolanaParts";
-import { StarknetNotHere } from "@/components/app/StarknetParts";
+import { SolanaProve } from "@/components/app/SolanaProve";
+import { StarknetProve } from "@/components/app/StarknetProve";
 
 export const metadata: Metadata = {
   title: "Prove",
@@ -34,7 +34,7 @@ export default function DisclosePage() {
         </Link>
       }
     >
-      <SolanaOr solana={<SolanaNotHere what="Prove" />} starknet={<StarknetNotHere what="Prove" />}>
+      <SolanaOr solana={<SolanaProve />} starknet={<StarknetProve />}>
         <Suspense fallback={<ProveSkeleton />}>
           <DiscloseView />
         </Suspense>

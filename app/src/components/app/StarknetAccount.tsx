@@ -95,6 +95,13 @@ export type StarknetLinksEngine = {
   claim(secret: Uint8Array, step: (at: number, detail?: string) => void): Promise<ClaimResult>;
 };
 
+/** Showing the payments in one channel (components/app/prove/StarknetProve); the keys stay in the session. */
+export type StarknetProveEngine = {
+  channels(): Promise<import("@/lib/proofs/starknetChannelRead").ChannelRef[]>;
+  preview(ref: import("@/lib/proofs/starknetChannelRead").ChannelRef): Promise<{ payments: import("@/lib/proofs/starknetChannel").ChannelPayment[]; outside: number }>;
+  make(ref: import("@/lib/proofs/starknetChannelRead").ChannelRef, verifier: string, expiresAt: number): Promise<import("@/lib/proofs/starknetChannel").StarknetChannelProof>;
+};
+
 type StarknetCtx = {
   /** Starknet is the network picked (and on). */
   on: boolean;
@@ -128,6 +135,8 @@ type StarknetCtx = {
   payroll: StarknetPayrollEngine | null;
   /** Claim links over the open account, or null until it is open. */
   links: StarknetLinksEngine | null;
+  /** Payment disclosures over the open account, or null until it is open. */
+  prove: StarknetProveEngine | null;
   /** Bringing USDC in with Circle's CCTP: on or off, Gloam's fee on the receive, Circle's fee per source. Null while unread. */
   cctp: CctpInfo | null;
   /** Burns sent from another network that haven't arrived yet (kept on this device). */
@@ -486,6 +495,26 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
     };
   }, [session, token, readBalances]);
 
+  const prove = useMemo<StarknetProveEngine | null>(() => {
+    const s = session;
+    if (!s) return null;
+    const lib = () => Promise.all([import("@/lib/proofs/starknetChannelRead"), import("@/lib/proofs/starknetChannelClient")]);
+    return {
+      channels: async () => {
+        const [rd, cl] = await lib();
+        return rd.listChannels(cl.channelMakerFor(s));
+      },
+      preview: async (ref) => {
+        const [rd, cl] = await lib();
+        return rd.previewChannel(cl.channelMakerFor(s), ref);
+      },
+      make: async (ref, verifier, expiresAt) => {
+        const [rd, cl] = await lib();
+        return rd.makeChannelProof(cl.channelMakerFor(s), ref, verifier, expiresAt);
+      },
+    };
+  }, [session]);
+
   const bringIn = useCallback(
     async (plan: StarknetBringInPlan): Promise<string | null> => {
       const s = session;
@@ -583,6 +612,7 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
       cashOut: (to, amount) => move("cashout", (s, t, step) => s.cashOut(to, t, amount, step)),
       payroll,
       links,
+      prove,
       cctp,
       pendingBringIns,
       bringIn,
@@ -597,7 +627,7 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
       },
       clearError: () => setError(null),
     }),
-    [on, token, relay, mainAddress, gloam, session, privateBalance, publicBalance, restoring, task, error, setUp, refresh, move, payroll, links, cctp, pendingBringIns, bringIn, cashOutTo]
+    [on, token, relay, mainAddress, gloam, session, privateBalance, publicBalance, restoring, task, error, setUp, refresh, move, payroll, links, prove, cctp, pendingBringIns, bringIn, cashOutTo]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
