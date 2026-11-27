@@ -34,6 +34,9 @@ import { forgetStarknetAccount, keepStarknetAccount, keptStarknetAccount, starkn
 import type { PayrollDeps, Reach } from "@/lib/starknetPrivacy/payroll";
 import type { PayrollStore } from "@/lib/starknetPrivacy/payrollStore";
 import type { ScheduleStore } from "@/lib/starknetPrivacy/payrollSchedule";
+import type { SentLinksStore } from "@/lib/starknetPrivacy/sentLinks";
+import type { ClaimResult, LinkHolding } from "@/lib/starknetPrivacy/claim";
+import { isStarknetClaimHash } from "@/lib/starknetPrivacy/claimLink";
 
 /** How a Gloam wallet opens its private account here (never a signature): what the wait's first step says, and the seed. */
 export type StarknetOpener = { first: string; seed: (index: number) => Promise<Uint8Array> };
@@ -61,6 +64,20 @@ export type StarknetPayrollEngine = {
   sync(): Promise<bigint>;
   /** Plain words for an error. */
   message(e: unknown): string;
+};
+
+/** Claim links over the open account (components/app/StarknetLinks). */
+export type StarknetLinksEngine = {
+  /** This account's sent links, sealed in this browser. */
+  sentLinks(): Promise<SentLinksStore>;
+  /** Runs that send one link each (Pay privately, as a claim link), apart from payroll's. */
+  linkRuns(): Promise<PayrollStore>;
+  /** The link step payroll runs take (keep a link, open its account, mark it paid). */
+  linkDeps(): Promise<Required<Pick<PayrollDeps, "newLink" | "openLink" | "onPaid">>>;
+  /** What a link's one-time account holds now. */
+  read(secret: Uint8Array): Promise<LinkHolding>;
+  /** Move what a link holds into this account: a claim, or the sender taking it back. Steps: 0 waiting, 1 claiming. */
+  claim(secret: Uint8Array, step: (at: number, detail?: string) => void): Promise<ClaimResult>;
 };
 
 type StarknetCtx = {
@@ -94,6 +111,8 @@ type StarknetCtx = {
   cashOut(to: string, amount: bigint): Promise<string | null>;
   /** Payroll over the open account, or null until it is open. */
   payroll: StarknetPayrollEngine | null;
+  /** Claim links over the open account, or null until it is open. */
+  links: StarknetLinksEngine | null;
   /** Close the private account in this tab and forget it on this device. */
   close(): void;
   clearError(): void;
@@ -135,8 +154,13 @@ const STEPS: Record<Exclude<StarknetTaskKind, "refresh">, string[]> = {
 };
 
 export function StarknetAccountProvider({ children }: { children: ReactNode }) {
-  const { starknet } = useNetwork();
+  const { starknet, selectStarknet } = useNetwork();
   const on = STARKNET_ENABLED && starknet;
+  // A Starknet claim link opens on Starknet, whatever network was picked here.
+  useEffect(() => {
+    if (STARKNET_ENABLED && !starknet && isStarknetClaimHash(window.location.hash)) selectStarknet();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per arrival, by the link in the address bar
+  }, []);
   const account = useAppAccount();
   const { signMessageAsync } = useSignMessage();
   const mainAddress = account.isConnected && account.address ? account.address.toLowerCase() : null;
@@ -383,6 +407,37 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
     };
   }, [session, token]);
 
+  const links = useMemo<StarknetLinksEngine | null>(() => {
+    const s = session;
+    const t = token;
+    if (!s || !t) return null;
+    const stores = async () => {
+      const [st, sl] = await Promise.all([import("@/lib/starknetPrivacy/payrollStore"), import("@/lib/starknetPrivacy/sentLinks")]);
+      return { st, sl, store: sl.sentLinksStore({ key: sl.sentLinksKey(STARKNET_NETWORK, s.address), cipher: await st.runCipher(s.keys.viewingKey, s.address, sl.SENT_LINKS_DOMAIN) }) };
+    };
+    const linkOf = async (secret: Uint8Array) => (await import("@/lib/starknetPrivacy/claimSession")).linkSession(s.cfg, s.relayInfo, window.location.origin, secret);
+    return {
+      sentLinks: async () => (await stores()).store,
+      linkRuns: async () => {
+        const st = await import("@/lib/starknetPrivacy/payrollStore");
+        return st.payrollStore({ key: `${st.payrollStoreKey(STARKNET_NETWORK, s.address)}:links`, cipher: await st.runCipher(s.keys.viewingKey, s.address) });
+      },
+      linkDeps: async () => {
+        const [{ store }, cs] = await Promise.all([stores(), import("@/lib/starknetPrivacy/claimSession")]);
+        return cs.starknetLinkDeps(s, t, store, window.location.origin);
+      },
+      read: async (secret) => (await import("@/lib/starknetPrivacy/claimSession")).readLink(await linkOf(secret), t),
+      claim: async (secret, step) => {
+        const cs = await import("@/lib/starknetPrivacy/claimSession");
+        try {
+          return await cs.claimInto(await linkOf(secret), s.address, t, step);
+        } finally {
+          await readBalances(s).catch(() => {});
+        }
+      },
+    };
+  }, [session, token, readBalances]);
+
   const value = useMemo<StarknetCtx>(
     () => ({
       on,
@@ -408,6 +463,7 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
         }),
       cashOut: (to, amount) => move("cashout", (s, t, step) => s.cashOut(to, t, amount, step)),
       payroll,
+      links,
       close: () => {
         if (mainAddress) kept.delete(mainAddress);
         const db = starknetKeepDb();
@@ -418,7 +474,7 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
       },
       clearError: () => setError(null),
     }),
-    [on, token, relay, mainAddress, gloam, session, privateBalance, publicBalance, restoring, task, error, setUp, refresh, move, payroll]
+    [on, token, relay, mainAddress, gloam, session, privateBalance, publicBalance, restoring, task, error, setUp, refresh, move, payroll, links]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

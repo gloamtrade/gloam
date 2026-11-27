@@ -25,6 +25,12 @@
  *    several first payments shows those accounts together. Each proof shows
  *    how many notes it makes (about one per person), never to whom or how
  *    much, and its fee to Gloam's relay.
+ *  - Claim links: a row with no account is paid by a claim link
+ *    (lib/starknetPrivacy/claimLink). Before the proof that pays it, the run
+ *    keeps a new link (sealed, under Sent links), then opens its one-time
+ *    account (deployed by the relay, then its own open, one proof), and the
+ *    link is paid in the same proof as everyone else, with Gloam's fee for its
+ *    open and for its later claim paid in that proof too.
  *  - Resume without paying twice: before a proof goes to the relay, the run is
  *    saved with the notes it spends and the block it was proven at. A proof
  *    found in flight on resume is settled first: by its transaction when the
@@ -87,6 +93,8 @@ export type DraftRow = {
   note?: string;
   /** The first payment to this account: it opens a channel, which shows their account. */
   first?: boolean;
+  /** No account given: paid by a claim link. */
+  link?: boolean;
 };
 
 const CSV_DELIMITERS = ["\t", ";", ","] as const;
@@ -187,7 +195,7 @@ export type ParsedList = {
  * name, private account, amount; a header row is optional and may name them
  * in another order. A note column, as EVM lists have, is read past.
  */
-export function parseStarknetPayrollCsv(text: string, token: Pick<StarknetToken, "decimals" | "symbol">): ParsedList {
+export function parseStarknetPayrollCsv(text: string, token: Pick<StarknetToken, "decimals" | "symbol">, opts: { links?: boolean } = {}): ParsedList {
   const lines = text
     .replace(/^﻿/, "")
     .replace(/\r\n?/g, "\n")
@@ -239,14 +247,15 @@ export function parseStarknetPayrollCsv(text: string, token: Pick<StarknetToken,
       : cells.length > width
         ? 'This row has more cells than the list has columns. Put an amount with a comma in quotes, like "1,250", and use a dot for decimals.'
         : null;
-    if (!error && !typed) error = "Add their private account on Starknet.";
-    else if (!error && !address) {
+    const link = !error && !typed && opts.links === true;
+    if (!error && !typed && !link) error = "Add their private account on Starknet.";
+    else if (!error && typed && !address) {
       error = typed.startsWith("gloamr1") ? "That is a Gloam address for the other networks. Use their private account on Starknet." : "Not a Starknet address. Copy their private account again from Gloam.";
     }
     const read = readPayrollAmount(amountInput, token.decimals);
     const amount = !error && "amount" in read ? read.amount : null;
     if (!error && "error" in read) error = read.error;
-    const row: DraftRow = { line: i, name, address: address ?? typed, amountInput, amount, error };
+    const row: DraftRow = { line: i, name, address: address ?? typed, amountInput, amount, error, ...(link ? { link: true } : {}) };
     if (!error && address) {
       const prior = seen.get(address);
       if (prior !== undefined) row.note = `Same account as line ${prior}. Both lines are paid.`;
@@ -272,7 +281,7 @@ export const OWN_ACCOUNT = "That is your own private account.";
 export function checkRecipients(rows: readonly DraftRow[], reach: ReadonlyMap<string, Reach>, owner: string): DraftRow[] {
   const self = starknetAddressText(owner);
   return rows.map((r) => {
-    if (r.error) return r;
+    if (r.error || r.link) return r;
     if (r.address === self) return { ...r, error: OWN_ACCOUNT, amount: null };
     const at = reach.get(r.address);
     if (at === "closed") return { ...r, error: NOT_OPEN, amount: null };
@@ -283,7 +292,7 @@ export function checkRecipients(rows: readonly DraftRow[], reach: ReadonlyMap<st
 
 /** The accounts the reach check still has to read. */
 export function addressesToCheck(rows: readonly DraftRow[], known: ReadonlyMap<string, Reach>): string[] {
-  return [...new Set(rows.filter((r) => !r.error && !known.has(r.address)).map((r) => r.address))];
+  return [...new Set(rows.filter((r) => !r.error && !r.link && !known.has(r.address)).map((r) => r.address))];
 }
 
 /**
@@ -291,13 +300,14 @@ export function addressesToCheck(rows: readonly DraftRow[], known: ReadonlyMap<s
  * proof under the relay's cap. A first payment counts once per account (a
  * second line to the same account in the same proof rides its channel).
  */
-export function estimateProofs(rows: readonly { first?: boolean; address: string }[]): number {
+export function estimateProofs(rows: readonly { first?: boolean; link?: boolean; address: string }[]): number {
   let proofs = 0;
   let used = Infinity;
   let people = 0;
   let opened = new Set<string>();
   for (const r of rows) {
-    const cost = r.first && !opened.has(r.address) ? ACTIONS_PER_FIRST_PAYMENT : ACTIONS_PER_PAYMENT;
+    // A claim link's one-time account is new: its payment opens a channel.
+    const cost = r.link || (r.first && !opened.has(r.address)) ? ACTIONS_PER_FIRST_PAYMENT : ACTIONS_PER_PAYMENT;
     if (used + cost > RELAY_MAX_ACTIONS || people >= PAYROLL_PROOF_MAX) {
       proofs++;
       used = ACTIONS_BASE;
@@ -316,9 +326,11 @@ export type DraftSummary = {
   skipped: number;
   /** What the people are paid. */
   total: bigint;
-  /** About how many proofs (estimateProofs). */
+  /** About how many proofs now: the payments (estimateProofs) and one to open each link's account. */
   proofs: number;
-  /** Gloam's fee for those proofs. */
+  /** Claim links in it: each takes one more proof later, when it is claimed. */
+  links: number;
+  /** Gloam's fee: once per payment proof, and twice per link (its open and its claim). */
   fees: bigint;
   /** How many are paid for the first time (their accounts show). */
   first: number;
@@ -330,11 +342,12 @@ export type DraftSummary = {
 export function summarize(rows: readonly DraftRow[], balance: bigint, fee: bigint): DraftSummary {
   const ok = rows.filter((r) => !r.error && r.amount !== null);
   const total = ok.reduce((s, r) => s + r.amount!, 0n);
-  const proofs = estimateProofs(ok);
-  const fees = BigInt(proofs) * fee;
+  const payments = estimateProofs(ok);
+  const links = ok.filter((r) => r.link).length;
+  const fees = BigInt(payments + 2 * links) * fee;
   const first = new Set(ok.filter((r) => r.first).map((r) => r.address)).size;
   const need = total + fees;
-  return { ready: ok.length, skipped: rows.length - ok.length, total, proofs, fees, first, short: need > balance ? need - balance : 0n };
+  return { ready: ok.length, skipped: rows.length - ok.length, total, proofs: payments + links, links, fees, first, short: need > balance ? need - balance : 0n };
 }
 
 // ------------------------------------------------------------------ the run
@@ -369,6 +382,8 @@ export type RunRow = {
   /** Why it was skipped, or the last error on it. */
   reason?: string;
   txHash?: string;
+  /** Paid by a claim link: its Sent links id once kept (`address` is its one-time account then), and whether that account is open. */
+  link?: { id?: string; open?: boolean };
 };
 
 /** A proof handed (or about to be handed) to the relay. */
@@ -431,6 +446,7 @@ export function newRun(args: {
       amount: r.amount !== null && !r.error ? r.amount.toString() : "0",
       status: r.error || r.amount === null ? "skipped" : "queued",
       ...(r.first ? { first: true } : {}),
+      ...(r.link && !r.error ? { link: {} } : {}),
       ...(r.error ? { reason: r.error } : {}),
     })),
     inflight: null,
@@ -506,7 +522,7 @@ export type Proven = {
   spends: string[];
   change: string[];
   provedAt: number;
-  /** Gloam's fee it pays (base units). */
+  /** Gloam's fee it pays (base units), with what it pays for its links' opens and claims. */
   fee: bigint;
   /** The call and its proof, handed to `send` as they are. */
   payload: unknown;
@@ -531,9 +547,15 @@ export type PayrollDeps = {
    * transaction (it checks on the pool before proving). `onWait` names the
    * blocks it waits for first. Nothing is sent.
    */
-  prove(payments: { address: string; amount: bigint }[], onWait: (detail: string) => void): Promise<Proven>;
+  prove(payments: { address: string; amount: bigint; link?: boolean }[], onWait: (detail: string) => void): Promise<Proven>;
   /** Hand a proof to the relay; its transaction hash. Rejects with a RelayRefusal when the relay says no. */
   send(proven: Proven): Promise<string>;
+  /** Keep a new claim link (sealed, before anything is sent for it): its id and its one-time account. Runs with link rows need it. */
+  newLink?(row: { name: string; amount: bigint; runId: string }): Promise<{ id: string; address: string }>;
+  /** Open a kept link's one-time account (deploy, then its open). Safe to run again. */
+  openLink?(id: string, onWait: (detail: string) => void): Promise<void>;
+  /** These rows' payment landed (`txHash` when known): a claim link among them is paid. */
+  onPaid?(rows: readonly RunRow[], txHash?: string): Promise<void>;
   /** Wait for a sent transaction to land. Rejects if it reverts or takes too long. */
   confirm(txHash: string): Promise<void>;
   /** Where a proof in flight stands. */
@@ -552,6 +574,7 @@ export const SAVE_FAILED = "This browser couldn't save the run, so the next proo
 export const PROOF_DROPPED = "The last proof didn't land on Starknet, so nobody in it was paid. Resume to send it again.";
 export const PROOF_STILL_CHECKING = "Starknet hasn't said yet whether the last proof went through. Resume in a minute to check it again.";
 export const NOT_SURE = "Couldn't tell whether this landed, so it isn't sent again. Check with them before paying them again.";
+export const LINKS_OFF = "Claim links can't be made here.";
 
 function setRows(run: PayrollRun, idx: readonly number[], patch: Partial<RunRow>): void {
   for (const i of idx) run.rows[i] = { ...run.rows[i]!, ...patch };
@@ -616,6 +639,7 @@ export async function runPayroll(run: PayrollRun, deps: PayrollDeps): Promise<Pa
         const hash = r.txHash ?? f.txHash;
         setRows(run, f.rows, { status: "paid", reason: undefined, ...(hash ? { txHash: hash } : {}) });
         await changed();
+        await deps.onPaid?.(f.rows.map((i) => run.rows[i]!), hash).catch(() => undefined);
         continue;
       }
       if (r.state === "unknown") {
@@ -644,13 +668,41 @@ export async function runPayroll(run: PayrollRun, deps: PayrollDeps): Promise<Pa
       return run;
     }
     const idx = queued.slice(0, PAYROLL_PROOF_MAX);
+
+    // Claim links in it: kept, then their one-time accounts opened, one at a time, before its proof.
+    for (const i of idx) {
+      const row = run.rows[i]!;
+      if (!row.link || row.link.open) continue;
+      if (!deps.newLink || !deps.openLink) return pause(LINKS_OFF);
+      if (deps.stopRequested()) return pause();
+      try {
+        if (!row.link.id) {
+          const made = await deps.newLink({ name: row.name, amount: BigInt(row.amount), runId: run.id });
+          run.rows[i] = { ...row, address: made.address, link: { id: made.id } };
+          // Saved before anything is sent for it: a resume opens this link, never a second one.
+          try {
+            await changed(true);
+          } catch {
+            return pause(SAVE_FAILED);
+          }
+        }
+        setRows(run, [i], { status: "proving" });
+        await deps.openLink(run.rows[i]!.link!.id!, (detail) => deps.onChange?.(run, detail));
+        run.rows[i] = { ...run.rows[i]!, status: "queued", link: { ...run.rows[i]!.link!, open: true } };
+        await changed();
+      } catch (e) {
+        setRows(run, [i], { status: "queued" });
+        return pause(deps.message(e));
+      }
+    }
+
     setRows(run, idx, { status: "proving" });
     deps.onChange?.(run);
 
     let proven: Proven;
     try {
       proven = await deps.prove(
-        idx.map((i) => ({ address: run.rows[i]!.address, amount: BigInt(run.rows[i]!.amount) })),
+        idx.map((i) => ({ address: run.rows[i]!.address, amount: BigInt(run.rows[i]!.amount), ...(run.rows[i]!.link ? { link: true } : {}) })),
         (detail) => deps.onChange?.(run, detail)
       );
     } catch (e) {
@@ -714,6 +766,7 @@ export async function runPayroll(run: PayrollRun, deps: PayrollDeps): Promise<Pa
     run.inflight = null;
     setRows(run, inProof, { status: "paid", txHash });
     await changed();
+    await deps.onPaid?.(inProof.map((i) => run.rows[i]!), txHash).catch(() => undefined);
   }
 }
 
@@ -773,9 +826,14 @@ const CSV_STATUS: Record<RowStatus, string> = {
   unknown: "unknown",
 };
 
-/** The run as a CSV: row, name, account, amount, token, status, transaction, reason. */
-export function resultsCsv(run: PayrollRun, token: Pick<StarknetToken, "decimals" | "symbol">): string {
-  const head = ["row", "name", "account", "amount", "token", "status", "transaction", "reason"];
+/**
+ * The run as a CSV: row, name, account, amount, token, status, transaction,
+ * claim link, reason. A claim link is a bearer secret: `linkUrl` gives it for
+ * a link row (only while it may still be unclaimed), and the file says so on
+ * the page that downloads it.
+ */
+export function resultsCsv(run: PayrollRun, token: Pick<StarknetToken, "decimals" | "symbol">, linkUrl: (id: string) => string | null = () => null): string {
+  const head = ["row", "name", "account", "amount", "token", "status", "transaction", "claim link", "reason"];
   const lines = run.rows.map((r) =>
     [
       String(r.line),
@@ -785,6 +843,7 @@ export function resultsCsv(run: PayrollRun, token: Pick<StarknetToken, "decimals
       token.symbol,
       CSV_STATUS[r.status],
       r.txHash ?? "",
+      r.link?.id && r.status === "paid" ? (linkUrl(r.link.id) ?? "") : "",
       r.status === "paid" ? "" : (r.reason ?? ""),
     ]
       .map(csvCell)
@@ -813,7 +872,14 @@ export function isRun(v: unknown): v is PayrollRun {
     (r!.payday === undefined || typeof r!.payday === "string") &&
     Array.isArray(r!.rows) &&
     r!.rows.every(
-      (x) => x && typeof x.address === "string" && typeof x.amount === "string" && /^\d+$/.test(x.amount) && typeof x.status === "string" && x.status in CSV_STATUS
+      (x) =>
+        x &&
+        typeof x.address === "string" &&
+        typeof x.amount === "string" &&
+        /^\d+$/.test(x.amount) &&
+        typeof x.status === "string" &&
+        x.status in CSV_STATUS &&
+        (x.link === undefined || (typeof x.link === "object" && x.link !== null && (x.link.id === undefined || typeof x.link.id === "string")))
     ) &&
     (f === null ||
       (typeof f === "object" &&

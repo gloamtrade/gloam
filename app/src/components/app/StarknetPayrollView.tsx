@@ -34,14 +34,16 @@ import type { StarknetToken } from "@/lib/starknetPrivacy/config";
 import { Spinner } from "@/components/ui/Spinner";
 import { TokenLogo } from "./TokenLogo";
 import { SolanaSteps } from "./SolanaParts";
-import { shortStark, useStarknet, type StarknetPayrollEngine } from "./StarknetAccount";
+import { shortStark, useStarknet, type StarknetLinksEngine, type StarknetPayrollEngine } from "./StarknetAccount";
+import { sentLinkUrl } from "@/lib/starknetPrivacy/sentLinks";
 import { STARKNET_NAME, StarknetGate, starkAmount } from "./StarknetParts";
 import { starknetExplorerTx } from "./StarknetVault";
 import { StarknetDueLine, StarknetScheduleList, StarknetScheduleSave, useStarknetSchedules } from "./StarknetPayrollSchedules";
+import { LINK_PRIVACY_NOTE } from "./StarknetLinks";
 
 const storeLib = () => import("@/lib/starknetPrivacy/payrollStore");
 
-const TEMPLATE = "name,address,amount\nAda Obi,0xPASTE_THEIR_STARKNET_PRIVATE_ACCOUNT,250\nTunde Bello,0xPASTE_THEIR_STARKNET_PRIVATE_ACCOUNT,180";
+const TEMPLATE = "name,address,amount\nAda Obi,0xPASTE_THEIR_STARKNET_PRIVATE_ACCOUNT,250\nTunde Bello,,180";
 
 const STATUS_LABEL: Record<RowStatus, string> = {
   queued: "Waiting",
@@ -115,7 +117,7 @@ export function StarknetPayrollPage() {
       : sn.relay?.moves === "off"
         ? `Paying on ${STARKNET_NAME} isn't open yet. Try again later.`
         : null;
-  return <StarknetPayrollView engine={sn.payroll} balance={sn.privateBalance} fee={sn.fee} relayNote={relayNote} />;
+  return <StarknetPayrollView engine={sn.payroll} links={sn.links} balance={sn.privateBalance} fee={sn.fee} relayNote={relayNote} />;
 }
 
 export function StarknetPayrollView(props: {
@@ -126,8 +128,13 @@ export function StarknetPayrollView(props: {
   fee: bigint;
   /** Why the relay can't pay right now (paused, or moves not open), or null. */
   relayNote: string | null;
+  /** Claim links: a row with no account is paid by one. Null leaves them out (every row needs an account). */
+  links?: StarknetLinksEngine | null;
 }) {
   const { engine, balance, fee, relayNote } = props;
+  const links = props.links ?? null;
+  /** Each paid link's URL by its id, for Copy and the results file (read from Sent links). */
+  const [linkUrls, setLinkUrls] = useState<Map<string, string>>(() => new Map());
   const relayFunded = relayNote === null;
   const token = engine.token;
   const [store, setStore] = useState<PayrollStore | null>(null);
@@ -159,6 +166,23 @@ export function StarknetPayrollView(props: {
   useEffect(() => {
     schedulesRef.current = sched.list ?? [];
   }, [sched.list]);
+
+  // Paid claim links in the run on screen: their URLs, for Copy and the results file.
+  const paidLinks = run ? run.rows.flatMap((r) => (r.link?.id && r.status === "paid" ? [r.link.id] : [])).join(",") : "";
+  useEffect(() => {
+    if (!links || !paidLinks) return;
+    let live = true;
+    void links
+      .sentLinks()
+      .then((st) => st.load())
+      .then((all) => {
+        if (live) setLinkUrls(new Map(all.map((l) => [l.id, sentLinkUrl(l, window.location.origin)] as const)));
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [links, paidLinks]);
 
   // This account's runs: an open one comes back to resume.
   useEffect(() => {
@@ -196,7 +220,7 @@ export function StarknetPayrollView(props: {
     []
   );
 
-  const parsed = parseStarknetPayrollCsv(text, token);
+  const parsed = parseStarknetPayrollCsv(text, token, { links: Boolean(links) });
   const pending = addressesToCheck(parsed.rows, reach);
   const rows = pending.length ? parsed.rows : checkRecipients(parsed.rows, reach, engine.owner);
   const have = balance ?? 0n;
@@ -255,7 +279,7 @@ export function StarknetPayrollView(props: {
       const ok = await withRunLock(engine.owner, async () => {
         setRunning(true);
         try {
-          const deps = await engine.deps();
+          const deps = { ...(await engine.deps()), ...(links ? await links.linkDeps() : {}) };
           // The stored copy is the truth: another tab may have paid part of it since this one loaded.
           const fresh = (await store.load()).find((r) => r.id === start.id) ?? start;
           setRun({ ...fresh });
@@ -287,7 +311,7 @@ export function StarknetPayrollView(props: {
       });
       if (!ok) setError("This run is paying in another tab. Use that tab, or close it and resume here.");
     },
-    [store, engine, sched]
+    [store, engine, sched, links]
   );
 
   async function start() {
@@ -344,7 +368,7 @@ export function StarknetPayrollView(props: {
   }
 
   function exportRun(r: PayrollRun) {
-    download(`gloam-starknet-payroll-${new Date(r.createdAt).toISOString().slice(0, 10)}.csv`, resultsCsv(r, token));
+    download(`gloam-starknet-payroll-${new Date(r.createdAt).toISOString().slice(0, 10)}.csv`, resultsCsv(r, token, (id) => linkUrls.get(id) ?? null));
   }
 
   if (loadError) {
@@ -388,8 +412,9 @@ export function StarknetPayrollView(props: {
                 <li key={i} className="flex items-start justify-between gap-3 py-3">
                   <div className="min-w-0">
                     <p className="truncate text-[14px] text-foreground">{r.name}</p>
-                    <p className="tnum truncate text-[12px] text-mute">{shortStark(r.address)}</p>
+                    <p className="tnum truncate text-[12px] text-mute">{r.link ? "Claim link" : shortStark(r.address)}</p>
                     {r.reason && r.status !== "paid" && <p className="mt-0.5 text-[12px] leading-snug text-warn">{r.reason}</p>}
+                    {r.link?.id && r.status === "paid" && linkUrls.get(r.link.id) && <CopyLink url={linkUrls.get(r.link.id)!} />}
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
                     <span className="tnum text-[14px] text-foreground">{r.status === "skipped" ? "" : `${starkAmount(BigInt(r.amount), token)} ${token.symbol}`}</span>
@@ -588,7 +613,8 @@ export function StarknetPayrollView(props: {
               <UploadGlyph className="h-6 w-6 text-foreground" />
               <p className="mt-3 text-[17px] text-foreground">{dragging ? "Drop it here" : "Drop your team’s CSV"}</p>
               <p className="mt-1.5 max-w-[42ch] text-[13.5px] leading-relaxed text-mute">
-                One line per person, up to {PAYROLL_MAX_ROWS}. Each one needs a Gloam private account on {STARKNET_NAME}.
+                One line per person, up to {PAYROLL_MAX_ROWS}. Each one needs a Gloam private account on {STARKNET_NAME}
+                {links ? ", or leave the address empty to pay them by claim link." : "."}
               </p>
               <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5" aria-label="Columns">
                 {["name", "address", "amount"].map((c) => (
@@ -633,7 +659,7 @@ export function StarknetPayrollView(props: {
                   <li key={r.line} className="flex items-start justify-between gap-3 py-3">
                     <div className="min-w-0">
                       <p className="truncate text-[14px] text-foreground">{r.name}</p>
-                      <p className="tnum truncate text-[12px] text-mute">{r.address ? shortStark(r.address) : `Line ${r.line}`}</p>
+                      <p className="tnum truncate text-[12px] text-mute">{r.link ? "Claim link" : r.address ? shortStark(r.address) : `Line ${r.line}`}</p>
                       {r.error && <p className="mt-0.5 text-[12px] leading-snug text-warn">{r.error}</p>}
                       {!r.error && r.note && <p className="mt-0.5 text-[12px] leading-snug text-mute">{r.note}</p>}
                     </div>
@@ -677,7 +703,7 @@ export function StarknetPayrollView(props: {
           <p className="tnum mt-2 text-[13.5px] text-mute">
             {summary.ready > 0 ? `${people(summary.ready)}${summary.skipped ? `, ${summary.skipped} skipped` : ""}` : "Add your team to see the total"}
           </p>
-          <CostBox token={token} fee={fee} proofs={summary.ready > 0 ? summary.proofs : 0} fees={summary.fees} />
+          <CostBox token={token} fee={fee} proofs={summary.ready > 0 ? summary.proofs : 0} fees={summary.fees} links={summary.links} />
           <div className="mt-3 rounded-[16px] bg-surface p-4">
             <div className="flex items-baseline justify-between gap-3 text-[13.5px]">
               <span className="text-mute">Private balance</span>
@@ -692,7 +718,7 @@ export function StarknetPayrollView(props: {
               {summary.short > 0n ? `${starkAmount(summary.short, token)} ${token.symbol} short with Gloam's fee. Add more first.` : "Payments and the fee come out of your private balance."}
             </p>
           </div>
-          <PrivacyLines first={summary.first} proofs={summary.proofs} />
+          <PrivacyLines first={summary.first} proofs={summary.proofs} links={summary.links} />
           {relayNote && <p className="mt-3 text-[12.5px] leading-relaxed text-warn">{relayNote}</p>}
           <button
             type="button"
@@ -738,12 +764,12 @@ export function StarknetPayrollView(props: {
 }
 
 /** What the run costs: proofs and Gloam's fee on each, before anything is sent. */
-function CostBox({ token, fee, proofs, fees }: { token: StarknetToken; fee: bigint; proofs: number; fees: bigint }) {
+function CostBox({ token, fee, proofs, fees, links }: { token: StarknetToken; fee: bigint; proofs: number; fees: bigint; links: number }) {
   return (
     <dl className="tnum mt-5 space-y-2 rounded-[16px] border border-line p-4 text-[13.5px]">
       <div className="flex items-baseline justify-between gap-3">
         <dt className="text-mute">Proofs</dt>
-        <dd className="text-foreground">{proofs > 0 ? `About ${proofs}` : "None yet"}</dd>
+        <dd className="text-foreground">{proofs > 0 ? `About ${proofs}${links > 0 ? `, ${links} more when claimed` : ""}` : "None yet"}</dd>
       </div>
       <div className="flex items-baseline justify-between gap-3">
         <dt className="text-mute">Gloam&apos;s fee</dt>
@@ -754,6 +780,7 @@ function CostBox({ token, fee, proofs, fees }: { token: StarknetToken; fee: bigi
       {fee > 0n && proofs > 0 && (
         <p className="pt-1 text-[12px] leading-relaxed text-mute">
           {starkAmount(fee, token)} {token.symbol} a proof. One proof pays many people at once.
+          {links > 0 ? " A claim link adds it twice: to open the link, and for its claim, so they get the whole amount." : ""}
         </p>
       )}
     </dl>
@@ -761,10 +788,11 @@ function CostBox({ token, fee, proofs, fees }: { token: StarknetToken; fee: bigi
 }
 
 /** What a run shows on Starknet, said once, and the daily limit on proofs when a run needs a few. */
-function PrivacyLines({ first, proofs }: { first: number; proofs: number }) {
+function PrivacyLines({ first, proofs, links }: { first: number; proofs: number; links: number }) {
   return (
     <div className="mt-4 space-y-2 text-[12.5px] leading-relaxed text-mute">
       <p>Nobody can see who you paid or how much. Each proof shows how many payments it carries and Gloam&apos;s fee.</p>
+      {links > 0 && <p>{LINK_PRIVACY_NOTE}</p>}
       {first > 0 && (
         <p>
           {first === 1
@@ -774,6 +802,28 @@ function PrivacyLines({ first, proofs }: { first: number; proofs: number }) {
       )}
       {proofs >= 3 && <p>{STARKNET_NAME} proofs are limited each day, so a long run may finish tomorrow. It picks up where it stopped.</p>}
     </div>
+  );
+}
+
+/** A paid claim link's Copy, in the run's list. */
+function CopyLink({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="mt-1 inline-flex h-8 items-center rounded-full px-0 text-[12.5px] text-foreground underline-offset-2 hover:underline"
+      onClick={() => {
+        void navigator.clipboard
+          ?.writeText(url)
+          .then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1600);
+          })
+          .catch(() => {});
+      }}
+    >
+      {copied ? "Copied" : "Copy claim link"}
+    </button>
   );
 }
 

@@ -156,7 +156,12 @@ export function sealedList<T extends { id: string; createdAt: number }>(opts: {
     return write((all) => all.filter((r) => r.id !== id));
   }
 
-  return { load, save, remove };
+  /** Change the item with this id under the store's lock (nothing when it isn't there). Resolves once it reads back. */
+  function edit(id: string, change: (item: T) => T): Promise<void> {
+    return write((all) => all.map((r) => (r.id === id ? change(r) : r)));
+  }
+
+  return { load, save, remove, edit };
 }
 
 export function payrollStore(opts: { key: string; cipher: RunCipher; storage?: RunStorage }) {

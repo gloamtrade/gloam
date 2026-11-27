@@ -14,6 +14,11 @@
  *     a transaction the relay would refuse;
  *  4. proves it for real, and names the notes it spends and the change it
  *     makes, for the run to save before it is sent.
+ *
+ * A claim link in a proof (a payment to its one-time account) adds Gloam's fee
+ * twice to that proof: once withdrawn to the relay for the open of the link's
+ * account (an open pays no fee of its own: it has nothing to pay from), and
+ * once paid into the link, which its claim (or take back) pays the relay.
  */
 import { SetupRequirement } from "@starkware-libs/starknet-privacy-sdk";
 import { num, type Call } from "starknet";
@@ -108,8 +113,17 @@ export function starknetPayrollDeps(s: StarknetSession, token: StarknetToken): P
       const blind = !confirmed && s.cfg.discovery.kind === "indexer";
       const at = await s.settle((left) => onWait(waitText(left)), true, blind ? async (b) => !(await s.spentSince(b, token)) : undefined);
       const fee = s.feeFor(token);
-      const list = payments.slice(0, PAYROLL_PROOF_MAX).map((p) => ({ to: p.address, amount: p.amount }));
-      const input = (n: number) => ({ token: token.address, self: s.address, payments: list.slice(0, n), fee, provingBlockId: at });
+      const base = fee?.amount ?? 0n;
+      const list = payments.slice(0, PAYROLL_PROOF_MAX);
+      const links = (n: number) => BigInt(list.slice(0, n).filter((p) => p.link).length);
+      // A link gets its claim's fee on top; the relay gets this proof's fee and one per link opened.
+      const input = (n: number) => ({
+        token: token.address,
+        self: s.address,
+        payments: list.slice(0, n).map((p) => ({ to: p.address, amount: p.link ? p.amount + base : p.amount })),
+        fee: fee ? { recipient: fee.recipient, amount: base * (1n + links(n)) } : null,
+        provingBlockId: at,
+      });
       // 3. How many fit, run on the pool first.
       onWait("Checking the payment");
       const count = await fitCount(list.length, async (n) => {
@@ -118,7 +132,7 @@ export function starknetPayrollDeps(s: StarknetSession, token: StarknetToken): P
         if (used === null) throw new Error("Couldn't read the payment back. Try again.");
         return used;
       });
-      if (count === 0) return { count: 0, spends: [], change: [], provedAt: at, fee: fee?.amount ?? 0n, payload: null };
+      if (count === 0) return { count: 0, spends: [], change: [], provedAt: at, fee: 0n, payload: null };
       // 4. The proof, and what it spends.
       const before = noteIds((await s.transfers.discoverNotes({ tokens, blockIdentifier: at })).notes.get(token.address) as NoteLike[] | undefined);
       onWait("Proving");
@@ -131,7 +145,7 @@ export function starknetPayrollDeps(s: StarknetSession, token: StarknetToken): P
         spends: before.filter((id) => !left.has(id)),
         change: after.filter((id) => !had.has(id)),
         provedAt: at,
-        fee: fee?.amount ?? 0n,
+        fee: base * (1n + 2n * links(count)),
         payload: r,
       } satisfies Proven;
     },

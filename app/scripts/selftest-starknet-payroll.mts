@@ -145,7 +145,7 @@ const ONE = 1_000_000n;
     "no private account, own account, first payment"
   );
   const s = P.summarize(checked, 100n * ONE, ONE / 4n);
-  eq(s, { ready: 3, skipped: 2, total: 8n * ONE, proofs: 1, fees: ONE / 4n, first: 1, short: 0n }, "three people, one proof, one fee");
+  eq(s, { ready: 3, skipped: 2, total: 8n * ONE, proofs: 1, links: 0, fees: ONE / 4n, first: 1, short: 0n }, "three people, one proof, one fee");
   eq(P.summarize(checked, 8n * ONE, ONE / 4n).short, ONE / 4n, "short by the fee when the balance only covers the pay");
   eq(P.summarize(checked, 100n * ONE, 0n).fees, 0n, "no fee asked, none counted");
 
@@ -636,9 +636,9 @@ ok(savedBeforeSend > 15, `every send went out with its proof saved in flight (${
   run.rows[0] = { ...run.rows[0]!, name: "=HYPERLINK(1)", status: "paid", txHash: "0x99" };
   run.rows[1] = { ...run.rows[1]!, status: "not_paid", reason: "Closed early" };
   const csv = P.resultsCsv(run, USDC).split("\n");
-  eq(csv[0], "row,name,account,amount,token,status,transaction,reason", "results header");
-  ok(csv[1]!.includes("'=HYPERLINK(1)") && csv[1]!.includes(",1,USDC,paid,0x99,"), "a formula name is defused, amount exact");
-  ok(csv[2]!.endsWith("not paid,,Closed early"), "a row not paid says why");
+  eq(csv[0], "row,name,account,amount,token,status,transaction,claim link,reason", "results header");
+  ok(csv[1]!.includes("'=HYPERLINK(1)") && csv[1]!.includes(",1,USDC,paid,0x99,,"), "a formula name is defused, amount exact");
+  ok(csv[2]!.endsWith("not paid,,,Closed early"), "a row not paid says why");
 
   ok(P.isRun(JSON.parse(JSON.stringify(run))), "a run reads back");
   ok(!P.isRun({ ...run, v: 2 }), "another version doesn't");

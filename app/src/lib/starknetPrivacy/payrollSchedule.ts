@@ -24,6 +24,7 @@ import { sealedList, type RunCipher, type RunStorage } from "./payrollStore";
 /** Most schedules one account keeps. */
 export const MAX_SCHEDULES = 50;
 
+/** A person on a schedule: their private account, or "" to pay them by claim link (a new link each payday). */
 export type StarknetSchedulePerson = { name: string; address: string; amount: string };
 
 export type StarknetSchedule = {
@@ -160,7 +161,16 @@ export function isSchedule(v: unknown): v is StarknetSchedule {
     typeof s!.createdAt === "number" &&
     Array.isArray(s!.people) &&
     s!.people.length > 0 &&
-    s!.people.every((p) => p && typeof p.name === "string" && typeof p.address === "string" && starknetAddressText(p.address) === p.address && typeof p.amount === "string" && /^[1-9]\d*$/.test(p.amount))
+    s!.people.every(
+      (p) =>
+        p &&
+        typeof p.name === "string" &&
+        typeof p.address === "string" &&
+        // "" is a person paid by claim link: a new link each payday.
+        (p.address === "" || starknetAddressText(p.address) === p.address) &&
+        typeof p.amount === "string" &&
+        /^[1-9]\d*$/.test(p.amount)
+    )
   );
 }
 
