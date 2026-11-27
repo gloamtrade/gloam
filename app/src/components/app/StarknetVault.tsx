@@ -22,7 +22,7 @@ import { SuccessModal } from "./SuccessModal";
 import { TokenLogo } from "./TokenLogo";
 import { parseStarkAmount, useStarknet } from "./StarknetAccount";
 import { StarknetClaimCard, StarknetClaimLead, StarknetPayOrLink, useStarknetClaimInHash } from "./StarknetLinks";
-import { StarknetAddFromPicker, StarknetBringIn, StarknetBringInPending, bringInSources, type StarknetAddFrom } from "./StarknetBringIn";
+import { StarknetAddFromPicker, StarknetBringIn, StarknetBringInPending, StarknetBringInRelay, bringInRelaySources, bringInSources, type StarknetAddFrom } from "./StarknetBringIn";
 import {
   STARKNET_NAME,
   StarknetActionButton,
@@ -217,7 +217,10 @@ function StarknetAddView({ token }: { token: StarknetToken }) {
   const { show, modal } = useSuccess(token);
   // Other networks to bring USDC in from with Circle's CCTP, when Gloam's relay does it.
   const sources = bringInSources(sn.cctp);
+  const relaySources = bringInRelaySources(sn.cctp);
   const source = from === "account" ? null : (sources.find((s) => s.chainId === from) ?? null);
+  const relaySource = from === "account" || source ? null : (relaySources.find((s) => s.chainId === from) ?? null);
+  const fromName = source?.name ?? relaySource?.name ?? null;
   const balance = sn.publicBalance;
   const problem = starkAmountProblem(amount, token, balance);
   const value = parseStarkAmount(amount, token.decimals);
@@ -233,9 +236,11 @@ function StarknetAddView({ token }: { token: StarknetToken }) {
       <section className="gl-card p-5 sm:p-7">
         <h2 className="t-title text-foreground">Add privately</h2>
         <p className="mt-1.5 max-w-[56ch] text-[14px] leading-relaxed text-mute">
-          {source
-            ? `Bring ${token.symbol} in from ${source.name} and add it to your private balance. The transfer and the add show your Starknet account and the amount.`
-            : `Move ${token.symbol} that sits on your Starknet account into your private balance. Adding shows your account and the amount.`}
+          {relaySource
+            ? `Bring ${relaySource.tokens.map((t) => t.symbol).join(" or ")} in from ${relaySource.name} as ${token.symbol} and add it to your private balance. The transfers and the add show your Starknet account and the amount.`
+            : fromName
+              ? `Bring ${token.symbol} in from ${fromName} and add it to your private balance. The transfer and the add show your Starknet account and the amount.`
+              : `Move ${token.symbol} that sits on your Starknet account into your private balance. Adding shows your account and the amount.`}
         </p>
         {sn.pendingBringIns.length > 0 && (
           <div className="mt-5">
@@ -244,7 +249,7 @@ function StarknetAddView({ token }: { token: StarknetToken }) {
         )}
         {sources.length > 0 && (
           <div className="mt-5">
-            <StarknetAddFromPicker value={source ? source.chainId : "account"} onChange={setFrom} sources={sources} disabled={busy} />
+            <StarknetAddFromPicker value={source?.chainId ?? relaySource?.chainId ?? "account"} onChange={setFrom} sources={sources} relaySources={relaySources} disabled={busy} />
           </div>
         )}
         {source ? (
@@ -253,6 +258,15 @@ function StarknetAddView({ token }: { token: StarknetToken }) {
               source={source}
               token={token}
               onDone={(hash, lands) => show({ title: "Added privately", body: `It came in from ${source.name} and is in your private balance now.`, amount: lands, hash })}
+            />
+          </div>
+        ) : relaySource ? (
+          <div className="mt-3">
+            <StarknetBringInRelay
+              key={relaySource.chainId}
+              source={relaySource}
+              token={token}
+              onDone={(hash, lands) => show({ title: "Added privately", body: `It came in from ${relaySource.name} and is in your private balance now.`, amount: lands, hash })}
             />
           </div>
         ) : (

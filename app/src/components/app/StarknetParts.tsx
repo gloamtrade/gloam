@@ -225,11 +225,14 @@ export function StarknetAmountCard({
   onAmount,
   problem,
   disabled,
+  balanceText,
 }: {
   id: string;
   label: string;
   balanceLabel: string;
   balance: bigint | null;
+  /** Says the balance in its own words (another token than the one typed); the quick shares are left out then. */
+  balanceText?: string;
   token: StarknetToken;
   amount: string;
   onAmount: (v: string) => void;
@@ -243,9 +246,7 @@ export function StarknetAmountCard({
         <label htmlFor={id} className="text-mute">
           {label}
         </label>
-        <span className="tnum min-w-0 truncate text-mute">
-          {balanceLabel} {balance === null ? "..." : starkAmount(balance, token)} {token.symbol}
-        </span>
+        <span className="tnum min-w-0 truncate text-mute">{balanceText ?? `${balanceLabel} ${balance === null ? "..." : starkAmount(balance, token)} ${token.symbol}`}</span>
       </div>
       <div className="mt-2 flex items-center gap-3">
         <input
@@ -266,7 +267,7 @@ export function StarknetAmountCard({
       <p className={`tnum mt-1 min-h-5 text-[13px] ${problem ? "text-danger" : "text-mute"}`} role={problem ? "alert" : undefined}>
         {problem ?? " "}
       </p>
-      {balance !== null && balance > 0n && (
+      {balanceText === undefined && balance !== null && balance > 0n && (
         <CashOutPercentChips
           balance={balance}
           decimals={token.decimals}

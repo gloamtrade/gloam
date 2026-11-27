@@ -51,7 +51,11 @@ export type StarknetTaskKind = "setup" | "restore" | "add" | "pay" | "cashout" |
  * receive and the private add.
  */
 export type StarknetBringInPlan =
-  | { sourceSteps: string[]; burn: (step: (at: number, detail?: string) => void) => Promise<PendingBringIn> }
+  | {
+      sourceSteps: string[];
+      /** Sign on the source chain; `keep` the burn on this device as soon as it is sent (before its receipt). */
+      burn: (step: (at: number, detail?: string) => void, keep: (p: PendingBringIn) => void) => Promise<PendingBringIn>;
+    }
   | { resume: PendingBringIn };
 
 /** A wait, named step by step (the same shape SolanaSteps draws). */
@@ -487,12 +491,15 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
         "bringin",
         async (step) => {
           const [c, k] = await Promise.all([import("@/lib/starknetPrivacy/cctpClient"), import("@/lib/starknetPrivacy/cctp")]);
+          const keep = (x: PendingBringIn) => {
+            c.keepPendingBringIn(s.address, x);
+            setPendingBringIns(c.pendingBringIns(s.address));
+          };
           let p: PendingBringIn;
           if ("burn" in plan) {
-            p = await plan.burn(step);
-            // Kept before anything else waits on it: a closed tab picks it up again here.
-            c.keepPendingBringIn(s.address, p);
-            setPendingBringIns(c.pendingBringIns(s.address));
+            // Kept as soon as it is sent, and again once it is done: a closed tab picks it up here.
+            p = await plan.burn(step, keep);
+            keep(p);
           } else p = plan.resume;
           const source = k.cctpSourceByDomain(p.domain);
           if (!source) throw new Error("That network can't bring money in here.");
@@ -504,8 +511,9 @@ export function StarknetAccountProvider({ children }: { children: ReactNode }) {
             source,
             origin: window.location.origin,
             step: (at, detail) => step(lead.length + at, detail),
-            onArrived: () => {
-              c.dropPendingBringIn(s.address, p.tx);
+            onRelayed: keep,
+            onSettled: () => {
+              c.dropPendingBringIn(s.address, c.pendingKey(p));
               setPendingBringIns(c.pendingBringIns(s.address));
             },
           });
