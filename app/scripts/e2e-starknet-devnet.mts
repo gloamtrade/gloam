@@ -630,6 +630,8 @@ async function sessionThroughRoutes(input: { pool: string; relayer: { address: s
       // account's own outside execution of the relay's fee and the pool's approve, sent by the relay.
       const fee = one / 100n;
       const approve = (4n * one) / 10n;
+      // What the mint would land on the account (the scenarios before this one spend what was there).
+      await admin.execute({ contractAddress: token, entrypoint: "transfer", calldata: CallData.compile([dave.address, num.toHex(one), "0x0"]) }).then((r) => starknetProvider(URL).waitForTransaction(r.transaction_hash));
       const { receiveOutsideCalls } = await import("../src/lib/starknetPrivacy/cctp");
       const signed = await dave.outsideCall(receiveOutsideCalls({ usdc: token, relay: input.relayer.address, pool, fee, approve }));
       const relayAcct = new Account({ provider: starknetProvider(URL), address: input.relayer.address, signer: input.relayer.private_key, cairoVersion: "1" });
