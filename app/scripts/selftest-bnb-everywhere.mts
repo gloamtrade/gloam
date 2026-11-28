@@ -267,7 +267,7 @@ if (MODE !== "on") {
   } as Parameters<typeof vaultChecks>[1];
   const vc = vaultChecks(n, read);
   ok(vc.every((c) => c.ok), `on: a vault as planned passes every check (${vc.filter((c) => !c.ok).map((c) => c.label).join(", ")})`);
-  ok(PUBLIC_RPC_HOSTS.every((h) => CSP_CONNECT_SOURCES.includes(h)), "on: the CSP allows its public RPCs");
+  ok(PUBLIC_RPC_HOSTS.every((h) => CSP_CONNECT_SOURCES.includes(new URL(h).origin)), "on: the CSP allows its public RPCs");
   // Glim: live facts, the public RPC, no partnership.
   const facts = bnbFacts() ?? "";
   ok(facts.includes("chain ID 56") && facts.includes("18 decimals") && facts.includes("100,000") && facts.includes("21 November 2026"), "on: Glim's live facts");
