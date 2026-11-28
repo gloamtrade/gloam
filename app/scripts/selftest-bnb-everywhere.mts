@@ -168,9 +168,9 @@ ok(vaultSwapRouter(CHAIN_ID) === null, "no swap router on BNB Chain");
 ok(!swapMainnets().includes("BNB Chain"), "the swap chains leave BNB Chain out");
 for (const raw of ["1", "true", "TRUE", "on", "yes", " 1 "]) {
   ok(bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} turns it on`);
-  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw, NEXT_PUBLIC_BNB_POOL: "0x89d3042390204f57b8b4F8949D3c2203E4002164" } as unknown as NodeJS.ProcessEnv).length === 2, `${JSON.stringify(raw)} with a pool: the CSP allows its two public RPCs`);
-  // Without NEXT_PUBLIC_BNB_POOL the CSP falls back to the SDK file: nothing to allow before the deploy, the two RPCs after it.
-  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === (SDK_POOL_IN ? 2 : 0), `${JSON.stringify(raw)} with no pool in the env: ${SDK_POOL_IN ? "the SDK's pool, its two public RPCs" : "nothing to allow yet"}`);
+  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw, NEXT_PUBLIC_BNB_POOL: "0x89d3042390204f57b8b4F8949D3c2203E4002164" } as unknown as NodeJS.ProcessEnv).length === 4, `${JSON.stringify(raw)} with a pool: the CSP allows its four public RPCs`);
+  // Without NEXT_PUBLIC_BNB_POOL the CSP falls back to the SDK file: nothing to allow before the deploy, the four RPCs after it.
+  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === (SDK_POOL_IN ? 4 : 0), `${JSON.stringify(raw)} with no pool in the env: ${SDK_POOL_IN ? "the SDK's pool, its four public RPCs" : "nothing to allow yet"}`);
 }
 for (const raw of [undefined, "", "0", "false", "off", "no", "enabled", "2"]) {
   ok(!bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} leaves it off`);
