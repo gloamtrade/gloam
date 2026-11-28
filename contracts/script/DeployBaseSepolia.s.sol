@@ -31,7 +31,7 @@ import {MainnetDeploy} from "./MainnetDeploy.sol";
  *   export LIMIT_TOTAL=25000000000,25000000000,10000000000000000000          # 25,000 USDC; 25,000 EURC; 10 ETH
  *   # Cash-out fee: deposits and private transfers are free, unshield keeps this share of the
  *   # amount for FEE_RECIPIENT (paid out by collectFees(asset)). Capped at 100 bps (1%) in the contract.
- *   export WITHDRAW_FEE_BPS=25          # 0.25%; this is the default when unset
+ *   export WITHDRAW_FEE_BPS=50          # 0.5%; this is the default when unset
  *   export FEE_RECIPIENT=0xB3900ac9350903218e4c7597bAb0f008F01B30B8   # the treasury
  *   export NEW_OWNER=0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8       # it must call acceptOwnership()
  *   export NEW_OWNER_EOA=1              # the owner is a wallet, not a multisig, as on the other chains

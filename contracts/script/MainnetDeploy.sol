@@ -55,7 +55,7 @@ import {VaultOwnerGuard} from "../src/VaultOwnerGuard.sol";
  *   LIMIT_ASSETS         assets to list, comma separated (0x0 means the chain's native coin, where allowed)
  *   LIMIT_PER_DEPOSIT    per-deposit limit for each, raw units, same order
  *   LIMIT_TOTAL          total limit for each, raw units, same order
- *   WITHDRAW_FEE_BPS     cash-out fee in basis points, default 25 (0.25%), max 100 (1%)
+ *   WITHDRAW_FEE_BPS     cash-out fee in basis points, default 50 (0.5%), max 100 (1%)
  *   FEE_RECIPIENT        who collects cash-out fees; unset means the fee stays OFF
  *   NEW_OWNER            the owner multisig; it must call acceptOwnership() afterwards. It must
  *                        be a contract unless NEW_OWNER_EOA=1. Unset: the deployer keeps the pool.
@@ -228,9 +228,9 @@ abstract contract MainnetDeploy is RedeployGuard {
         }
     }
 
-    /// @dev WITHDRAW_FEE_BPS (default 25) and FEE_RECIPIENT. No recipient: fee off.
+    /// @dev WITHDRAW_FEE_BPS (default 50) and FEE_RECIPIENT. No recipient: fee off.
     function _readWithdrawFee() internal view returns (uint16 bps, address recipient) {
-        uint256 raw = vm.envOr("WITHDRAW_FEE_BPS", uint256(25));
+        uint256 raw = vm.envOr("WITHDRAW_FEE_BPS", uint256(50));
         require(raw <= 100, "WITHDRAW_FEE_BPS above the 100 bps (1%) cap");
         bps = uint16(raw);
         recipient = vm.envOr("FEE_RECIPIENT", address(0));
