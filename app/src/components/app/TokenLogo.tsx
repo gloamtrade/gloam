@@ -58,7 +58,7 @@ const INK_PLATE_LOGO_IDS = new Set(["dis", "hims", "ibm", "nke", "rblx", "uber",
  * tile edge to edge, so they get no plate and no border, only a hairline drawn
  * over the image so a dark tile keeps its edge on a dark panel.
  */
-const FULL_TILE_LOGO_IDS = new Set(["robinhood", "tempo", "base", "ethereum", "elysium", "solana"]);
+const FULL_TILE_LOGO_IDS = new Set(["robinhood", "tempo", "base", "ethereum", "elysium", "solana", "starknet"]);
 
 /**
  * Network tiles by chain family. BNB Chain's family id is also its gas coin's
@@ -74,6 +74,8 @@ const NETWORK_TILES: Record<string, string> = {
   bnb: "/brand/networks/bnb.png",
   // Solana: its three bars on black, as Solana's own app tiles show them
   solana: "/brand/networks/solana.svg",
+  // Starknet: its mark on its navy, from Starknet's own StarkGate (starknet-io/starkgate-frontend chains/starknet.svg), made square
+  starknet: "/brand/networks/starknet.svg",
 };
 
 const SPECIAL_LOGOS: Record<string, string> = {
@@ -83,6 +85,7 @@ const SPECIAL_LOGOS: Record<string, string> = {
   base: "/brand/networks/base.svg",
   ethereum: "/brand/networks/ethereum.svg",
   elysium: "/brand/networks/elysium.png",
+  starknet: "/brand/networks/starknet.svg",
   // SOL, Solana's coin: Solana's three bars on a black disc (the Solana brand kit's mark)
   sol: "/brand/tokens/sol.svg",
   // ZEC (bridged to Solana): the official Zcash full-colour icon from github.com/zcash/logos

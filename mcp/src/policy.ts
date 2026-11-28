@@ -60,7 +60,6 @@ import {
   RH_MAINNET_CHAIN_ID,
   RH_MAINNET_AI,
   RH_MAINNET_CASHCAT,
-  RH_MAINNET_GRIFT,
   RH_MAINNET_ORBIO,
   RH_MAINNET_PONS,
   RH_MAINNET_USDG,
@@ -77,15 +76,21 @@ import {
   SOLANA_ASSETS,
   SOLANA_MAINNET_CHAIN_ID,
   SOLANA_RINGS_SOL_MINT,
+  STARKNET_ASSETS,
+  STARKNET_MAINNET_LIST_ID,
+  isStarknetAddress,
+  starknetAddressHex,
 } from "@gloamtrade/sdk";
 import type { NetworkKey } from "./networks.js";
 
 /**
- * A network a limit can name: Gloam's EVM networks, and "solana-mainnet"
- * (src/solana.ts), keyed by SOLANA_MAINNET_CHAIN_ID. Solana's assets are named
- * by their mint (base58, matched exactly); SOL by the Rings SDK's SOL mint.
+ * A network a limit can name: Gloam's EVM networks, "solana-mainnet"
+ * (src/solana.ts), keyed by SOLANA_MAINNET_CHAIN_ID, and "starknet-mainnet"
+ * (src/starknet.ts), keyed by STARKNET_MAINNET_LIST_ID. Solana's assets are
+ * named by their mint (base58, matched exactly); SOL by the Rings SDK's SOL
+ * mint. Starknet's by their address (0x and 64 hex digits, any case or padding).
  */
-export type LimitNetworkKey = NetworkKey | "solana-mainnet";
+export type LimitNetworkKey = NetworkKey | "solana-mainnet" | "starknet-mainnet";
 
 export type SpendTool = "pay" | "send" | "shield" | "swap";
 /**
@@ -97,9 +102,9 @@ export const SPEND_TOOLS: SpendTool[] = ["pay", "send", "shield"];
 export const ALL_SPEND_TOOLS: SpendTool[] = ["pay", "send", "shield", "swap"];
 
 const TOOL_WORDS: Record<SpendTool, string> = {
-  pay: "pay privately (gloam_execute_private_pay, and on Solana gloam_solana_pay and gloam_solana_cash_out)",
+  pay: "pay privately (gloam_execute_private_pay, on Solana gloam_solana_pay and gloam_solana_cash_out, on Starknet gloam_starknet_pay and gloam_starknet_cash_out)",
   send: "send publicly (gloam_execute_transfer)",
-  shield: "shield into a private balance (gloam_execute_shield, and on Solana gloam_solana_add)",
+  shield: "shield into a private balance (gloam_execute_shield, on Solana gloam_solana_add, on Starknet gloam_starknet_add)",
   swap: 'swap privately (gloam_execute_private_swap; the owner lists "swap" in tools to allow it)',
 };
 
@@ -186,6 +191,7 @@ export const NETWORK_CHAIN_IDS: Record<NetworkKey, number> = {
 /** The chain id a limit's network names; refuses Elysium and BNB Chain while the SDK has no pool for them. */
 function networkChainId(key: LimitNetworkKey): number {
   if (key === "solana-mainnet") return SOLANA_MAINNET_CHAIN_ID;
+  if (key === "starknet-mainnet") return STARKNET_MAINNET_LIST_ID;
   const id = NETWORK_CHAIN_IDS[key];
   if (!id) throw new Error(`${key} is not available in this version of @gloamtrade/mcp yet. Update the package.`);
   return id;
@@ -215,7 +221,6 @@ export const KNOWN_ASSETS: KnownAsset[] = [
   // Mainnet: exactly what the mainnet pools list.
   { symbol: "USDG", chainId: RH_MAINNET_CHAIN_ID, address: RH_MAINNET_USDG, decimals: 6, stable: true },
   { symbol: "GLOAM", chainId: RH_MAINNET_CHAIN_ID, address: GLOAM_TOKEN, decimals: 18, stable: false },
-  { symbol: "GRIFT", chainId: RH_MAINNET_CHAIN_ID, address: RH_MAINNET_GRIFT, decimals: 18, stable: false },
   { symbol: "ETH", chainId: RH_MAINNET_CHAIN_ID, address: NATIVE_ASSET, decimals: 18, stable: false },
   { symbol: "PONS", chainId: RH_MAINNET_CHAIN_ID, address: RH_MAINNET_PONS, decimals: 18, stable: false },
   { symbol: "CASHCAT", chainId: RH_MAINNET_CHAIN_ID, address: RH_MAINNET_CASHCAT, decimals: 18, stable: false },
@@ -254,6 +259,16 @@ export const KNOWN_ASSETS: KnownAsset[] = [
     decimals: a.decimals,
     stable: a.stable === true,
   })),
+  // Starknet mainnet (gloam_starknet_* tools): USDC, by its address in one form (0x and 64 lowercase hex
+  // digits). Last, so a bare "USDC" keeps naming the one it named before; name the network
+  // (starknet-mainnet) for Starknet's.
+  ...STARKNET_ASSETS.mainnet.map((a) => ({
+    symbol: a.symbol,
+    chainId: STARKNET_MAINNET_LIST_ID,
+    address: starknetAddressHex(a.address) as Address,
+    decimals: a.decimals,
+    stable: a.stable,
+  })),
 ];
 
 /** BNB Chain's listed assets as KnownAsset rows, or none while the SDK has no pool for it. */
@@ -277,7 +292,7 @@ export function assetLabel(chainId: number, asset: Address): string {
 // ------------------------------------------------------------------ config shape
 
 const amount = z.union([z.string(), z.number()]).transform((v) => String(v).trim());
-const network = z.enum(["robinhood", "tempo", "base", "ethereum", "robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "elysium", "bnb-mainnet", "solana-mainnet"]);
+const network = z.enum(["robinhood", "tempo", "base", "ethereum", "robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "elysium", "bnb-mainnet", "solana-mainnet", "starknet-mainnet"]);
 
 const assetEntry = z
   .object({
@@ -344,7 +359,10 @@ function unitOf(known: KnownAsset | undefined, symbol: string, address: Address)
 
 function normalizeRecipient(r: string): string {
   const s = r.trim();
-  return /^0x[0-9a-fA-F]{40}$/.test(s) ? s.toLowerCase() : s;
+  if (/^0x[0-9a-fA-F]{40}$/.test(s)) return s.toLowerCase();
+  // A Starknet address (more than 40 hex digits): one form, 0x and 64 lowercase hex digits.
+  if (/^0x[0-9a-fA-F]{41,64}$/.test(s) && isStarknetAddress(s)) return starknetAddressHex(s);
+  return s;
 }
 
 /** Turn one agent's raw config into an enforceable policy (throws with a plain message). */
@@ -383,6 +401,13 @@ export function resolveAgent(agent: string, raw: AgentConfig, source: string): A
       decimals = known?.decimals ?? entry.decimals ?? -1;
       if (decimals < 0) throw new Error(`Asset ${k} is not one Gloam knows; add "decimals" for it.`);
       symbol = known?.symbol ?? `${k.slice(0, 6)}…${k.slice(-4)}`;
+    } else if (/^0x[0-9a-fA-F]{41,64}$/.test(k) && isStarknetAddress(k)) {
+      // a Starknet token: only one Gloam lists on Starknet (any case or padding)
+      known = KNOWN_ASSETS.find((a) => a.chainId === STARKNET_MAINNET_LIST_ID && BigInt(a.address) === BigInt(k));
+      if (!known || (wantChain != null && wantChain !== STARKNET_MAINNET_LIST_ID)) {
+        throw new Error(`Asset ${k} is not one Gloam lists on Starknet (${STARKNET_ASSETS.mainnet.map((a) => a.symbol).join(", ")}).`);
+      }
+      ({ address, chainId, decimals, symbol } = known);
     } else if (isSolanaAddress(k)) {
       // a Solana mint: only one Gloam lists on Solana (exact match, base58 is case-sensitive)
       known = KNOWN_ASSETS.find((a) => a.chainId === SOLANA_MAINNET_CHAIN_ID && a.address === k);
@@ -544,7 +569,7 @@ export function loadPolicy(env: Record<string, string | undefined>, readFile: (p
         mode: "invalid",
         agent,
         source,
-        error: `GLOAM_LIMIT_NETWORK "${limitNetwork}" is not a Gloam network. Use robinhood-mainnet, tempo-mainnet, base-mainnet, ethereum-mainnet, solana-mainnet, ${mainnetNetwork("elysium") ? "elysium-mainnet, " : ""}${mainnetNetwork("bnb") ? "bnb-mainnet, " : ""}robinhood, tempo, base${testnetNetwork("elysium") ? ", ethereum or elysium" : " or ethereum"}.`,
+        error: `GLOAM_LIMIT_NETWORK "${limitNetwork}" is not a Gloam network. Use robinhood-mainnet, tempo-mainnet, base-mainnet, ethereum-mainnet, solana-mainnet, starknet-mainnet, ${mainnetNetwork("elysium") ? "elysium-mainnet, " : ""}${mainnetNetwork("bnb") ? "bnb-mainnet, " : ""}robinhood, tempo, base${testnetNetwork("elysium") ? ", ethereum or elysium" : " or ethereum"}.`,
       };
     }
     const assetKeys = list(env.GLOAM_LIMIT_ASSETS ?? "");

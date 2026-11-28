@@ -15,7 +15,7 @@ with options, one getter per `GameFunction`, and `getWorker()`.
 | `GLOAM_NETWORK` | Network | Assets |
 |---|---|---|
 | `base` (default) | Base Sepolia, testnet | USDC, EURC, ETH |
-| `robinhood-mainnet` | Robinhood Chain, mainnet | USDG, GLOAM, PONS, CASHCAT, ETH, AI, ORBIO; GRIFT once its limit lands |
+| `robinhood-mainnet` | Robinhood Chain, mainnet | USDG, GLOAM, PONS, CASHCAT, ETH, AI, ORBIO |
 | `base-mainnet` | Base, mainnet | USDC, EURC, USDT, ETH |
 | `elysium-mainnet` | Elysium, mainnet, live since 9 November 2026, with SDK 0.7.0 or later (gas in HYPE) | USDC |
 | `elysium` | Elysium testnet (99801), once the SDK has its pool (gas in HYPE) | Test USDC |

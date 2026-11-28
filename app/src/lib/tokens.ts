@@ -120,18 +120,13 @@ const CASHCAT: OnchainToken = { id: "cashcat", symbol: "CASHCAT", name: "Cash Ca
 
 /**
  * Robinhood Chain mainnet (4663): exactly what the mainnet pool lists. USDG and
- * $GLOAM, PONS, CASHCAT, AI and ORBIO (AI and ORBIO open since 2026-11-03), and
- * San Verano's $GRIFT once its limit lands. Native ETH is listed too
+ * $GLOAM, PONS, CASHCAT, AI and ORBIO (AI and ORBIO open since 2026-11-03). Native ETH is listed too
  * (supportsNativeShield) and opened with AI and ORBIO (isNativeAddable). The app reads every limit from the pool
  * (see ShieldView); the values are in RH_MAINNET_ASSETS (packages/sdk).
  */
 export const RH_MAINNET_TOKENS: OnchainToken[] = [
   { id: "usdg", symbol: "USDG", name: "Global Dollar", address: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", decimals: 6, yahoo: "", kind: "stablecoin" },
   { id: "gloam", symbol: "GLOAM", name: "Gloam", address: "0xDcD885F5c60b3aD49F6D58718696417314e8724d", decimals: 18, yahoo: "", kind: "token", coingecko: "gloam" },
-  // San Verano's $GRIFT: a plain OpenZeppelin ERC-20 (Pons v2 launcher, Sourcify exact match), no
-  // transfer fee or rebasing. Its limit goes through the timelock (NoDepositLimits), so Add offers it
-  // only once that lands (opensWithLimit).
-  { id: "grift", symbol: "GRIFT", name: "grift.world", address: "0x9f4BA41F91a59A34e17eE8C9EB3A51363B11aBD5", decimals: 18, yahoo: "", kind: "token", coingecko: "grift-world", opensWithLimit: true },
   PONS,
   CASHCAT,
   // Artificial Inu: a clone of Doppler's DopplerERC20V1, no mint, no transfer fee, no rebasing. Its

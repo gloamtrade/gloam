@@ -369,11 +369,16 @@ export function ProofShareCard({
   headline,
   rows,
   onEdit,
+  badge = "Proof ready",
+  tokenLabel = "Your proof. Send it to them however you like.",
 }: {
   token: string;
   headline: ReactNode;
   rows: ShowsRow[];
   onEdit: () => void;
+  /** What the card is called (a disclosure is not a proof). */
+  badge?: string;
+  tokenLabel?: string;
 }) {
   const id = useId();
   const [copied, setCopied] = useState<"proof" | "link" | null>(null);
@@ -398,7 +403,7 @@ export function ProofShareCard({
         <div className="relative">
           <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-sealed-soft px-2.5 text-[12px] font-medium text-sealed">
             <ShieldCheck className="h-3.5 w-3.5" />
-            Proof ready
+            {badge}
           </span>
           <p id={`${id}-title`} className="tnum mt-4 text-[26px] font-light leading-tight tracking-[-0.018em] text-foreground sm:text-[30px]">
             {headline}
@@ -416,7 +421,7 @@ export function ProofShareCard({
 
       <div className="bg-surface/50 max-sm:p-5 sm:p-7">
         <label htmlFor={`${id}-token`} className="text-[13px] text-mute">
-          Your proof. Send it to them however you like.
+          {tokenLabel}
         </label>
         <textarea
           id={`${id}-token`}

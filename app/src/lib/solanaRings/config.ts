@@ -15,6 +15,17 @@ export type RingsNetwork = "mainnet" | "devnet";
 
 export const SOLANA_RINGS_ENABLED = process.env.NEXT_PUBLIC_SOLANA_RINGS_ENABLED === "1";
 
+/**
+ * Making claim links on Solana (Pay > Claim link, and a payroll row with no
+ * address): off unless NEXT_PUBLIC_SOLANA_CLAIM_LINKS is "1". It stays off
+ * until scripts/e2e-solana-claim-links.mts has run on devnet, the first live
+ * check that paying an unregistered shielded address (a link's one-time
+ * account) reaches the Rings indexer. Off or on, a link already made can be
+ * claimed and taken back (the claim page, Receive > Claim a payment, Sent
+ * links), and payment requests, which never touch the chain, work.
+ */
+export const SOLANA_CLAIM_LINKS_ENABLED = process.env.NEXT_PUBLIC_SOLANA_CLAIM_LINKS === "1";
+
 export const SOLANA_RINGS_NETWORK: RingsNetwork =
   process.env.NEXT_PUBLIC_SOLANA_RINGS_NETWORK === "devnet" ? "devnet" : "mainnet";
 
@@ -81,6 +92,13 @@ export function addFeePayer(input: {
   if (walletPaysFee(input.walletLamports, input.fee ?? WALLET_ADD_FEE_LAMPORTS)) return "wallet";
   return input.relay?.on && input.relay.funded && input.relay.relayer && input.signOnly ? "relay" : "needs_sol";
 }
+
+/**
+ * Where a Solana claim link opened in the app waits in this tab while the
+ * wallet connects (lib/solanaRings/claimKeep). Here, with nothing else loaded,
+ * because WelcomeModal's first-paint script reads it too. Never rename it.
+ */
+export const SOLANA_CLAIM_KEY = "gloam.solanaClaim";
 
 /** How the site names the network: "Solana", or "Solana devnet" on a devnet build. */
 export const SOLANA_NAME = SOLANA_RINGS_NETWORK === "devnet" ? "Solana devnet" : "Solana";

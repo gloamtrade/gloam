@@ -198,7 +198,7 @@ test("a token the router doesn't list is refused with a plain line, and the rest
   assert.equal(swapLinkSummary(l), "Swap 100 USDG");
 });
 
-test("a real token Gloam lists but the router doesn't swap is refused (GRIFT, Add only)", () => {
+test("a real token the router doesn't swap is refused (GRIFT)", () => {
   const l = read({ from: "USDG", to: "GRIFT", chain: RH });
   assert.equal(l.to, null);
   assert.equal(l.problems.length, 1);
@@ -282,7 +282,7 @@ test("a swap link opened with Solana picked leaves Solana, even for the EVM netw
   assert.equal(swapLinkMove(RH, RH, true), RH, "Solana picked: move, or the link shows Swap is not on Solana yet");
   assert.equal(swapLinkMove(null, RH, true), null, "not a swap link: stay");
   const hub = readFileSync(new URL("../src/components/app/VaultHub.tsx", import.meta.url), "utf8");
-  assert.match(hub, /const to = swapLinkMove\(swapLinkTo, networkKey, solana\);\s*if \(to\) setNetworkKey\(to\);/);
+  assert.match(hub, /const to = swapLinkMove\(swapLinkTo, networkKey, solana \|\| starknet\);\s*if \(to\) setNetworkKey\(to\);/, "Solana or Starknet picked: a swap link moves to its EVM network");
 });
 
 test("Swap asked for on a network without it: where swaps run, with a switch to each", () => {

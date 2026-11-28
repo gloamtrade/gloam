@@ -33,6 +33,8 @@ M._resolveFilename = function (req: string, ...rest: unknown[]) {
 const env = process.env as Record<string, string | undefined>;
 env.NEXT_PUBLIC_SOLANA_RINGS_ENABLED = "1";
 env.NEXT_PUBLIC_SOLANA_RINGS_NETWORK = "devnet";
+/** Claim links in payroll follow NEXT_PUBLIC_SOLANA_CLAIM_LINKS as the shell sets it: CI runs this off and on. */
+const LINKS = env.NEXT_PUBLIC_SOLANA_CLAIM_LINKS === "1";
 
 const P = await import("../src/lib/solanaRings/payroll");
 const S = await import("../src/lib/solanaRings/payrollStore");
@@ -89,7 +91,11 @@ const OWNER = addr(999);
   eq(rows[0]!.line, 2, "lines count from 1, the header included");
   eq(rows[1]!.amount, 1_250_500_000n, "a quoted 1,250.50 reads as 1250.5");
   ok(rows[2]!.error?.includes("more cells"), "an unquoted 1,25 shifts the row: refused, not read as 1 or 125");
-  ok(rows[3]!.error?.includes("Solana private address"), "a missing address says so");
+  if (LINKS) ok(!rows[3]!.error && rows[3]!.link === true && rows[3]!.amount === 10_000_000n, "claim links on: a missing address gets a claim link, as on the other chains");
+  else ok(rows[3]!.error?.includes("Solana private address") && !rows[3]!.link, "claim links off: a missing address says so");
+  // either way, by choice
+  eq(P.parseSolanaPayrollCsv("Tunde,,5", USDC, { links: false }).rows[0]!.error, P.NO_ADDRESS, "links off: no address is an error");
+  ok(P.parseSolanaPayrollCsv("Tunde,,5", USDC, { links: true }).rows[0]!.link === true, "links on: no address is a claim link");
   ok(rows[4]!.error?.includes("EVM address"), "an EVM address is named as one");
   ok(rows[5]!.error?.includes("Not a Solana address"), "junk is not an address");
   ok(rows[6]!.error?.includes("above zero"), "zero is refused");
@@ -131,8 +137,14 @@ const OWNER = addr(999);
   eq(checked[1]!.amount, null, "a flagged row adds nothing to the total");
 
   const sum = P.summarize(checked, 300_000_000n);
-  eq(sum, { ready: 2, skipped: 10, total: 255_000_000n, short: 0n }, "two people ready (Ada and her second line), 255 USDC, covered");
-  eq(P.summarize(checked, 255_000_000n - 1n).short, 1n, "short by exactly what is missing");
+  if (LINKS) {
+    eq(checked[3]!.error, null, "a claim link row needs no registry record");
+    eq(sum, { ready: 3, skipped: 9, total: 265_000_000n, short: 0n }, "three ready (Ada, her second line and a claim link), 265 USDC, covered");
+    eq(P.summarize(checked, 265_000_000n - 1n).short, 1n, "short by exactly what is missing");
+  } else {
+    eq(sum, { ready: 2, skipped: 10, total: 255_000_000n, short: 0n }, "two people ready (Ada and her second line), 255 USDC, covered");
+    eq(P.summarize(checked, 255_000_000n - 1n).short, 1n, "short by exactly what is missing");
+  }
 }
 
 // ------------------------------------------------------------------ pacing
@@ -639,7 +651,12 @@ eq(ringsExplorerTx("abc", "mainnet"), "https://solscan.io/tx/abc", "mainnet expl
   ok((await c1.seal("same")) !== (await c1.seal("same")), "a fresh nonce each time");
   await assert.rejects((await S.runCipher(secret, addr(5))).open(await c1.seal("hi")), "another account's address can't open it");
   await assert.rejects((await S.runCipher(Uint8Array.from(secret, (b) => b ^ 1), OWNER)).open(await c1.seal("hi")), "another secret can't open it");
-  const tampered = sealedBig.slice(0, -6) + (sealedBig.endsWith("A") ? "B" : "A") + sealedBig.slice(-5);
+  // Flip one bit of the ciphertext itself. Swapping in a base64 letter can leave the bytes as
+  // they were: the letter it put in was already there in about 1 run in 64.
+  const flipped = Buffer.from(body);
+  flipped[100] ^= 1;
+  const tampered = `gsp1.${ivB64}.${flipped.toString("base64")}`;
+  ok(tampered !== sealedBig, "the tampered list really differs");
   await assert.rejects(c1.open(tampered), "a changed byte fails to open");
   checks += 3;
   const real = S.payrollStore({ key: "real", cipher: c1, storage });
@@ -711,5 +728,5 @@ eq(ringsExplorerTx("abc", "mainnet"), "https://solscan.io/tx/abc", "mainnet expl
   eq(C.ringsErrorMessage(new C.RingsRelayError("Too many requests.", 429, "rate_limited", false)), "Too many requests.", "the relay's words are kept");
 }
 
-console.log(`selftest-solana-payroll: ${checks} checks passed`);
+console.log(`selftest-solana-payroll (claim links ${LINKS ? "on" : "off"}): ${checks} checks passed`);
 process.exit(0);

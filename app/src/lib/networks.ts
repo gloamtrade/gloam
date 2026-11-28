@@ -328,7 +328,7 @@ export const elysiumTestnet = defineChain({
  */
 export const bnbMainnet = defineChain({
   ...bsc,
-  rpcUrls: { default: { http: [...(BNB?.rpcUrls ?? ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.bnbchain.org"])] } },
+  rpcUrls: { default: { http: [...(BNB?.rpcUrls ?? ["https://bsc-rpc.publicnode.com", "https://bsc.drpc.org", "https://1rpc.io/bnb", "https://bsc-dataseed.bnbchain.org"])] } },
 });
 
 /**

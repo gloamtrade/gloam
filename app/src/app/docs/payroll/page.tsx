@@ -6,6 +6,9 @@ import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { liveMainnetNames } from "@/lib/mainnet";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
+import { PAYROLL_PROOF_MAX } from "@/lib/starknetPrivacy/payroll";
+import { STARKNET_DOCS_NAME } from "../starknet/starknetDocs";
 
 export const metadata: Metadata = {
   title: "Private payroll",
@@ -160,6 +163,17 @@ Robin,gloamr1.3mPz...c4Ta,4200`}</code>
         Paying out of a balance you built up over time hides your payroll total
         too. More detail in <Link href="/docs/privacy-model">What stays private</Link>.
       </p>
+      {STARKNET_ENABLED && (
+        <p>
+          <strong>On {STARKNET_DOCS_NAME}</strong> payroll pays up to{" "}
+          {PAYROLL_PROOF_MAX} people in one proof, with Gloam&apos;s fee once per
+          proof. A person with no private account on Starknet gets a claim link.
+          The first payment to someone shows their private account, and a proof
+          with several first payments shows those accounts together. Payments
+          over channels already open show nobody and no amount. See{" "}
+          <Link href="/docs/starknet#payroll">{STARKNET_DOCS_NAME}</Link>.
+        </p>
+      )}
 
       <h2 id="schedules">Scheduled payroll</h2>
       <p>

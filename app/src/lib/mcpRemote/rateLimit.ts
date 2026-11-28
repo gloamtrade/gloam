@@ -7,7 +7,9 @@
  * so every serverless instance shares them, and fall back to process memory
  * when Redis is not set or does not answer. Counts for cheap reads (LOCAL_BUCKETS)
  * stay in memory: every request there used to cost Redis commands, and the
- * Vercel firewall already limits each IP across instances.
+ * Vercel firewall already limits each IP across instances. Busy reads that
+ * still want a shared count (the Starknet RPC proxy) use hitBatchedCount: one
+ * Redis call per batch of hits on an instance, not one per hit.
  *
  * What a count is about (an IP, a wallet, a spend marker) is never in the
  * clear: a key names it by an HMAC under the server secret GLOAM_RATE_LIMIT_KEY
@@ -41,6 +43,8 @@ const WINDOW_SEC = 60;
  * same for whoever asks (a bridge's progress for whoever holds its request id),
  * and what it reads is held in memory a while (ballots, final counts, live
  * balances, prices, token checks), so these are counted per instance too.
+ * So is GET /api/starknet/relay (sn-relay-info): the relay's settings and its
+ * STRK, held 20 seconds per instance.
  */
 const LOCAL_BUCKETS = new Set([
   "req",
@@ -64,6 +68,7 @@ const LOCAL_BUCKETS = new Set([
   "token-insight",
   "bridge-status",
   "csp-report",
+  "sn-relay-info",
 ]);
 const PREFIX = "gloam:mcp:rl:";
 const MEM_MAX_KEYS = 10_000;
@@ -321,6 +326,88 @@ export async function addRateCount(
   }
   if (opts.failClosed && process.env.NODE_ENV === "production") throw new SharedCountUnavailable("no redis");
   return inMemory();
+}
+
+type Batch = { known: number; lost: number; inflight: number; pending: number; syncedAt: number; ttlSet: boolean; exp: number };
+
+function batches(): Map<string, Batch> {
+  const g = globalThis as { __gloamRateBatch?: Map<string, Batch> };
+  if (!g.__gloamRateBatch) g.__gloamRateBatch = new Map();
+  return g.__gloamRateBatch;
+}
+
+/** How a batched count (hitBatchedCount) sends to Redis: after `slack` unsent hits, or `syncMs` after its last send. */
+export type BatchSync = { slack: number; syncMs: number };
+
+/**
+ * A shared count for a busy read path (a proxy's node calls), without a Redis
+ * call per request. Each instance adds hits up in memory and sends them in one
+ * INCRBY once it holds `slack` of them or `syncMs` has passed since its last
+ * send; Redis answers with everyone's total, and between sends the instance
+ * decides from that total plus what it holds. That total only grows within a
+ * window, so once it is over the limit every further hit there is refused in
+ * memory, with no Redis call at all. What it gives up: each instance may let
+ * through up to `slack` (plus one request's `delta`) more than a count per
+ * request would, before it learns the window is used; and a refused hit is not
+ * counted (the limit holds what passes). Same keys as addRateCount. Reads
+ * only: it never fails closed, and when Redis does not answer, the hits stay
+ * counted in this instance, as with hitRateLimit. hitRateLimit, addRateCount
+ * and readRateLimit are unchanged.
+ */
+export async function hitBatchedCount(
+  ip: string,
+  bucket: string,
+  delta: number,
+  limit: number,
+  sync: BatchSync,
+  now = Date.now(),
+  windowSec = WINDOW_SEC,
+): Promise<RateResult> {
+  const span = Number.isSafeInteger(windowSec) && windowSec > 0 ? windowSec : WINDOW_SEC;
+  const window = Math.floor(now / 1000 / span);
+  const slot = span === WINDOW_SEC ? `${window}` : `${span}s:${window}`;
+  const key = `${PREFIX}${bucket}:${ipKey(bucket, ip)}:${slot}`;
+  const retryAfterSec = Math.max(1, (window + 1) * span - Math.floor(now / 1000));
+  const result = (n: number): RateResult => ({ allowed: n <= limit, limit, remaining: Math.max(0, limit - n), retryAfterSec });
+  const m = batches();
+  if (m.size > MEM_MAX_KEYS) {
+    for (const [k, v] of m) if (v.exp <= now) m.delete(k);
+    if (m.size > MEM_MAX_KEYS) m.clear();
+  }
+  const cur = m.get(key);
+  const b = cur && cur.exp > now ? cur : { known: 0, lost: 0, inflight: 0, pending: 0, syncedAt: now, ttlSet: false, exp: (window + 1) * span * 1000 };
+  if (b !== cur) m.set(key, b);
+  const d = Number.isSafeInteger(delta) && delta > 0 ? delta : 1;
+  const held = () => b.known + b.lost + b.inflight + b.pending;
+  // Already over from what this instance knows: the real total is at least this much.
+  if (held() + d > limit) return result(held() + d);
+  b.pending += d;
+  if (!redisConfigured() || LOCAL_BUCKETS.has(bucket)) {
+    b.lost += b.pending;
+    b.pending = 0;
+    return result(held());
+  }
+  if (b.pending < Math.max(1, sync.slack) && now - b.syncedAt < sync.syncMs) return result(held());
+  const take = b.pending;
+  b.pending = 0;
+  b.inflight += take;
+  b.syncedAt = now;
+  const withTtl = !b.ttlSet;
+  try {
+    const json = await redisCall(withTtl ? [["INCRBY", key, take], ["EXPIRE", key, keyTtl(span)]] : [["INCRBY", key, take]]);
+    const n = Number(json?.[0]?.result);
+    if (!Number.isFinite(n)) throw new Error("redis: bad INCRBY result");
+    b.ttlSet = true;
+    // The key was gone (flushed) and this send made it again with no expiry: give it one.
+    if (!withTtl && n === take) await redisCall([["EXPIRE", key, keyTtl(span)]]).catch(() => {});
+    b.inflight -= take;
+    b.known = Math.max(b.known, n);
+  } catch (e) {
+    logRedisMiss(e);
+    b.inflight -= take;
+    b.lost += take;
+  }
+  return result(held());
 }
 
 /**

@@ -104,4 +104,4 @@ export function ScheduleStatusChip({ status }: { status: ScheduleStatus }) {
 
 /** The honest line: why a schedule reminds you instead of paying by itself. */
 export const SELF_CUSTODY_NOTE =
-  "Gloam never holds your keys, so it can’t pay without you. It reminds you when payroll is due and runs it in one click, from this browser.";
+  "Gloam never holds your keys, so a schedule reminds you on payday and you run it in one click.";

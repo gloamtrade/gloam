@@ -1,0 +1,503 @@
+"use client";
+
+/**
+ * The Vault on Starknet: the same overview, action row and forms as on the
+ * other networks (VaultHome, VaultHub's row, the big amount card), over the
+ * Starknet account (StarknetAccount). Starknet has Add privately, Pay
+ * privately, Receive and Cash out; Swap, Agent top-ups and Public send are not
+ * on Starknet yet, so they are not listed.
+ *
+ * What each screen says follows lib/starknetPrivacy/config, once and plainly:
+ * a payment over an open channel hides who paid, who was paid and how much;
+ * the first payment to someone shows their private account; adding shows the
+ * account and the amount; a cash out shows where it went and how much. A
+ * payment request (components/app/StarknetRequests) fills in Pay and never
+ * touches the chain.
+ */
+import Link from "next/link";
+import { useState } from "react";
+import { STARKNET_NETWORK, type StarknetToken } from "@/lib/starknetPrivacy/config";
+import { STARKNET_VAULT_ACTIONS } from "@/lib/starknetPrivacy/vaultActions";
+import { ADD_FIRST, type VaultActionId, type VaultActionInfo } from "@/lib/vaultHub";
+import { ActionTile, BalancePane, QuickRow, type Holding } from "./VaultHome";
+import { SuccessModal } from "./SuccessModal";
+import { TokenLogo } from "./TokenLogo";
+import { parseStarkAmount, useStarknet } from "./StarknetAccount";
+import { StarknetClaimCard, StarknetClaimLead, StarknetPayOrLink, useStarknetClaimInHash } from "./StarknetLinks";
+import { StarknetRequestBanner, StarknetRequestCard, StarknetRequestLead, useStarknetRequestInHash } from "./StarknetRequests";
+import { requestAmountText, type StarknetRequest, type StarknetRequestOnPay } from "@/lib/starknetPrivacy/requestLink";
+import { StarknetCashOutNetPicker, StarknetCashOutTo, cashOutDestinations, type StarknetCashOutNet } from "./StarknetCashOutTo";
+import { StarknetBringInSolana } from "./StarknetBringInSolana";
+import { StarknetAddFromPicker, StarknetBringIn, StarknetBringInPending, StarknetBringInRelay, bringInRelaySources, bringInSources, type StarknetAddFrom } from "./StarknetBringIn";
+import {
+  STARKNET_NAME,
+  StarknetActionButton,
+  StarknetAddressCopy,
+  StarknetAddressField,
+  StarknetAmountCard,
+  StarknetEmptyBalance,
+  StarknetError,
+  StarknetGate,
+  StarknetPrivacyNote,
+  StarknetSteps,
+  isStarkAddress,
+  starkAmount,
+  starkAmountProblem,
+} from "./StarknetParts";
+
+/** A transaction on Starknet's explorer (Voyager), or null on a local devnet. */
+export function starknetExplorerTx(hash: string): string | null {
+  if (STARKNET_NETWORK === "mainnet") return `https://voyager.online/tx/${hash}`;
+  if (STARKNET_NETWORK === "sepolia") return `https://sepolia.voyager.online/tx/${hash}`;
+  return null;
+}
+
+function holding(v: bigint | null, token: StarknetToken | null): Holding[] {
+  if (v === null || !token || v <= 0n) return [];
+  return [{ id: token.symbol.toLowerCase(), symbol: token.symbol, logoId: "usdc", text: starkAmount(v, token), amount: Number(v) / 10 ** token.decimals, dollar: true }];
+}
+
+// ---------------------------------------------------------------- overview
+
+export function StarknetVaultHome({ missing }: { missing?: string | null }) {
+  const sn = useStarknet();
+  if (!sn) return null;
+  const { address, token, privateBalance, publicBalance } = sn;
+  const privateRows = holding(privateBalance, token);
+  const walletRows = holding(publicBalance, token);
+  const known = Boolean(address && privateBalance !== null);
+  const hasPrivate = privateRows.length > 0;
+  const blockedFor = (a: VaultActionInfo) => (known && !hasPrivate && (a.id === "pay" || a.id === "cashout") ? ADD_FIRST : null);
+  const symbol = token?.symbol ?? "USDC";
+
+  const next = hasPrivate
+    ? {
+        text: `Pay privately from your private balance, or cash out to any ${STARKNET_NAME} address.`,
+        action: (
+          <Link href="/app/vault?tab=move" className="btn btn-ink">
+            Pay privately
+          </Link>
+        ),
+      }
+    : walletRows[0]
+      ? {
+          text: `${walletRows[0].text} ${symbol} is on your Starknet account. Add it privately.`,
+          action: (
+            <Link href="/app/vault?tab=shield" className="btn btn-ink">
+              Add privately
+            </Link>
+          ),
+        }
+      : { text: `Nothing to add yet. Send ${symbol} on ${STARKNET_NAME} to your Starknet account first.`, action: null };
+
+  return (
+    <div className="space-y-6">
+      {missing && (
+        <p role="status" className="rounded-[16px] bg-surface px-4 py-3 text-[14px] text-soft">
+          {missing} is not on Starknet yet. Here is what Gloam does on Starknet.
+        </p>
+      )}
+      <QuickRow actions={STARKNET_VAULT_ACTIONS} blockedFor={blockedFor} />
+
+      {!address ? (
+        <StarknetGate />
+      ) : (
+        <section className="gl-card overflow-hidden" aria-labelledby="vault-money-title">
+          <div className="flex items-center justify-between gap-3 px-5 pt-5 sm:px-7 sm:pt-6">
+            <h2 id="vault-money-title" className="text-[15px] text-foreground">
+              Your money on {STARKNET_NAME}
+            </h2>
+          </div>
+          <div className="mt-4 grid gap-px border-y border-line bg-line sm:grid-cols-2">
+            <BalancePane
+              sealed
+              title="Private balance"
+              badge="Only you"
+              rows={privateRows}
+              loading={privateBalance === null}
+              empty="0.00"
+              note={hasPrivate ? "Read and decrypted on this device." : "Nothing here yet. Only you will see this number."}
+            />
+            <BalancePane
+              sealed={false}
+              title="On your Starknet account"
+              badge={null}
+              rows={walletRows}
+              loading={publicBalance === null}
+              empty="0.00"
+              note="Not private yet. Anyone can see this on the explorer."
+            />
+          </div>
+          <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7" aria-live="polite">
+            <p className="min-w-0 text-[14px] leading-relaxed text-soft">{next.text}</p>
+            {next.action && <div className="shrink-0 max-sm:[&>.btn]:w-full">{next.action}</div>}
+          </div>
+        </section>
+      )}
+
+      <section aria-labelledby="vault-actions-title">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-1">
+          <h2 id="vault-actions-title" className="t-eyebrow">
+            What you can do
+          </h2>
+        </div>
+        <ul className="gl-card divide-y divide-line overflow-hidden xl:grid xl:grid-cols-4 xl:divide-x xl:divide-y-0">
+          {STARKNET_VAULT_ACTIONS.map((a) => (
+            <li key={a.id} className="min-w-0">
+              <ActionTile action={a} blocked={blockedFor(a)} />
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {address && <StarknetPrivacyNote className="max-w-[68ch] px-1 text-[13px]" />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- the panel under the action row
+
+export function StarknetVaultPanel({ id, onReceive }: { id: VaultActionId; onReceive: () => void }) {
+  const sn = useStarknet();
+  const claim = useStarknetClaimInHash();
+  // A request link (#snreq=...): Pay pays the first listed token, so a request names that one.
+  const request = useStarknetRequestInHash(STARKNET_NETWORK, 1);
+  if (!sn) return null;
+  if (!sn.address || !sn.token) {
+    const lead =
+      id === "receive" && claim ? <StarknetClaimLead claim={claim} token={sn.token} /> : id === "pay" && request?.request ? <StarknetRequestLead request={request.request} token={sn.token} /> : undefined;
+    return <StarknetGate lead={lead} />;
+  }
+  if (id === "shield") return <StarknetAddView token={sn.token} />;
+  if (id === "pay") return <StarknetPayOrLink spend={<StarknetSpendView kind="pay" token={sn.token} onReceive={onReceive} fromUrl={request} />} />;
+  if (id === "cashout") return <StarknetSpendView kind="cashout" token={sn.token} onReceive={onReceive} />;
+  if (id === "receive")
+    return (
+      <div className="space-y-6">
+        {claim && <StarknetClaimCard claim={claim} />}
+        <StarknetReceiveView token={sn.token} />
+      </div>
+    );
+  return null;
+}
+
+type Shown = { title: string; body: string; amount: bigint; hash: string };
+
+function useSuccess(token: StarknetToken) {
+  const [shown, setShown] = useState<Shown | null>(null);
+  const href = shown ? starknetExplorerTx(shown.hash) : null;
+  const modal = (
+    <SuccessModal
+      open={Boolean(shown)}
+      title={shown?.title ?? ""}
+      body={shown?.body ?? ""}
+      logo={<TokenLogo id="usdc" symbol={token.symbol} size={56} />}
+      amount={shown ? `${starkAmount(shown.amount, token)} ${token.symbol}` : undefined}
+      primaryHref={href ?? undefined}
+      primaryLabel={href ? "View on explorer" : undefined}
+      secondaryLabel="Done"
+      onClose={() => setShown(null)}
+    />
+  );
+  return { show: setShown, modal };
+}
+
+function RelayPaused() {
+  return (
+    <p className="mt-4 rounded-[16px] bg-warn-soft px-4 py-3 text-[13px] leading-relaxed text-warn">
+      Private payments on {STARKNET_NAME} are paused for a moment. Try again later.
+    </p>
+  );
+}
+
+/** Gloam's fee on a move, when it asks one: from what is added (Add), or from the private balance (Pay, Cash out). */
+function FeeLine({ fee, token, from = "from your private balance" }: { fee: bigint; token: StarknetToken; from?: string }) {
+  if (fee <= 0n) return null;
+  return (
+    <p className="tnum mt-3 text-[13px] text-mute">
+      Gloam&apos;s fee: {starkAmount(fee, token)} {token.symbol}, {from}
+    </p>
+  );
+}
+
+// ---------------------------------------------------------------- Add privately
+
+function StarknetAddView({ token }: { token: StarknetToken }) {
+  const sn = useStarknet()!;
+  const [amount, setAmount] = useState("");
+  const [from, setFrom] = useState<StarknetAddFrom>("account");
+  const { show, modal } = useSuccess(token);
+  // Other networks to bring USDC in from with Circle's CCTP, when Gloam's relay does it.
+  const sources = bringInSources(sn.cctp);
+  const relaySources = bringInRelaySources(sn.cctp);
+  const source = from === "account" ? null : (sources.find((s) => s.chainId === from) ?? null);
+  const relaySource = from === "account" || source ? null : (relaySources.find((s) => s.chainId === from) ?? null);
+  const fromName = source?.name ?? relaySource?.name ?? null;
+  const balance = sn.publicBalance;
+  const problem = starkAmountProblem(amount, token, balance);
+  const value = parseStarkAmount(amount, token.decimals);
+  const tooSmall = value !== null && sn.fee > 0n && value <= sn.fee ? `More than Gloam's fee of ${starkAmount(sn.fee, token)} ${token.symbol}` : null;
+  // The relay approves at most this much for one add, and refuses more before anything moves.
+  const tooBig = value !== null && sn.maxAdd > 0n && value > sn.maxAdd ? `One add moves at most ${starkAmount(sn.maxAdd, token)} ${token.symbol}` : null;
+  const working = sn.task?.kind === "add";
+  const busy = working || sn.task?.kind === "bringin";
+  const stop = !sn.relay?.funded ? "Paused for a moment" : !amount.trim() || !value ? "Enter an amount" : (problem ?? tooSmall ?? tooBig);
+
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <section className="gl-card p-5 sm:p-7">
+        <h2 className="t-title text-foreground">Add privately</h2>
+        <p className="mt-1.5 max-w-[56ch] text-[14px] leading-relaxed text-mute">
+          {relaySource
+            ? `Bring ${relaySource.tokens.map((t) => t.symbol).join(" or ")} in from ${relaySource.name} as ${token.symbol} and add it to your private balance. The transfers and the add show your Starknet account and the amount.`
+            : fromName
+              ? `Bring ${token.symbol} in from ${fromName} and add it to your private balance. The transfer and the add show your Starknet account and the amount.`
+              : `Move ${token.symbol} that sits on your Starknet account into your private balance. Adding shows your account and the amount.`}
+        </p>
+        {sn.pendingBringIns.length > 0 && (
+          <div className="mt-5">
+            <StarknetBringInPending token={token} />
+          </div>
+        )}
+        {sources.length > 0 && (
+          <div className="mt-5">
+            <StarknetAddFromPicker value={source?.chainId ?? relaySource?.chainId ?? "account"} onChange={setFrom} sources={sources} relaySources={relaySources} disabled={busy} />
+          </div>
+        )}
+        {source?.kind === "svm" ? (
+          <div className="mt-3">
+            <StarknetBringInSolana token={token} onDone={(hash, lands) => show({ title: "Added privately", body: "It came in from Solana and is in your private balance now.", amount: lands, hash })} />
+          </div>
+        ) : source ? (
+          <div className="mt-3">
+            <StarknetBringIn
+              source={source}
+              token={token}
+              onDone={(hash, lands) => show({ title: "Added privately", body: `It came in from ${source.name} and is in your private balance now.`, amount: lands, hash })}
+            />
+          </div>
+        ) : relaySource ? (
+          <div className="mt-3">
+            <StarknetBringInRelay
+              key={relaySource.chainId}
+              source={relaySource}
+              token={token}
+              onDone={(hash, lands) => show({ title: "Added privately", body: `It came in from ${relaySource.name} and is in your private balance now.`, amount: lands, hash })}
+            />
+          </div>
+        ) : (
+          <>
+            <div className={sources.length > 0 ? "mt-3" : "mt-5"}>
+              <StarknetAmountCard
+                id="sn-add-amount"
+                label="Add"
+                balanceLabel="On your account"
+                balance={balance}
+                token={token}
+                amount={amount}
+                onAmount={setAmount}
+                problem={problem}
+                disabled={working}
+              />
+            </div>
+            <FeeLine fee={sn.fee} token={token} from="taken from what you add" />
+            {!sn.relay?.funded && <RelayPaused />}
+            <StarknetActionButton
+              kind="add"
+              label="Add privately"
+              stop={stop}
+              className="mt-5"
+              onClick={() => {
+                // The fee comes out of what is added (inside the proof): the private balance grows by the rest.
+                const fee = sn.fee;
+                void sn.add(value!).then((hash) => {
+                  if (!hash) return;
+                  setAmount("");
+                  show({ title: "Added privately", body: "It's in your private balance now.", amount: value! - fee, hash });
+                });
+              }}
+            />
+            <StarknetSteps task={working ? sn.task : null} className="mt-4" />
+            <StarknetError kind="add" className="mt-4" />
+          </>
+        )}
+      </section>
+      <aside className="gl-card p-5 sm:p-6">
+        <h3 className="text-[15px] text-foreground">Fund your Starknet account</h3>
+        <p className="mt-1.5 text-[13.5px] leading-relaxed text-mute">
+          Send {token.symbol} on {STARKNET_NAME} to this address from any Starknet wallet or exchange. Then add it privately here.
+        </p>
+        <div className="mt-4">
+          <StarknetAddressCopy address={sn.address!} label="Your Starknet account" />
+        </div>
+        <p className="mt-4 text-[12.5px] leading-relaxed text-mute">
+          {sources.length > 0
+            ? `Or pick another network under From: Gloam brings ${token.symbol} in through Circle, with no Starknet wallet or STRK.`
+            : "Bringing money in from other networks is coming."}
+        </p>
+      </aside>
+      {modal}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Pay privately and Cash out
+
+function StarknetSpendView({ kind, token, onReceive, fromUrl = null }: { kind: "pay" | "cashout"; token: StarknetToken; onReceive: () => void; fromUrl?: StarknetRequestOnPay | null }) {
+  const sn = useStarknet()!;
+  const [to, setTo] = useState("");
+  const [amount, setAmount] = useState("");
+  const [net, setNet] = useState<StarknetCashOutNet>("starknet");
+  const { show, modal } = useSuccess(token);
+  const balance = sn.privateBalance;
+  const pay = kind === "pay";
+  // A request link fills in who and how much, once per link (set while rendering, so it is there on the first paint).
+  const [request, setRequest] = useState<StarknetRequest | null>(null);
+  const [filledFor, setFilledFor] = useState<StarknetRequestOnPay | null>(null);
+  if (pay && fromUrl?.request && filledFor !== fromUrl) {
+    setFilledFor(fromUrl);
+    setRequest(fromUrl.request);
+    setTo(fromUrl.request.to);
+    setAmount(fromUrl.request.amount !== null ? requestAmountText(fromUrl.request.amount, token.decimals) : "");
+  }
+  const asked = pay && request ? (
+    <StarknetRequestBanner request={request} token={token} onDismiss={() => setRequest(null)} />
+  ) : pay && fromUrl?.problem ? (
+    <p role="alert" className="mt-5 rounded-[16px] bg-warn-soft px-4 py-3 text-[13px] leading-relaxed text-warn">
+      {fromUrl.problem}
+    </p>
+  ) : null;
+  // A cash out can also go to another network with Circle's CCTP, when Gloam's relay does it.
+  const destinations = pay ? [] : cashOutDestinations(sn.cctp);
+  const dest = net === "starknet" ? null : (destinations.find((d) => d.chainId === net) ?? null);
+  const problem = starkAmountProblem(amount, token, balance, sn.fee);
+  const value = parseStarkAmount(amount, token.decimals);
+  const working = sn.task?.kind === kind;
+  const self = sn.address && to && isStarkAddress(to) && BigInt(to) === BigInt(sn.address);
+  const stop = !sn.relay?.funded
+    ? "Paused for a moment"
+    : !isStarkAddress(to)
+      ? pay
+        ? "Enter a private account"
+        : "Enter an address"
+      : self
+        ? "That's your own account"
+        : !amount.trim() || !value
+          ? "Enter an amount"
+          : problem;
+
+  if (balance !== null && balance === 0n && !working) {
+    // A move that spent the whole balance lands here: its success shows over the empty state.
+    return (
+      <section className="gl-card p-5 sm:p-7">
+        <h2 className="t-title text-foreground">{pay ? "Pay privately" : "Cash out"}</h2>
+        {asked}
+        <StarknetEmptyBalance onReceive={onReceive} />
+        {modal}
+      </section>
+    );
+  }
+
+  return (
+    <section className="gl-card max-w-[720px] p-5 sm:p-7">
+      <h2 className="t-title text-foreground">{pay ? "Pay privately" : "Cash out"}</h2>
+      <p className="mt-1.5 max-w-[56ch] text-[14px] leading-relaxed text-mute">
+        {pay
+          ? "Pay another private account on Starknet. The first payment to someone shows their private account; after that, nothing about a payment shows."
+          : dest
+            ? `Send from your private balance to any address on ${dest.name}. Circle delivers it there, so nothing is needed on ${dest.name}.`
+            : `Send from your private balance to any ${STARKNET_NAME} address. A cash out shows where it went and how much, never which account it came from.`}
+      </p>
+      {asked}
+      {destinations.length > 0 && (
+        <div className="mt-5">
+          <StarknetCashOutNetPicker value={dest ? dest.chainId : "starknet"} onChange={setNet} destinations={destinations} disabled={working} />
+        </div>
+      )}
+      {dest ? (
+        <div className="mt-3">
+          <StarknetCashOutTo
+            key={dest.chainId}
+            dest={dest}
+            token={token}
+            onDone={(r) =>
+              show({
+                title: "Cashed out",
+                body: r.delivered ? `It arrived at that address on ${dest.name}.` : `It's on its way to that address on ${dest.name}. Circle delivers it in a few minutes.`,
+                amount: r.arrives,
+                hash: r.hash,
+              })
+            }
+          />
+        </div>
+      ) : (
+        <>
+          <div className={destinations.length > 0 ? "mt-3 space-y-3" : "mt-5 space-y-3"}>
+            <StarknetAddressField label={pay ? "To (their private account)" : "To (any Starknet address)"} value={to} onChange={setTo} placeholder="0x..." disabled={working} />
+            <StarknetAmountCard
+              id={`sn-${kind}-amount`}
+              label={pay ? "Pay" : "Cash out"}
+              balanceLabel="Private balance"
+              balance={balance}
+              token={token}
+              amount={amount}
+              onAmount={setAmount}
+              problem={problem}
+              disabled={working}
+            />
+          </div>
+          <FeeLine fee={sn.fee} token={token} />
+          {!sn.relay?.funded && <RelayPaused />}
+          <StarknetActionButton
+            kind={kind}
+            label={pay ? "Pay privately" : "Cash out"}
+            stop={stop}
+            className="mt-5"
+            onClick={() =>
+              void (pay ? sn.pay(to, value!) : sn.cashOut(to, value!)).then((hash) => {
+                if (!hash) return;
+                setAmount("");
+                if (request) {
+                  // Paid: a reload no longer fills the request in again.
+                  setRequest(null);
+                  if (fromUrl) history.replaceState(null, "", window.location.pathname + window.location.search);
+                }
+                show({
+                  title: pay ? "Paid privately" : "Cashed out",
+                  body: pay ? "They'll see it in their private balance." : "It's on its way to that address.",
+                  amount: value!,
+                  hash,
+                });
+              })
+            }
+          />
+          <StarknetSteps task={working ? sn.task : null} className="mt-4" />
+          <StarknetError kind={kind} className="mt-4" />
+        </>
+      )}
+      {modal}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- Receive
+
+function StarknetReceiveView({ token }: { token: StarknetToken }) {
+  const sn = useStarknet()!;
+  return (
+    <section className="gl-card max-w-[720px] p-5 sm:p-7">
+      <h2 className="t-title text-foreground">Receive</h2>
+      <p className="mt-1.5 max-w-[56ch] text-[14px] leading-relaxed text-mute">
+        Share your private account to get paid privately on Starknet. The first payment to it shows this address; after that, nothing about a payment shows.
+      </p>
+      <div className="mt-5">
+        <StarknetAddressCopy address={sn.address!} label="Your private account on Starknet" />
+      </div>
+      <div className="mt-6 border-t border-line pt-6">
+        <h3 className="text-[15px] font-medium text-foreground">Request a payment</h3>
+        <p className="mt-1 text-[13px] leading-relaxed text-mute">A link with the amount and a note, like an invoice.</p>
+        <StarknetRequestCard token={token} />
+      </div>
+    </section>
+  );
+}

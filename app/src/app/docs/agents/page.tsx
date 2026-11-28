@@ -6,6 +6,8 @@ import { joinNames, liveMainnetNames } from "@/lib/mainnet";
 import { ELYSIUM_ENABLED } from "@/lib/elysium";
 import { BNB_ENABLED } from "@/lib/bnb";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
+import { STARKNET_DOCS_NAME, STARKNET_DOCS_NOTE } from "../starknet/starknetDocs";
 
 export const metadata: Metadata = {
   title: "Agents",
@@ -474,6 +476,20 @@ const hash = await wallet.writeContract({
           </tbody>
         </table>
       </div>
+      {STARKNET_ENABLED && (
+        <>
+          <h3 id="starknet">On {STARKNET_DOCS_NAME}</h3>
+          <p>
+            From 0.12.0 the server has <code>gloam_starknet_*</code> tools: info,
+            balance, register, add, pay, cash out and transaction status. The
+            agent&apos;s key (<code>GLOAM_AGENT_PRIVATE_KEY</code>) opens the same
+            private Starknet account the app opens for that wallet. Spending
+            limits name the network <code>starknet-mainnet</code>, and a payment
+            or cash out counts its amount and Gloam&apos;s fee. {STARKNET_DOCS_NOTE}{" "}
+            See <Link href="/docs/starknet#mcp">{STARKNET_DOCS_NAME}</Link>.
+          </p>
+        </>
+      )}
 
       <h2>Private agent payments (x402)</h2>
       <p>

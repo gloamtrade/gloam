@@ -11,7 +11,7 @@ Every tool that touches a chain takes a `network`:
 | `network` | What it is | Assets | Keys |
 | --- | --- | --- | --- |
 | `tempo-mainnet` | Tempo mainnet | USDC.e, pathUSD, USDT0, OUSD | Final ceremony keys |
-| `robinhood-mainnet` | Robinhood Chain mainnet | USDG, GLOAM, PONS, CASHCAT, ETH, AI, ORBIO; GRIFT once its timelocked limit lands | Final ceremony keys |
+| `robinhood-mainnet` | Robinhood Chain mainnet | USDG, GLOAM, PONS, CASHCAT, ETH, AI, ORBIO | Final ceremony keys |
 | `base-mainnet` | Base mainnet | USDC, EURC, USDT, ETH | Final ceremony keys |
 | `ethereum-mainnet` | Ethereum mainnet | USDC, USDT, USDG, PYUSD, EURC, ETH | Final ceremony keys |
 | `tempo` | Tempo testnet (Moderato) | PathUSD and other test stablecoins | Dev keys |
@@ -109,6 +109,13 @@ The server reads its environment, then `~/.gloam/agent.env` (or the file in `GLO
 | `gloam_solana_pay` | execute | **Real private payment** to another Gloam private account on Solana. Hides the asset and the amount, not the two accounts. Limits tool `pay` |
 | `gloam_solana_cash_out` | execute | **Real cash out** to any Solana address (default: the agent's own wallet). Public: destination, asset and amount. Limits tool `pay` |
 | `gloam_solana_tx_status` | read | Landed, failed, dropped (safe to resend) or pending for a Solana send |
+| `gloam_starknet_info` | read | Gloam on Starknet (not open yet): USDC, what it hides and shows, the auditor key and the prover, the relay and its fee, this agent's private Starknet account (see [Starknet](#starknet-not-open-yet)) |
+| `gloam_starknet_balance` | read | The private USDC balance on Starknet, what waits at the account's address, and whether the account is open |
+| `gloam_starknet_register` | execute | Put the private Starknet account on chain and open it, once. Gloam's relay pays; nothing is spent. Shows the account |
+| `gloam_starknet_add` | execute | **Real add** of USDC that sits at the account's address. Public: the account and the amount. Limits tool `shield` |
+| `gloam_starknet_pay` | execute | **Real private payment** to another Gloam private account on Starknet. The first payment to someone shows their account; later ones show nothing. Limits tool `pay` (amount and fee) |
+| `gloam_starknet_cash_out` | execute | **Real cash out** to any Starknet address (default: the agent's own account address). Public: destination and amount. Limits tool `pay` (amount and fee) |
+| `gloam_starknet_tx_status` | read | Accepted, reverted or pending for a Starknet transaction |
 
 `gloam_execute_shield` is the private-execution rail: the agent ends up with a shielded balance only this server can spend. The agent sees a note handle such as `n-k3x9p2qw7m`, never the note's secret. When no signer is configured, every execute tool returns a plan instead of acting, and we never return a fake private fill.
 
@@ -134,6 +141,29 @@ From 0.11.0 the server runs Gloam on Solana mainnet, through Helius Solana Priva
 GLOAM_AGENT_SOLANA_KEY=[12,34,...]
 GLOAM_LIMIT_ASSETS=USDC
 GLOAM_LIMIT_NETWORK=solana-mainnet
+GLOAM_LIMIT_MAX_PER_PAYMENT=5
+GLOAM_LIMIT_MAX_PER_DAY=25
+GLOAM_LIMIT_RECIPIENTS=any
+```
+
+## Starknet (not open yet)
+
+From 0.12.0 the server has Gloam on Starknet mainnet, through Starknet's own privacy pool (STRK20), with the `gloam_starknet_*` tools above. **Starknet is not open on Gloam yet:** until it opens, Gloam's Starknet routes refuse, and every tool that would touch them answers `"status": "not_open"` without sending, reserving or logging anything.
+
+**What it hides, plainly:** over a channel that is already open, a payment hides who paid, who was paid and the amount. The first payment to someone opens a channel to them, which shows their private account (never who paid or how much). Adding money shows the account and the amount; a cash out shows the destination and the amount, never which private account it came from. The pool has a mandatory auditor key: registering stores the account's viewing key encrypted to it, so its holder can read the account's private activity for authorized inspection; it cannot spend. Proofs are made by Starkscan's prover, which sees what it proves.
+
+- **Key:** the agent's EVM key, `GLOAM_AGENT_PRIVATE_KEY`. It signs the Gloam app's fixed account text, so the agent gets the same private Starknet account the Gloam app opens for that wallet (`GLOAM_STARKNET_ACCOUNT_INDEX`, default 0). It never leaves the server and is never printed.
+- **Fees:** Gloam's relay deploys the account and sends every transaction, so the agent never needs STRK. Each add, payment and cash out pays Gloam's relay fee (0.25 USDC on mainnet) inside its proof: `gloam_starknet_info` reads it live, and `maxFee` caps it per call. A fee that changed since the server last read it stops the move before anything is proven; call again to pay it.
+- **Busy:** proofs come from a small daily quota for now. When it is used, a move answers `"status": "busy"`, `"code": "quota"`, and nothing is sent.
+- **Assets:** USDC on Starknet. Money reaches the agent's account address from any wallet or exchange that sends USDC on Starknet; `gloam_starknet_add` makes it private.
+- **Limits:** the network is `starknet-mainnet`. Name USDC with `"network": "starknet-mainnet"` (or `GLOAM_LIMIT_NETWORK=starknet-mainnet`), or by its address. Adding money counts as `shield`, paying and cashing out as `pay`, with Gloam's fee counted on top of the amount. A cash out to the agent's own account address needs no recipient entry. Write Starknet recipients as `0x` and 64 hex digits (any case). No limits still means no spending.
+- **First run:** `gloam_starknet_register` once, so the account is on chain and other Gloam accounts can pay it; send USDC to its address and `gloam_starknet_add` it.
+
+```bash
+# ~/.gloam/agent.env (chmod 600)
+GLOAM_AGENT_PRIVATE_KEY=0x...
+GLOAM_LIMIT_ASSETS=USDC
+GLOAM_LIMIT_NETWORK=starknet-mainnet
 GLOAM_LIMIT_MAX_PER_PAYMENT=5
 GLOAM_LIMIT_MAX_PER_DAY=25
 GLOAM_LIMIT_RECIPIENTS=any
@@ -296,7 +326,7 @@ Assets are named by symbol or by `0x` token address (with `decimals` for a token
 | Network | Symbols |
 | --- | --- |
 | `tempo-mainnet` | `USDC.e`, `pathUSD`, `USDT0`, `OUSD` |
-| `robinhood-mainnet` | `USDG`, `GLOAM`, `GRIFT`, `PONS`, `CASHCAT`, `AI`, `ORBIO`, `ETH` |
+| `robinhood-mainnet` | `USDG`, `GLOAM`, `PONS`, `CASHCAT`, `AI`, `ORBIO`, `ETH` |
 | `tempo` (testnet) | `PathUSD`, `OUSD`, `AlphaUSD`, `BetaUSD`, `ThetaUSD` |
 | `robinhood` (testnet) | `ETH`, `USDG` |
 | `base-mainnet` | `USDC`, `EURC`, `USDT`, `ETH` |

@@ -6,6 +6,8 @@ import { swapMainnets } from "@/lib/vaultSwap";
 import { ELYSIUM, ELYSIUM_TESTNET } from "@/lib/elysium";
 import { BNB } from "@/lib/bnb";
 import { CASH_OUT_FEE_BPS, CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
+import { STARKNET_DOCS_NAME, STARKNET_DOCS_NOTE } from "../starknet/starknetDocs";
 
 const MAINNETS = liveMainnetNames();
 
@@ -153,6 +155,24 @@ npm install snarkjs   # optional peer, for proving`}</code>
           private payments are free.
         </li>
       </ul>
+
+      {STARKNET_ENABLED && (
+        <>
+          <h3 id="starknet">{STARKNET_DOCS_NAME}</h3>
+          <p>
+            From 0.10.0, <code>@gloamtrade/sdk/starknet</code> opens the same
+            private Starknet account the app opens, and adds, pays (one person
+            or up to 28 in one proof), cashes out and makes claim links through
+            Gloam&apos;s routes. It runs on Starknet&apos;s own privacy pool, not
+            the vault, and needs <code>starknet</code> and StarkWare&apos;s
+            privacy SDK next to it. {STARKNET_DOCS_NOTE} Errors are typed:{" "}
+            <code>StarknetOffError</code>, <code>StarknetBusyError</code>,{" "}
+            <code>StarknetFeeChangedError</code> and{" "}
+            <code>StarknetInsufficientError</code>. See{" "}
+            <Link href="/docs/starknet#sdk">{STARKNET_DOCS_NAME}</Link>.
+          </p>
+        </>
+      )}
 
       <h2>The model</h2>
       <p>

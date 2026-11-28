@@ -7,6 +7,8 @@ import { liveMainnetNames } from "@/lib/mainnet";
 import { SCREEN_LIST_INFO } from "@/lib/screening";
 import { swapMainnets } from "@/lib/vaultSwap";
 import { RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
+import { STARKNET_DOCS_NAME, STARKNET_DOCS_NOTE } from "../starknet/starknetDocs";
 
 export const metadata: Metadata = {
   title: "What stays private",
@@ -119,6 +121,19 @@ export default function DocsPrivacyPage() {
             Everything above is about the Gloam vault. Gloam on Solana runs
             through Helius Privacy Rings instead. {RINGS_PRIVACY_NOTE} See{" "}
             <Link href="/docs/chain#solana">{SOLANA_NAME}</Link>.
+          </p>
+        </>
+      )}
+
+      {STARKNET_ENABLED && (
+        <>
+          <h2 id="starknet">On {STARKNET_DOCS_NAME}</h2>
+          <p>
+            Everything above is about the Gloam vault. Gloam on Starknet runs
+            on Starknet&apos;s own privacy pool instead. {STARKNET_DOCS_NOTE}{" "}
+            Registering an account stores its viewing key encrypted to the
+            pool&apos;s auditor key, for authorized inspection; that key cannot
+            spend. See <Link href="/docs/starknet#privacy">{STARKNET_DOCS_NAME}</Link>.
           </p>
         </>
       )}

@@ -8,6 +8,7 @@ import { useModalFocus } from "@/hooks/useModalFocus";
 import { readDemo } from "@/lib/demoFlag";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { keptClaimLink } from "@/lib/claimLinkStore";
+import { SOLANA_CLAIM_KEY } from "@/lib/solanaRings/config";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 /** The key the welcome is dismissed under (the mainnet welcome's; the older testnet one is no longer read). */
@@ -20,15 +21,17 @@ const SHOWN_KEY = "gloam_mainnet_welcome_v1";
  * paint instead of seconds later, after the wallet code loads. Once React takes
  * over, state drives it as before (and recording demos keep it shut).
  *
- * Not over a claim link: someone opening a payment (#claim=..., or one this tab
- * keeps while they sign in, lib/claimLinkStore) came to claim it, and the claim
- * page already said what happens next. It shows on a later visit instead.
+ * Not over a claim link: someone opening a payment (#claim=..., a Solana one
+ * #sol=..., or one this tab keeps while they sign in, lib/claimLinkStore and
+ * lib/solanaRings/claimKeep) came to claim it, and the claim page already said
+ * what happens next. It shows on a later visit instead.
  */
-const REVEAL_SCRIPT = `(function(){try{if(localStorage.getItem('${SHOWN_KEY}')==='1')return;if(/[?&]demo=1/.test(location.search)||sessionStorage.getItem('gloam_demo')==='1')return;if(location.hash.indexOf('#claim=')===0||sessionStorage.getItem('gloam.claimLink'))return;var el=document.getElementById('gl-welcome');if(el)el.hidden=false}catch(e){}})()`;
+const REVEAL_SCRIPT = `(function(){try{if(localStorage.getItem('${SHOWN_KEY}')==='1')return;if(/[?&]demo=1/.test(location.search)||sessionStorage.getItem('gloam_demo')==='1')return;if(location.hash.indexOf('#claim=')===0||location.hash.indexOf('#sol=')===0||sessionStorage.getItem('gloam.claimLink')||sessionStorage.getItem('${SOLANA_CLAIM_KEY}'))return;var el=document.getElementById('gl-welcome');if(el)el.hidden=false}catch(e){}})()`;
 
-/** Opened from a claim link, now or earlier in this tab (lib/claimLinkStore). */
+/** Opened from a claim link, now or earlier in this tab (lib/claimLinkStore, lib/solanaRings/claimKeep). */
 function openingClaim(): boolean {
-  return window.location.hash.startsWith("#claim=") || keptClaimLink() !== null;
+  const h = window.location.hash;
+  return h.startsWith("#claim=") || h.startsWith("#sol=") || keptClaimLink() !== null || window.sessionStorage.getItem(SOLANA_CLAIM_KEY) !== null;
 }
 
 export function WelcomeModal() {

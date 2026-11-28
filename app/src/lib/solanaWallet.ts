@@ -92,6 +92,88 @@ export function useSolanaWallets(): SolanaWallet[] {
   return useSyncExternalStore(subscribe, () => snapshot, () => EMPTY);
 }
 
+const PAYER_KEY = "gloam:solana-payer";
+
+/** Remember the Solana wallet someone picked to pay with, for next time. Never throws. */
+export function rememberSolanaWallet(name: string): void {
+  try {
+    window.localStorage.setItem(PAYER_KEY, name);
+  } catch {
+    /* private window or blocked storage: the pick lasts this visit */
+  }
+}
+
+function rememberedSolanaWallet(): string | null {
+  try {
+    return window.localStorage.getItem(PAYER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Which Solana wallet pays when there are several in the browser. The first one
+ * the browser announces is often one that isn't set up (Phantom installed,
+ * never used), so it goes, in order: the one picked here; a wallet already
+ * connected to this site (`trusted`, from a silent reconnect), the one picked
+ * last time or named like the connected EVM wallet ("OKX Wallet") first; then
+ * the last pick, the EVM name, one already sharing an account, the first.
+ */
+export function preferredSolanaWallet(
+  wallets: readonly SolanaWallet[],
+  opts: { picked?: string | null; evmName?: string | null; remembered?: string | null; trusted?: readonly string[] } = {}
+): SolanaWallet | null {
+  if (wallets.length === 0) return null;
+  const byName = (n: string | null | undefined) => (n ? wallets.find((w) => w.name === n) : undefined);
+  const remembered = opts.remembered !== undefined ? opts.remembered : typeof window === "undefined" ? null : rememberedSolanaWallet();
+  const evm = (opts.evmName ?? "").trim().toLowerCase();
+  const sameAsEvm = evm ? wallets.find((w) => w.name.toLowerCase() === evm || w.name.toLowerCase().startsWith(evm.split(" ")[0]!)) : undefined;
+  const trusted = opts.trusted ?? [];
+  const isTrusted = (w: SolanaWallet | undefined) => (w && trusted.includes(w.name) ? w : undefined);
+  const anyTrusted = wallets.find((w) => trusted.includes(w.name));
+  const authorized = wallets.find((w) => (w.wallet.accounts ?? []).some((a) => a.chains?.includes(CHAIN)));
+  return (
+    byName(opts.picked) ??
+    isTrusted(byName(remembered)) ??
+    isTrusted(sameAsEvm) ??
+    anyTrusted ??
+    byName(remembered) ??
+    sameAsEvm ??
+    authorized ??
+    wallets[0]!
+  );
+}
+
+/**
+ * A Solana wallet's balance of one token, in base units, read through Gloam's
+ * RPC (/api/solana/rpc; no Solana node in the page). SOL by the system program
+ * id, any other by its mint (SPL or Token-2022). Null when the read fails.
+ */
+export async function readSolanaBalance(owner: string, mint: string): Promise<bigint | null> {
+  const native = mint === "11111111111111111111111111111111";
+  const call = native
+    ? { jsonrpc: "2.0", id: 1, method: "getBalance", params: [owner, { commitment: "confirmed" }] }
+    : { jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner", params: [owner, { mint }, { encoding: "jsonParsed", commitment: "confirmed" }] };
+  try {
+    const res = await fetch("/api/solana/rpc", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(call), cache: "no-store" });
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      result?: { value?: number | { account?: { data?: { parsed?: { info?: { tokenAmount?: { amount?: string } } } } } }[] };
+      error?: unknown;
+    };
+    if (json.error || !json.result) return null;
+    const v = json.result.value;
+    if (native) return typeof v === "number" ? BigInt(v) : null;
+    if (!Array.isArray(v)) return null;
+    return v.reduce((sum, a) => {
+      const amt = a.account?.data?.parsed?.info?.tokenAmount?.amount;
+      return sum + (amt && /^\d+$/.test(amt) ? BigInt(amt) : BigInt(0));
+    }, BigInt(0));
+  } catch {
+    return null;
+  }
+}
+
 /** Ask the wallet to connect. Returns its Solana mainnet account. */
 export async function connectSolana(w: SolanaWallet): Promise<SolanaAccount> {
   const connect = w.wallet.features["standard:connect"];
@@ -153,24 +235,70 @@ const toBase64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
  * Sign and send the order's transaction from this wallet. A wallet that only
  * signs hands it back, and the server sends it (/api/bridge/solana-send).
  */
-export async function paySolana(w: SolanaWallet, a: SolanaAccount, txBase64: string): Promise<void> {
+export async function paySolana(w: SolanaWallet, a: SolanaAccount, txBase64: string): Promise<string | null> {
   const transaction = fromBase64(txBase64);
-  const sendFeature = w.wallet.features["solana:signAndSendTransaction"];
-  if (sendFeature) {
-    await sendFeature.signAndSendTransaction({ account: a.account, chain: CHAIN, transaction });
-    return;
-  }
+  // Sign here and let Gloam send it: a wallet that sends it itself can report
+  // success for a transaction Solana never takes (approved after its blockhash
+  // ran out), and the page would wait for money that never left. Sent by Gloam,
+  // a refusal comes back at once and nothing is kept.
   const signFeature = w.wallet.features["solana:signTransaction"];
-  if (!signFeature) throw new Error(`${w.name} can't sign this.`);
-  const [signed] = await signFeature.signTransaction({ account: a.account, chain: CHAIN, transaction });
-  if (!signed?.signedTransaction) throw new Error(`${w.name} didn't sign it.`);
-  const res = await fetch("/api/bridge/solana-send", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ tx: toBase64(signed.signedTransaction) }),
-  });
-  const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: { message?: string } } | null;
-  if (!json?.ok) throw new Error(json?.error?.message ?? "Couldn't send it to Solana. Try again.");
+  if (signFeature) {
+    const [signed] = await signFeature.signTransaction({ account: a.account, chain: CHAIN, transaction });
+    if (!signed?.signedTransaction) throw new Error(`${w.name} didn't sign it.`);
+    const res = await fetch("/api/bridge/solana-send", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tx: toBase64(signed.signedTransaction) }),
+    });
+    const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: { signature?: string }; error?: { message?: string } } | null;
+    if (!json?.ok) throw new Error(json?.error?.message ?? "Couldn't send it to Solana. Try again.");
+    return json.data?.signature ?? null;
+  }
+  const sendFeature = w.wallet.features["solana:signAndSendTransaction"];
+  if (!sendFeature) throw new Error(`${w.name} can't sign this.`);
+  const out = (await sendFeature.signAndSendTransaction({ account: a.account, chain: CHAIN, transaction })) as unknown;
+  const first = Array.isArray(out) ? out[0] : out;
+  const sig = (first as { signature?: Uint8Array } | undefined)?.signature;
+  return sig instanceof Uint8Array && sig.length === 64 ? base58(sig) : null;
+}
+
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+/** Base58 for a transaction signature (Solana's way of writing one). */
+export function base58(bytes: Uint8Array): string {
+  let n = BigInt(0);
+  for (const b of bytes) n = n * BigInt(256) + BigInt(b);
+  let out = "";
+  while (n > BigInt(0)) {
+    out = B58[Number(n % BigInt(58))] + out;
+    n /= BigInt(58);
+  }
+  for (const b of bytes) {
+    if (b !== 0) break;
+    out = "1" + out;
+  }
+  return out;
+}
+
+/**
+ * Where a Solana transaction is, read through Gloam's RPC: "landed" (confirmed),
+ * "failed" (it landed with an error: nothing moved), "unknown" (not seen yet).
+ */
+export async function solanaTxState(signature: string): Promise<"landed" | "failed" | "unknown"> {
+  try {
+    const res = await fetch("/api/solana/rpc", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSignatureStatuses", params: [[signature], { searchTransactionHistory: true }] }),
+      cache: "no-store",
+    });
+    const json = (await res.json()) as { result?: { value?: ({ err: unknown; confirmationStatus?: string } | null)[] } };
+    const st = json.result?.value?.[0];
+    if (!st) return "unknown";
+    if (st.err) return "failed";
+    return st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized" ? "landed" : "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 /** Whether this wallet can sign a plain message (what opens a Gloam private account). */
