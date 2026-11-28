@@ -30,6 +30,7 @@ import type { PayrollStore } from "@/lib/solanaRings/payrollStore";
 import { claimLinkUrl, encodeClaim, newClaim } from "@/lib/solanaRings/claimLink";
 import { Spinner } from "@/components/ui/Spinner";
 import { TokenLogo } from "./TokenLogo";
+import { Select } from "@/components/ui/Select";
 import { formatSolAmount, useSolana, type SolanaPayrollEngine } from "./SolanaAccount";
 import { SolanaGate, SolanaSteps, preferredAsset, useSolanaUsd, usd } from "./SolanaParts";
 
@@ -513,31 +514,23 @@ export function SolanaPayrollView(props: {
             <h2 className="text-[17px] text-foreground">Pay in</h2>
             <p className="text-[13px] text-mute max-sm:hidden">Comes out of your private balance</p>
           </div>
-          <div className="mt-4 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] max-sm:-mx-5 max-sm:px-5 sm:flex-wrap [&::-webkit-scrollbar]:hidden" role="radiogroup" aria-label="Currency">
-            {assets.map((a) => {
-              const selected = a.id === assetId;
-              const b = balances[a.id] ?? 0n;
-              return (
-                <button
-                  key={a.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => setAssetId(a.id)}
-                  className={`flex h-14 shrink-0 items-center gap-3 rounded-full border pl-2 pr-5 text-left transition-[border-color,box-shadow,background-color] duration-200 ${
-                    selected ? "border-foreground bg-panel shadow-card" : "border-line bg-panel hover:border-line-strong hover:bg-surface"
-                  }`}
-                >
-                  <TokenLogo id={a.id} symbol={a.symbol} size={38} />
-                  <span className="min-w-0">
-                    <span className="block text-[14px] font-medium leading-tight text-foreground">{a.symbol}</span>
-                    <span className="tnum mt-0.5 block text-[12px] leading-tight text-mute">
-                      {ready[a.id] === false ? "Not set up yet" : b > 0n ? `${fmt(b, a.decimals)} private` : "No private balance"}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
+          {/* one dropdown, each asset with what you hold privately */}
+          <div className="mt-4 max-w-[380px]">
+            <Select
+              label="Pay in"
+              value={assetId}
+              onChange={(v) => setAssetId(v)}
+              options={assets.map((a) => {
+                const b = balances[a.id] ?? 0n;
+                return {
+                  value: a.id,
+                  label: a.symbol,
+                  icon: <TokenLogo id={a.id} symbol={a.symbol} size={22} />,
+                  description: ready[a.id] === false ? "Not set up yet" : b > 0n ? `${fmt(b, a.decimals)} private` : "No private balance",
+                };
+              })}
+              className="h-12 w-full text-[15px]"
+            />
           </div>
         </section>
 
