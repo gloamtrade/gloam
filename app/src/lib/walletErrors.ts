@@ -81,7 +81,7 @@ export function surelyNotSent(e: unknown): boolean {
  * extension's worker can stop after it sent, so that keeps what was kept.
  */
 const SOLANA_DECLINED = /reject|denied|declin|cancel|(?:plugin|popup|window|wallet|extension)(?: was| is)? closed/i;
-const SOLANA_NOT_SENT = /simulat|blockhash|insufficient|not enough/i;
+const SOLANA_NOT_SENT = /simulat|blockhash|insufficient|not enough|nothing left your wallet|transaction isn.t valid/i;
 
 export function solanaDeclined(message: string): boolean {
   return SOLANA_DECLINED.test(message);

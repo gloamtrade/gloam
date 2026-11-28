@@ -235,24 +235,70 @@ const toBase64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
  * Sign and send the order's transaction from this wallet. A wallet that only
  * signs hands it back, and the server sends it (/api/bridge/solana-send).
  */
-export async function paySolana(w: SolanaWallet, a: SolanaAccount, txBase64: string): Promise<void> {
+export async function paySolana(w: SolanaWallet, a: SolanaAccount, txBase64: string): Promise<string | null> {
   const transaction = fromBase64(txBase64);
-  const sendFeature = w.wallet.features["solana:signAndSendTransaction"];
-  if (sendFeature) {
-    await sendFeature.signAndSendTransaction({ account: a.account, chain: CHAIN, transaction });
-    return;
-  }
+  // Sign here and let Gloam send it: a wallet that sends it itself can report
+  // success for a transaction Solana never takes (approved after its blockhash
+  // ran out), and the page would wait for money that never left. Sent by Gloam,
+  // a refusal comes back at once and nothing is kept.
   const signFeature = w.wallet.features["solana:signTransaction"];
-  if (!signFeature) throw new Error(`${w.name} can't sign this.`);
-  const [signed] = await signFeature.signTransaction({ account: a.account, chain: CHAIN, transaction });
-  if (!signed?.signedTransaction) throw new Error(`${w.name} didn't sign it.`);
-  const res = await fetch("/api/bridge/solana-send", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ tx: toBase64(signed.signedTransaction) }),
-  });
-  const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: { message?: string } } | null;
-  if (!json?.ok) throw new Error(json?.error?.message ?? "Couldn't send it to Solana. Try again.");
+  if (signFeature) {
+    const [signed] = await signFeature.signTransaction({ account: a.account, chain: CHAIN, transaction });
+    if (!signed?.signedTransaction) throw new Error(`${w.name} didn't sign it.`);
+    const res = await fetch("/api/bridge/solana-send", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tx: toBase64(signed.signedTransaction) }),
+    });
+    const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: { signature?: string }; error?: { message?: string } } | null;
+    if (!json?.ok) throw new Error(json?.error?.message ?? "Couldn't send it to Solana. Try again.");
+    return json.data?.signature ?? null;
+  }
+  const sendFeature = w.wallet.features["solana:signAndSendTransaction"];
+  if (!sendFeature) throw new Error(`${w.name} can't sign this.`);
+  const out = (await sendFeature.signAndSendTransaction({ account: a.account, chain: CHAIN, transaction })) as unknown;
+  const first = Array.isArray(out) ? out[0] : out;
+  const sig = (first as { signature?: Uint8Array } | undefined)?.signature;
+  return sig instanceof Uint8Array && sig.length === 64 ? base58(sig) : null;
+}
+
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+/** Base58 for a transaction signature (Solana's way of writing one). */
+export function base58(bytes: Uint8Array): string {
+  let n = BigInt(0);
+  for (const b of bytes) n = n * BigInt(256) + BigInt(b);
+  let out = "";
+  while (n > BigInt(0)) {
+    out = B58[Number(n % BigInt(58))] + out;
+    n /= BigInt(58);
+  }
+  for (const b of bytes) {
+    if (b !== 0) break;
+    out = "1" + out;
+  }
+  return out;
+}
+
+/**
+ * Where a Solana transaction is, read through Gloam's RPC: "landed" (confirmed),
+ * "failed" (it landed with an error: nothing moved), "unknown" (not seen yet).
+ */
+export async function solanaTxState(signature: string): Promise<"landed" | "failed" | "unknown"> {
+  try {
+    const res = await fetch("/api/solana/rpc", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSignatureStatuses", params: [[signature], { searchTransactionHistory: true }] }),
+      cache: "no-store",
+    });
+    const json = (await res.json()) as { result?: { value?: ({ err: unknown; confirmationStatus?: string } | null)[] } };
+    const st = json.result?.value?.[0];
+    if (!st) return "unknown";
+    if (st.err) return "failed";
+    return st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized" ? "landed" : "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 /** Whether this wallet can sign a plain message (what opens a Gloam private account). */
