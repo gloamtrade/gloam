@@ -36,7 +36,7 @@ import { MAINNET_ENABLED, type GloamChainId } from "@/lib/networks";
 import { originChain } from "@/lib/originChains";
 import { useVaultStatus } from "@/lib/passkey";
 import { dropUnsentNote, formatFeePercent, saveLocalNote, updateLocalNote, type LocalNote } from "@/lib/shield";
-import { connectSolana, paySolana, preferredSolanaWallet, readSolanaBalance, reconnectSolana, rememberSolanaWallet, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
+import { connectSolana, paySolana, preferredSolanaWallet, readSolanaBalance, reconnectSolana, rememberSolanaWallet, solanaTxState, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
 import { track } from "@/lib/track";
 import type { TrackEvent } from "@/lib/trackEvents";
 import { failedBeforeSend, solanaDeclined, solanaSurelyNotSent, surelyNotSent, walletDeclined, walletErrorText } from "@/lib/walletErrors";
@@ -101,6 +101,10 @@ type PrivateStage =
        * hasn't seen: most likely never sent. Not proof, so its note is kept.
        */
       expired?: boolean;
+      /** The Solana transaction's signature, when the wallet or Gloam's send gave one. */
+      sig?: string | null;
+      /** Seen confirmed on Solana: only Relay is left to wait for. */
+      onChain?: boolean;
     }
   | { kind: "landed"; quote: PrivateBridgeQuote }
   | { kind: "late"; quote: PrivateBridgeQuote }
@@ -676,8 +680,31 @@ function BridgeSheet({
   // out, so the person may start over. Its note stays saved, out of the
   // balance: Relay not seeing it (or a status read that failed) is no proof,
   // and if it lands after all the sync counts it (lib/claimSweep).
+  // A Solana send with a signature: read it on Solana every few seconds until it
+  // lands. Landed with an error, nothing moved: the note goes and the person can
+  // try again. Not seen at all past the transaction's life: expired below.
   useEffect(() => {
-    if (!sentPriv?.unsure || !sentPriv.quote.solanaTx || sentPriv.expired) return;
+    const sig = sentPriv?.sig;
+    if (!sentPriv || !sig || !sentPriv.quote.solanaTx || sentPriv.onChain || sentPriv.expired) return;
+    let live = true;
+    const check = async () => {
+      const state = await solanaTxState(sig);
+      if (!live) return;
+      if (state === "landed") setPriv((p) => (p === sentPriv ? { ...sentPriv, onChain: true } : p));
+      else if (state === "failed") {
+        dropUnsentNote(sentPriv.note.id);
+        setPriv({ kind: "failed", quote: sentPriv.quote });
+      }
+    };
+    void check();
+    const t = window.setInterval(() => void check(), 4000);
+    return () => {
+      live = false;
+      window.clearInterval(t);
+    };
+  }, [sentPriv]);
+  useEffect(() => {
+    if (!sentPriv || sentPriv.onChain || !(sentPriv.unsure || sentPriv.sig) || !sentPriv.quote.solanaTx || sentPriv.expired) return;
     const left = Math.max(0, sentPriv.at + 150_000 - Date.now());
     const t = window.setTimeout(() => setPriv((p) => (p === sentPriv ? { ...sentPriv, expired: true } : p)), left);
     return () => window.clearTimeout(t);
@@ -859,8 +886,9 @@ function BridgeSheet({
 
     if (quote.solanaTx && r.wallet && r.account) {
       let unsure = false;
+      let sig: string | null = null;
       try {
-        await paySolana(r.wallet, r.account, quote.solanaTx);
+        sig = await paySolana(r.wallet, r.account, quote.solanaTx);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
         if (solanaSurelyNotSent(msg)) {
@@ -879,7 +907,7 @@ function BridgeSheet({
       }
       prepared.current = null;
       setStatus(null);
-      setPriv({ kind: "sent", quote, note: r.note, payer: r.wallet.name, hash: null, unsure, at: Date.now() });
+      setPriv({ kind: "sent", quote, note: r.note, payer: r.wallet.name, hash: null, unsure: unsure || !sig, at: Date.now(), sig });
       once(`private-sent:${quote.requestId}`, "bridge_private_sent", { source: quote.send.chain, token: quote.send.symbol });
       return;
     }
@@ -2133,11 +2161,13 @@ function PrivateProgress({
           : q.sameChain
             ? `Swapping and adding ${amount} to your private balance…`
             : relay === "waiting"
-              ? stage.unsure
-                ? stage.expired
-                  ? `Relay hasn't seen a payment from ${stage.payer}, so it most likely didn't go out. If it did, it shows in your private balance by itself. Start over to try again.`
-                  : `Checking whether ${stage.payer} sent it…`
-                : `Sent from ${stage.payer}. Waiting for ${q.send.chain} to confirm…`
+              ? stage.kind === "sent" && stage.expired
+                ? `${q.send.chain} never confirmed a payment from ${stage.payer}, so it didn't go out and your money is still in your wallet. Start over to try again.`
+                : stage.kind === "sent" && stage.onChain
+                  ? `Confirmed on ${q.send.chain}. Relay is moving it to ${q.receive.chain}…`
+                  : stage.unsure
+                    ? `Checking whether ${stage.payer} sent it…`
+                    : `Sent from ${stage.payer}. Waiting for ${q.send.chain} to confirm…`
               : `Received. Adding ${amount} to your private balance on ${q.receive.chain}…`;
   return (
     <div className="mt-5">
