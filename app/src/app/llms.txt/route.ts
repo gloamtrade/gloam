@@ -37,7 +37,7 @@ const DOCS: [path: string, title: string, about: string][] = [
 /** Gloam on Solana, only while it is on: its own line, since a payment there hides less than in the vault. */
 function solanaLine(): string {
   if (!SOLANA_RINGS_ENABLED) return "";
-  return `- Gloam is on ${SOLANA_NAME} too, through Helius Privacy Rings, in the app at ${SITE}/app/solana. ${RINGS_PRIVACY_NOTE} Gloam's relay pays the Solana fees. Developers and agents reach Solana through the SDK (@gloamtrade/sdk/solana) and the npm MCP server (@gloamtrade/mcp).\n`;
+  return `- Gloam is on ${SOLANA_NAME} too, through Helius Privacy Rings, in the app at ${SITE}/app/solana. ${RINGS_PRIVACY_NOTE} Gloam's relay pays the Solana fees. The SDK (@gloamtrade/sdk/solana) and the local MCP server (@gloamtrade/mcp, gloam_solana_* tools) cover it; the hosted MCP server only lists it.\n`;
 }
 
 /** Gloam on Starknet, only while it is on: its own line, since the first payment there shows the payee. */
