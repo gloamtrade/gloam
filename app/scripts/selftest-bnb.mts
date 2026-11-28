@@ -89,7 +89,7 @@ function answer(url: string, method: string, params: unknown[]): unknown {
 }
 globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
   const url = String(input instanceof Request ? input.url : input);
-  if (!/bsc-rpc\.publicnode\.com|bsc-dataseed\.bnbchain\.org|\/api\/rpc\/56|archive\.example|capped\.example|capped32005\.example/.test(url)) {
+  if (!/bsc-rpc\.publicnode\.com|bsc\.drpc\.org|1rpc\.io|bsc-dataseed\.bnbchain\.org|\/api\/rpc\/56|archive\.example|capped\.example|capped32005\.example/.test(url)) {
     throw new Error(`selftest-bnb: no network calls allowed (${url})`);
   }
   if (publicDown && url.includes("publicnode")) return new Response("upstream down", { status: 500 });

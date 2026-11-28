@@ -161,7 +161,7 @@ const tool = async (name: string, args: Record<string, unknown> = {}) => {
 };
 const toolText = JSON.stringify(TOOLS);
 const mainnetKeys = () => nets.NETWORK_KEYS.filter((k) => !nets.getNetwork(k).testnet);
-const PUBLIC_RPC_HOSTS = ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.bnbchain.org"];
+const PUBLIC_RPC_HOSTS = ["https://bsc-rpc.publicnode.com", "https://bsc.drpc.org", "https://1rpc.io/bnb", "https://bsc-dataseed.bnbchain.org"];
 
 // Every run: no private swaps on BNB Chain, and the flag's words.
 ok(vaultSwapRouter(CHAIN_ID) === null, "no swap router on BNB Chain");
