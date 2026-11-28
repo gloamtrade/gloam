@@ -2,732 +2,537 @@ import { swapMainnets, swapV3Live } from "@/lib/vaultSwap";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AppLink } from "@/components/AppLink";
-import { DocsLayout } from "@/components/DocsLayout";
+import { Header } from "@/components/Header";
+import { Footer } from "@/components/Footer";
 import { FlowDiagram, PoolPicture } from "@/components/docs/FlowDiagram";
+import { Columns, Note, Pull, Section, Sub, Terms, type WpSection } from "@/components/whitepaper/WhitepaperParts";
+import { WhitepaperToc } from "@/components/whitepaper/WhitepaperToc";
 import { joinNames, liveMainnetNames, liveMainnetsSinceText, mainnetPool } from "@/lib/mainnet";
-import { ELYSIUM, ELYSIUM_TESTNET } from "@/lib/elysium";
+import { ELYSIUM } from "@/lib/elysium";
 import { BNB } from "@/lib/bnb";
+import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 
 /** Base and Ethereum mainnet join the lists once their pools are in (lib/mainnet.ts). */
 const BASE_LIVE = mainnetPool(8453) !== null;
 const ETHEREUM_LIVE = mainnetPool(1) !== null;
-const MAINNET_IDS = [
-  "RH 4663",
+/** The mainnets after Robinhood Chain and Tempo, as words: "Base and Ethereum", and Elysium and BNB Chain while they are on. */
+const LATER_NAMES = joinNames([...(BASE_LIVE ? ["Base"] : []), ...(ETHEREUM_LIVE ? ["Ethereum"] : []), ...(ELYSIUM ? ["Elysium"] : []), ...(BNB ? ["BNB Chain"] : [])]);
+/** "Robinhood Chain 4663, Tempo 4217, Base 8453, …": the mainnets a wallet connects to. */
+const MAINNET_CHAINS = [
+  "Robinhood Chain 4663",
   "Tempo 4217",
   ...(BASE_LIVE ? ["Base 8453"] : []),
   ...(ETHEREUM_LIVE ? ["Ethereum 1"] : []),
-  // Elysium mainnet, only while it is on (lib/elysium.ts)
   ...(ELYSIUM ? [`Elysium ${ELYSIUM.chainId}`] : []),
-  // BNB Chain, only while it is on (lib/bnb.ts)
   ...(BNB ? [`BNB Chain ${BNB.chainId}`] : []),
-].join(" · ");
-/** The mainnets after Robinhood Chain and Tempo, as words: "Base and Ethereum", and Elysium while it is on. */
-const LATER_NAMES = joinNames([...(BASE_LIVE ? ["Base"] : []), ...(ETHEREUM_LIVE ? ["Ethereum"] : []), ...(ELYSIUM ? ["Elysium"] : []), ...(BNB ? ["BNB Chain"] : [])]);
+].join(", ");
 
 export const metadata: Metadata = {
   title: "Whitepaper",
   alternates: { canonical: "/whitepaper" },
-  description:
-    `Gloam whitepaper: private stablecoin payments on ${liveMainnetNames()}. Thesis, architecture, cryptography, what is new, how it compares, threat model and roadmap.`,
+  description: `Gloam whitepaper: private stablecoin payments on ${liveMainnetNames()}. Thesis, architecture, cryptography, what is new, how it compares, threat model and roadmap.`,
 };
+
+const S: Record<string, WpSection> = {
+  abstract: { id: "abstract", n: "01", title: "Abstract" },
+  problem: { id: "problem", n: "02", title: "The problem" },
+  thesis: { id: "thesis", n: "03", title: "Thesis and principles" },
+  privacy: { id: "privacy-myth", n: "04", title: "What privacy means here" },
+  architecture: { id: "architecture", n: "05", title: "System architecture" },
+  cryptography: { id: "cryptography", n: "06", title: "Cryptography" },
+  whatsNew: { id: "whats-new", n: "07", title: "What is new" },
+  compare: { id: "compare", n: "08", title: "How Gloam compares" },
+  threat: { id: "threat", n: "09", title: "Threat model" },
+  product: { id: "product", n: "10", title: "Product" },
+  roadmap: { id: "roadmap", n: "11", title: "Roadmap" },
+  risks: { id: "risks", n: "12", title: "Risks and limits" },
+  nonClaims: { id: "non-claims", n: "13", title: "What we do not claim" },
+  closing: { id: "closing", n: "14", title: "Closing" },
+};
+const SECTIONS = Object.values(S);
 
 export default function WhitepaperPage() {
   return (
-    <DocsLayout
-      title="Whitepaper"
-      lede={`Private money on public chains. The technical and product thesis for Gloam: private stablecoin payments for people, teams and AI agents, private by default and provable on demand, on ${liveMainnetNames()}.`}
-      glance={[
-        { label: "Version", value: "0.5" },
-        { label: "Status", value: "Public draft" },
-        { label: "Networks", value: `Mainnet ${MAINNET_IDS}; testnet 46630 · 42431 · 84532 · 11155111${ELYSIUM_TESTNET ? " · 99801" : ""}` },
-        { label: "Live", value: "Shield · pay · payroll · proofs · swaps" },
-        { label: "Private swaps", value: "Mainnet; amounts public" },
-        { label: "Mainnet", value: "Live since 21 Oct 2026" },
-      ]}
-      quickLinks={[
-        { href: "/docs", label: "Documentation" },
-        { href: "/app", label: "Open the app" },
-        { href: "https://x.com/gloamtrade", label: "@gloamtrade" },
-      ]}
-    >
-      <div className="rounded-[14px] bg-surface px-5 py-4 text-[14px] leading-relaxed text-mute">
-        This document is a living public draft. It describes design targets,
-        shipped capability on mainnet and testnet, and intentional non-claims.
-        It is not an offer of securities, a guarantee of future timelines, a
-        promise of absolute anonymity, or a solicitation to purchase anything.
-      </div>
+    <div className="relative min-h-screen bg-panel text-foreground">
+      <Header />
 
-      <h2 id="abstract">1. Abstract</h2>
-      <p>
-        Public blockchains made settlement programmable and verifiable. They also
-        made financial activity permanently legible. Wallet graphs, size, and
-        timing form a continuous record of intent, legible to bots, competitors,
-        counterparties, and anyone with an explorer.
-      </p>
-      <p>
-        Stablecoins are becoming how businesses and AI agents pay each other,
-        and every one of those payments is public. Gloam makes them private,
-        and lets the payer prove exactly what someone needs to see. It is a
-        self-custodial vault on {liveMainnetNames()} in
-        which stablecoins, and on Robinhood Chain stock tokens, can be held,
-        paid and proven with
-        reduced public visibility. The thesis is one line:{" "}
-        <strong>private by default, provable on demand.</strong>
-      </p>
-      <p>
-        Gloam is not new cryptography. A payment has one owner, so the owner
-        proves it on their own device with zero-knowledge proofs from the Zcash
-        lineage, and nobody else ever holds a key. What is new is the building
-        block on top: private payments you can prove (section 7).
-      </p>
-      <p>
-        Privacy on a transparent chain is not the absence of transactions from
-        explorers. It is the separation of <em>settlement visibility</em> from{" "}
-        <em>strategy visibility</em>. Shield and unshield remain deliberate public
-        edges. While assets remain inside the shielded set, amounts and internal
-        transfer relationships are designed not to appear as a simple public
-        balance sheet for a single address.
-      </p>
+      <main className="mx-auto max-w-[1240px] px-6">
+        {/* Cover: the title, one line of what this is, three facts. */}
+        <section className="pb-20 pt-14 sm:pb-28 sm:pt-24">
+          <p className="text-[14px] text-mute">Whitepaper · Version 0.6 · November 2026</p>
+          <h1 className="t-display-xl mt-6 max-w-[16ch] text-balance">Private money on public chains.</h1>
+          <p className="mt-7 max-w-[48ch] text-pretty text-[19px] leading-relaxed text-soft sm:text-[21px]">
+            The technical and product thesis for Gloam: private stablecoin payments for people, teams and AI agents.
+          </p>
+          <div className="mt-10 flex flex-wrap items-center gap-x-7 gap-y-4">
+            <AppLink href="/app" className="btn btn-ink">
+              Open the app
+            </AppLink>
+            <Link href="/docs" className="gl-arrowlink">
+              Read the docs <span aria-hidden>→</span>
+            </Link>
+          </div>
 
-      <h2 id="problem">2. Problem</h2>
-      <h3>2.1 Transparent finance as confession</h3>
-      <p>
-        Open ledgers encode intent. A salary paid onchain is readable by every
-        coworker. A supplier payment shows your margins. A treasury balance
-        shows your runway. A large swap signals urgency. Address clustering
-        tools turn a wallet into a public narrative. For teams, funds and
-        agents this is not a feature. It is a cost priced into every
-        interaction.
-      </p>
-      <h3>2.2 Stablecoin payments are public by default</h3>
-      <p>
-        Real stablecoin payments came to about $390B in 2025, double 2024, and
-        58% of that ($226B) was business to business. Every one of those
-        payments, and the balance behind it, can be read by anyone with an
-        explorer. AI agents that pay for tools over HTTP add a new payer with
-        the same exposure: an agent&apos;s wallet shows what it buys and how
-        it works.
-      </p>
-      <h3>2.3 Tokenized equities inherit the same exposure</h3>
-      <p>
-        Robinhood Chain positions itself as infrastructure for financial
-        services and real-world assets, and tokenized stocks already trade
-        there. Without application-layer privacy, a stock position is as
-        public as a payment.
-      </p>
-      <h3>2.4 Why now</h3>
-      <ul>
-        <li>
-          New payment chains launched in 2026: Tempo mainnet on 18 March,
-          Robinhood Chain on 1 July and Arc on 16 September. All are public by
-          default.
-        </li>
-        <li>
-          Stablecoins held privately in Railgun on Ethereum grew from $2.1M in
-          January 2024 to $51M in October 2026. That is still under 0.1% of a
-          $311B supply.
-        </li>
-        <li>
-          FinCEN withdrew its proposed mixer rule on 5 October 2026. The GENIUS
-          Act requires stablecoin issuers to be able to freeze, and
-          Gloam&apos;s design never stops them.
-        </li>
-      </ul>
+          <dl className="mt-16 grid gap-x-10 gap-y-8 sm:mt-20 sm:grid-cols-3">
+            {[
+              { k: "Live on mainnet", v: "Since 21 October 2026" },
+              { k: "Networks", v: liveMainnetNames() },
+              { k: "Status", v: "Public draft, updated as we ship" },
+            ].map((f) => (
+              <div key={f.k} className="border-t border-foreground pt-5">
+                <dt className="text-[13px] text-mute">{f.k}</dt>
+                <dd className="mt-2 text-pretty text-[17px] leading-snug text-foreground">{f.v}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
 
-      <h2 id="thesis">3. Thesis and principles</h2>
-      <p>
-        Gloam asserts that private holding, private payment and selective proof
-        are first-class requirements for onchain money, not optional skins on a
-        public wallet.
-      </p>
-      <ul>
-        <li>
-          <strong>One owner, no key holder.</strong> A payment has one owner,
-          so the owner proves it on their own device. No committee, operator or
-          server holds a key or sees the secret inputs.
-        </li>
-        <li>
-          <strong>Honesty over theater.</strong> No mock private success. Claims
-          expand only as contracts, circuits, and audits support them.
-        </li>
-        <li>
-          <strong>Battle-tested patterns.</strong> Commitments, nullifiers,
-          Merkle membership, and zero-knowledge proofs, not novel cryptography
-          invented for a launch tweet.
-        </li>
-        <li>
-          <strong>Edges are real.</strong> Entering and leaving the vault is
-          visible. Privacy tools reduce public visibility; they do not erase the
-          physical world, legal process, or operator error.
-        </li>
-        <li>
-          <strong>Mainnet only when ready.</strong> Production capital
-          requires production ceremonies, reviews, and operational maturity.
-          Mainnet opened on the final ceremony keys, after an internal review,
-          with deposit limits.
-        </li>
-      </ul>
+        <div className="border-t border-line pt-16 sm:pt-24 lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-x-20">
+          <WhitepaperToc sections={SECTIONS} />
 
-      <h2 id="privacy-myth">4. What “privacy” means here</h2>
-      <p>
-        A common misconception is that private transactions leave no footprint
-        on a block explorer. That is not how application-layer privacy on a
-        public chain works.
-      </p>
-      <ul>
-        <li>
-          <strong>Visible by design:</strong> that the vault contract was used;
-          shield (deposit) and unshield (withdrawal) events; proof verification
-          transactions and the account that submits them (the Gloam relay can
-          submit in the user&apos;s place).
-        </li>
-        <li>
-          <strong>Hidden by design (goal):</strong> amounts while shielded;
-          the internal transfer graph between notes; who made a private swap;
-          trade intent during private execution (roadmap).
-        </li>
-        <li>
-          <strong>Degraded when the set is small:</strong> timing and size
-          correlation; thin anonymity sets.
-        </li>
-      </ul>
-      <p>
-        Private send does not mean “nothing on the explorer.” It means the
-        public record does not present a simple Alice→Bob amount story for value
-        that stays inside the vault.
-      </p>
+          <article className="wp min-w-0 max-w-[720px]">
+            <Note>
+              A living public draft. It describes what is live on mainnet, what is designed, and what we deliberately do
+              not claim. It is not an offer of securities, a promise of timelines or absolute anonymity, or a solicitation
+              to buy anything.
+            </Note>
 
-      <PoolPicture title="Figure 1, Wallet, vault, and exit" />
+            <Section s={S.abstract}>
+              <p>
+                Public blockchains made settlement programmable and verifiable. They also made financial activity
+                permanently readable: wallet graphs, sizes and timing form a running record of intent, open to bots,
+                competitors and anyone with an explorer.
+              </p>
+              <p>
+                Stablecoins are becoming how businesses and AI agents pay each other, and every one of those payments is
+                public. Gloam makes them private and lets the payer prove exactly what someone needs to see. It is a
+                self-custodial vault on {liveMainnetNames()}, where stablecoins, and stock tokens on Robinhood Chain, are
+                held, paid and proven without a public balance sheet.
+              </p>
+              <Pull>Private by default, provable on demand.</Pull>
+              <p>
+                Gloam is not new cryptography. A payment has one owner, so the owner proves it on their own device with
+                zero-knowledge proofs from the Zcash lineage, and nobody else ever holds a key. What is new is the building
+                block on top: private payments you can prove (section 07).
+              </p>
+              <p>
+                Privacy on a transparent chain is not the absence of transactions from explorers. It separates{" "}
+                <em>settlement visibility</em> from <em>strategy visibility</em>. Adding and cashing out stay deliberate
+                public edges. Inside the vault, amounts and who paid whom do not read as a balance sheet for one address.
+              </p>
+            </Section>
 
-      <h2 id="architecture">5. System architecture</h2>
-      <h3>5.1 Placement</h3>
-      <p>
-        Gloam is an application-layer privacy system on a transparent L2
-        (Robinhood Chain), with the same contracts deployed on Tempo, a
-        payments-first L1, and on {LATER_NAMES}. Settlement finality remains with the chain. Privacy
-        is constructed above it via a self-custodial shielded pool, a Merkle
-        tree of note commitments, nullifiers to prevent double-spends, and
-        on-chain verifiers for zero-knowledge proofs. The pool holds deposits,
-        but only a valid proof from the note holder moves them: there is no
-        admin withdraw, and rule changes are timelocked (5.5).
-      </p>
-      <h3>5.2 Core components</h3>
-      <ul>
-        <li>
-          <strong>Client application</strong>, wallet connection, note
-          material generation, Merkle path reconstruction from on-chain events,
-          browser-side proof generation, notes encrypted at rest, and product
-          UX.
-        </li>
-        <li>
-          <strong>ShieldPool (Poseidon)</strong>, holds deposited assets,
-          maintains the tree, accepts proof-bound shield deposits, and
-          processes transfer and unshield with proof verification. It has no
-          admin withdraw.
-        </li>
-        <li>
-          <strong>Hash and tree</strong>, Poseidon-based commitments and a
-          depth-20 Merkle structure aligned with circuit constraints.
-        </li>
-        <li>
-          <strong>Circuits</strong>, shield (binds a deposit to its note),
-          transfer (private send / split) and unshield (exit), with
-          public-input layouts bound to the vault. A sealed-swap circuit from
-          the first private trade design is retired and stays off. Three more
-          circuits back the proofs in 6.1.
-        </li>
-        <li>
-          <strong>Verifiers</strong>, Groth16 verifiers for each on-chain
-          circuit. A dual verifier routes transfer and unshield by public-input
-          count; deposits use a separate shield verifier.
-        </li>
-        <li>
-          <strong>Memo board</strong>, an encrypted payment-message contract
-          that lets a recipient find payments sent to them. It holds no funds.
-        </li>
-        <li>
-          <strong>Swap routers</strong>, one per mainnet (Uniswap v4 on
-          Robinhood Chain, Tempo&apos;s stablecoin exchange on Tempo). A router
-          takes one note out of the vault to a one-time escrow, buys an exact
-          amount on its fixed venue, and deposits the output back as a new
-          note, in one transaction. It uses only the vault&apos;s unshield and
-          proof-bound deposit, and has no upgrade. Tempo&apos;s has no owner;
-          Robinhood Chain&apos;s can add a pool with 3 days of public notice and
-          take one off at once, and nothing else.
-        </li>
-      </ul>
+            <Section s={S.problem}>
+              <Terms
+                items={[
+                  {
+                    term: "Transparent finance is a confession",
+                    body: "A salary paid onchain is readable by every coworker. A supplier payment shows your margins, a treasury balance your runway, a large swap your urgency. Clustering tools turn a wallet into a public story.",
+                  },
+                  {
+                    term: "Stablecoin payments are public by default",
+                    body: "Real stablecoin payments came to about $390B in 2025, double 2024, and 58% of it ($226B) was business to business. Every payment, and the balance behind it, is open to anyone with an explorer. Agents paying for tools over HTTP carry the same exposure.",
+                  },
+                  {
+                    term: "Tokenized stocks inherit it",
+                    body: "Tokenized stocks already trade on Robinhood Chain. Without privacy at the application layer, a stock position is as public as a payment.",
+                  },
+                ]}
+              />
+              <Sub>Why now</Sub>
+              <ul>
+                <li>Tempo (18 March), Robinhood Chain (1 July) and Arc (16 September) launched in 2026. All are public by default.</li>
+                <li>
+                  Stablecoins held privately in Railgun grew from $2.1M in January 2024 to $51M in October 2026: still
+                  under 0.1% of a $311B supply.
+                </li>
+                <li>
+                  FinCEN withdrew its proposed mixer rule on 5 October 2026. The GENIUS Act requires issuers to be able to
+                  freeze, and Gloam&apos;s design never stops them.
+                </li>
+              </ul>
+            </Section>
 
-      <FlowDiagram
-        title="Figure 2, Component sketch"
-        steps={[
-          {
-            n: "01",
-            title: "Client",
-            body: "Wallet UI, local note secrets, proof generation in the browser.",
-          },
-          {
-            n: "02",
-            title: "Pool",
-            body: "Holds deposits, Merkle root history, nullifier set, proof-gated payout. No admin withdraw.",
-          },
-          {
-            n: "03",
-            title: "Verifier",
-            body: "On-chain check of proofs against fixed public inputs.",
-          },
-          {
-            n: "04",
-            title: "Circuits",
-            body: "Shield, transfer and unshield constraints (Poseidon notes + membership).",
-          },
-        ]}
-      />
+            <Section s={S.thesis}>
+              <p>
+                Private holding, private payment and selective proof are first-class requirements for money onchain, not a
+                skin on a public wallet.
+              </p>
+              <Terms
+                items={[
+                  {
+                    term: "One owner, no key holder",
+                    body: "The owner proves a payment on their own device. No committee, operator or server holds a key or sees the secret inputs.",
+                  },
+                  {
+                    term: "Honesty over theatre",
+                    body: "No mock private success. Claims grow only as contracts, circuits and reviews support them.",
+                  },
+                  {
+                    term: "Proven patterns",
+                    body: "Commitments, nullifiers, Merkle membership and zero-knowledge proofs. No cryptography invented for a launch.",
+                  },
+                  {
+                    term: "The edges are real",
+                    body: "Entering and leaving the vault is visible. Privacy reduces what the public sees; it does not erase legal process or operator error.",
+                  },
+                  {
+                    term: "Mainnet when ready",
+                    body: "Mainnet opened on the final ceremony keys, after an internal review, with deposit limits.",
+                  },
+                ]}
+              />
+            </Section>
 
-      <h3>5.3 Note scheme</h3>
-      <p>
-        A shielded note binds a secret, amount, and asset into a commitment.
-        Nullifiers are derived so that spending a note can be recorded without
-        reusing it. Exact field hashes and layouts are implemented in circuit
-        source and client libraries and must stay aligned across releases.
-      </p>
-      <h3>5.4 Actions</h3>
-      <ul>
-        <li>
-          <strong>Shield</strong>, public assets enter the vault with a proof
-          that the new commitment encodes exactly the amount and asset
-          deposited; the commitment is inserted into the tree.
-        </li>
-        <li>
-          <strong>Transfer (private send)</strong>, spend one note, insert two
-          new commitments (payment and change), conserve value for a single
-          asset. The payment note is encrypted to the recipient&apos;s Gloam
-          address (receive tag) and posted to the memo board, where the
-          recipient&apos;s app finds it by scanning. A payment link covers
-          people without a Gloam address.
-        </li>
-        <li>
-          <strong>Unshield</strong>, prove ownership of a note and withdraw to
-          a public address bound in the proof. Exit is a visible edge.
-        </li>
-        <li>
-          <strong>Swap</strong>, unshield one note to an escrow address derived
-          from the whole swap (the note spent, the new note, a refund note and
-          the route), trade it on a public DEX, and shield the exact output as
-          a new note. The Gloam relay submits it. Who swapped stays private; the
-          tokens and amounts are public. If someone sends the unshield alone,
-          the same call returns 99% of the note as the refund note.
-        </li>
-        <li>
-          <strong>Prove</strong>, show a named party a balance, a payment
-          received, or a payroll total without opening the wallet (6.1).
-        </li>
-      </ul>
-      <h3>5.5 Custody and rule changes</h3>
-      <p>
-        The pool is self-custodial. No function lets the owner, the team, or
-        anyone else withdraw note-backed funds; value leaves only through an
-        unshield proof, to the recipient bound in that proof. The owner&apos;s
-        one transfer function returns native currency sent to the contract by
-        mistake, above what notes back, and cannot reach note-backed funds.
-      </p>
-      <p>
-        The owner wallet can still change rules: swap verifiers, set rates, and
-        set oracle feeds. Setup has ended on both live pools, so every such
-        change must be queued on-chain and can only run after a public 3-day
-        delay. Users see a pending change before it takes effect and can cash
-        out first. On mainnet the same delay applies to raising deposit limits
-        or adding an asset, while the owner can lower limits or close deposits
-        at once. At launch the owner is a single wallet on mainnet as on
-        testnet; a multisig is planned. Each mainnet vault&apos;s ownership
-        moves to the owner guard, a contract that forwards only limit and fee
-        changes and the sweep of coin sent by mistake: on a vault it holds, nobody can swap a verifier, and the
-        trade-off is set out in the threat model.
-      </p>
+            <Section s={S.privacy}>
+              <p>
+                A private payment does not mean nothing on the explorer. It means the public record shows no simple
+                &ldquo;Alice paid Bob this much&rdquo; story for money that stays inside the vault.
+              </p>
+              <Columns
+                cols={[
+                  {
+                    title: "Visible by design",
+                    items: [
+                      "That the vault was used",
+                      "Adding money and cashing out",
+                      "Proof transactions and who submits them (the Gloam relay can submit for you)",
+                    ],
+                  },
+                  {
+                    title: "Hidden by design",
+                    tone: "sealed",
+                    items: ["Amounts while inside the vault", "Who paid whom inside the vault", "Who made a private swap"],
+                  },
+                  {
+                    title: "Weaker while the set is small",
+                    items: ["Timing that lines up", "Amounts that stand out", "Few people using the vault"],
+                  },
+                ]}
+              />
+              <PoolPicture title="Figure 1. Wallet, vault and exit" />
+            </Section>
 
-      <FlowDiagram
-        title="Figure 3, User loop"
-        subtitle="Real contracts. No simulated private fills."
-        steps={[
-          {
-            n: "1",
-            title: "Connect",
-            body: `Wallet on a mainnet (Robinhood Chain 4663, Tempo 4217${BASE_LIVE ? ", Base 8453" : ""}${ETHEREUM_LIVE ? ", Ethereum 1" : ""}${ELYSIUM ? `, Elysium ${ELYSIUM.chainId}` : ""}${BNB ? `, BNB Chain ${BNB.chainId}` : ""}), or on a testnet (46630, 42431, 84532, 11155111${ELYSIUM_TESTNET ? ", 99801" : ""}) to practice.`,
-          },
-          {
-            n: "2",
-            title: "Shield",
-            body: "Deposit USDG or $GLOAM (Robinhood Chain); USDC.e, pathUSD, USDT0 or OUSD (Tempo); USDC, EURC, USDT or ETH (Base); or USDC, USDT, USDG, PYUSD, EURC or ETH (Ethereum), into the vault, under deposit limits. The Robinhood Chain testnet also takes ETH and faucet stocks.",
-          },
-          {
-            n: "3",
-            title: "Send or hold",
-            body: "Private send splits a note; the payment is sealed to the recipient's Gloam address.",
-          },
-          {
-            n: "4",
-            title: "Unshield",
-            body: "Prove and cash out to a normal wallet when ready.",
-          },
-        ]}
-      />
+            <Section s={S.architecture}>
+              <Sub>Placement</Sub>
+              <p>
+                Gloam is application-layer privacy on Robinhood Chain, a transparent L2, with the same contracts on Tempo, a
+                payments-first L1{LATER_NAMES ? `, and on ${LATER_NAMES}` : ""}. Finality stays with the chain. Privacy is
+                built above it: a self-custodial pool, a Merkle tree of note commitments, nullifiers against double-spends,
+                and onchain verifiers for zero-knowledge proofs. Only a valid proof from the note&apos;s owner moves money:
+                there is no admin withdraw, and rule changes are timelocked.
+              </p>
+              <Sub>Components</Sub>
+              <Terms
+                items={[
+                  { term: "App", body: "Wallet connection, note secrets, Merkle paths from onchain events, proofs made in the browser, notes encrypted at rest." },
+                  { term: "Vault (ShieldPool)", body: "Holds deposits, keeps the tree, takes proof-bound deposits, and pays out only against a verified proof. No admin withdraw." },
+                  { term: "Hash and tree", body: "Poseidon commitments in a depth-20 Merkle tree, matched to the circuits." },
+                  { term: "Circuits", body: "Shield (binds a deposit to its note), transfer (private send and split) and unshield (cash out), plus three proof circuits (06)." },
+                  { term: "Verifiers", body: "Groth16 verifiers per circuit. A dual verifier routes transfer and unshield; deposits use their own." },
+                  { term: "Memo board", body: "An encrypted message contract that lets a recipient find payments sent to them. It holds no funds." },
+                  {
+                    term: "Swap routers",
+                    body: "One per mainnet. A router takes one note to a one-time escrow, buys an exact amount on a fixed venue and deposits the output as a new note, in one transaction. No upgrade; Robinhood Chain's can add a pool with 3 days' public notice.",
+                  },
+                ]}
+              />
+              <FlowDiagram
+                title="Figure 2. Components"
+                steps={[
+                  { n: "01", title: "App", body: "Local note secrets and proofs made in the browser." },
+                  { n: "02", title: "Vault", body: "Deposits, root history, nullifiers, proof-gated payout. No admin withdraw." },
+                  { n: "03", title: "Verifier", body: "Checks each proof onchain against fixed public inputs." },
+                  { n: "04", title: "Circuits", body: "Shield, transfer and unshield constraints." },
+                ]}
+              />
+              <Sub>Notes</Sub>
+              <p>
+                A note binds a secret, an amount and an asset into a commitment. Spending it records a nullifier, so the
+                same note can never be spent twice. Field layouts live in the circuit source and client libraries and stay
+                aligned across releases.
+              </p>
+              <Sub>Actions</Sub>
+              <Terms
+                items={[
+                  { term: "Add (shield)", body: "Money enters the vault with a proof that the new note holds exactly what was deposited." },
+                  {
+                    term: "Pay (transfer)",
+                    body: "Spend one note and make two: the payment and the change. The payment is sealed to the recipient's Gloam address and posted to the memo board, where their app finds it. A claim link covers people without an address.",
+                  },
+                  { term: "Cash out (unshield)", body: "Prove ownership and withdraw to the address bound in the proof. A visible edge." },
+                  {
+                    term: "Swap",
+                    body: "Cash one note out to an escrow derived from the whole swap, trade it on a public venue, and add the exact output back as a new note. Who swapped stays private; the tokens and amounts are public.",
+                  },
+                  { term: "Prove", body: "Show one named party a balance, a payment received or a payroll total, without opening the wallet." },
+                ]}
+              />
+              <Sub>Custody and rule changes</Sub>
+              <p>
+                The vault is self-custodial. No function lets the owner, the team or anyone else withdraw note-backed money;
+                value leaves only through a cash-out proof, to the address bound in it. The owner can only return coin sent
+                to the contract by mistake, above what notes back.
+              </p>
+              <p>
+                The owner can still change rules (verifiers, rates, oracle feeds), but every change is queued onchain and
+                runs only after a public 3-day delay, so people can cash out first. On mainnet the same delay covers raising
+                limits or adding an asset; lowering limits or closing deposits is immediate. Each mainnet vault moves to an
+                owner guard that forwards only limit and fee changes and the sweep of mistaken coin, so nobody can swap a
+                verifier there.
+              </p>
+              {SOLANA_RINGS_ENABLED && (
+                <>
+                  <Sub>Solana</Sub>
+                  <p>
+                    On Solana, Gloam runs on Helius Privacy Rings rather than its own vault. A private payment there hides
+                    the asset and the amount; the two private accounts it moves between are public, and adding money shows
+                    the wallet it came from. Gloam&apos;s account layer keeps people&apos;s main wallets out of their
+                    payments.
+                  </p>
+                </>
+              )}
+              <FlowDiagram
+                title="Figure 3. How someone uses it"
+                subtitle="Real contracts. No simulated private fills."
+                steps={[
+                  { n: "1", title: "Connect", body: `A wallet on a mainnet: ${MAINNET_CHAINS}.` },
+                  { n: "2", title: "Add", body: "Stablecoins (and stock tokens on Robinhood Chain) go into the vault, under deposit limits." },
+                  { n: "3", title: "Pay or hold", body: "A private payment splits a note and seals it to the recipient's Gloam address." },
+                  { n: "4", title: "Cash out", body: "Prove and withdraw to any wallet when ready." },
+                ]}
+              />
+            </Section>
 
-      <h2 id="cryptography">6. Cryptography and verification</h2>
-      <p>
-        Circuits are written in Circom 2.1.6, with Poseidon for
-        circuit-friendly hashing and Merkle membership. Proofs are Groth16 on
-        BN254, generated in the browser with snarkjs 0.7.5 and checked by
-        on-chain verifiers. The trusted setup used on testnet is a
-        single-contributor dev ceremony: its keys must not be treated as a
-        production setup. The multi-party ceremony for mainnet closed on 17
-        October 2026 with 13 contributors, sealed with drand round 6561386, and
-        mainnet uses its keys.
-      </p>
-      <p>
-        Public-input layouts are versioned. Shield binds commitment, amount,
-        and asset. Unshield binds root, nullifier, asset, amount, and
-        recipient. Transfer binds root, nullifier, and two new commitments.
-        The dual verifier routes transfer and unshield by public-input count.
-      </p>
-      <p>
-        Sealed swap (the first private trade design) binds root, nullifier,
-        two new commitments, assets, a public min-out floor, and rate
-        numerators. It is retired: neither testnet pool has a sealed-swap
-        verifier set, so every sealed swap call reverts, and the mainnet pools
-        have no sealed swap at all. Its design could leave the pool owing an
-        asset it does not hold (audit H1). Private swaps replaced it. They add
-        no circuit: a swap is an unshield and a proof-bound shield, joined by
-        the router in one transaction.
-      </p>
-      <p>
-        Earlier pools on both chains, including a keccak-based Robinhood Chain
-        pool, remain on-chain for history only and are superseded. The product
-        path on testnet is the Poseidon vault redeployed on 2026-09-29 with
-        shield, transfer, and unshield verifiers enabled (dev keys). Mainnet
-        runs new payments-only pools (ShieldPoolPayments) on the final keys.
-      </p>
-      <h3>6.1 Proofs shared with others</h3>
-      <p>
-        Three more circuits back proofs a holder hands to someone else: proof
-        of funds (at least an amount across up to four unspent notes, balance
-        hidden), proof of payment (a payment received, with the amount shown
-        or only a minimum), and a payroll total (a run paid exactly a total in
-        a given number of payments). These are verified off-chain, in the
-        browser at gloam.trade/verify, against the live vault state. Each one
-        (<code>gloamfunds1</code>, <code>gloampay1</code>,{" "}
-        <code>gloamroll1</code>) carries a label naming who it is for and an
-        expiry, both bound into the proof. The older{" "}
-        <code>gloamdisc1</code> balance disclosure reused the shield circuit
-        and carried no recipient label or expiry. Every deposit publishes a
-        valid proof of that statement on chain, so anyone could make one for
-        any deposit. It is no longer made, and checkers never pass one; an
-        exact balance is now a <code>gloambal1</code> proof.
-      </p>
+            <Section s={S.cryptography}>
+              <p>
+                Circuits are written in Circom 2.1.6 with Poseidon hashing. Proofs are Groth16 on BN254, made in the browser
+                with snarkjs 0.7.5 and checked by onchain verifiers. Mainnet uses the keys from a multi-party ceremony that
+                closed on 17 October 2026 with 13 contributors, sealed with drand round 6561386.
+              </p>
+              <p>
+                Public inputs are versioned. Shield binds the commitment, amount and asset. Cash out binds the root,
+                nullifier, asset, amount and recipient. Transfer binds the root, nullifier and two new commitments.
+              </p>
+              <p>
+                The first private trade design (sealed swap) is retired: no live vault has it, and its design could leave the
+                pool owing an asset it does not hold. Private swaps replaced it with no new circuit, joining a cash out and a
+                proof-bound deposit in one transaction.
+              </p>
+              <Sub>Proofs you hand to someone</Sub>
+              <Terms
+                items={[
+                  { term: "Proof of funds", body: <>At least an amount across up to four notes, balance hidden (<code>gloamfunds1</code>).</> },
+                  { term: "Proof of payment", body: <>A payment received, amount shown or only a minimum (<code>gloampay1</code>).</> },
+                  { term: "Payroll total", body: <>A run paid exactly a total across a number of payments (<code>gloamroll1</code>).</> },
+                ]}
+              />
+              <p>
+                Each one names who it is for and when it expires, both bound into the proof, and anyone can check it in a
+                browser at <Link href="/verify">/verify</Link> against the live vault.
+              </p>
+            </Section>
 
-      <h2 id="whats-new">7. What is new in Gloam</h2>
-      <p>
-        Gloam is not new cryptography. It is a new building block for finance:
-        private payments you can prove. This section draws the line exactly.
-      </p>
-      <h3>7.1 Not new</h3>
-      <ul>
-        <li>
-          The private pool design: notes, nullifiers and a Merkle tree, from
-          the Zcash lineage starting in 2016, and used by Tornado, Railgun and
-          Cloak.
-        </li>
-        <li>
-          Selective disclosure as an idea: Zcash and Railgun viewing keys,
-          Privacy Pools, and Zama decryption rights.
-        </li>
-      </ul>
-      <h3>7.2 New, as far as our research found</h3>
-      <ol>
-        <li>
-          <strong>Payroll total proof.</strong> The <code>payroll_total</code>{" "}
-          circuit proves that a run of up to 32 payments adds up to exactly a
-          total, all funded by the prover, without
-          showing who got what. Its public inputs are{" "}
-          <code>[asset, total, count, paymentsHash, context]</code>. Each slot
-          opens both the payment note and the note it spent, so a payment the
-          prover only received cannot be counted as one they made. We found
-          nothing like it.
-        </li>
-        <li>
-          <strong>Proofs scoped to one reader.</strong> Who the proof is for (a
-          label), its expiry, the chain and the pool are hashed into one public{" "}
-          <code>context</code> input:{" "}
-          <code>keccak256(abi.encode(&quot;gloam.proof.v1&quot;, kind, chainId, pool, expiresAt, label)) mod p</code>.
-          The <code>solvency</code>, <code>receipt</code> and{" "}
-          <code>payroll_total</code> circuits bind it into the proof, so
-          changing the label breaks it. Anyone can check a proof in a browser
-          with no wallet at <Link href="/verify">/verify</Link>. Viewing keys,
-          by contrast, show a holder&apos;s whole history and cannot be taken
-          back.
-        </li>
-        <li>
-          <strong>Private payments for AI agents.</strong> A private payment
-          method proposed for the Machine Payments Protocol from Tempo and
-          Stripe (tempoxyz/mpp-specs#376; MPP had no private method), private
-          x402 payments, and an MCP server that gives agents handles instead of
-          secrets, with spending limits.
-        </li>
-      </ol>
-      <p>
-        One honest limit: a reader can still forward a proof. It will say who
-        it was made for and when it expires, but nothing stops the forwarding.
-        A designated-verifier mode is next.
-      </p>
+            <Section s={S.whatsNew}>
+              <p>Gloam is not new cryptography. It is a new building block for finance: private payments you can prove.</p>
+              <Sub>Not new</Sub>
+              <ul>
+                <li>The private pool design (notes, nullifiers, a Merkle tree), from Zcash in 2016, used by Tornado, Railgun and Cloak.</li>
+                <li>Selective disclosure as an idea: Zcash and Railgun viewing keys, Privacy Pools, Zama decryption rights.</li>
+              </ul>
+              <Sub>New, as far as our research found</Sub>
+              <Terms
+                numbered
+                items={[
+                  {
+                    term: "Payroll total proof",
+                    body: (
+                      <>
+                        The <code>payroll_total</code> circuit proves that up to 32 payments add up to exactly a total, all
+                        funded by the prover, without showing who got what. Each slot opens the payment and the note it spent,
+                        so money the prover only received can&apos;t count. We found nothing like it.
+                      </>
+                    ),
+                  },
+                  {
+                    term: "Proofs for one reader",
+                    body: (
+                      <>
+                        Who it is for, its expiry, the chain and the pool are hashed into one public <code>context</code>{" "}
+                        input, so changing the label breaks the proof. Viewing keys, by contrast, show a whole history and
+                        can&apos;t be taken back.
+                      </>
+                    ),
+                  },
+                  {
+                    term: "Private payments for AI agents",
+                    body: "A private payment method proposed for the Machine Payments Protocol from Tempo and Stripe (tempoxyz/mpp-specs#376), private x402 payments, and an MCP server that gives agents handles instead of secrets, with spending limits.",
+                  },
+                ]}
+              />
+              <Note>One honest limit: a reader can still forward a proof. It says who it was for and when it expires, but nothing stops the forwarding. A designated-verifier mode is next.</Note>
+            </Section>
 
-      <h2 id="compare">8. How Gloam compares</h2>
-      <p>
-        Privacy splits into two jobs. Shared secrets, such as sealed auctions,
-        order books and lending pools, need someone to compute on many
-        people&apos;s hidden data, so FHE and MPC networks (Zama, Arcium) use a
-        committee that holds keys. A payment has one owner, so the owner proves
-        it on their own device and nobody else ever holds a key.
-      </p>
-      <p>
-        The difference shows up in a breach. If a committee or an operator is
-        breached, everyone who used it can be exposed, including past
-        payments. If one owner&apos;s device is breached, one person is
-        exposed. Gloam builds the payments product on proven zero-knowledge
-        maths, the way Stripe built on card networks.
-      </p>
-      <div className="overflow-x-auto">
-        <table className="min-w-[640px]">
-          <thead>
-            <tr>
-              <th>Product</th>
-              <th>Who can see payments</th>
-              <th>Where they win</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>
-                <strong>Gloam</strong>
-              </td>
-              <td>Only the owner, and whoever they prove one fact to</td>
-              <td>Owner-only privacy, proofs for one reader, payroll and agent rails on {liveMainnetNames()}</td>
-            </tr>
-            <tr>
-              <td>Zama (FHE)</td>
-              <td>A 13-node committee shares one global key</td>
-              <td>Computing on shared data, like auctions and lending</td>
-            </tr>
-            <tr>
-              <td>Arcium (MPC, Solana)</td>
-              <td>A node cluster, private while one node stays honest</td>
-              <td>Private shared state on Solana</td>
-            </tr>
-            <tr>
-              <td>Tempo Zones</td>
-              <td>The zone operator sees everything in the zone</td>
-              <td>Enterprises that want an operator in the loop</td>
-            </tr>
-            <tr>
-              <td>Helius Privacy</td>
-              <td>Helius&apos;s server receives the full secret inputs, amounts included</td>
-              <td>Speed on weak phones, and Solana reach</td>
-            </tr>
-            <tr>
-              <td>Railgun</td>
-              <td>Only the owner; viewing keys show the whole history</td>
-              <td>Years live, a far bigger crowd of notes, more external audits</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p>
-        We found no other product on Tempo or Robinhood Chain that combines
-        owner-only privacy, proofs for one reader, and payroll and agent rails.
-        The full comparison, with what a breach exposes and where each one
-        wins, is at <Link href="/docs/compare">/docs/compare</Link>.
-      </p>
+            <Section s={S.compare}>
+              <p>
+                Privacy splits into two jobs. Shared secrets, like sealed auctions or lending pools, need someone to compute
+                on many people&apos;s hidden data, so FHE and MPC networks use a committee that holds keys. A payment has one
+                owner, so the owner proves it on their own device.
+              </p>
+              <p>
+                The difference shows in a breach. Breach a committee and everyone who used it can be exposed, past payments
+                included. Breach one owner&apos;s device and one person is exposed.
+              </p>
+              <div className="wp-table overflow-x-auto">
+                <table className="min-w-[600px]">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>Who can see payments</th>
+                      <th>Where it wins</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="is-us">
+                      <td>Gloam</td>
+                      <td>Only the owner, and whoever they prove one fact to</td>
+                      <td>Owner-only privacy, proofs for one reader, payroll and agent rails</td>
+                    </tr>
+                    <tr>
+                      <td>Zama (FHE)</td>
+                      <td>A 13-node committee shares one global key</td>
+                      <td>Computing on shared data, like auctions and lending</td>
+                    </tr>
+                    <tr>
+                      <td>Arcium (MPC)</td>
+                      <td>A node cluster, private while one node stays honest</td>
+                      <td>Private shared state on Solana</td>
+                    </tr>
+                    <tr>
+                      <td>Tempo Zones</td>
+                      <td>The zone operator sees everything in the zone</td>
+                      <td>Enterprises that want an operator in the loop</td>
+                    </tr>
+                    <tr>
+                      <td>Railgun</td>
+                      <td>Only the owner; viewing keys show the whole history</td>
+                      <td>Years live, more users, more external audits</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>
+                The full comparison, with what a breach exposes and where each one wins, is at{" "}
+                <Link href="/docs/compare">/docs/compare</Link>.
+              </p>
+            </Section>
 
-      <h2 id="threat">9. Threat model</h2>
-      <h3>9.1 In scope (design goals)</h3>
-      <ul>
-        <li>Observer reading a single address balance while assets are shielded</li>
-        <li>
-          Simple public reconstruction of internal note-to-note payment graphs
-          (as anonymity set grows)
-        </li>
-        <li>Double-spend of the same note (nullifiers)</li>
-      </ul>
-      <h3>9.2 Edges and residual leakage</h3>
-      <ul>
-        <li>Shield and unshield amounts and timing on the public chain</li>
-        <li>RPC and network metadata if clients are careless</li>
-        <li>
-          The submitting wallet, when a user sends without the relay. On
-          Robinhood Chain the deployed memo board also records who posted each
-          memo, so the sender stays off that record only when the relay posts
-          it; Tempo&apos;s board does not record the poster.
-        </li>
-        <li>
-          Correlation attacks when few users participate or amounts are unique
-        </li>
-        <li>
-          Private swap tokens and amounts, which are public like any DEX trade;
-          a swap sized like a recent deposit, or a cash out sized like a
-          swap&apos;s output, can be matched
-        </li>
-      </ul>
-      <h3>9.3 Out of scope as “solved by crypto alone”</h3>
-      <ul>
-        <li>Device malware, phishing, and coerced key disclosure</li>
-        <li>Legal process and off-chain identity linkage</li>
-        <li>User deletion of local note material without backup</li>
-        <li>Absolute anonymity against nation-state adversaries</li>
-      </ul>
+            <Section s={S.threat}>
+              <Columns
+                cols={[
+                  {
+                    title: "What it protects against",
+                    tone: "sealed",
+                    items: ["Reading one address's balance while money is in the vault", "Rebuilding who paid whom inside the vault", "Spending the same note twice"],
+                  },
+                  {
+                    title: "What still shows",
+                    items: [
+                      "Amounts and timing when adding and cashing out",
+                      "The sending wallet, if someone sends without the relay",
+                      "Matches when few people use the vault or amounts are unique",
+                      "Swap tokens and amounts",
+                    ],
+                  },
+                  {
+                    title: "Beyond cryptography",
+                    items: ["Malware, phishing and coercion", "Legal process and offchain identity", "Lost notes without a backup", "Nation-state adversaries"],
+                  },
+                ]}
+              />
+            </Section>
 
-      <h2 id="product">10. Product surface</h2>
-      <p>
-        The application at{" "}
-        <AppLink href="/app">gloam.trade/app</AppLink> provides:
-      </p>
-      <ul>
-        <li>
-          Wallet connection to {liveMainnetNames()} mainnet, and to Robinhood
-          Chain testnet, Tempo Moderato, Base Sepolia and Ethereum Sepolia for
-          practice
-        </li>
-        <li>Portfolio with wallet balances, shielded balances, and faucet stocks on testnet</li>
-        <li>
-          Stock tokens on Robinhood Chain testnet held and sent privately, like
-          any other asset in the vault
-        </li>
-        <li>Public send and stock token transfer paths</li>
-        <li>Shield deposits into the privacy vault</li>
-        <li>
-          Private send (transfer) and cash-out (unshield) with browser proofs,
-          optionally submitted by the Gloam relay so the user&apos;s wallet does
-          not appear
-        </li>
-        <li>
-          Receiving by Gloam address (encrypted memos) or payment link, plus
-          note import
-        </li>
-        <li>Private payroll, scheduled payroll, and payment requests</li>
-        <li>Proofs of funds, payment, and payroll totals, checked at /verify</li>
-        <li>
-          Private swaps on {swapMainnets()} mainnet: USDG, $GLOAM,
-          PONS, CASHCAT, WETH, stock tokens and more on Robinhood Chain, the four
-          vault stablecoins on Tempo{swapV3Live(8453) || swapV3Live(1) ? ", stablecoins and ETH on Uniswap v4 on the others" : ""}, sent by the
-          Gloam relay, with who swapped kept private and the amounts public
-        </li>
-        <li>
-          The first private trade design (sealedSwap) is retired. On the
-          Robinhood Chain testnet a via-market path (cash out, public swap,
-          re-shield) remains where a public pool exists, with the swap size
-          public on that edge
-        </li>
-      </ul>
-      <p>
-        Documentation and this whitepaper live on the same
-        origin (
-        <Link href="/docs">/docs</Link>,{" "}
-        <Link href="/whitepaper">/whitepaper</Link>
-        ). Marketing site and product share one brand: ink, paper, and a single green tint that marks what is private.
-      </p>
+            <Section s={S.product}>
+              <p>
+                The app at <AppLink href="/app">gloam.trade/app</AppLink> runs on {liveMainnetNames()}.
+              </p>
+              <Terms
+                items={[
+                  { term: "Private balance", body: "Add stablecoins, hold them privately, see public and private side by side." },
+                  { term: "Pay", body: "Private payments to a Gloam address or @name, claim links, and payment requests. The relay can submit so your wallet never appears." },
+                  { term: "Payroll", body: "Private payroll runs, paid in one go or on a schedule." },
+                  { term: "Prove", body: "Proofs of funds, payment and payroll totals, checked at /verify." },
+                  {
+                    term: "Swap",
+                    body: `Private swaps on ${swapMainnets()}${swapV3Live(8453) || swapV3Live(1) ? ", including Uniswap v4 on Base and Ethereum" : ""}: who swapped stays private, the amounts are public.`,
+                  },
+                  { term: "Cash out", body: "To any wallet, or across chains." },
+                ]}
+              />
+            </Section>
 
-      <h2 id="roadmap">11. Roadmap</h2>
-      <ol>
-        <li>
-          <strong>Live on mainnet:</strong> {liveMainnetsSinceText()}, all
-          on the same vault and the final ceremony keys: proof-bound
-          shield, unshield, private send, the Gloam relay, payroll, proofs of
-          funds, payment, and payroll totals, private agent payments,
-          deposit limits, and pools with no admin withdraw and timelocked rule
-          changes. Private swaps from the private balance run on Robinhood
-          Chain and Tempo, through a router per chain, and on Robinhood Chain
-          they include stock tokens. A swap hides who swapped, not the tokens or
-          the amounts. Encrypted payment memos run on every network, and
-          the Robinhood Chain testnet adds stock tokens held and sent
-          privately, with test funds.
-        </li>
-        <li>
-          <strong>Retired:</strong> the first sealed-swap path (circuit,
-          verifier, oracle-bound rates). It stays off, and private swaps
-          replaced it.
-        </li>
-        <li>
-          <strong>Near term:</strong> a designated-verifier mode for proofs;
-          anonymity set growth; operational monitoring.
-        </li>
-        <li>
-          <strong>Mid term:</strong> issuer-scoped disclosure for regulated
-          stablecoins on Tempo.
-        </li>
-        <li>
-          <strong>Production gate:</strong> done before mainnet, the multi-party
-          trusted setup (13 contributors) and an internal review (no Critical or
-          High findings open on 20 October 2026). Done since: Kann Audits
-          reviewed the vault contracts (<Link href="/security">report, 1 November 2026</Link>) and found no Critical,
-          High or Medium issues. The swap routers, circuits, app and relay were
-          not part of it. Still ahead: a multisig owner and the incident process.
-        </li>
-      </ol>
+            <Section s={S.roadmap}>
+              <div className="wp-road">
+                {[
+                  {
+                    k: "Live",
+                    on: true,
+                    v: `${liveMainnetsSinceText()}, on the same vault and the final ceremony keys: private add, pay and cash out, the relay, payroll, proofs, private agent payments, private swaps, deposit limits, no admin withdraw and timelocked rules.`,
+                  },
+                  { k: "Done", v: "Multi-party trusted setup (13 contributors), internal review, and Kann Audits on the vault contracts (no Critical, High or Medium findings, 1 November 2026)." },
+                  { k: "Next", v: "A designated-verifier mode for proofs, a larger anonymity set, and monitoring." },
+                  { k: "Later", v: "Issuer-scoped disclosure for regulated stablecoins, and a public incident process." },
+                  { k: "Retired", v: "The first sealed-swap path. Private swaps replaced it." },
+                ].map((r) => (
+                  <div key={r.k} className="wp-road-row">
+                    <span className={`wp-road-k ${r.on ? "is-on" : ""}`}>{r.k}</span>
+                    <p>{r.v}</p>
+                  </div>
+                ))}
+              </div>
+            </Section>
 
-      <h2 id="risks">12. Risks and limitations</h2>
-      <ul>
-        <li>
-          On mainnet, deposit limits cap
-          what the pools take
-        </li>
-        <li>
-          Smart contract and circuit bugs: Kann Audits reviewed the vault
-          contracts and found no Critical, High or Medium issues, but no review
-          rules out bugs, and the routers, circuits, app and relay were not part
-          of it
-        </li>
-        <li>The Robinhood Chain and Tempo testnets run on development proving keys from a single-contributor dev ceremony (mainnet, Base Sepolia and Ethereum Sepolia use the 13-contributor keys)</li>
-        <li>
-          Rule changes, including verifier swaps, by a single owner wallet,
-          limited by a public 3-day delay, until the owner guard holds that
-          vault
-        </li>
-        <li>Browser-local note storage and user operational error</li>
-        <li>
-          A payer can reclaim a direct payment until the payee claims it,
-          because the payer created the note and knows its key; claiming moves
-          it into a new note only the payee knows
-        </li>
-        <li>The relayer is run by the Gloam team at launch; it can refuse or go down, never redirect</li>
-        <li>
-          Private swaps show their tokens and amounts, trade on outside venues,
-          and only go through the relay; a swap someone breaks on purpose
-          refunds 99% of the note
-        </li>
-        <li>
-          A stablecoin issuer can freeze the vault contract; the answer is to
-          screen deposits so flagged funds never enter
-        </li>
-        <li>A reader can forward a proof meant for them</li>
-        <li>Regulatory and compliance uncertainty around privacy tools</li>
-        <li>Thin anonymity sets in early usage, on the new mainnet pools especially</li>
-        <li>L2 and bridge operational risk of the underlying chain</li>
-      </ul>
+            <Section s={S.risks}>
+              <ul className="wp-risks">
+                <li>Deposit limits cap what the vaults take on mainnet.</li>
+                <li>Kann Audits reviewed the vault contracts only; the routers, circuits, app and relay were not part of it, and no review rules out bugs.</li>
+                <li>A single owner wallet can change rules after a public 3-day delay, until the owner guard holds that vault.</li>
+                <li>Notes live in the browser; a lost device without a backup loses them.</li>
+                <li>A payer can reclaim a direct payment until the payee claims it.</li>
+                <li>The Gloam team runs the relay; it can refuse or go down, never redirect.</li>
+                <li>Swaps show their tokens and amounts and trade on outside venues.</li>
+                <li>An issuer can freeze the vault contract; deposits are screened so flagged funds never enter.</li>
+                <li>A reader can forward a proof meant for them.</li>
+                <li>Regulation around privacy tools is uncertain, and anonymity sets are thin early on.</li>
+              </ul>
+            </Section>
 
-      <h2 id="non-claims">13. Explicit non-claims</h2>
-      <p>
-        Gloam is live on mainnet. It does not claim a full
-        external audit (the Kann Audits review covers the vault contracts only),
-        insurance of funds, legal immunity, or invisibility
-        from investigation. Nothing in
-        this paper is investment advice.
-      </p>
+            <Section s={S.nonClaims}>
+              <p>
+                Gloam is live on mainnet. It does not claim a full external audit (Kann Audits covered the vault contracts
+                only), insurance of funds, legal immunity, or invisibility from investigation. Nothing here is investment
+                advice.
+              </p>
+            </Section>
 
-      <h2 id="closing">14. Closing</h2>
-      <p>
-        Settlement will remain public. Salaries, suppliers and strategies need
-        not. Gloam builds the sealed chamber beside the open book on{" "}
-        {liveMainnetNames()}, so people, teams and agents can hold, pay and prove
-        exactly what is needed, without printing every private calculation to
-        the street.
-      </p>
-      <div className="t-label pt-4">gloam.trade · live on mainnet · hello@gloam.trade · @gloamtrade</div>
-    </DocsLayout>
+            <Section s={S.closing}>
+              <Pull>Settlement stays public. Salaries, suppliers and strategies need not.</Pull>
+              <p>
+                Gloam builds the sealed room beside the open book, so people, teams and agents can hold, pay and prove exactly
+                what is needed, without printing every private calculation to the street.
+              </p>
+              <p className="wp-sign">
+                gloam.trade · <a href="mailto:hello@gloam.trade">hello@gloam.trade</a> ·{" "}
+                <a href="https://x.com/gloamtrade" target="_blank" rel="noreferrer">
+                  @gloamtrade
+                </a>
+              </p>
+            </Section>
+          </article>
+        </div>
+      </main>
+
+      <Footer />
+    </div>
   );
 }
