@@ -389,4 +389,44 @@ await check("a tree walk from the deploy block: old spans to history, recent one
   assert.equal(BigInt(filterOf(f[f.length - 1]!).toBlock!), HEAD, "to the head");
 });
 
+await check("a log range the private RPC refuses (dRPC free plan, HTTP 400) goes to the public side and keeps the private RPC for every other call", async () => {
+  const net = nets.getNetwork("robinhood-mainnet");
+  const PRIVATE = "https://private.selftest.invalid/rpc";
+  const PUBLIC = net.chain.rpcUrls.default.http[0]!;
+  const asked: string[] = [];
+  const before = globalThis.fetch;
+  resetRpcRest();
+  resetRpcChecks();
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = (typeof input === "string" ? input : input instanceof URL ? input.href : input.url).replace(/\/$/, "");
+    const body = JSON.parse(String(init?.body ?? "{}")) as { id: number; method: string };
+    const side = url === PRIVATE ? "private" : url === PUBLIC.replace(/\/$/, "") ? "public" : url;
+    asked.push(`${side}:${body.method}`);
+    const json = (status: number, payload: object) => new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, ...payload }), { status, headers: { "content-type": "application/json" } });
+    if (body.method === "eth_chainId") return json(200, { result: toHex(net.chainId) });
+    if (side === "private" && body.method === "eth_getLogs") {
+      // an HTTP 400 that is not a JSON-RPC answer, as dRPC's keyed endpoint sends it
+      return new Response(JSON.stringify({ message: "ranges over 10000 blocks are not supported on free plan", code: 35 }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+    if (body.method === "eth_getLogs") return json(200, { result: [] });
+    if (body.method === "eth_blockNumber") return json(200, { result: toHex(124_900_000n) });
+    throw new Error(`selftest-read-transport: unexpected ${body.method} to ${url}`);
+  }) as typeof fetch;
+  process.env[`GLOAM_RPC_URL_${net.chainId}`] = PRIVATE;
+  try {
+    const c = createPublicClient({ chain: net.chain, transport: serverTransport(net, { retryCount: 0 }) });
+    const logs = await c.getLogs({ address: "0x841DC046E5d8D3a6Fa2F0E4cC6D1Ef7Fb6b0e9e2", fromBlock: 124_000_000n, toBlock: 124_900_000n });
+    assert.deepEqual(logs, [], "the public side answered the wide range");
+    assert.ok(asked.includes("private:eth_getLogs") && asked.includes("public:eth_getLogs"), "tried private, then public");
+    asked.length = 0;
+    assert.equal(await c.getBlockNumber({ cacheTime: 0 }), 124_900_000n);
+    assert.deepEqual(asked, ["private:eth_blockNumber"], "the next call still goes to the private RPC (not passed over)");
+  } finally {
+    delete process.env[`GLOAM_RPC_URL_${net.chainId}`];
+    globalThis.fetch = before;
+    resetRpcRest();
+    resetRpcChecks();
+  }
+});
+
 console.log(`read-transport: ${n} passed`);
