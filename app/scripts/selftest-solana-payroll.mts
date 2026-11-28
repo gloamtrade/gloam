@@ -726,6 +726,14 @@ eq(ringsExplorerTx("abc", "mainnet"), "https://solscan.io/tx/abc", "mainnet expl
   ok(C.paymentsTooBig({ code: "WALLET_CREATE_TRANSFER", causeCodes: ["WALLET_TOO_MANY_INPUTS"] }), "too many inputs: fewer people per transaction");
   ok(!C.paymentsTooBig(wrapped), "a low balance is not about size");
   eq(C.ringsErrorMessage(new C.RingsRelayError("Too many requests.", 429, "rate_limited", false)), "Too many requests.", "the relay's words are kept");
+  const unknown = Object.assign(new Error("WALLET_BUILD_WITHDRAWAL"), { code: "WALLET_BUILD_WITHDRAWAL", cause: { code: "CLIENT_PROVER_REQUEST" } });
+  eq(C.ringsErrorMessage(unknown), "Something went wrong on Solana (CLIENT_PROVER_REQUEST). Try again.", "an unknown SDK error names its innermost code");
+  eq(C.ringsErrorMessage(new Error("x".repeat(200))), "Something went wrong on Solana. Try again.", "a long message with no code stays plain");
+  eq(
+    C.ringsErrorMessage(Object.assign(new Error("WALLET_BUILD_TRANSFER"), { code: "WALLET_BUILD_TRANSFER", causeCode: "CLIENT_PROVER_TEE_ATTESTATION" })),
+    "Gloam couldn't check Solana's prover. Check your device's date and time, then try again.",
+    "a failed prover check points at the device clock"
+  );
 }
 
 console.log(`selftest-solana-payroll (claim links ${LINKS ? "on" : "off"}): ${checks} checks passed`);
