@@ -56,8 +56,7 @@ export function ScheduleList({
 
       {sorted.length === 0 ? (
         <p className="mt-3 text-[13px] leading-relaxed text-mute">
-          Pay the same people on a calendar? Save a list as a schedule, with a cap per run, and this page tells you when
-          it is due.
+          Pay the same people every month? Save the list as a schedule and get a reminder on payday.
         </p>
       ) : (
         <ul className="-mx-2 mt-3 space-y-1">
@@ -177,7 +176,7 @@ export function ScheduleList({
         </ul>
       )}
 
-      <p className="mt-4 border-t border-line pt-4 text-[12.5px] leading-relaxed text-mute">{SELF_CUSTODY_NOTE}</p>
+      {sorted.length > 0 && <p className="mt-4 border-t border-line pt-4 text-[12.5px] leading-relaxed text-mute">{SELF_CUSTODY_NOTE}</p>}
     </section>
   );
 }

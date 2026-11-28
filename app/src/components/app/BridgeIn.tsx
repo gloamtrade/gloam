@@ -172,7 +172,6 @@ export function BridgeInCard({
 }) {
   const { network } = useNetwork();
   const dest = BRIDGE_DESTINATIONS[network.family];
-  const swap = swapSource(network);
   const [opened, setOpen] = useState(false);
   // Closing it, or opening it by hand, uses up the link's one opening.
   const [startUsed, setStartUsed] = useState(false);
@@ -196,11 +195,10 @@ export function BridgeInCard({
       <p className="mt-3 text-[14px] leading-relaxed text-foreground">
         Bring money over from {sources.length} chains, or straight from an exchange.
       </p>
-      <p className="mt-1.5 text-[12.5px] leading-relaxed text-mute">
+      <p className="mt-1.5 max-w-[52ch] text-[13px] leading-relaxed text-mute">
         {solanaPrivate
-          ? `From a Solana wallet it goes straight into your private balance. From anywhere else it lands in your wallet on ${dest.chain} as ${dest.token.symbol}, then you add it here privately.`
-          : `It lands in your wallet on ${dest.chain} as ${dest.token.symbol}. Then you add it here privately.`}
-        {swap && ` Holding ${swap.tokens[0]!.symbol} on ${swap.name}? Swap it to ${dest.token.symbol} here too.`}
+          ? "From your own wallet it can land straight in your private balance."
+          : `It lands in your wallet on ${dest.chain}, then you add it here privately.`}
       </p>
       <button type="button" disabled={!recipient} onClick={() => setOpen(true)} className="btn btn-ghost btn-sm mt-4">
         {recipient ? "Bring money over" : "Connect a wallet first"}
