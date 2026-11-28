@@ -1,0 +1,20 @@
+Starknet privacy SDK (@starkware-libs/starknet-privacy-sdk 0.14.4-rc.2)
+
+Source: https://github.com/starkware-libs/starknet-privacy, directory sdk/
+Tag: PRIVACY-0.14.4-RC.2, commit f7fb72a9a7d0cb1a2ad447fec55c1207029ae093
+License: Apache License 2.0 (LICENSE in this folder, copied from the repository root)
+
+Why it is vendored: the SDK is published only to GitHub Packages, which needs a
+token to install, and has no public npm release yet. This tarball is the
+package built from the tag above (npm ci, npm run build, npm pack in sdk/).
+
+Changes from the upstream package, marked by the "-gloam.1" file name, all in
+package.json "exports" (no code changed):
+ - "./contract-discovery" points at the SDK's own
+   dist/internal/contract-discovery.js. Upstream exposes ContractDiscoveryProvider
+   only through "./testing", which also loads the devnet harness (node:fs,
+   node:child_process) and so can't be bundled for the browser.
+ - each entry with an "import" condition also gets "default" (the same file), so
+   the app's TypeScript scripts, which tsx loads as CommonJS, resolve it too.
+
+Replace this with the published package once StarkWare releases it on npm.

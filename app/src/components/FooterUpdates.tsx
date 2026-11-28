@@ -27,18 +27,18 @@ export function FooterUpdates() {
 
   if (done) {
     return (
-      <p className="mt-8 text-[14px] text-soft" role="status">
+      <p className="text-[15px] text-soft" role="status">
         You&apos;re on the list. Every update has an unsubscribe link.
       </p>
     );
   }
 
   return (
-    <form onSubmit={onSubmit} noValidate className="relative mt-8 max-w-[360px]">
-      <label htmlFor="footer-updates" className="text-[13px] text-mute">
+    <form onSubmit={onSubmit} noValidate className="relative max-w-[420px]">
+      <label htmlFor="footer-updates" className="text-[14px] text-soft">
         Get Gloam updates
       </label>
-      <div className="mt-2 flex gap-2">
+      <div className="mt-3 flex gap-2">
         <input
           id="footer-updates"
           name="email"
@@ -50,11 +50,11 @@ export function FooterUpdates() {
           required
           maxLength={254}
           placeholder="you@example.com"
-          className="gl-input h-10 min-w-0 flex-1 text-[14px]"
+          className="gl-input h-11 min-w-0 flex-1 text-[15px]"
           aria-invalid={Boolean(error)}
           aria-describedby={error ? "footer-updates-err" : undefined}
         />
-        <button type="submit" disabled={sending} aria-busy={sending} className="btn btn-ink btn-sm h-10 shrink-0">
+        <button type="submit" disabled={sending} aria-busy={sending} className="btn btn-ink btn-sm h-11 shrink-0 px-5">
           <BusyLabel busy={sending}>Subscribe</BusyLabel>
         </button>
       </div>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { IntentLink } from "@/components/IntentLink";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { FRESH_WALLET_ENABLED } from "@/lib/freshWalletFlag";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
 
 /**
  * The docs map: sidebar groups, top tabs, and the helpers that decide what is
@@ -56,6 +57,8 @@ export const DOCS_NAV: DocNavGroup[] = [
       { href: "/docs/compare", label: "How Gloam compares" },
       { href: "/docs/proofs", label: "Proofs" },
       { href: "/docs/chain", label: "Networks" },
+      // only while Starknet is on (lib/starknetPrivacy/config); the page answers 404 otherwise
+      ...(STARKNET_ENABLED ? [{ href: "/docs/starknet", label: "Starknet" }] : []),
       { href: "/docs/data", label: "Prices & oracles" },
     ],
   },
@@ -92,7 +95,7 @@ export const DOCS_TABS: DocsTab[] = [
     href: "/docs/privacy-model",
     match: ["/docs/privacy-model", "/docs/threat-model", "/docs/compare", "/docs/encryption", "/docs/proofs"],
   },
-  { label: "Networks", href: "/docs/chain", match: ["/docs/chain", "/docs/data"] },
+  { label: "Networks", href: "/docs/chain", match: ["/docs/chain", "/docs/data", ...(STARKNET_ENABLED ? ["/docs/starknet"] : [])] },
   {
     label: "SDK",
     href: "/docs/sdk",

@@ -48,6 +48,8 @@ export const PRIVACY_STATUS = {
   ],
   solana:
     "Solana mainnet (gloam_solana_* tools), through Helius Solana Privacy Rings: a private payment hides the asset and the amount. The two private accounts it moves between are visible, adding money shows the wallet it came from, a cash out shows its destination, asset and amount, and proofs are made by Helius's prover. Sender and recipient are not hidden on Solana.",
+  starknet:
+    "Starknet mainnet (gloam_starknet_* tools), through Starknet's privacy pool, not open on Gloam yet. Over a channel that is already open a payment hides who paid, who was paid and the amount. The first payment to someone shows their private account, adding money shows the account and the amount, and a cash out shows the destination and the amount. The pool's auditor key can read an account's private activity (registering stores its viewing key encrypted to it; it cannot spend), and proofs are made by Starkscan's prover, which sees what it proves.",
   disabled: ["the old sealed trade: retired on every network"],
   notLive: ["the old sealed trade"],
   review:

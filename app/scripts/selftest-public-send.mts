@@ -30,7 +30,7 @@ const WALLET = "0x00000000000000000000000000000000000000b2";
 const symbols = (chainId: number) => publicSendTokens(chainId).map((t) => t.symbol);
 
 test("every listed token goes out on every chain", () => {
-  assert.deepEqual(symbols(4663), ["USDG", "GLOAM", "GRIFT", "PONS", "CASHCAT", "AI", "ORBIO"]);
+  assert.deepEqual(symbols(4663), ["USDG", "GLOAM", "PONS", "CASHCAT", "AI", "ORBIO"]);
   assert.deepEqual(symbols(4217), ["USDC.e", "pathUSD", "USDT0", "OUSD"]);
   assert.deepEqual(symbols(8453), ["USDC", "EURC", "USDT"]);
   assert.deepEqual(symbols(1), ["USDC", "USDT", "USDG", "PYUSD", "EURC"]);

@@ -114,6 +114,34 @@ export async function buildSolanaTx(
   return { ok: false, reason: "rpc" };
 }
 
+/**
+ * Send a signed transaction, and say why when Solana refuses it: "expired" (its
+ * blockhash is gone, so it was approved too late), "refused" (it fails in
+ * simulation: too little money, a bad account), or "rpc" (no node answered).
+ * The first two can never land; nothing left the wallet.
+ */
+export async function sendSolanaTxChecked(signedBase64: string): Promise<{ ok: true; signature: string } | { ok: false; reason: "invalid" | "expired" | "refused" | "rpc"; detail?: string }> {
+  let raw: Buffer;
+  try {
+    raw = Buffer.from(signedBase64, "base64");
+    VersionedTransaction.deserialize(raw);
+  } catch {
+    return { ok: false, reason: "invalid" };
+  }
+  for (const url of rpcs()) {
+    try {
+      const signature = await new Connection(url, { commitment: "confirmed" }).sendRawTransaction(raw, { maxRetries: 5 });
+      return { ok: true, signature };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/blockhash not found|block height exceeded|BlockhashNotFound/i.test(msg)) return { ok: false, reason: "expired" };
+      if (/simulation failed|insufficient|custom program error|InstructionError/i.test(msg)) return { ok: false, reason: "refused", detail: msg.split("\n")[0]!.slice(0, 160) };
+      /* a node that didn't answer: the next RPC */
+    }
+  }
+  return { ok: false, reason: "rpc" };
+}
+
 /** Send a transaction a wallet signed but did not send itself. Returns its signature. */
 export async function sendSolanaTx(signedBase64: string): Promise<string | null> {
   let raw: Buffer;

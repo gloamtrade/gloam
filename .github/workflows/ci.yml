@@ -69,7 +69,12 @@ jobs:
       # place in the menus; bridged ZEC (its mint, shown only once its ring interface is
       # read as set up, priced, two places); Solana in /admin (the relay's history read
       # into accounts opened, bring-ins, wallet adds, payments and cash-outs, wallet adds
-      # reported and checked, the mainnet totals with Solana in). No network.
+      # reported and checked, the mainnet totals with Solana in); claim links and payment
+      # requests (the link format, no collision with EVM links, single use, take back,
+      # two claims at once, kept before paid, sent links sealed, payroll's link rows),
+      # with making links off and on (NEXT_PUBLIC_SOLANA_CLAIM_LINKS). Prove: a payment
+      # received, checked against its transaction (a real mainnet transact decoded, every
+      # tamper, change and wrong chain refused). No network.
       - name: App Solana self-tests
         working-directory: app
         run: |
@@ -77,11 +82,50 @@ jobs:
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-bridge-in.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-relay-add.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-payroll.mts
+          NEXT_PUBLIC_SOLANA_CLAIM_LINKS=1 ../mcp/node_modules/.bin/tsx scripts/selftest-solana-payroll.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-payroll-csv.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-site.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-opened.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-zec.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-solana-metrics.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-claim-links.mts
+          NEXT_PUBLIC_SOLANA_CLAIM_LINKS=1 ../mcp/node_modules/.bin/tsx scripts/selftest-solana-claim-links.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-prove-solana.mts
+
+      # Starknet (off by default): the core library behind NEXT_PUBLIC_STARKNET_ENABLED.
+      # Config (pools only from the environment), private-account keys from a wallet
+      # signature or a Gloam root (never a Solana account's), matching the devnet run
+      # that sent real transactions; what the relay will send (account deploy, the
+      # token approve, the pool's apply_actions) and every way each is refused, on the
+      # pool's real encoding; add, pay and cash out on the SDK's in-memory pool. The
+      # routes (/api/starknet/rpc, relay, prove) with the node and Starkscan faked: the
+      # proxy's read-only allowlist, the relay's checks on the chain and its limits,
+      # Starkscan's job API (key, Idempotency-Key, submit then poll) and its adapter as
+      # the SDK's prover. Payroll: the list, the account checks, proofs sized to the
+      # relay's cap, and every way a proof is left in flight against a fake chain, the
+      # sealed store and schedules. Claim links: the link format (no collision with EVM
+      # or Solana links), claiming once, take back, link rows in a run, sent links sealed.
+      # Payment requests: the link format (no other link reads it, it reads no other),
+      # Pay filled from it, what its banner says, and Receive's Request a payment.
+      # @gloamtrade/sdk/starknet against the app byte for byte (the account from a wallet
+      # signature or a Gloam root, keys, claim links, the calls the relay sends). The public
+      # site's Starknet copy (docs, llms.txt, the hosted MCP, Glim), off and on. Prove:
+      # the payments in one channel, read and signed on the in-memory pool, every
+      # tamper and wrong chain refused.
+      # No network. The devnet end to ends (scripts/e2e-starknet-devnet.mts,
+      # scripts/e2e-starknet-sdk-devnet.mts for the SDK, scripts/e2e-starknet-prove-devnet.mts
+      # for Prove) run locally.
+      - name: App Starknet self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-core.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-routes.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-payroll.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-claim-links.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-requests.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-sdk.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-site.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-prove-starknet.mts
 
       # Every token amount the app shows: two places, cut down and never rounded up,
       # "<0.01" for dust, "0.00" for zero, thousands separators, 6- and 18-decimal

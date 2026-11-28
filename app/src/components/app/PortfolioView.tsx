@@ -445,6 +445,16 @@ export function PortfolioView() {
   const tokensUnpriced = positions.filter((p) => p.raw > BigInt(0) && !p.priced).map((p) => p.symbol);
   const publicUnpriced = [...(!isTempo && nativeWei > BigInt(0) && nativeUsdRate == null ? [nativeSymbol] : []), ...tokensUnpriced];
   const unpriced = [...new Set([...shieldUnpriced, ...publicUnpriced])];
+  // A price still loading (the markets feed's first read, CoinGecko for $GLOAM and PONS):
+  // the figures wait for it rather than show a total that jumps a second later.
+  const pricesPending =
+    unpricedRows.some((r) => {
+      if (isNativeAsset(r.asset)) return marketsPending;
+      const tok = knownHere.find((t) => t.address.toLowerCase() === r.asset.toLowerCase());
+      return tok ? pricePending(tok) : false;
+    }) ||
+    positions.some((p) => p.raw > BigInt(0) && !p.priced && p.pending) ||
+    (!isTempo && nativeWei > BigInt(0) && nativeUsdRate == null && marketsPending);
 
   // Public (wallet + tokens) vs sealed (vault) split, the whole point.
   const publicUsd = nativeHeldUsd + stocksUsd;
@@ -553,6 +563,7 @@ export function PortfolioView() {
         showUsd: settings.showUsd,
         sealedUsd,
         unpriced: unpricedRows.map(amountOfRow),
+        pending: pricesPending,
         vaultValue,
         formatUsd: formatUsdCompact,
       });
@@ -638,6 +649,8 @@ export function PortfolioView() {
               <span className="gl-skeleton inline-block h-[0.85em] w-[min(14rem,60%)] align-baseline" aria-label="Loading your private balance" />
             ) : amountsHidden && balancesVisible ? (
               <SealDots n={7} dot={14} label="Private balance hidden" className="h-[1em]" />
+            ) : privateDisplay === null ? (
+              <span className="gl-skeleton inline-block h-[0.85em] w-[min(14rem,60%)] align-baseline" aria-label="Loading your private balance" />
             ) : (
               <HeroFigure text={privateDisplay} />
             )}
@@ -702,6 +715,8 @@ export function PortfolioView() {
                   <dd className="text-foreground">
                     {amountsHidden ? (
                       <SealDots n={5} />
+                    ) : pricesPending && settings.showUsd ? (
+                      <span role="status" aria-label="Loading the total" className="inline-block h-3.5 w-12 rounded bg-surface-2 align-middle motion-safe:animate-pulse" />
                     ) : (
                       <>
                         {totalDisplay}
@@ -710,7 +725,7 @@ export function PortfolioView() {
                     )}
                   </dd>
                 </div>
-                {settings.showUsd && unpriced.length > 0 && !amountsHidden && (
+                {settings.showUsd && unpriced.length > 0 && !pricesPending && !amountsHidden && (
                   <div className="text-mute">Not in the total: {unpriced.join(", ")}, no dollar price</div>
                 )}
               </dl>

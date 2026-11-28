@@ -297,7 +297,7 @@ export function DocsLayout({
                 </nav>
               )}
 
-              <div ref={proseRef} className="docs-prose mt-10 space-y-5 text-[16px] leading-[26px]">
+              <div ref={proseRef} className="docs-prose mt-12 space-y-6 text-[16.5px] leading-[1.75]">
                 {children}
               </div>
               <DocsCopyEnhancer />

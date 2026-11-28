@@ -11,7 +11,9 @@ import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_LIVE_SINCE, ELYSIUM_RPC_DISPLAY, ELYSIUM
 import { BNB, BNB_LIVE_SINCE } from "@/lib/bnb";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { AppLink } from "@/components/AppLink";
-import { RINGS_PAYROLL_NOTE, RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAssets } from "@/lib/solanaRings/config";
+import { RINGS_PAYROLL_NOTE, RINGS_PRIVACY_NOTE, SOLANA_CLAIM_LINKS_ENABLED, SOLANA_NAME, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK, ringsAssets } from "@/lib/solanaRings/config";
+import { STARKNET_ENABLED, starknetConfig } from "@/lib/starknetPrivacy/config";
+import { STARKNET_DOCS_NAME, STARKNET_DOCS_NOTE } from "../starknet/starknetDocs";
 
 export const metadata: Metadata = {
   title: "Networks",
@@ -83,6 +85,8 @@ export default function DocsNetworksPage() {
         ...(BNB ? [{ label: "BNB Chain mainnet", value: String(BNB.chainId) }] : []),
         // Solana has no chain id: it runs through Helius Privacy Rings, not the vault
         ...(SOLANA_RINGS_ENABLED ? [{ label: SOLANA_NAME, value: "Privacy Rings" }] : []),
+        // Starknet runs through Starknet's own privacy pool, not the vault (lib/starknetPrivacy/config)
+        ...(STARKNET_ENABLED ? [{ label: STARKNET_DOCS_NAME, value: "Privacy pool" }] : []),
         { label: "Testnets", value: ELYSIUM_TESTNET ? "46630 · 42431 · 84532 · 11155111 · 99801" : "46630 · 42431 · 84532 · 11155111" },
         { label: "Gas", value: `ETH; stablecoins on Tempo${ELYSIUM ? "; HYPE on Elysium" : ""}${BNB ? "; BNB on BNB Chain" : ""}` },
       ]}
@@ -103,6 +107,13 @@ export default function DocsNetworksPage() {
           {SOLANA_NAME} is the exception: Gloam runs there through Helius Privacy
           Rings, not this vault, and a payment hides less. See{" "}
           <a href="#solana">{SOLANA_NAME}</a>.
+        </p>
+      )}
+      {STARKNET_ENABLED && (
+        <p>
+          {STARKNET_DOCS_NAME} {SOLANA_RINGS_ENABLED ? "is another" : "is the exception"}: Gloam runs there through
+          Starknet&apos;s own privacy pool, not this vault. See{" "}
+          <a href="#starknet">{STARKNET_DOCS_NAME}</a>.
         </p>
       )}
 
@@ -1080,6 +1091,23 @@ export default function DocsNetworksPage() {
             </li>
             <li>
               <strong>Payroll.</strong> {RINGS_PAYROLL_NOTE}
+              {SOLANA_CLAIM_LINKS_ENABLED && " A person with no address gets a claim link."}
+            </li>
+            {SOLANA_CLAIM_LINKS_ENABLED && (
+              <li>
+                <strong>Claim links</strong>, a link anyone can claim into their
+                own private balance. Each one is a one-time private account whose
+                key rides in the link: making it pays that account privately, and
+                claiming it moves the money on. Both show on Solana like any
+                private payment: your private account, the one-time account and
+                the account that claims it, not the token or the amount. Until
+                someone claims it, you can take it back under Sent links.
+              </li>
+            )}
+            <li>
+              <strong>Payment requests</strong>, a link that fills in Pay with
+              your private address, the token and the amount. Nothing about it
+              goes on chain, and the note stays with the payer.
             </li>
             <li>
               <strong>Fees</strong>, Gloam&apos;s relay pays the Solana network
@@ -1093,7 +1121,7 @@ export default function DocsNetworksPage() {
             </li>
             <li>
               <strong>Not on Solana</strong>, proof of funds or payment,
-              private swaps and claim links.
+              {SOLANA_CLAIM_LINKS_ENABLED ? " and private swaps." : " private swaps and claim links."}
             </li>
             <li>
               <strong>In the app</strong>, <AppLink href="/app/solana">/app/solana</AppLink>
@@ -1101,6 +1129,8 @@ export default function DocsNetworksPage() {
           </ul>
         </>
       )}
+
+      {STARKNET_ENABLED && <StarknetSection />}
 
       <h2>Switching networks in the app</h2>
       <p>
@@ -1128,5 +1158,65 @@ export default function DocsNetworksPage() {
         and what is still ahead.
       </p>
     </DocsLayout>
+  );
+}
+
+/** Gloam on Starknet: its pool, asset and what shows, only while Starknet is on (lib/starknetPrivacy/config). */
+function StarknetSection() {
+  const cfg = starknetConfig();
+  const token = cfg.tokens[0] ?? null;
+  return (
+    <>
+      <h2 id="starknet">{STARKNET_DOCS_NAME}</h2>
+      <p>
+        Gloam has no vault of its own here. It runs on Starknet&apos;s
+        privacy pool (STRK20), with Gloam&apos;s account layer on top: your
+        private account is its own Starknet account, opened from your Gloam
+        key, and Gloam&apos;s relay deploys it and sends its transactions.{" "}
+        {STARKNET_DOCS_NOTE}
+      </p>
+      <ul>
+        <li>
+          <strong>Network</strong>, {STARKNET_DOCS_NAME} (chain id <code>{cfg.chainId}</code>)
+        </li>
+        {cfg.pool && (
+          <li>
+            <strong>Pool</strong>, <code>{cfg.pool}</code>
+          </li>
+        )}
+        {token && (
+          <li>
+            <strong>{token.symbol}</strong>, <code>{token.address}</code>
+          </li>
+        )}
+        <li>
+          <strong>What shows</strong>, the first payment to someone shows their
+          private account. Later payments over that channel show neither side
+          nor the amount. Adding money shows the account and the amount, and a
+          cash out shows where it went and how much.
+        </li>
+        <li>
+          <strong>Fees</strong>, Gloam&apos;s relay pays Starknet&apos;s fees. On
+          mainnet each add, payment and cash out pays Gloam&apos;s relay fee of
+          0.25 USDC inside its proof.
+        </li>
+        <li>
+          <strong>Payment requests</strong>, a link that fills in Pay with your
+          private account and the amount. Nothing about it goes on chain, and
+          the note stays with the payer.
+        </li>
+        <li>
+          <strong>Who makes the proof</strong>, Starkscan&apos;s prover, which
+          sees the transaction it proves. The pool&apos;s auditor key can read
+          an account&apos;s private activity.
+        </li>
+        <li>
+          <strong>Not on Starknet</strong>, proof of funds or payment, and private swaps.
+        </li>
+        <li>
+          <strong>More</strong>, <Link href="/docs/starknet">{STARKNET_DOCS_NAME} in full</Link>
+        </li>
+      </ul>
+    </>
   );
 }

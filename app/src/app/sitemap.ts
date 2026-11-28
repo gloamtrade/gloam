@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { FRESH_WALLET_ENABLED } from "@/lib/freshWalletFlag";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
 import { kvBackend } from "@/lib/partnersKv";
 import { listPublishedUpdates } from "@/lib/updatesMail";
 
@@ -55,6 +56,8 @@ const PAGES: { path: string; priority: number }[] = [
   // the fresh-wallet guide only while the flow is on (lib/freshWalletFlag)
   ...(FRESH_WALLET_ENABLED ? [{ path: "/docs/fresh-wallet", priority: 0.6 }] : []),
   { path: "/docs/chain", priority: 0.6 },
+  // the Starknet guide only while Starknet is on (lib/starknetPrivacy/config)
+  ...(STARKNET_ENABLED ? [{ path: "/docs/starknet", priority: 0.6 }] : []),
   // the testnet guide only while people see the testnets (lib/showTestnets)
   ...(SHOW_TESTNETS ? [{ path: "/docs/testnet", priority: 0.6 }] : []),
   { path: "/docs/privacy-model", priority: 0.6 },

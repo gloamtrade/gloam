@@ -23,7 +23,9 @@ import {
 } from "@/lib/mainnet";
 import { ELYSIUM, ELYSIUM_FLAG, ELYSIUM_RPC_DISPLAY, ELYSIUM_TESTNET } from "@/lib/elysium";
 import { BNB, BNB_LIVE_SINCE } from "@/lib/bnb";
-import { RINGS_PAYROLL_NOTE, RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED, ringsAssets } from "@/lib/solanaRings/config";
+import { RINGS_PAYROLL_NOTE, RINGS_PRIVACY_NOTE, SOLANA_CLAIM_LINKS_ENABLED, SOLANA_NAME, SOLANA_RINGS_ENABLED, ringsAssets } from "@/lib/solanaRings/config";
+import { STARKNET_PRIVACY, STARKNET_PRIVACY_NOTE } from "@gloamtrade/sdk";
+import { STARKNET_ENABLED, STARKNET_NETWORK, starknetConfig } from "@/lib/starknetPrivacy/config";
 import { VAULT_SWAP_V2_ROUTER, swapV3Live } from "@/lib/vaultSwap";
 import { voteFacts } from "@/lib/vote/glim";
 import {
@@ -457,15 +459,48 @@ export function solanaFacts(): string | null {
   if (!SOLANA_RINGS_ENABLED) return null;
   return [
     `${SOLANA_NAME.toUpperCase()} (Gloam on Solana; it is not one of the vault mainnets above and works differently)`,
-    `- Gloam is live on ${SOLANA_NAME}, at gloam.trade/app/solana (Solana in the app's menu). It runs through Helius Privacy Rings, not the Gloam vault. Assets: ${joinNames(ringsAssets().map((a) => a.symbol))}. Add, pay privately, payroll and cash out work there.`,
+    `- Gloam is live on ${SOLANA_NAME}, at gloam.trade/app/solana (Solana in the app's menu). It runs through Helius Privacy Rings, not the Gloam vault. Assets: ${joinNames(ringsAssets().map((a) => a.symbol))}. Add, pay privately, ${SOLANA_CLAIM_LINKS_ENABLED ? "claim links, " : ""}payment requests, payroll and cash out work there.`,
     ...ringsAssets()
       .filter((a) => a.note)
       .map((a) => `- ${a.symbol} (mint ${a.mint}): ${a.note}`),
     `- ${RINGS_PRIVACY_NOTE} Adding money also shows the token and the amount, and a cash out shows the address it goes to, the token and the amount. Never say or suggest that Gloam on Solana hides who paid whom, the sender or the recipient.`,
     "- A person's Solana private account is its own key, opened by a signature from their main Solana wallet, so the same wallet reopens the same account on any device. Gloam's relay pays the Solana fees, so the private account never needs SOL of its own.",
     `- ${RINGS_PAYROLL_NOTE}`,
-    "- On Solana the proof is made by Helius's prover in an attested enclave, not on the person's device. Proof of funds or payment, private swaps and claim links are not on Solana, and the SDK and the MCP servers do not cover it. Never say or suggest a partnership with Helius or Solana.",
+    ...(SOLANA_CLAIM_LINKS_ENABLED
+      ? [
+          "- A Solana claim link (gloam.trade/c#sol=...) is a one-time account whose key rides in the link. Making it pays that account. Claiming it moves the money into the claimer's own balance. Whoever made it can take back one nobody claimed (Pay, Sent links). Like any Solana private payment, both steps show the accounts they move between, with the link's one-time account in the middle, and not the token or the amount. Gloam's relay pays the fees. A payroll row with no address gets one.",
+        ]
+      : []),
+    "- A Solana payment request is a link that fills in Pay with the private address, the token and the amount. It never goes on chain, and its note is only shown to the payer.",
+    `- On Solana the proof is made by Helius's prover in an attested enclave, not on the person's device. Proof of funds or payment${SOLANA_CLAIM_LINKS_ENABLED ? " and private swaps are" : ", private swaps and claim links are"} not on Solana. Developers and agents reach Solana through the SDK (@gloamtrade/sdk/solana) and the npm MCP server (@gloamtrade/mcp). Never say or suggest a partnership with Helius or Solana.`,
     "- Bringing money over from a Solana wallet into a vault on another chain (the bridge) is a different thing and works as before.",
+  ].join("\n");
+}
+
+/**
+ * What Glim knows about Gloam on Starknet, only while it is on
+ * (NEXT_PUBLIC_STARKNET_ENABLED, lib/starknetPrivacy/config). Off, Glim says
+ * nothing about it: no "coming", no date, no plan. On Starknet the first
+ * payment to someone shows their private account, so Glim must never say a
+ * payment there always hides who was paid.
+ */
+export function starknetFacts(): string | null {
+  if (!STARKNET_ENABLED) return null;
+  const name = STARKNET_NETWORK === "mainnet" ? "Starknet" : STARKNET_NETWORK === "sepolia" ? "Starknet Sepolia" : "Starknet devnet";
+  const tokens = starknetConfig().tokens.map((t) => t.symbol);
+  return [
+    `${name.toUpperCase()} (Gloam on Starknet; it is not one of the vault mainnets above and works differently)`,
+    `- Gloam is on ${name}: pick ${name} in the app's network menu. It runs on Starknet's own privacy pool (STRK20), not the Gloam vault. ${tokens.length ? `Asset: ${joinNames(tokens)}.` : ""} Add, pay privately, payroll, claim links, payment requests and cash out work there.`,
+    `- ${STARKNET_PRIVACY_NOTE} Never say or suggest that the first payment to someone hides who was paid: it shows their private account. A payroll with several first payments shows those accounts together.`,
+    "- A person's Starknet private account is its own Starknet account, opened from their Gloam key (a wallet's signature over a fixed text, or a Gloam wallet's passkey or backup code), so the same wallet, passkey or code reopens it on any device. Gloam's relay deploys it and sends every transaction, so it never needs STRK.",
+    `- ${STARKNET_PRIVACY.auditor}`,
+    `- ${STARKNET_PRIVACY.prover} ${STARKNET_PRIVACY.screening}`,
+    "- Fees: Gloam's relay pays Starknet's fees. On mainnet each add, payment and cash out pays Gloam's relay fee (0.25 USDC), shown in the app before each move. Opening an account is free, with a daily cap.",
+    "- Proofs come from a few a day for now. When they are used, the app says Starknet is busy and nothing is sent: try again later. Each move waits about 10 blocks before its proof.",
+    "- A Starknet payment request is a link that fills in Pay with the private account and the amount. It never goes on chain. Starknet payments carry no note, so its note is only shown to the payer. Paying it is like any payment there: a first payment shows the payee's private account.",
+    "- A Starknet claim link (gloam.trade/c#sn=...) is a one-time private account whose key rides in the link. Paying it shows that one-time account. Claiming it moves the money into the claimer's own private account, which shows that account. Whoever made it can take back one nobody claimed. A payroll row with no account gets one.",
+    "- Not on Starknet: proof of funds or of a single payment, and private swaps. Prove on Starknet shares every payment between two accounts, and that can't be taken back. Money comes in through Add from another network (Circle's CCTP networks such as Base, Ethereum and Arbitrum, plus Robinhood Chain, Tempo, BNB Chain, Elysium or a Solana wallet), or by sending USDC on Starknet to the account's address, then Add. Cash out can go to any of the CCTP networks.",
+    "- The SDK (@gloamtrade/sdk/starknet) and the local MCP server (gloam_starknet_* tools) open the same private account for servers and agents. Never say or suggest a partnership with StarkWare, Starknet or Starkscan.",
   ].join("\n");
 }
 
@@ -556,7 +591,7 @@ function mainnetLiveFacts(): string {
     "MAINNET IS LIVE (this overrides any line below that says the app is testnet only, that mainnet is coming, or that names fewer mainnets)",
     `- Gloam is live on ${liveMainnetsSummary()}. It went live on mainnet on Wednesday 21 October 2026 at 13:00 UTC, on ${launchNames()}.${joined} ${BNB ? "The vault has one address on Robinhood Chain, Tempo, Base and Ethereum, and its own on each newer chain" : "The vault has the same address on every mainnet"}; it is listed on gloam.trade/docs/chain, so point there instead of writing it out. Say so plainly when asked, and point to gloam.trade/app.`,
     ...(rh
-      ? ["- Robinhood Chain mainnet (chain ID 4663): the vault takes USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO (ETH, AI and ORBIO opened on 3 November 2026, and AI and ORBIO also swap privately with USDG). GRIFT is listed too and opens once its deposit limit lands through the public three-day timelock: the app offers it only once the vault takes it. Details, if someone adds the chain by hand: RPC https://rpc.mainnet.chain.robinhood.com, chain ID 4663, currency ETH, explorer RobinScan https://robin.etherscan.io (a transaction is at robin.etherscan.io/tx/ and its hash, an address at robin.etherscan.io/address/ and the address)."]
+      ? ["- Robinhood Chain mainnet (chain ID 4663): the vault takes USDG, $GLOAM, PONS, CASHCAT, ETH, AI and ORBIO (ETH, AI and ORBIO opened on 3 November 2026, and AI and ORBIO also swap privately with USDG). Details, if someone adds the chain by hand: RPC https://rpc.mainnet.chain.robinhood.com, chain ID 4663, currency ETH, explorer RobinScan https://robin.etherscan.io (a transaction is at robin.etherscan.io/tx/ and its hash, an address at robin.etherscan.io/address/ and the address)."]
       : []),
     ...(tempo
       ? ["- Tempo mainnet (chain ID 4217): the vault takes USDC.e, pathUSD, USDT0 and OUSD, and fees are paid in stablecoins. Details, if someone adds the chain by hand: RPC https://rpc.tempo.xyz, chain ID 4217, currency USD, explorer https://explore.tempo.xyz."]
@@ -728,6 +763,7 @@ export function knowledgeBlock(): string {
   const elysium = elysiumFacts();
   const bnb = bnbFacts();
   const solana = solanaFacts();
+  const starknet = starknetFacts();
   const block = [
     about().trim(),
     ...(base ? [base] : []),
@@ -736,6 +772,7 @@ export function knowledgeBlock(): string {
     ...(elysium ? [elysium] : []),
     ...(bnb ? [bnb] : []),
     ...(solana ? [solana] : []),
+    ...(starknet ? [starknet] : []),
     TOKEN.trim(),
     ...[voteFacts()].filter((v): v is string => v !== null),
     CRYPTO_TALK.trim(),

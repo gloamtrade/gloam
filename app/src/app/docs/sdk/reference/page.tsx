@@ -233,9 +233,8 @@ export default function DocsSdkReferencePage() {
                 <code>RH_MAINNET_CASHCAT</code>, <code>RH_MAINNET_AI</code>, <code>RH_MAINNET_ORBIO</code>
               </td>
               <td>
-                Robinhood Chain mainnet pool assets, with <code>RH_MAINNET_GRIFT</code> and native ETH
-                (<code>NATIVE_ASSET</code>). ETH, AI and ORBIO take deposits since 3 November 2026; GRIFT
-                once its timelocked limit lands (0.4.5)
+                Robinhood Chain mainnet pool assets, with native ETH (<code>NATIVE_ASSET</code>). ETH, AI
+                and ORBIO take deposits since 3 November 2026 (0.4.5)
               </td>
             </tr>
             <tr>

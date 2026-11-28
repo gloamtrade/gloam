@@ -89,7 +89,7 @@ function answer(url: string, method: string, params: unknown[]): unknown {
 }
 globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
   const url = String(input instanceof Request ? input.url : input);
-  if (!/bsc-rpc\.publicnode\.com|bsc-dataseed\.bnbchain\.org|\/api\/rpc\/56|archive\.example|capped\.example|capped32005\.example/.test(url)) {
+  if (!/bsc-rpc\.publicnode\.com|bsc\.drpc\.org|1rpc\.io|bsc-dataseed\.bnbchain\.org|\/api\/rpc\/56|archive\.example|capped\.example|capped32005\.example/.test(url)) {
     throw new Error(`selftest-bnb: no network calls allowed (${url})`);
   }
   if (publicDown && url.includes("publicnode")) return new Response("upstream down", { status: 500 });
@@ -165,9 +165,9 @@ ok(mainnet.liveMainnetCount() >= 5, "the other mainnets still count");
 if (MODE === "off") {
   for (const raw of ["1", "true", "TRUE", "on", "yes", " 1 "]) {
     ok(bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} is on`);
-    ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw, NEXT_PUBLIC_BNB_POOL: POOL } as unknown as NodeJS.ProcessEnv).length === 2, `${JSON.stringify(raw)} with a pool: the CSP allows its two RPCs`);
-    // Without NEXT_PUBLIC_BNB_POOL the CSP falls back to the SDK file: nothing to allow before the deploy, the two RPCs after it.
-    ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === (SDK_POOL_IN ? 2 : 0), `${JSON.stringify(raw)} with no pool in the env: ${SDK_POOL_IN ? "the SDK's pool, its two RPCs" : "nothing to allow"}`);
+    ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw, NEXT_PUBLIC_BNB_POOL: POOL } as unknown as NodeJS.ProcessEnv).length === 4, `${JSON.stringify(raw)} with a pool: the CSP allows its four RPCs`);
+    // Without NEXT_PUBLIC_BNB_POOL the CSP falls back to the SDK file: nothing to allow before the deploy, the four RPCs after it.
+    ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === (SDK_POOL_IN ? 4 : 0), `${JSON.stringify(raw)} with no pool in the env: ${SDK_POOL_IN ? "the SDK's pool, its four RPCs" : "nothing to allow"}`);
   }
   for (const raw of [undefined, "", " ", "0", "false", "off", "no", "enabled", "2", "maybe"]) {
     ok(!bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} is off`);
