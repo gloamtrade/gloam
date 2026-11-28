@@ -154,7 +154,7 @@ function answersFor(url: string, chainId: number, config: HttpTransportConfig): 
  * transport only) takes a send while the private RPC has not answered: nothing
  * reached it, so the send still goes out once, through the public RPC.
  */
-function checkedPrivate(url: string, chainId: number, config: HttpTransportConfig, sendInstead?: Transport, keepOnLogRange = false): Transport {
+function checkedPrivate(url: string, chainId: number, config: HttpTransportConfig, sendInstead?: Transport): Transport {
   // asked once per call: a node that hangs costs one timeout, then it is passed over
   const inner = http(url, { ...config, retryCount: 0 });
   const key = `${chainId} ${url}`;
@@ -173,13 +173,19 @@ function checkedPrivate(url: string, chainId: number, config: HttpTransportConfi
         try {
           return await t.request(args);
         } catch (e) {
-          // checked, then failed as a node: passed over like one that never answered. A log
-          // range it refuses (some say "limit exceeded") is about the range, not the node,
-          // where the walk splits it: kept, so the smaller ranges come back here.
-          if (nodeFailed(e) && !(keepOnLogRange && args.method === "eth_getLogs" && isRangeError(e))) {
+          // checked, then failed as a node: passed over like one that never answered. An
+          // HTTP 400 or a log range it refuses is about this request, not the node (dRPC's
+          // free plan answers a wide log range with a 400): the private RPC is kept for every
+          // other call, and this one goes on to the public side, or the walk splits it.
+          const status = (e as { status?: number })?.status ?? null;
+          const range = args.method === "eth_getLogs" && isRangeError(e);
+          if (nodeFailed(e) && status !== 400 && !range) {
             passOver(key);
-            const status = (e as { status?: number })?.status ?? null;
             console.warn("gloam_rpc_private_failed", JSON.stringify({ chainId, method: args.method, status }));
+          } else if (status === 400 && !range) {
+            // the node's own words (never the URL, which carries the key), to learn what it refuses
+            const said = String((e as { details?: unknown }).details ?? "").replace(/https?:\/\/\S+/g, "<url>").slice(0, 160);
+            console.warn("gloam_rpc_private_refused", JSON.stringify({ chainId, method: args.method, said }));
           }
           throw e;
         }
@@ -207,12 +213,12 @@ export function serverTransport(net: Net, config: HttpTransportConfig = {}, opts
   // the fallback retries the pair as a whole; each side asks each of its RPCs once a pass
   const once = { ...config, retryCount: 0 };
   if (!opts.sendOnce) {
-    const own = checkedPrivate(priv, net.chainId, config, undefined, canary !== null);
+    const own = checkedPrivate(priv, net.chainId, config);
     const backup = readTransport(net, once);
     return canary ? logsOneSideAtATime(own, backup, canary, config.retryCount) : fallback([own, backup], { retryCount: config.retryCount });
   }
   // sendInstead only ever takes a send: one head RPC
-  const own = checkedPrivate(priv, net.chainId, config, rpcListTransport(urls, once, { sendTo: "one" }), canary !== null);
+  const own = checkedPrivate(priv, net.chainId, config, rpcListTransport(urls, once, { sendTo: "one" }));
   // The backup never gets a raw send. Its exclusion has to show on the transport
   // fallback reads (config.methods), which the history split carries over from the head list.
   const backup = readTransport(net, { ...once, methods: { exclude: SEND_METHODS } });
