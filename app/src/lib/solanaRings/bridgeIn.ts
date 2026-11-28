@@ -32,9 +32,14 @@
  * the same way on 2026-11-23: Base USDC (deposit address and wallet), Base ETH,
  * Ethereum USDC and BNB Chain USDT all delivered it; 20 USDC from Base quoted
  * about 0.0227 ZEC.
+ *
+ * ZEC straight from a Zcash wallet comes through NEAR Intents instead
+ * (lib/solanaRings/zcashIn) and is followed by this same flow, its transfer
+ * marked `via: "near"`.
  */
 import { BRIDGE_CHAINS, BRIDGE_MAX_USD, BRIDGE_MIN_USD, validRefundAddress, type BridgeAppFee, type BridgeChain, type BridgeChainKind, type BridgeStage, type BridgeToken, type CostedQuote } from "../bridge";
 import { displayAmountNumber, typedAmount } from "../amountShort";
+import { validZcashTransparent } from "../zcashAddress";
 import { RELAYED_DEPOSIT_MIN } from "./relayPolicy";
 import { ringsAssets, RINGS_SOL_MINT, SOLANA_RINGS_NETWORK, type RingsAsset, type RingsNetwork } from "./config";
 
@@ -111,7 +116,23 @@ export type SolanaBridgeQuote = {
   gasUsd: number | null;
   timeSec: number;
   bitcoin: boolean;
+  /** Who carries it: Relay when absent, NEAR Intents (from a Zcash wallet, lib/solanaRings/zcashIn) when "near". */
+  via?: "near";
+  /** NEAR Intents' terms of a real quote, kept with the transfer. */
+  near?: NearTerms;
 };
+
+/**
+ * What a NEAR Intents (1Click) quote adds: its signature, kept with the quote
+ * in case of a dispute; when to send by (the panel stops showing the address
+ * after); when 1Click retires the deposit address; its fee on a refund.
+ */
+export type NearTerms = { signature: string; sendBy: number; addressUntil: string | null; refundFee: string | null };
+
+/** Who carries a transfer, in the panel's words. */
+export function providerName(t: { via?: "near" }): string {
+  return t.via === "near" ? "NEAR Intents" : "Relay";
+}
 
 /**
  * A quote as the cost warning reads it (lib/bridge routeCost). USDC or USDT
@@ -158,6 +179,8 @@ export type TrackedBridge = {
   timeSec: number;
   bitcoin: boolean;
   startedAt: number;
+  via?: "near";
+  near?: NearTerms;
 };
 
 export function trackedFrom(
@@ -182,6 +205,7 @@ export function trackedFrom(
     timeSec: q.timeSec,
     bitcoin: q.bitcoin,
     startedAt: now,
+    ...(q.via === "near" ? { via: "near" as const, ...(q.near ? { near: q.near } : {}) } : {}),
   };
 }
 
@@ -198,10 +222,15 @@ export function loadTracked(store: KV | null, key: string): TrackedBridge | null
     const raw = store?.getItem(key);
     if (!raw) return null;
     const t = JSON.parse(raw) as Partial<TrackedBridge>;
+    // Relay's request id, or for NEAR Intents its correlation id with the transparent Zcash address paid to.
+    const near = t?.via === "near";
+    const id = near
+      ? typeof t.requestId === "string" && /^[A-Za-z0-9-]{8,64}$/.test(t.requestId) && t.mode === "address" && validZcashTransparent(t.depositAddress ?? "")
+      : typeof t?.requestId === "string" && /^0x[0-9a-fA-F]{64}$/.test(t.requestId);
     const ok =
       t?.v === 1 &&
-      typeof t.requestId === "string" &&
-      /^0x[0-9a-fA-F]{64}$/.test(t.requestId) &&
+      (t.via === undefined || near) &&
+      id &&
       typeof t.depositAddress === "string" &&
       (t.mode === "wallet" || t.mode === "address") &&
       typeof t.send?.amount === "string" &&
@@ -424,7 +453,15 @@ export type Flow =
   | { kind: "form"; error: string | null }
   | { kind: "quoting" }
   | { kind: "review"; quote: SolanaBridgeQuote; at: number; signing: boolean; progress: string | null; error: string | null }
-  | { kind: "track"; t: TrackedBridge; relay: BridgeStage; shield: ShieldState; qr: string | null }
+  | {
+      kind: "track";
+      t: TrackedBridge;
+      relay: BridgeStage;
+      shield: ShieldState;
+      qr: string | null;
+      /** Less than asked arrived (NEAR Intents' INCOMPLETE_DEPOSIT): how much, as decimal text. */
+      short?: string | null;
+    }
   | { kind: "landed"; t: TrackedBridge; amount: bigint; signature: string | null };
 
 export type FlowEvent =
@@ -435,7 +472,7 @@ export type FlowEvent =
   | { type: "signFailed"; error: string }
   | { type: "track"; t: TrackedBridge }
   | { type: "qr"; requestId: string; qr: string }
-  | { type: "status"; stage: BridgeStage }
+  | { type: "status"; stage: BridgeStage; short?: string | null }
   | { type: "arrived"; amount: bigint }
   /** Nothing of the landing asset is at the address any more. */
   | { type: "gone" }
@@ -486,7 +523,7 @@ export function flowReducer(s: Flow, e: FlowEvent): Flow {
       if (s.kind !== "track") return s;
       if (s.relay === "done" || s.relay === "refunded" || (s.relay === "failed" && e.stage !== "refunded")) return s;
       if (s.relay === "moving" && e.stage === "waiting") return s;
-      return { ...s, relay: e.stage };
+      return { ...s, relay: e.stage, short: e.stage === "waiting" ? (e.short ?? null) : null };
     case "arrived":
       if (s.kind !== "track" || e.amount <= 0n) return s;
       if (s.shield.kind === "idle") return e.amount > baselineOf(s.t) ? { ...s, shield: { kind: "arrived", amount: e.amount } } : s;

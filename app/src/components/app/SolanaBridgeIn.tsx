@@ -11,6 +11,9 @@
  *    follows (kept in this browser, so a closed tab picks it up again).
  *  - SolanaArrivals: money that reached the private account's address but isn't
  *    private yet, with a button to make it private. Shown wherever the balance is.
+ *  - From Zcash (behind NEXT_PUBLIC_SOLANA_ZCASH_IN): ZEC sent from any Zcash
+ *    wallet to a NEAR Intents deposit address (lib/solanaRings/zcashIn), followed
+ *    and made private by the same flow as a Relay transfer.
  *
  * Both take `deps` so a preview can drive them with made-up answers.
  */
@@ -33,6 +36,7 @@ import {
   orNames,
   loadTracked,
   payRoute,
+  providerName,
   refundKey,
   refundPlace,
   saveRefund,
@@ -55,7 +59,21 @@ import {
 import type { ShieldResult } from "@/lib/solanaRings/arrivals";
 import type { RingsSession } from "@/lib/solanaRings/client";
 import { ringsAssets, SOLANA_RINGS_NETWORK, type RingsNetwork } from "@/lib/solanaRings/config";
-import { ringsAmount } from "@/lib/solanaRings/amount";
+import { ringsAmount, ringsAmountText } from "@/lib/solanaRings/amount";
+import {
+  ZCASH_IN_PRIVACY_NOTE,
+  ZCASH_LIMIT_LINE,
+  ZEC_LOGO,
+  loadZcashRefund,
+  saveZcashRefund,
+  sendByText,
+  zcashArrives,
+  zcashButton,
+  zcashInVisible,
+  zcashPaymentUri,
+  zcashRefundKey,
+} from "@/lib/solanaRings/zcashIn";
+import { zcashRefundProblem } from "@/lib/zcashAddress";
 import { originChain } from "@/lib/originChains";
 import type { GloamChainId } from "@/lib/networks";
 import { track } from "@/lib/track";
@@ -72,14 +90,17 @@ import { AmountProblem } from "./AmountProblem";
 import { SuccessReceipt } from "./SuccessModal";
 import { ChainLogo, CostWarning, PoweredByRelay, SourceBalance, TokenMark, feeRows, fmtMoney, stableMax } from "./BridgeIn";
 import { WalletConnectSheet } from "./WalletConnectSheet";
-import { displayAmountNumber, displayAmountText, typedAmount } from "@/lib/amountShort";
+import { displayAmountNumber, typedAmount } from "@/lib/amountShort";
 
 type KV = { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };
 
 /** Everything the panel asks of the world, so a preview can stand in for it. */
 export type SolanaBridgeDeps = {
   quote(body: Record<string, unknown>): Promise<SolanaBridgeQuote>;
-  status(t: TrackedBridge): Promise<BridgeStatus | null>;
+  /** A NEAR Intents quote for ZEC from a Zcash wallet (/api/bridge/solana-zcash). */
+  zcashQuote(body: Record<string, unknown>): Promise<SolanaBridgeQuote>;
+  /** Where a transfer stands, from whoever carries it; `short` when less than asked arrived. */
+  status(t: TrackedBridge): Promise<(BridgeStatus & { short?: string | null }) | null>;
   arrivals(): Promise<Arrival[]>;
   makePrivate(a: Pick<Arrival, "assetId" | "tokenAccount">): Promise<ShieldResult>;
   store(): KV | null;
@@ -104,10 +125,24 @@ function liveDeps(session: RingsSession | Account): SolanaBridgeDeps {
       if (!json?.ok || !json.data) throw new Error(json?.error?.message ?? "The bridge couldn't make a route right now. Try again.");
       return json.data;
     },
+    async zcashQuote(body) {
+      let res: Response;
+      try {
+        res = await fetch("/api/bridge/solana-zcash", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      } catch {
+        throw new Error("Couldn't reach NEAR Intents. Check your connection and try again.");
+      }
+      const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: SolanaBridgeQuote; error?: { message?: string } } | null;
+      if (!json?.ok || !json.data) throw new Error(json?.error?.message ?? "NEAR Intents couldn't make a route right now. Try again.");
+      return json.data;
+    },
     async status(t) {
-      const q = `requestId=${t.requestId}${t.depositAddress ? `&depositAddress=${encodeURIComponent(t.depositAddress)}` : ""}`;
-      const res = await fetch(`/api/bridge/status?${q}`, { cache: "no-store" });
-      const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: BridgeStatus } | null;
+      const url =
+        t.via === "near"
+          ? `/api/bridge/solana-zcash?depositAddress=${encodeURIComponent(t.depositAddress)}`
+          : `/api/bridge/status?requestId=${t.requestId}${t.depositAddress ? `&depositAddress=${encodeURIComponent(t.depositAddress)}` : ""}`;
+      const res = await fetch(url, { cache: "no-store" });
+      const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: BridgeStatus & { short?: string | null } } | null;
       return json?.ok && json.data ? json.data : null;
     },
     async arrivals() {
@@ -134,6 +169,70 @@ const assetOf = (id: string, network: RingsNetwork = "mainnet") => ringsAssets(n
 const ADDRESS_NAME: Record<string, string> = { svm: "Solana", tvm: "Tron", bvm: "Bitcoin" };
 /** The few logos the card shows before "+N more". */
 const FEATURED = [1, 8453, 4663, 56, 8253038, 42161, 728126428];
+
+/** Where the money comes from in the sheet: a chain Relay carries, or a Zcash wallet through NEAR Intents. */
+type Source = "relay" | "zcash";
+
+/** What a deposit address's code holds: for Zcash a payment request (ZIP 321) that fills the address and exact amount. */
+function qrText(t: Pick<TrackedBridge, "via" | "depositAddress" | "send">): string {
+  return t.via === "near" ? zcashPaymentUri(t) : t.depositAddress;
+}
+
+/** The paying chain's mark: Zcash has no chain id, so its coin's mark stands in. */
+function SourceMark({ t, size }: { t: { via?: "near"; send: { chainId: number } }; size: number }) {
+  return t.via === "near" ? <TokenMark src={ZEC_LOGO} size={size} /> : <ChainLogo id={t.send.chainId} size={size} />;
+}
+
+/** The clock, ticking every `every` ms; null until mounted, so the server and the first paint agree. */
+function useClock(every = 30_000): number | null {
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const first = window.setTimeout(tick, 0);
+    const t = window.setInterval(tick, every);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(t);
+    };
+  }, [every]);
+  return now;
+}
+
+/**
+ * The live price under an amount, as soon as one is typed: asked after a pause
+ * in typing, again every 20 seconds, and whenever what it depends on changes.
+ * A price only: no deposit address and nothing to sign (the routes' `preview`).
+ */
+function useLivePrice(ask: Record<string, unknown> | null, fetchQuote: (body: Record<string, unknown>) => Promise<SolanaBridgeQuote>) {
+  const key = ask ? JSON.stringify(ask) : null;
+  const [price, setPrice] = useState<{ key: string; quote: SolanaBridgeQuote | null; error: string | null } | null>(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!ask || !key) return;
+    let live = true;
+    const t = window.setTimeout(() => {
+      void fetchQuote(ask)
+        .then((quote) => live && setPrice({ key, quote, error: null }))
+        .catch((err) => live && setPrice({ key, quote: null, error: err instanceof Error ? err.message : "Couldn't get a price. Try again." }));
+    }, LIVE_PRICE_DEBOUNCE_MS);
+    return () => {
+      live = false;
+      window.clearTimeout(t);
+    };
+  }, [ask, key, fetchQuote, tick]);
+  useEffect(() => {
+    if (!key) return;
+    const t = window.setInterval(() => setTick((n) => n + 1), LIVE_PRICE_REFRESH_MS);
+    return () => window.clearInterval(t);
+  }, [key]);
+  // The price for what is on screen now; an older one stays up while a refresh of the same ask is on its way.
+  const live = key && price?.key === key ? price : null;
+  const retry = useCallback(() => {
+    setPrice(null);
+    setTick((n) => n + 1);
+  }, []);
+  return { key, live, retry };
+}
 
 // ---------------------------------------------------------------- money waiting at the private account
 
@@ -269,6 +368,10 @@ export function SolanaBridgeIn({
     return t && trackedLive(t, Date.now()) ? { kind: "track", t, relay: "waiting", shield: { kind: "idle" }, qr: null } : FORM;
   });
   const [opened, setOpen] = useState(false);
+  // A Zcash transfer picked up after a reload starts over on the Zcash form.
+  const [source, setSource] = useState<Source>(() => (flow.kind === "track" && flow.t.via === "near" ? "zcash" : "relay"));
+  // ZEC straight from a Zcash wallet: with its flag on, once ZEC is read as set up on Gloam.
+  const zcashOn = zcashInVisible(session.network) && ready.zec === true;
   // Connecting a wallet from the sheet: it steps aside for the sign-in or
   // WalletConnect sheet, and comes back with the wallet paying once one is here.
   const [resume, setResume] = useState(false);
@@ -317,7 +420,7 @@ export function SolanaBridgeIn({
     const check = () =>
       void deps
         .status(tracked)
-        .then((st) => live && st && dispatch({ type: "status", stage: st.stage }))
+        .then((st) => live && st && dispatch({ type: "status", stage: st.stage, short: st.short ?? null }))
         .catch(() => {
           /* the next check tries again */
         });
@@ -389,7 +492,7 @@ export function SolanaBridgeIn({
   useEffect(() => {
     if (!needsQr) return;
     void import("qrcode")
-      .then((QR) => QR.toDataURL(needsQr.depositAddress, { margin: 1, width: 400, errorCorrectionLevel: "M" }))
+      .then((QR) => QR.toDataURL(qrText(needsQr), { margin: 1, width: 400, errorCorrectionLevel: "M" }))
       .then((qr) => dispatch({ type: "qr", requestId: needsQr.requestId, qr }))
       .catch(() => {
         /* the address and copy button still work */
@@ -437,9 +540,31 @@ export function SolanaBridgeIn({
               It lands in your private account on Solana and goes private by itself, as {orNames(shownLandingAssets(ready))}. Your
               Solana wallet never appears.
             </p>
-            <button type="button" onClick={() => setOpen(true)} className="btn btn-ghost btn-sm mt-4">
-              {flow.kind === "landed" ? "See what arrived" : "Bring money over"}
-            </button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (flow.kind !== "landed") setSource("relay");
+                  setOpen(true);
+                }}
+                className="btn btn-ghost btn-sm"
+              >
+                {flow.kind === "landed" ? "See what arrived" : "Bring money over"}
+              </button>
+              {zcashOn && flow.kind !== "landed" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSource("zcash");
+                    setOpen(true);
+                  }}
+                  className="btn btn-ghost btn-sm"
+                >
+                  <TokenMark src={ZEC_LOGO} size={18} />
+                  ZEC from a Zcash wallet
+                </button>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -451,6 +576,9 @@ export function SolanaBridgeIn({
         deps={deps}
         ready={ready}
         relayFunded={relayFunded}
+        source={zcashOn ? source : "relay"}
+        onSource={setSource}
+        zcash={zcashOn}
         waiting={(id) => arrivals.filter((a) => a.assetId === id).reduce((sum, a) => sum + a.amount, 0n)}
         onRetry={() => void shield()}
         onConnect={connectWallet}
@@ -472,8 +600,14 @@ export function SolanaBridgeIn({
 function phaseText(flow: Extract<Flow, { kind: "track" }>, phase: ReturnType<typeof trackPhase>): string {
   const t = flow.t;
   const lands = `${t.receive.symbol}`;
+  const by = providerName(t);
   switch (phase) {
     case "waiting":
+      if (flow.short) {
+        // NEAR Intents saw less than asked: by its rules (exact input) it goes back by the deadline.
+        const fee = t.near?.refundFee ? `, less its ${t.near.refundFee} ZEC refund fee` : "";
+        return `Only ${flow.short} ${t.send.symbol} arrived, less than the ${typedAmount(t.send.amount)} asked, so ${by} sends it back to your ${t.send.chain} address${fee}.`;
+      }
       return t.mode === "wallet"
         ? t.unsure
           ? "Checking whether your wallet sent it…"
@@ -488,9 +622,9 @@ function phaseText(flow: Extract<Flow, { kind: "track" }>, phase: ReturnType<typ
     case "notPrivate":
       return `It's in your private account on Solana, not private yet. ${flow.shield.kind === "failed" ? flow.shield.message : ""}`.trim();
     case "refunded":
-      return `The transfer didn't go through. Relay sent it back to ${refundPlace(t)}.`;
+      return `The transfer didn't go through. ${by} sent it back to ${refundPlace(t)}.`;
     case "failed":
-      return `The transfer didn't go through. Relay returns the money to ${refundPlace(t)}.`;
+      return `The transfer didn't go through. ${by} returns the money to ${refundPlace(t)}.`;
   }
 }
 
@@ -512,7 +646,8 @@ function PhaseLine({ flow, phase, compact = false }: { flow: Extract<Flow, { kin
   );
 }
 
-function arrivesText(q: { timeSec: number; bitcoin: boolean }): string {
+function arrivesText(q: { timeSec: number; bitcoin: boolean; via?: "near" }): string {
+  if (q.via === "near") return zcashArrives(q.timeSec);
   if (q.bitcoin) return "After Bitcoin confirms, usually 10 to 30 min";
   return q.timeSec > 0 && q.timeSec < 60 ? "In under a minute" : `In about ${Math.max(1, Math.round(q.timeSec / 60))} min`;
 }
@@ -523,7 +658,7 @@ function QuoteRows({
   sentRow,
   returned = false,
 }: {
-  q: Pick<SolanaBridgeQuote, "receive" | "feeUsd" | "appFee" | "timeSec" | "bitcoin"> & {
+  q: Pick<SolanaBridgeQuote, "receive" | "feeUsd" | "appFee" | "timeSec" | "bitcoin" | "via"> & {
     gasUsd?: number | null;
     send: SolanaBridgeQuote["send"];
     /** The connected wallet pays, so its network fee shows in the wallet. */
@@ -543,17 +678,18 @@ function QuoteRows({
     "Added privately, about",
     <span key="a" className="flex items-center gap-1.5 font-medium">
       <TokenMark src={q.receive.logo} size={18} />
-      {displayAmountText(q.receive.amount)}{" "}
+      {ringsAmountText(q.receive.amount, q.receive.decimals)}{" "}
       {q.receive.symbol}
     </span>,
   ];
+  const feeLabel = `${providerName(q)} fee`;
   // Once it is paid, only what was sent, what lands and what it cost: the rest was for deciding.
   const rows: [string, React.ReactNode][] = sentRow
-    ? [["Sent", `${typedAmount(q.send.amount)} ${q.send.symbol} on ${q.send.chain}`], ...(returned ? [] : [lands]), ...feeRows(q, "Relay fee")]
+    ? [["Sent", `${typedAmount(q.send.amount)} ${q.send.symbol} on ${q.send.chain}`], ...(returned ? [] : [lands]), ...feeRows(q, feeLabel)]
     : [
         lands,
-        ["At least", `${displayAmountText(q.receive.minimum)} ${q.receive.symbol}`],
-        ...feeRows(q, "Relay fee"),
+        ["At least", `${ringsAmountText(q.receive.minimum, q.receive.decimals)} ${q.receive.symbol}`],
+        ...feeRows(q, feeLabel),
         ...gas,
         ["Making it private", "Free, Gloam pays the Solana fee"],
         ["Arrives", arrivesText(q)],
@@ -582,11 +718,14 @@ function LivePrice({
   error,
   walletPays,
   onRetry,
+  provider = "Relay",
 }: {
   quote: SolanaBridgeQuote | null;
   error: string | null;
   walletPays: boolean;
   onRetry: () => void;
+  /** Whose fee the rows name: "Relay" or "NEAR Intents". */
+  provider?: string;
 }) {
   if (error) {
     return (
@@ -604,9 +743,10 @@ function LivePrice({
     : quote?.gasUsd != null && quote.gasUsd >= 0.01
       ? [["Network fee", `about $${fmtMoney(quote.gasUsd)} on ${quote.send.chain}`]]
       : [["Network fee", "Shown in your wallet"]];
+  const feeLabel = `${provider} fee`;
   const rows: [string, React.ReactNode][] = [
-    ["At least", quote ? `${displayAmountText(quote.receive.minimum)} ${quote.receive.symbol}` : wait],
-    ...(quote ? feeRows(quote, "Relay fee") : ([["Relay fee", wait]] as [string, React.ReactNode][])),
+    ["At least", quote ? `${ringsAmountText(quote.receive.minimum, quote.receive.decimals)} ${quote.receive.symbol}` : wait],
+    ...(quote ? feeRows(quote, feeLabel) : ([[feeLabel, wait]] as [string, React.ReactNode][])),
     ...gas,
     ["Arrives", quote ? arrivesText(quote) : wait],
   ];
@@ -619,7 +759,7 @@ function LivePrice({
               You get about
               <TokenMark src={quote.receive.logo} size={18} />
               <span className="tnum font-medium">
-                {displayAmountText(quote.receive.amount)} {quote.receive.symbol}
+                {ringsAmountText(quote.receive.amount, quote.receive.decimals)} {quote.receive.symbol}
               </span>
               in your private balance
             </>
@@ -636,7 +776,7 @@ function LivePrice({
           ))}
         </dl>
       </div>
-      {quote && <CostWarning quote={costedQuote(quote)} />}
+      {quote && quote.via !== "near" && <CostWarning quote={costedQuote(quote)} />}
     </div>
   );
 }
@@ -657,6 +797,9 @@ function BridgeSheet({
   deps,
   ready,
   relayFunded,
+  source,
+  onSource,
+  zcash,
   waiting,
   onRetry,
   onConnect,
@@ -671,6 +814,11 @@ function BridgeSheet({
   deps: SolanaBridgeDeps;
   ready: Record<string, boolean>;
   relayFunded: boolean;
+  /** Where the money comes from: a chain Relay carries, or a Zcash wallet (NEAR Intents). */
+  source: Source;
+  onSource: (s: Source) => void;
+  /** Whether ZEC from a Zcash wallet is offered here. */
+  zcash: boolean;
   /** How much of an asset is already waiting at the account, so only more counts as this transfer arriving. */
   waiting: (assetId: string) => bigint;
   onRetry: () => void;
@@ -744,6 +892,10 @@ function BridgeSheet({
     const q = search.trim().toLowerCase();
     return q ? sources.filter((c) => c.name.toLowerCase().includes(q) || c.tokens.some((t) => t.symbol.toLowerCase().includes(q))) : sources;
   }, [search, sources]);
+  const zcashMatch = zcash && (() => {
+    const q = search.trim().toLowerCase();
+    return !q || "zcash".includes(q) || "zec".includes(q);
+  })();
 
   const amountNum = Number(amount);
   const amountOk = /^\d+(\.\d+)?$/.test(amount) && (token.stable ? amountNum >= BRIDGE_MIN_USD && amountNum <= BRIDGE_MAX_USD : amountNum > 0);
@@ -772,7 +924,7 @@ function BridgeSheet({
   // Asked after a pause in typing, again every 20 seconds, and whenever what it depends on
   // changes. A price only: no deposit address and nothing to sign (the route's `preview`).
   const priceAsk = useMemo(() => {
-    if (!open || picking || flow.kind !== "form" || !onMainnet || !landingReady || !amountOk) return null;
+    if (!open || picking || source !== "relay" || flow.kind !== "form" || !onMainnet || !landingReady || !amountOk) return null;
     return {
       chainId: chain.id,
       symbol: token.symbol,
@@ -782,35 +934,9 @@ function BridgeSheet({
       preview: true,
       ...(walletPays && evm ? { sender: evm } : {}),
     };
-  }, [open, picking, flow.kind, onMainnet, landingReady, amountOk, chain.id, token.symbol, landing, amount, account.address, walletPays, evm]);
-  const priceKey = priceAsk ? JSON.stringify(priceAsk) : null;
-  const [price, setPrice] = useState<{ key: string; quote: SolanaBridgeQuote | null; error: string | null } | null>(null);
-  const [priceTick, setPriceTick] = useState(0);
-  useEffect(() => {
-    if (!priceAsk || !priceKey) return;
-    let live = true;
-    const t = window.setTimeout(() => {
-      void deps
-        .quote(priceAsk)
-        .then((quote) => live && setPrice({ key: priceKey, quote, error: null }))
-        .catch((err) => live && setPrice({ key: priceKey, quote: null, error: err instanceof Error ? err.message : "Couldn't get a price. Try again." }));
-    }, LIVE_PRICE_DEBOUNCE_MS);
-    return () => {
-      live = false;
-      window.clearTimeout(t);
-    };
-  }, [priceAsk, priceKey, deps, priceTick]);
-  useEffect(() => {
-    if (!priceKey) return;
-    const t = window.setInterval(() => setPriceTick((n) => n + 1), LIVE_PRICE_REFRESH_MS);
-    return () => window.clearInterval(t);
-  }, [priceKey]);
-  // The price for what is on screen now; an older one stays up while a refresh of the same ask is on its way.
-  const livePrice = priceKey && price?.key === priceKey ? price : null;
-  const retryPrice = useCallback(() => {
-    setPrice(null);
-    setPriceTick((n) => n + 1);
-  }, []);
+  }, [open, picking, source, flow.kind, onMainnet, landingReady, amountOk, chain.id, token.symbol, landing, amount, account.address, walletPays, evm]);
+  const relayQuote = useCallback((b: Record<string, unknown>) => deps.quote(b), [deps]);
+  const { key: priceKey, live: livePrice, retry: retryPrice } = useLivePrice(priceAsk, relayQuote);
 
   function body(extra: Record<string, unknown>) {
     return { chainId: chain.id, symbol: token.symbol, asset: landing, amount, recipient: account.address, ...extra };
@@ -900,7 +1026,7 @@ function BridgeSheet({
 
   const title = picking ? "Where is the money?" : flow.kind === "landed" ? "" : "Bring money over";
   const subtitle = picking
-    ? `${sources.length} chains. Sending from an exchange works too: pick the chain you withdraw on.`
+    ? `${sources.length + (zcash ? 1 : 0)} chains. Sending from an exchange works too: pick the chain you withdraw on.`
     : flow.kind === "track" || flow.kind === "review"
       ? "Into your private balance on Solana."
       : "From another chain or an exchange, into your private balance on Solana.";
@@ -971,11 +1097,32 @@ function BridgeSheet({
                   className="gl-input h-12 px-3.5 text-[16px] sm:text-[15px]"
                 />
                 <ul className="mt-3 grid gap-1">
+                  {zcashMatch && (
+                    <li>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSource("zcash");
+                          setPicking(false);
+                          setSearch("");
+                        }}
+                        aria-current={source === "zcash" ? "true" : undefined}
+                        className={`flex min-h-[56px] w-full items-center gap-3 rounded-2xl px-3 text-left transition-colors hover:bg-surface ${source === "zcash" ? "bg-surface" : ""}`}
+                      >
+                        <TokenMark src={ZEC_LOGO} size={32} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[15px] text-foreground">Zcash</span>
+                          <span className="block truncate text-[12.5px] text-mute">ZEC, from any Zcash wallet, through NEAR Intents</span>
+                        </span>
+                      </button>
+                    </li>
+                  )}
                   {matches.map((c) => (
                     <li key={c.id}>
                       <button
                         type="button"
                         onClick={() => {
+                          onSource("relay");
                           setChain(c);
                           setSymbol(c.tokens[0]!.symbol);
                           setLanding(null);
@@ -984,8 +1131,8 @@ function BridgeSheet({
                           setPicking(false);
                           setSearch("");
                         }}
-                        aria-current={c.id === chain.id ? "true" : undefined}
-                        className={`flex min-h-[56px] w-full items-center gap-3 rounded-2xl px-3 text-left transition-colors hover:bg-surface ${c.id === chain.id ? "bg-surface" : ""}`}
+                        aria-current={source === "relay" && c.id === chain.id ? "true" : undefined}
+                        className={`flex min-h-[56px] w-full items-center gap-3 rounded-2xl px-3 text-left transition-colors hover:bg-surface ${source === "relay" && c.id === chain.id ? "bg-surface" : ""}`}
                       >
                         <ChainLogo id={c.id} size={32} />
                         <span className="min-w-0 flex-1">
@@ -995,12 +1142,26 @@ function BridgeSheet({
                       </button>
                     </li>
                   ))}
-                  {matches.length === 0 && <li className="rounded-2xl bg-surface px-4 py-4 text-[13.5px] text-mute">No chain matches that. Try another name.</li>}
+                  {matches.length === 0 && !zcashMatch && <li className="rounded-2xl bg-surface px-4 py-4 text-[13.5px] text-mute">No chain matches that. Try another name.</li>}
                 </ul>
               </div>
             )}
 
-            {!picking && (flow.kind === "form" || flow.kind === "quoting") && (
+            {!picking && source === "zcash" && (flow.kind === "form" || flow.kind === "quoting") && (
+              <ZcashForm
+                open={open}
+                account={account}
+                flow={flow}
+                dispatch={dispatch}
+                deps={deps}
+                zecReady={ready.zec === true}
+                relayFunded={relayFunded}
+                waiting={waiting}
+                onPick={() => setPicking(true)}
+              />
+            )}
+
+            {!picking && source === "relay" && (flow.kind === "form" || flow.kind === "quoting") && (
               <form onSubmit={walletPays ? startWallet : getAddress} className="mt-5 grid grid-cols-[minmax(0,1fr)] gap-4">
                 <div>
                   <p className="text-[13px] text-mute">From</p>
@@ -1242,6 +1403,159 @@ function BridgeSheet({
   );
 }
 
+/**
+ * ZEC from a Zcash wallet (lib/solanaRings/zcashIn): the amount, the live
+ * price under it, and the transparent Zcash address a refund would go to.
+ * "Get a deposit address" asks NEAR Intents for one and hands the transfer to
+ * the same flow as a Relay one (track, then made private as it lands).
+ */
+function ZcashForm({
+  open,
+  account,
+  flow,
+  dispatch,
+  deps,
+  zecReady,
+  relayFunded,
+  waiting,
+  onPick,
+}: {
+  open: boolean;
+  account: Account;
+  flow: Flow;
+  dispatch: React.Dispatch<Parameters<typeof flowReducer>[1]>;
+  deps: SolanaBridgeDeps;
+  zecReady: boolean;
+  relayFunded: boolean;
+  waiting: (assetId: string) => bigint;
+  onPick: () => void;
+}) {
+  const onMainnet = account.network === "mainnet";
+  const [amount, setAmount] = useState("");
+  const refundKey = zcashRefundKey(account.network, account.address);
+  const [refund, setRefund] = useState(() => loadZcashRefund(deps.store(), refundKey));
+  const problem = zcashRefundProblem(refund);
+  const text = amount.trim();
+  const amountOk = /^\d+(\.\d{1,8})?$/.test(text) && Number(text) > 0;
+  const button = zcashButton({ busy: flow.kind === "quoting", onMainnet, zecReady, amount, refund });
+  const canAsk = button.ready && flow.kind === "form";
+
+  // The live price: a dry quote, no deposit address, a stand-in refund address until the real one is asked with.
+  const priceAsk = useMemo(
+    () => (open && flow.kind === "form" && onMainnet && zecReady && amountOk ? { amount: text, recipient: account.address, preview: true } : null),
+    [open, flow.kind, onMainnet, zecReady, amountOk, text, account.address]
+  );
+  const nearQuote = useCallback((b: Record<string, unknown>) => deps.zcashQuote(b), [deps]);
+  const price = useLivePrice(priceAsk, nearQuote);
+
+  async function getAddress(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canAsk) return;
+    dispatch({ type: "quoting" });
+    try {
+      const quote = await deps.zcashQuote({ amount: text, recipient: account.address, refundTo: refund.trim() });
+      if (quote.via !== "near" || !quote.depositAddress) throw new Error("NEAR Intents couldn't make a route right now. Try again.");
+      saveZcashRefund(deps.store(), refundKey, refund.trim());
+      const t = trackedFrom(quote, "address", Date.now(), { baseline: waiting(quote.receive.assetId) });
+      dispatch({ type: "track", t });
+      track("bridge_address_created", { source: "Zcash", token: "ZEC", dest: "solana" });
+      void import("qrcode")
+        .then((QR) => QR.toDataURL(qrText(t), { margin: 1, width: 400, errorCorrectionLevel: "M" }))
+        .then((qr) => dispatch({ type: "qr", requestId: t.requestId, qr }))
+        .catch(() => {
+          /* the address and copy button still work */
+        });
+    } catch (err) {
+      dispatch({ type: "quoteFailed", error: err instanceof Error ? err.message : "Couldn't reach NEAR Intents. Check your connection and try again." });
+    }
+  }
+
+  return (
+    <form onSubmit={getAddress} className="mt-5 grid grid-cols-[minmax(0,1fr)] gap-4">
+      <div>
+        <p className="text-[13px] text-mute">From</p>
+        <button
+          type="button"
+          onClick={onPick}
+          className="mt-1.5 flex h-14 w-full items-center gap-3 rounded-xl border border-line px-3.5 text-left transition-colors hover:bg-surface"
+        >
+          <TokenMark src={ZEC_LOGO} size={28} />
+          <span className="min-w-0 flex-1 text-[15px] text-foreground">Zcash</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden className="text-mute">
+            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-mute">Lands as ZEC in your private balance on Solana.</p>
+      </div>
+
+      <div>
+        <label htmlFor="sol-zcash-amount" className="text-[13px] text-mute">
+          Amount to send
+        </label>
+        <div className="gl-inputwrap mt-1.5 flex h-12 items-center gap-2 px-3.5">
+          <input
+            id="sol-zcash-amount"
+            inputMode="decimal"
+            autoComplete="off"
+            placeholder="0"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="tnum min-w-0 flex-1 bg-transparent text-[16px] text-foreground outline-none! placeholder:text-faint"
+          />
+          <TokenMark src={ZEC_LOGO} size={20} />
+          <span className="text-[14px] text-mute">ZEC</span>
+        </div>
+        <AmountProblem value={amount} decimals={8} />
+        <p className="mt-1.5 text-[12px] text-mute">{ZCASH_LIMIT_LINE} All of what arrives goes private.</p>
+      </div>
+
+      {price.key && <LivePrice quote={price.live?.quote ?? null} error={price.live?.error ?? null} walletPays={false} onRetry={price.retry} provider="NEAR Intents" />}
+
+      <div>
+        <label htmlFor="sol-zcash-refund" className="text-[13px] text-mute">
+          Your Zcash address
+        </label>
+        <input
+          id="sol-zcash-refund"
+          autoComplete="off"
+          spellCheck={false}
+          value={refund}
+          onChange={(e) => setRefund(e.target.value.trim())}
+          placeholder="t1…"
+          aria-invalid={problem ? true : undefined}
+          aria-describedby="sol-zcash-refund-help"
+          className="gl-input tnum mt-1.5 h-12 px-3.5 text-[16px] sm:text-[14px]"
+        />
+        {problem ? (
+          <p id="sol-zcash-refund-help" role="alert" className="mt-1.5 text-[12.5px] leading-relaxed text-danger">
+            {problem}
+          </p>
+        ) : (
+          <p id="sol-zcash-refund-help" className="mt-1.5 text-[12px] leading-relaxed text-mute">
+            If the transfer fails, the ZEC goes back here. A transparent address, starting with t1 or t3.
+          </p>
+        )}
+      </div>
+
+      {flow.kind === "form" && flow.error && (
+        <p role="alert" className="rounded-xl bg-danger-soft px-4 py-3 text-[13px] leading-relaxed text-danger">
+          {flow.error}
+        </p>
+      )}
+      {!relayFunded && (
+        <p className="rounded-xl bg-warn-soft px-4 py-3 text-[13px] leading-relaxed text-warn">
+          Gloam&apos;s Solana relay is paused for a moment. ZEC you bring over waits in your private account until it can go private.
+        </p>
+      )}
+
+      <button type="submit" disabled={!canAsk} className="btn btn-ink btn-lg btn-block h-auto min-h-12 whitespace-normal py-3 text-center leading-snug">
+        {button.label}
+      </button>
+      <p className="text-center text-[12px] leading-relaxed text-mute">{ZCASH_IN_PRIVACY_NOTE} Through NEAR Intents.</p>
+    </form>
+  );
+}
+
 function Tracking({
   flow,
   copied,
@@ -1257,7 +1571,11 @@ function Tracking({
 }) {
   const t = flow.t;
   const phase = trackPhase(flow);
-  const showAddress = t.mode === "address" && phase === "waiting";
+  const now = useClock();
+  const near = t.via === "near";
+  // A NEAR Intents address is only offered until its send-by time: after it, a deposit may come back instead.
+  const expired = near && phase === "waiting" && !flow.short && now !== null && t.near !== undefined && now > t.near.sendBy;
+  const showAddress = t.mode === "address" && phase === "waiting" && !flow.short && !expired;
   const link = t.hash ? txLink(t.send.chainId, t.hash) : null;
   return (
     <div className="mt-5" aria-live="polite">
@@ -1270,10 +1588,15 @@ function Tracking({
               {t.send.amount} {t.send.symbol}
             </span>
             on
-            <ChainLogo id={t.send.chainId} size={18} />
+            <SourceMark t={t} size={18} />
             {t.send.chain}
             {t.send.usd !== null && !t.send.symbol.startsWith("USD") && <span className="tnum text-mute">(about ${t.send.usd.toFixed(2)})</span>}
           </p>
+          {near && t.near && (
+            <p className="mt-1.5 text-[13px] text-mute">
+              Send it by <span className="tnum text-foreground">{sendByText(t.near.sendBy)}</span>.
+            </p>
+          )}
           {flow.qr && (
             // eslint-disable-next-line @next/next/no-img-element -- a local data URL
             <img
@@ -1287,15 +1610,22 @@ function Tracking({
           <button
             type="button"
             onClick={() => onCopy(t.depositAddress)}
+            aria-label={`Copy the deposit address on ${t.send.chain}`}
             className="mt-4 flex w-full items-center gap-3 rounded-xl border border-line px-3.5 py-3 text-left transition-colors hover:bg-surface"
           >
             <span className="tnum min-w-0 flex-1 break-all text-[13.5px] text-foreground">{t.depositAddress}</span>
             <span className="shrink-0 text-[13px] font-medium text-foreground">{copied ? "Copied" : "Copy"}</span>
           </button>
         </>
+      ) : expired ? (
+        <p role="status" className="rounded-xl bg-warn-soft px-4 py-3 text-[13px] leading-relaxed text-warn">
+          This deposit address has expired. Don&apos;t send to it. Start over for a new one. If you already sent ZEC, it still shows here as
+          it arrives, or goes back to your Zcash address.
+        </p>
       ) : null}
 
-      <QuoteRows q={{ ...t, gasUsd: null }} sentRow={!showAddress} returned={phase === "refunded" || phase === "failed"} />
+      {/* An expired address was never paid as far as anyone knows, and a short one wasn't paid what was asked: no "Sent" row for either. */}
+      {!expired && !flow.short && <QuoteRows q={{ ...t, gasUsd: null }} sentRow={!showAddress} returned={phase === "refunded" || phase === "failed"} />}
       {link && (
         <p className="mt-2 text-[13px]">
           <a href={link} target="_blank" rel="noopener noreferrer" className="text-foreground underline underline-offset-4">
@@ -1303,14 +1633,23 @@ function Tracking({
           </a>
         </p>
       )}
-      {showAddress && (
-        <>
-          <CostWarning quote={costedQuote({ ...t, gasUsd: null })} />
-          <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
-            Send only {t.send.symbol} on {t.send.chain}, and use this address for this transfer only. Sending from an exchange works too.
-          </p>
-        </>
-      )}
+      {showAddress &&
+        (near ? (
+          <>
+            <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
+              Send only ZEC on Zcash, from a shielded or transparent balance, and only once to this address. The code fills in the address
+              and amount. If less than {t.send.amount} ZEC arrives, it goes back to your Zcash address.
+            </p>
+            <p className="mt-2 text-[12px] leading-relaxed text-mute">{ZCASH_IN_PRIVACY_NOTE}</p>
+          </>
+        ) : (
+          <>
+            <CostWarning quote={costedQuote({ ...t, gasUsd: null })} />
+            <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
+              Send only {t.send.symbol} on {t.send.chain}, and use this address for this transfer only. Sending from an exchange works too.
+            </p>
+          </>
+        ))}
 
       <PhaseLine flow={flow} phase={phase} />
 
@@ -1336,6 +1675,11 @@ function Tracking({
               Start over
             </button>
           )}
+          {near && phase !== "waiting" && (
+            <p className="mt-2 text-[12px] leading-relaxed text-mute">
+              Your deposit and NEAR Intents&apos; delivery to Solana are public. Once private, the token and amount stay hidden.
+            </p>
+          )}
         </>
       )}
     </div>
@@ -1348,7 +1692,7 @@ function Landed({ flow, onDone }: { flow: Extract<Flow, { kind: "landed" }>; onD
   const done = useRef<HTMLButtonElement>(null);
   useModalFocus(receipt, noop, { initial: done });
   const asset = assetOf(flow.t.receive.assetId);
-  const amount = asset && flow.amount > 0n ? ringsAmount(flow.amount, asset.decimals) : displayAmountText(flow.t.receive.amount);
+  const amount = asset && flow.amount > 0n ? ringsAmount(flow.amount, asset.decimals) : ringsAmountText(flow.t.receive.amount, flow.t.receive.decimals);
   return (
     <div ref={receipt} className="relative pt-3 text-center">
       <SuccessReceipt
