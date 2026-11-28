@@ -121,6 +121,35 @@ tampered[0] ^= 1;
 ok(!(await account.isPlainSignature(walletPub, msg0, tampered)), "a changed signature does not");
 ok(!(await account.isPlainSignature(walletPub, msg1, sig0)), "a signature over another message does not");
 
+// A browser without Web Crypto Ed25519 or X25519 (Chrome before 137 and 133, Safari
+// before 17): the account still opens, and a proof request to Helius's prover
+// still encrypts (the @heliuslabs/spr patch: the pure-JS X25519 KEM).
+{
+  const subtle = globalThis.crypto.subtle as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const curve = (a: unknown) => {
+    const name = typeof a === "string" ? a : (a as { name?: string } | undefined)?.name;
+    return name === "X25519" || name === "Ed25519";
+  };
+  const methods = ["generateKey", "importKey", "exportKey", "deriveBits", "sign", "verify"];
+  for (const m of methods) {
+    const real = subtle[m]!.bind(globalThis.crypto.subtle);
+    subtle[m] = (...a: unknown[]) => {
+      const alg = m === "importKey" ? a[2] : m === "exportKey" ? (a[1] as CryptoKey | undefined)?.algorithm : a[0];
+      return curve(alg) ? Promise.reject(new DOMException("Unrecognized name.", "NotSupportedError")) : real(...a);
+    };
+  }
+  try {
+    await assert.rejects(globalThis.crypto.subtle.importKey("raw", new Uint8Array(32), { name: "X25519" }, false, []), "the stand-in old browser has no X25519");
+    ok(await account.isPlainSignature(walletPub, msg0, sig0), "an old browser still verifies a plain wallet signature");
+    ok(!(await account.isPlainSignature(walletPub, msg0, tampered)), "and still refuses a changed one");
+    const encryption = await import(new URL("./client/prover/tee/encryption.js", import.meta.resolve("@heliuslabs/spr")).href);
+    const sealed = await encryption.encryptRequest(new Uint8Array(32).fill(9), "POST", "/prove/x", new TextEncoder().encode("{}"));
+    ok(typeof sealed.enc === "string" && sealed.enc.length === 64 && sealed.body.length > 2, "an old browser still encrypts a proof request");
+  } finally {
+    for (const m of methods) delete subtle[m];
+  }
+}
+
 const seed0 = await account.accountSeed(sig0, 0);
 const expected = new Uint8Array(hkdfSync("sha256", sig0, Buffer.from("gloam/solana-account/v1"), Buffer.from("account/0"), 32));
 ok(Buffer.from(seed0).equals(Buffer.from(expected)), "the seed is HKDF-SHA256 with Gloam's salt and info");

@@ -37,7 +37,7 @@
  * (lib/solanaRings/zcashIn) and is followed by this same flow, its transfer
  * marked `via: "near"`.
  */
-import { BRIDGE_CHAINS, BRIDGE_MAX_USD, BRIDGE_MIN_USD, validRefundAddress, type BridgeAppFee, type BridgeChain, type BridgeChainKind, type BridgeStage, type BridgeToken } from "../bridge";
+import { BRIDGE_CHAINS, BRIDGE_MAX_USD, BRIDGE_MIN_USD, validRefundAddress, type BridgeAppFee, type BridgeChain, type BridgeChainKind, type BridgeStage, type BridgeToken, type CostedQuote } from "../bridge";
 import { displayAmountNumber, typedAmount } from "../amountShort";
 import { validZcashTransparent } from "../zcashAddress";
 import { RELAYED_DEPOSIT_MIN } from "./relayPolicy";
@@ -101,8 +101,12 @@ export type SolanaBridgeQuote = {
   /** What the connected EVM wallet signs in order: an approve, then the deposit; or the deposit alone. */
   evmTxs: { to: string; data: string; value: string; chainId: number }[] | null;
   send: { amount: string; symbol: string; chain: string; chainId: number; logo: string; usd: number | null };
-  /** What lands at the private account, then goes private whole. */
-  receive: { amount: string; minimum: string; symbol: string; assetId: string; decimals: number; logo: string };
+  /**
+   * What lands at the private account, then goes private whole. `usd` is its
+   * dollar value at Relay's price, null when Relay gave none (and missing on
+   * a transfer saved before quotes carried it).
+   */
+  receive: { amount: string; minimum: string; symbol: string; assetId: string; decimals: number; logo: string; usd?: number | null };
   /** Where Relay returns the money if it can't deliver: the paying wallet, or the address given. */
   refundTo: string;
   /** Everything taken in fees: Relay's, and Gloam's own when it takes one (appFee). */
@@ -128,6 +132,21 @@ export type NearTerms = { signature: string; sendBy: number; addressUntil: strin
 /** Who carries a transfer, in the panel's words. */
 export function providerName(t: { via?: "near" }): string {
   return t.via === "near" ? "NEAR Intents" : "Relay";
+}
+
+/**
+ * A quote as the cost warning reads it (lib/bridge routeCost). USDC or USDT
+ * landing counts its amount as dollars, as every other bridge does. SOL or ZEC
+ * counts at Relay's dollar price of what lands, and with no price only the
+ * fees count: 20 USDC landing as about 0.13 SOL is never a 99% cost.
+ */
+export function costedQuote(
+  q: Pick<SolanaBridgeQuote, "send" | "feeUsd"> & { receive: Pick<SolanaBridgeQuote["receive"], "amount" | "symbol" | "assetId" | "usd">; gasUsd: number | null }
+): CostedQuote & { receive: { symbol: string } } {
+  const { amount, symbol, assetId, usd } = q.receive;
+  const stable = landingAssets().some((a) => a.id === assetId && a.stable);
+  const priced = typeof usd === "number" && Number.isFinite(usd) && usd > 0 ? usd : null;
+  return { send: q.send, feeUsd: q.feeUsd, gasUsd: q.gasUsd, receive: stable ? { amount, symbol } : { amount, symbol, usd: priced } };
 }
 
 // ---------------------------------------------------------------- a transfer on its way

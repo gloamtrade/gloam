@@ -1295,6 +1295,10 @@ export function ringsErrorMessage(e: unknown): string {
   if (has("WALLET_USER_RECORD_KEYS_MISMATCH") || has("WALLET_REGISTERED_KEYPAIR_MISMATCH")) {
     return "This private account is registered with other keys. Contact Gloam support.";
   }
+  if (has("CLIENT_PROVER_TEE_ATTESTATION")) return "Gloam couldn't check Solana's prover. Check your device's date and time, then try again.";
   if (/reject|denied|cancel/i.test(text)) return "You cancelled it in your wallet.";
-  return text.length < 160 && !/^[A-Z_]+$/.test(text) ? text : "Something went wrong on Solana. Try again.";
+  if (text.length < 160 && !/^[A-Z_]+$/.test(text)) return text;
+  // the innermost SDK code, so a screenshot of this says what failed
+  const code = [...codes].filter((c) => /^[A-Z][A-Z0-9_]{2,63}$/.test(c)).pop();
+  return code ? `Something went wrong on Solana (${code}). Try again.` : "Something went wrong on Solana. Try again.";
 }

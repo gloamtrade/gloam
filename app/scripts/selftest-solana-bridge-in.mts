@@ -21,7 +21,9 @@
  *  - the flow: arrived but not private (and tried again), refunded, failed,
  *    a tab closed and picked up again, money already waiting before a
  *    transfer, Relay's word never moving backwards;
- *  - the quote route with Relay faked: what it asks Relay for, what it refuses.
+ *  - the quote route with Relay faked: what it asks Relay for, what it refuses,
+ *    and what lands priced in dollars, so SOL or ZEC is never read as a 99%
+ *    cost (costedQuote).
  *
  * No network. Run from app/:  ../mcp/node_modules/.bin/tsx scripts/selftest-solana-bridge-in.mts
  */
@@ -802,9 +804,14 @@ ok(!/\u2014/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /public/.test(bridgeIn
     "the live price shows under the amount as soon as one is typed, after a pause, refreshed"
   );
   ok(
-    /Getting a price…/.test(sheet) && /Try again/.test(sheet) && /<CostWarning quote=\{quote\}/.test(sheet) && /feeRows\(quote, feeLabel\)/.test(sheet) && /provider = "Relay"/.test(sheet),
+    /Getting a price…/.test(sheet) && /Try again/.test(sheet) && /<CostWarning quote=\{costedQuote\(quote\)\}/.test(sheet) && /feeRows\(quote, feeLabel\)/.test(sheet) && /provider = "Relay"/.test(sheet),
     "loading, an error with Try again, the fee lines (Relay's unless NEAR Intents carries it) and the cost warning"
   );
+  ok(
+    (sheet.match(/<CostWarning quote=\{costedQuote\(/g) ?? []).length === 3 && !/<CostWarning quote=\{(?!costedQuote\()/.test(sheet),
+    "every cost warning on the Solana sheet reads SOL or ZEC at its dollar price (costedQuote): the live price, the review, the deposit address"
+  );
+  ok(!/costedQuote/.test(evmSheet) && (evmSheet.match(/<CostWarning quote=\{(stage\.quote|q|quote)\} \/>/g) ?? []).length === 5, "BridgeIn's warnings are as they were: it lands as a stablecoin");
   ok(/typedAmount\(flow\.quote\.send\.amount\)/.test(sheet) && /typedAmount\(q\.send\.amount\)/.test(sheet), "the review and the Sent line say back the amount as typed");
   ok(/typedAmount\(amount\)/.test(evmSheet) && /typedAmount\(q\.send\.amount\)/.test(evmSheet) && !/Bridge \$\{displayAmountText\(amount\)\}/.test(evmSheet), "BridgeIn's button and review say back the amount as typed too");
 }
@@ -855,6 +862,54 @@ ok(!/\u2014/.test(bridgeIn.SOLANA_BRIDGE_PRIVACY_NOTE) && /public/.test(bridgeIn
     res.status === 200 && (asked as unknown as Record<string, unknown>).destinationCurrency === ZEC.mint && json.data?.receive.assetId === "zec" && json.data.receive.decimals === 8,
     "ZEC lands as the Omni Bridge mint, in 8 decimals"
   );
+  {
+    const { expensiveRoute, routeCost } = await import("../src/lib/bridge");
+    // 20 USDC from Base for about 0.13 SOL, worth $19.80 at Relay's price.
+    const coinReply = (amount: string, amountUsd?: string) => (b: Record<string, unknown>) => ({
+      ...addressReply(b),
+      details: { ...addressReply(b).details, currencyOut: { amount, minimumAmount: amount, ...(amountUsd === undefined ? {} : { amountUsd }), currency: { chainId: 792703809, address: b.destinationCurrency } } },
+    });
+    relayReply = coinReply("130412345", "19.8");
+    res = await post({ ...base, asset: "sol" });
+    json = (await res.json()) as typeof json;
+    const sol = json.data!;
+    ok(res.status === 200 && sol.receive.amount === "0.130412345" && sol.receive.symbol === "SOL" && sol.receive.usd === 19.8, "SOL: what lands, and its dollar value at Relay's price");
+    ok(expensiveRoute({ ...sol, receive: { amount: sol.receive.amount } })!.share > 0.99, "read the old way, 0.13 SOL as 13 cents, it warned of a 99% cost");
+    const solCost = routeCost(bridgeIn.costedQuote(sol));
+    ok(expensiveRoute(bridgeIn.costedQuote(sol)) === null && solCost !== null && Math.round(solCost.usd * 100) === 19, "the sheet reads it at $19.80: 19 cents, no warning");
+    relayReply = coinReply("13041234", "13.5");
+    res = await post({ ...base, asset: "sol" });
+    json = (await res.json()) as typeof json;
+    const thin = expensiveRoute(bridgeIn.costedQuote(json.data!));
+    ok(thin !== null && Math.round(thin.share * 100) === 32, "SOL worth $13.50 for $19.99 still warns, at 32%");
+
+    // ZEC with no dollar price from Relay (or a zero one): only the fees count.
+    for (const amountUsd of [undefined, "0", "not a number"]) {
+      relayReply = coinReply("2270000", amountUsd);
+      res = await post({ ...base, asset: "zec" });
+      json = (await res.json()) as typeof json;
+      const zec = json.data!;
+      const c = routeCost(bridgeIn.costedQuote(zec));
+      ok(
+        res.status === 200 && zec.receive.amount === "0.0227" && zec.receive.usd === null && c?.usd === 0.16 && expensiveRoute(bridgeIn.costedQuote(zec)) === null,
+        `ZEC with Relay's price ${amountUsd === undefined ? "left out" : JSON.stringify(amountUsd)}: no price, the fees are the cost, no warning`
+      );
+    }
+
+    // USDC still counts by its amount, whatever Relay prices it at.
+    relayReply = coinReply("19842157", "19.1");
+    res = await post(base);
+    json = (await res.json()) as typeof json;
+    const usdc = bridgeIn.costedQuote(json.data!);
+    ok(json.data!.receive.usd === 19.1 && usdc.receive.usd === undefined && routeCost(usdc)!.usd === 0.16, "USDC lands as dollars by its amount, as before");
+    relayReply = addressReply;
+
+    // A transfer saved before quotes carried a price, landing as SOL: no price, never its amount as dollars.
+    const saved = bridgeIn.trackedFrom({ ...sol, receive: { ...sol.receive, usd: undefined } }, "address", Date.now());
+    ok(saved.receive.usd === undefined && expensiveRoute(bridgeIn.costedQuote({ ...saved, gasUsd: null })) === null, "a saved SOL transfer with no price: fees only, no warning");
+    ok(bridgeIn.costedQuote({ ...saved, receive: { ...saved.receive, assetId: "bonk" }, gasUsd: null }).receive.usd === null, "an asset it doesn't know is never read as a stablecoin");
+  }
+
   res = await post({ ...base, asset: "bonk" });
   json = (await res.json()) as typeof json;
   ok(res.status === 400 && /SOL or ZEC|USDT, SOL or ZEC/.test(json.error?.message ?? ""), "an asset it can't land as is refused, naming the ones it can");
