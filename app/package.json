@@ -13,6 +13,7 @@
     "@gloamtrade/sdk": "workspace:*",
     "@heliuslabs/spr": "0.9.0-alpha",
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@noble/curves": "2.4.0",
     "@solana/kit": "^8.3.0",
     "@solana/web3.js": "1.98.4",
     "@starkware-libs/starknet-privacy-sdk": "file:vendor/starknet-privacy/starknet-privacy-sdk-0.14.4-rc.2-gloam.1.tgz",

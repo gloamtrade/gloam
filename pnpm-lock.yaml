@@ -17,6 +17,13 @@ overrides:
   baseline-browser-mapping@2: ^2.11.32
   zod@4: ^4.6.7
 
+packageExtensionsChecksum: sha256-1gr5doEjgGAKWfg3NGchR+iakqkNEOPFOA44/y4r+J4=
+
+patchedDependencies:
+  '@heliuslabs/spr@0.9.0-alpha':
+    hash: 75ed9e2e418e517b94c8ca3fe58ed10fa297c0b39213abbb616af9d89cc7e5f4
+    path: patches/@heliuslabs__spr@0.9.0-alpha.patch
+
 importers:
 
   .: {}
@@ -28,10 +35,13 @@ importers:
         version: link:../packages/sdk
       '@heliuslabs/spr':
         specifier: 0.9.0-alpha
-        version: 0.9.0-alpha(@solana/kit@8.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6))(typescript@5.9.3)
+        version: 0.9.0-alpha(patch_hash=75ed9e2e418e517b94c8ca3fe58ed10fa297c0b39213abbb616af9d89cc7e5f4)(@solana/kit@8.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6))(typescript@5.9.3)
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.2
         version: 1.32.2(zod@4.6.7)
+      '@noble/curves':
+        specifier: 2.4.0
+        version: 2.4.0
       '@solana/kit':
         specifier: ^8.3.0
         version: 8.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
@@ -363,7 +373,7 @@ importers:
     dependencies:
       '@heliuslabs/spr':
         specifier: 0.9.0-alpha
-        version: 0.9.0-alpha(@solana/kit@8.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6))(typescript@5.9.3)
+        version: 0.9.0-alpha(patch_hash=75ed9e2e418e517b94c8ca3fe58ed10fa297c0b39213abbb616af9d89cc7e5f4)(@solana/kit@8.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6))(typescript@5.9.3)
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.2
         version: 1.32.2(zod@3.25.76)
@@ -471,7 +481,7 @@ importers:
     devDependencies:
       '@heliuslabs/spr':
         specifier: 0.9.0-alpha
-        version: 0.9.0-alpha(@solana/kit@8.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6))(typescript@5.9.3)
+        version: 0.9.0-alpha(patch_hash=75ed9e2e418e517b94c8ca3fe58ed10fa297c0b39213abbb616af9d89cc7e5f4)(@solana/kit@8.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6))(typescript@5.9.3)
       '@solana/kit':
         specifier: ^8.3.0
         version: 8.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
@@ -6276,9 +6286,10 @@ snapshots:
       react-dom: 19.2.4(react@19.2.4)
       use-sync-external-store: 1.6.0(react@19.2.4)
 
-  '@heliuslabs/spr@0.9.0-alpha(@solana/kit@8.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6))(typescript@5.9.3)':
+  '@heliuslabs/spr@0.9.0-alpha(patch_hash=75ed9e2e418e517b94c8ca3fe58ed10fa297c0b39213abbb616af9d89cc7e5f4)(@solana/kit@8.6.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6))(typescript@5.9.3)':
     dependencies:
       '@hpke/core': 1.9.0
+      '@hpke/dhkem-x25519': 1.8.0
       '@lightprotocol/hasher.rs': 0.2.1
       '@noble/ciphers': 2.4.0
       '@noble/curves': 2.4.0

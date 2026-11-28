@@ -23,3 +23,13 @@ overrides:
   baseline-browser-mapping@2: ^2.11.32
   # @modelcontextprotocol/sdk, viem and ox (zod 4 only; zod 3 has no fixed release)
   zod@4: ^4.6.7
+
+# The Solana SDK's proof-request encryption uses the pure-JS X25519 KEM (see the
+# @heliuslabs/spr patch), so it needs that package; the version Turnkey already pulls in.
+packageExtensions:
+  "@heliuslabs/spr@0.9.0-alpha":
+    dependencies:
+      "@hpke/dhkem-x25519": "1.8.0"
+
+patchedDependencies:
+  "@heliuslabs/spr@0.9.0-alpha": patches/@heliuslabs__spr@0.9.0-alpha.patch

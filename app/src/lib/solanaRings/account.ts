@@ -58,9 +58,11 @@ export async function accountSeed(walletSignature: Uint8Array, index: number): P
  */
 export async function isPlainSignature(publicKey: Uint8Array, message: Uint8Array, signature: Uint8Array): Promise<boolean> {
   if (publicKey.length !== 32 || signature.length !== 64) return false;
+  // noble, not Web Crypto: Ed25519 there needs Chrome 137 or Safari 17, and an older
+  // browser would be told its wallet signs the wrong way. Strict RFC 8032, as Web Crypto checks.
+  const { ed25519 } = await import("@noble/curves/ed25519.js");
   try {
-    const key = await subtle().importKey("raw", buf(publicKey), { name: "Ed25519" }, false, ["verify"]);
-    return await subtle().verify({ name: "Ed25519" }, key, buf(signature), buf(message));
+    return ed25519.verify(signature, message, publicKey, { zip215: false });
   } catch {
     return false;
   }

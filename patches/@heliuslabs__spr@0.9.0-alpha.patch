@@ -1,0 +1,14 @@
+diff --git a/dist/client/prover/tee/encryption.js b/dist/client/prover/tee/encryption.js
+index 97a917871f658824aa313180c9fe8a61bafec643..c4de1cccb0e8e9c0f5f8a6916a27e7357909064a 100644
+--- a/dist/client/prover/tee/encryption.js
++++ b/dist/client/prover/tee/encryption.js
+@@ -1,4 +1,8 @@
+-import { Aes256Gcm, CipherSuite, DhkemX25519HkdfSha256, HkdfSha256 } from "@hpke/core";
++import { Aes256Gcm, CipherSuite, HkdfSha256 } from "@hpke/core";
++// Gloam patch: the pure-JS X25519 KEM (noble), the same DHKEM(X25519, HKDF-SHA256) on the wire.
++// @hpke/core's own needs WebCrypto X25519, which Chrome added in 133 and Safari in 17,
++// so every proof request failed on older browsers before it was sent.
++import { DhkemX25519HkdfSha256 } from "@hpke/dhkem-x25519";
+ import { gcm } from "@noble/ciphers/aes.js";
+ import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
+ import { SPR_GATEWAY_PATH } from "../../../endpoint.js";
