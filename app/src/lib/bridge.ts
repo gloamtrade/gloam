@@ -490,29 +490,38 @@ export const EXPENSIVE_ROUTE_MIN_USD = 1;
 /** The parts of a quote that say what it costs (BridgeQuote and PrivateBridgeQuote both fit). */
 export type CostedQuote = {
   send: { usd: number | null };
-  receive: { amount: string };
+  /**
+   * What comes out. Its `amount` counts as dollars (a stablecoin) unless `usd`
+   * is there: then `usd` is what it is worth (Relay's price of SOL or ZEC
+   * landing on Solana), or null when it isn't a stablecoin and has no price.
+   */
+  receive: { amount: string; usd?: number | null };
   feeUsd: number;
   extra?: string | null;
   gasUsd?: number | null;
 };
 
 /**
- * What a route costs in dollars: what you pay less the stablecoin that comes
- * out (the price buffer sent back to the wallet counts as coming out), and
- * never less than Relay's own fee, plus the paying chain's network fee when
- * Relay prices it. `share` is that cost over what you pay, or null when Relay
- * doesn't price what you pay; then the cost is Relay's fee alone.
+ * What a route costs in dollars: what you pay less what comes out (the price
+ * buffer sent back to the wallet counts as coming out), and never less than
+ * Relay's own fee, plus the paying chain's network fee when Relay prices it.
+ * What comes out is a stablecoin's amount, or the dollar price of anything
+ * else; with no price for it, the fees are the whole cost, so 0.13 SOL is
+ * never read as 13 cents. `share` is that cost over what you pay, or null when
+ * Relay doesn't price what you pay; then the cost is Relay's fee alone.
  */
 export function routeCost(q: CostedQuote): { usd: number; share: number | null } | null {
   const gas = q.gasUsd ?? 0;
   const paid = q.send.usd;
-  const out = Number(q.receive.amount) + (q.extra ? Number(q.extra) : 0);
+  const landed = q.receive.usd === undefined ? Number(q.receive.amount) : q.receive.usd;
+  const fees = q.feeUsd + gas;
+  if (paid !== null && paid > 0 && landed === null) return Number.isFinite(fees) ? { usd: fees, share: fees / paid } : null;
+  const out = (landed ?? NaN) + (q.extra ? Number(q.extra) : 0);
   if (paid !== null && paid > 0 && Number.isFinite(out)) {
     const usd = Math.max(paid - out, q.feeUsd, 0) + gas;
     return { usd, share: usd / paid };
   }
-  const usd = q.feeUsd + gas;
-  return Number.isFinite(usd) ? { usd, share: null } : null;
+  return Number.isFinite(fees) ? { usd: fees, share: null } : null;
 }
 
 /** The cost to warn about before anything is sent, or null when the route is priced fine (or can't be told). */

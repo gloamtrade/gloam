@@ -26,6 +26,7 @@ import {
   LIVE_PRICE_REFRESH_MS,
   SOLANA_BRIDGE_PRIVACY_NOTE,
   bridgeButton,
+  costedQuote,
   defaultLanding,
   flowReducer,
   loadRefunds,
@@ -635,7 +636,7 @@ function LivePrice({
           ))}
         </dl>
       </div>
-      {quote && <CostWarning quote={quote} />}
+      {quote && <CostWarning quote={costedQuote(quote)} />}
     </div>
   );
 }
@@ -1203,7 +1204,7 @@ function BridgeSheet({
                   {flow.quote.send.chain}
                 </p>
                 <QuoteRows q={{ ...flow.quote, walletPays: true }} />
-                <CostWarning quote={flow.quote} />
+                <CostWarning quote={costedQuote(flow.quote)} />
                 {flow.signing && flow.progress && (
                   <p className="mt-4 flex items-center gap-2.5 rounded-2xl bg-surface px-4 py-3 text-[13.5px] text-foreground">
                     <span aria-hidden className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-foreground/50" />
@@ -1304,7 +1305,7 @@ function Tracking({
       )}
       {showAddress && (
         <>
-          <CostWarning quote={{ ...t, gasUsd: null }} />
+          <CostWarning quote={costedQuote({ ...t, gasUsd: null })} />
           <p className="mt-3 text-[12.5px] leading-relaxed text-mute">
             Send only {t.send.symbol} on {t.send.chain}, and use this address for this transfer only. Sending from an exchange works too.
           </p>
