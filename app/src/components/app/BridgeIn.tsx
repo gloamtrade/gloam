@@ -42,6 +42,7 @@ import type { TrackEvent } from "@/lib/trackEvents";
 import { failedBeforeSend, solanaDeclined, solanaSurelyNotSent, surelyNotSent, walletDeclined, walletErrorText } from "@/lib/walletErrors";
 import { payRelayTxs, wagmiPayActions } from "@/lib/relayWalletPay";
 import { SealedField } from "@/components/ui/SealedField";
+import { Select } from "@/components/ui/Select";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useNetwork } from "./NetworkProvider";
 import { useAccountScope } from "./AccountScope";
@@ -723,6 +724,39 @@ function BridgeSheet({
     return json.data;
   }
 
+  /**
+   * Max when the amount is what lands: the whole balance less Relay's real fee, read
+   * from a price for the whole balance (/api/bridge/quote, what you pay in), with a
+   * quarter of the fee and a cent kept over for the add on arrival and the price
+   * moving. Was a flat 0.5% (826.32 USDC left 4.13 behind for a 0.23 fee). With no
+   * price it falls back to that 0.5%.
+   */
+  async function privateMax(balance: bigint) {
+    const whole = Number(formatUnits(balance, token.decimals));
+    const flat = () => setAmount(String(Math.floor(whole * 0.995 * 100) / 100));
+    try {
+      const res = await fetch("/api/bridge/quote", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chainId: chain.id,
+          symbol: token.symbol,
+          network: network.key,
+          amount: formatUnits(balance, token.decimals),
+          recipient,
+          ...(chain.kind === "svm" && solOwner ? { refundTo: solOwner } : {}),
+        }),
+      });
+      const json = (await res.json()) as { ok: boolean; data?: BridgeQuote };
+      const out = json.ok && json.data ? Number(json.data.receive.amount) : NaN;
+      if (!Number.isFinite(out) || out <= 0 || out > whole) return flat();
+      const fee = whole - out;
+      setAmount(String(Math.max(0, Math.floor((whole - fee * 1.25 - 0.01) * 100) / 100)));
+    } catch {
+      flat();
+    }
+  }
+
   /** Connect the Solana wallet if it pays, make the note and its proof, and price the order. */
   async function startPrivate(e: React.FormEvent) {
     e.preventDefault();
@@ -1229,47 +1263,50 @@ function BridgeSheet({
               </div>
             </div>
 
-            {chain.tokens.length > 1 && (
-              <div role="radiogroup" aria-label="Token" className="flex flex-wrap gap-2">
-                {chain.tokens.map((t) => (
-                  <button
-                    key={t.symbol}
-                    type="button"
-                    role="radio"
-                    aria-checked={t.symbol === token.symbol}
-                    onClick={() => {
-                      setSymbol(t.symbol);
-                      setAmount("");
-                    }}
-                    className={`inline-flex h-10 items-center gap-2 rounded-full border pl-1.5 pr-3.5 text-[14px] transition-colors ${
-                      t.symbol === token.symbol ? "border-foreground text-foreground" : "border-line text-soft hover:bg-surface"
-                    }`}
-                  >
-                    <TokenMark src={t.logo} size={26} />
-                    {t.symbol}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {privately && chain.kind === "svm" && solWallets.length > 1 && (
-              <div role="radiogroup" aria-label="Solana wallet" className="flex flex-wrap gap-2">
-                {solWallets.map((w) => (
-                  <button
-                    key={w.name}
-                    type="button"
-                    role="radio"
-                    aria-checked={solWallet?.name === w.name}
-                    onClick={() => void pickSolWallet(w)}
-                    className={`inline-flex h-10 items-center gap-2 rounded-full border pl-1.5 pr-3.5 text-[14px] transition-colors ${
-                      solWallet?.name === w.name ? "border-foreground text-foreground" : "border-line text-soft hover:bg-surface"
-                    }`}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element -- the wallet's own data-URL icon */}
-                    <img src={w.icon} alt="" width={26} height={26} className="h-[26px] w-[26px] rounded-full" />
-                    {w.name}
-                  </button>
-                ))}
+            {(chain.tokens.length > 1 || (privately && chain.kind === "svm" && solWallets.length > 1)) && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {chain.tokens.length > 1 && (
+                  <div className="min-w-0">
+                    <p className="text-[13px] text-mute">Token</p>
+                    <Select
+                      label="Token"
+                      value={token.symbol}
+                      onChange={(v) => {
+                        setSymbol(v);
+                        setAmount("");
+                      }}
+                      options={chain.tokens.map((t) => ({ value: t.symbol, label: t.symbol, icon: <TokenMark src={t.logo} size={22} /> }))}
+                      className="mt-1.5 h-12 w-full text-[15px]"
+                    />
+                  </div>
+                )}
+                {privately && chain.kind === "svm" && solWallets.length > 1 && (
+                  <div className="min-w-0">
+                    <p className="text-[13px] text-mute">Pay from</p>
+                    <Select
+                      label="Solana wallet"
+                      value={solWallet?.name ?? ""}
+                      onChange={(name) => {
+                        const w = solWallets.find((x) => x.name === name);
+                        if (w) void pickSolWallet(w);
+                      }}
+                      // Wallets already connected to Gloam first, and said so.
+                      options={[...solWallets]
+                        .sort((a, b) => Number(Boolean(solAccounts[b.name])) - Number(Boolean(solAccounts[a.name])))
+                        .map((w) => {
+                          const acct = solAccounts[w.name];
+                          return {
+                            value: w.name,
+                            label: w.name,
+                            // eslint-disable-next-line @next/next/no-img-element -- the wallet's own data-URL icon
+                            icon: <img src={w.icon} alt="" width={22} height={22} className="h-[22px] w-[22px] rounded-full" />,
+                            description: acct ? `Connected, ${acct.address.slice(0, 4)}…${acct.address.slice(-4)}` : "Not connected",
+                          };
+                        })}
+                      className="mt-1.5 h-12 w-full text-[15px]"
+                    />
+                  </div>
+                )}
               </div>
             )}
 
@@ -1306,11 +1343,7 @@ function BridgeSheet({
                     symbol={token.symbol}
                     over={overSource ? chain.name : null}
                     // The amount here is what lands, so Max leaves room for Relay's fee.
-                    onMax={
-                      token.stable && srcBalance != null
-                        ? () => setAmount(String(Math.floor(Number(formatUnits(srcBalance, token.decimals)) * 0.995 * 100) / 100))
-                        : null
-                    }
+                    onMax={token.stable && srcBalance != null ? () => void privateMax(srcBalance) : null}
                   />
                 )}
                 {swapping && maxOut && (
@@ -1322,7 +1355,8 @@ function BridgeSheet({
                     </span>
                     <button
                       type="button"
-                      onClick={() => setAmount(String(Math.floor(maxOut.out * 0.98 * 100) / 100))}
+                      // maxOut is Relay's minimum already (slippage counted): a hair under it, not 2%.
+                      onClick={() => setAmount(String(Math.floor(maxOut.out * 0.997 * 100) / 100))}
                       className="h-9 rounded-full border border-line px-3 text-[12.5px] text-soft transition-colors hover:bg-surface hover:text-foreground"
                     >
                       Max
