@@ -20,6 +20,7 @@ import { useSchedules } from "./payroll/useSchedules";
 import { nameChangeMessage, usePayrollNames } from "./payroll/usePayrollNames";
 import { RelayToggle } from "./RelayToggle";
 import { TokenLogo } from "./TokenLogo";
+import { Select } from "@/components/ui/Select";
 import { SealDots } from "@/components/ui/SealDots";
 import { SealedField } from "@/components/ui/SealedField";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
@@ -27,7 +28,7 @@ import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient, publicClientFor } from "@/lib/rhClient";
 import { track } from "@/lib/track";
 import { countPerson } from "@/lib/people";
-import { addableTokensFor, isNativeAddable, shieldTokensFor } from "@/lib/tokens";
+import { addableTokensFor, isNativeAddable } from "@/lib/tokens";
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
 import {
   NATIVE_ASSET,
@@ -372,11 +373,6 @@ export function PayrollView() {
   const token: AssetOption = assetOptions.find((o) => o.address === assetChoice) ??
     assetOptions[0] ?? { address: NATIVE_ASSET, symbol: "ETH", logoId: "eth" };
   const asset = token.address;
-  // Stablecoins (and the native coin) lead; anything else waits behind "More".
-  const [moreAssets, setMoreAssets] = useState(false);
-  const leadCount =
-    shieldTokensFor(network.chainId).filter((t) => t.kind === "stablecoin").length +
-    (isNativeAddable(network.chainId, openGated) ? 1 : 0);
 
   /** Spendable private balance per asset (only entries the vault tree knows). */
   const balances = useMemo(() => {
@@ -1118,61 +1114,24 @@ export function PayrollView() {
               <h2 className="text-[17px] text-foreground">Pay in</h2>
               <p className="max-sm:hidden text-[13px] text-mute sm:block">Comes out of your private balance</p>
             </div>
-            <div
-              className="max-sm:-mx-5 mt-4 flex gap-2 overflow-x-auto max-sm:px-5 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0 [&::-webkit-scrollbar]:hidden"
-              role="radiogroup"
-              aria-label="Currency"
-            >
-              {assetOptions.map((o, i) => {
-                const selected = o.address === asset;
-                const b = balances.get(o.address.toLowerCase())?.total ?? 0n;
-                if (!moreAssets && i >= leadCount && !selected) return null;
-                return (
-                  <button
-                    key={o.address}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    onClick={() => setAsset(o.address)}
-                    className={`flex h-14 shrink-0 items-center gap-3 rounded-full border pl-2 pr-5 text-left transition-[border-color,box-shadow,background-color] duration-200 ${
-                      selected
-                        ? "border-foreground bg-panel shadow-card"
-                        : "border-line bg-panel hover:border-line-strong hover:bg-surface"
-                    }`}
-                  >
-                    <TokenLogo id={o.logoId} symbol={o.symbol} size={38} />
-                    <span className="min-w-0">
-                      <span className="block text-[14px] font-medium leading-tight text-foreground">{o.symbol}</span>
-                      {/* Signed out no balance is read, so none is named, not even "No private balance". */}
-                      {isConnected && (
-                        <span className="tnum mt-0.5 block text-[12px] leading-tight text-mute">
-                          {b > 0n ? `${formatAssetAmount(b, o.address)} private` : "No private balance"}
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                );
-              })}
-              {assetOptions.length > leadCount && (
-                <button
-                  type="button"
-                  onClick={() => setMoreAssets((v) => !v)}
-                  aria-expanded={moreAssets}
-                  className="flex h-14 shrink-0 items-center gap-2 rounded-full px-4 text-[13px] text-mute transition-colors hover:bg-surface hover:text-foreground"
-                >
-                  {moreAssets ? "Fewer" : `${assetOptions.length - leadCount} more`}
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    aria-hidden
-                    className={`transition-transform duration-200 ${moreAssets ? "rotate-180" : ""}`}
-                  >
-                    <path d="M6 9.5l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-              )}
+            {/* one dropdown, stablecoins first, each with what you hold privately */}
+            <div className="mt-4 max-w-[380px]">
+              <Select
+                label="Pay in"
+                value={asset}
+                onChange={(v) => setAsset(v as Address)}
+                options={assetOptions.map((o) => {
+                  const b = balances.get(o.address.toLowerCase())?.total ?? 0n;
+                  return {
+                    value: o.address,
+                    label: o.symbol,
+                    icon: <TokenLogo id={o.logoId} symbol={o.symbol} size={22} />,
+                    // Signed out no balance is read, so none is named, not even "No private balance".
+                    description: isConnected ? (b > 0n ? `${formatAssetAmount(b, o.address)} private` : "No private balance") : undefined,
+                  };
+                })}
+                className="h-12 w-full text-[15px]"
+              />
             </div>
           </section>
 

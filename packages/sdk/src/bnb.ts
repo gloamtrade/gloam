@@ -80,7 +80,9 @@ export interface BnbMainnetInput {
 
 export const BNB_MAINNET: BnbMainnetInput = {
   chainId: 56,
-  rpcUrls: ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.bnbchain.org"],
+  // publicnode first (it answers eth_getLogs, recent blocks only); dRPC and 1RPC spread the load so one
+  // provider's per-IP rate limit (shared mobile IPs hit it) never leaves balances blank; dataseed last (slow).
+  rpcUrls: ["https://bsc-rpc.publicnode.com", "https://bsc.drpc.org", "https://1rpc.io/bnb", "https://bsc-dataseed.bnbchain.org"],
   explorerUrl: "https://bscscan.com",
   usdt: { address: "0x55d398326f99059fF775485246999027B3197955", decimals: 18 },
   usdc: { address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", decimals: 18 },
@@ -110,7 +112,7 @@ export const BNB_MULTICALL3: Address = "0xcA11bde05977b3631167028862bE2a173976CA
  * The public RPCs that refuse eth_getLogs ("limit exceeded"): BNB Chain's own
  * dataseeds. They serve state, receipts and sends, never a log read.
  */
-export const BNB_NO_LOG_RPCS: readonly string[] = ["https://bsc-dataseed.bnbchain.org"];
+export const BNB_NO_LOG_RPCS: readonly string[] = ["https://bsc.drpc.org", "https://1rpc.io/bnb", "https://bsc-dataseed.bnbchain.org"];
 
 /**
  * Blocks per eth_getLogs the public log RPC takes (publicnode: "exceed maximum

@@ -36,12 +36,13 @@ import { MAINNET_ENABLED, type GloamChainId } from "@/lib/networks";
 import { originChain } from "@/lib/originChains";
 import { useVaultStatus } from "@/lib/passkey";
 import { dropUnsentNote, formatFeePercent, saveLocalNote, updateLocalNote, type LocalNote } from "@/lib/shield";
-import { connectSolana, paySolana, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
+import { connectSolana, paySolana, preferredSolanaWallet, readSolanaBalance, reconnectSolana, rememberSolanaWallet, solanaTxState, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
 import { track } from "@/lib/track";
 import type { TrackEvent } from "@/lib/trackEvents";
 import { failedBeforeSend, solanaDeclined, solanaSurelyNotSent, surelyNotSent, walletDeclined, walletErrorText } from "@/lib/walletErrors";
 import { payRelayTxs, wagmiPayActions } from "@/lib/relayWalletPay";
 import { SealedField } from "@/components/ui/SealedField";
+import { Select } from "@/components/ui/Select";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useNetwork } from "./NetworkProvider";
 import { useAccountScope } from "./AccountScope";
@@ -100,6 +101,10 @@ type PrivateStage =
        * hasn't seen: most likely never sent. Not proof, so its note is kept.
        */
       expired?: boolean;
+      /** The Solana transaction's signature, when the wallet or Gloam's send gave one. */
+      sig?: string | null;
+      /** Seen confirmed on Solana: only Relay is left to wait for. */
+      onChain?: boolean;
     }
   | { kind: "landed"; quote: PrivateBridgeQuote }
   | { kind: "late"; quote: PrivateBridgeQuote }
@@ -167,7 +172,6 @@ export function BridgeInCard({
 }) {
   const { network } = useNetwork();
   const dest = BRIDGE_DESTINATIONS[network.family];
-  const swap = swapSource(network);
   const [opened, setOpen] = useState(false);
   // Closing it, or opening it by hand, uses up the link's one opening.
   const [startUsed, setStartUsed] = useState(false);
@@ -191,11 +195,10 @@ export function BridgeInCard({
       <p className="mt-3 text-[14px] leading-relaxed text-foreground">
         Bring money over from {sources.length} chains, or straight from an exchange.
       </p>
-      <p className="mt-1.5 text-[12.5px] leading-relaxed text-mute">
+      <p className="mt-1.5 max-w-[52ch] text-[13px] leading-relaxed text-mute">
         {solanaPrivate
-          ? `From a Solana wallet it goes straight into your private balance. From anywhere else it lands in your wallet on ${dest.chain} as ${dest.token.symbol}, then you add it here privately.`
-          : `It lands in your wallet on ${dest.chain} as ${dest.token.symbol}. Then you add it here privately.`}
-        {swap && ` Holding ${swap.tokens[0]!.symbol} on ${swap.name}? Swap it to ${dest.token.symbol} here too.`}
+          ? "From your own wallet it can land straight in your private balance."
+          : `It lands in your wallet on ${dest.chain}, then you add it here privately.`}
       </p>
       <button type="button" disabled={!recipient} onClick={() => setOpen(true)} className="btn btn-ghost btn-sm mt-4">
         {recipient ? "Bring money over" : "Connect a wallet first"}
@@ -304,7 +307,46 @@ function BridgeSheet({
   const solWallets = useSolanaWallets();
   const vault = useVaultStatus();
   const [solName, setSolName] = useState("");
-  const solWallet = chain.kind === "svm" ? (solWallets.find((w) => w.name === solName) ?? solWallets[0] ?? null) : null;
+  // Solana wallets already connected to this site, found with a silent reconnect (no prompt):
+  // the one that pays by default, and its account, so its balance shows and Continue asks nothing.
+  const [solAccounts, setSolAccounts] = useState<Record<string, SolanaAccount>>({});
+  const solActive = open && chain.kind === "svm";
+  useEffect(() => {
+    if (!solActive || solWallets.length === 0) return;
+    let live = true;
+    void Promise.all(
+      solWallets.map(async (w) => {
+        const acct = await Promise.race([reconnectSolana(w), new Promise<null>((r) => window.setTimeout(() => r(null), 4000))]);
+        return [w.name, acct] as const;
+      })
+    ).then((rows) => {
+      if (!live) return;
+      const found: Record<string, SolanaAccount> = {};
+      for (const [n, a] of rows) if (a) found[n] = a;
+      setSolAccounts((prev) => ({ ...found, ...prev }));
+    });
+    return () => {
+      live = false;
+    };
+  }, [solActive, solWallets]);
+  const solWallet =
+    chain.kind === "svm" ? preferredSolanaWallet(solWallets, { picked: solName, evmName: connector?.name, trusted: Object.keys(solAccounts) }) : null;
+  const solAccount = solWallet ? (solAccounts[solWallet.name] ?? null) : null;
+  const [solConnectError, setSolConnectError] = useState<string | null>(null);
+  /** Pick a Solana wallet: remembered for next time, and connected now so its balance shows. */
+  async function pickSolWallet(w: SolanaWallet) {
+    setSolName(w.name);
+    rememberSolanaWallet(w.name);
+    setSolConnectError(null);
+    if (solAccounts[w.name]) return;
+    try {
+      const acct = await connectSolana(w);
+      setSolAccounts((prev) => ({ ...prev, [w.name]: acct }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message.split("\n")[0]! : "";
+      setSolConnectError(solanaDeclined(msg) ? `${w.name} didn't connect.` : `Couldn't connect ${w.name}. Open it, unlock it and try again, or pick another wallet.`);
+    }
+  }
   const switchable = connector?.type === "injected" || connector?.type === "walletConnect";
   const canPrivate =
     !demo &&
@@ -372,8 +414,27 @@ function BridgeSheet({
     query: { enabled: balanceReadable && nativeToken, retry: 1 },
   });
   const srcRead = nativeToken ? srcCoin : srcToken;
-  const srcBalance: bigint | null = balanceReadable && !srcRead.isError ? (nativeToken ? srcCoin.data?.value : srcToken.data) ?? null : null;
-  const srcLoading = balanceReadable && srcRead.isLoading;
+  // The paying Solana wallet's balance of the picked token, once it is connected.
+  const solOwner = solActive ? (solAccount?.address ?? null) : null;
+  const solKey = solOwner ? `${solOwner}:${token.address}` : null;
+  const [solBal, setSolBal] = useState<{ key: string; value: bigint | null } | null>(null);
+  useEffect(() => {
+    if (!solOwner || !solKey) return;
+    let live = true;
+    void readSolanaBalance(solOwner, token.address).then((value) => live && setSolBal({ key: solKey, value }));
+    return () => {
+      live = false;
+    };
+  }, [solOwner, solKey, token.address]);
+  const srcBalance: bigint | null =
+    chain.kind === "svm"
+      ? solKey && solBal?.key === solKey
+        ? solBal.value
+        : null
+      : balanceReadable && !srcRead.isError
+        ? ((nativeToken ? srcCoin.data?.value : srcToken.data) ?? null)
+        : null;
+  const srcLoading = chain.kind === "svm" ? Boolean(solKey && solBal?.key !== solKey) : balanceReadable && srcRead.isLoading;
   // Not private, from an EVM chain, with a wallet that can switch there: the wallet
   // signs the bridge to itself. A deposit address stays one tap away, for an exchange.
   const walletPays =
@@ -617,8 +678,31 @@ function BridgeSheet({
   // out, so the person may start over. Its note stays saved, out of the
   // balance: Relay not seeing it (or a status read that failed) is no proof,
   // and if it lands after all the sync counts it (lib/claimSweep).
+  // A Solana send with a signature: read it on Solana every few seconds until it
+  // lands. Landed with an error, nothing moved: the note goes and the person can
+  // try again. Not seen at all past the transaction's life: expired below.
   useEffect(() => {
-    if (!sentPriv?.unsure || !sentPriv.quote.solanaTx || sentPriv.expired) return;
+    const sig = sentPriv?.sig;
+    if (!sentPriv || !sig || !sentPriv.quote.solanaTx || sentPriv.onChain || sentPriv.expired) return;
+    let live = true;
+    const check = async () => {
+      const state = await solanaTxState(sig);
+      if (!live) return;
+      if (state === "landed") setPriv((p) => (p === sentPriv ? { ...sentPriv, onChain: true } : p));
+      else if (state === "failed") {
+        dropUnsentNote(sentPriv.note.id);
+        setPriv({ kind: "failed", quote: sentPriv.quote });
+      }
+    };
+    void check();
+    const t = window.setInterval(() => void check(), 4000);
+    return () => {
+      live = false;
+      window.clearInterval(t);
+    };
+  }, [sentPriv]);
+  useEffect(() => {
+    if (!sentPriv || sentPriv.onChain || !(sentPriv.unsure || sentPriv.sig) || !sentPriv.quote.solanaTx || sentPriv.expired) return;
     const left = Math.max(0, sentPriv.at + 150_000 - Date.now());
     const t = window.setTimeout(() => setPriv((p) => (p === sentPriv ? { ...sentPriv, expired: true } : p)), left);
     return () => window.clearTimeout(t);
@@ -665,6 +749,39 @@ function BridgeSheet({
     return json.data;
   }
 
+  /**
+   * Max when the amount is what lands: the whole balance less Relay's real fee, read
+   * from a price for the whole balance (/api/bridge/quote, what you pay in), with a
+   * quarter of the fee and a cent kept over for the add on arrival and the price
+   * moving. Was a flat 0.5% (826.32 USDC left 4.13 behind for a 0.23 fee). With no
+   * price it falls back to that 0.5%.
+   */
+  async function privateMax(balance: bigint) {
+    const whole = Number(formatUnits(balance, token.decimals));
+    const flat = () => setAmount(String(Math.floor(whole * 0.995 * 100) / 100));
+    try {
+      const res = await fetch("/api/bridge/quote", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chainId: chain.id,
+          symbol: token.symbol,
+          network: network.key,
+          amount: formatUnits(balance, token.decimals),
+          recipient,
+          ...(chain.kind === "svm" && solOwner ? { refundTo: solOwner } : {}),
+        }),
+      });
+      const json = (await res.json()) as { ok: boolean; data?: BridgeQuote };
+      const out = json.ok && json.data ? Number(json.data.receive.amount) : NaN;
+      if (!Number.isFinite(out) || out <= 0 || out > whole) return flat();
+      const fee = whole - out;
+      setAmount(String(Math.max(0, Math.floor((whole - fee * 1.25 - 0.01) * 100) / 100)));
+    } catch {
+      flat();
+    }
+  }
+
   /** Connect the Solana wallet if it pays, make the note and its proof, and price the order. */
   async function startPrivate(e: React.FormEvent) {
     e.preventDefault();
@@ -680,8 +797,13 @@ function BridgeSheet({
     try {
       let account: SolanaAccount | null = null;
       if (wallet) {
-        setPriv({ kind: "working", text: `Connecting ${wallet.name}…` });
-        account = await connectSolana(wallet);
+        account = solAccounts[wallet.name] ?? null;
+        if (!account) {
+          setPriv({ kind: "working", text: `Connecting ${wallet.name}…` });
+          account = await connectSolana(wallet);
+          const got = account;
+          setSolAccounts((prev) => ({ ...prev, [wallet.name]: got }));
+        }
       }
       step = "prepare";
       const key = `${network.key}:${dest.token.address}:${wei}`;
@@ -717,7 +839,9 @@ function BridgeSheet({
           step === "connect"
             ? solanaDeclined(msg)
               ? `${payerName} didn't connect. Nothing moved.`
-              : `Couldn't connect ${payerName}. Try again.`
+              : solWallets.length > 1
+                ? `Couldn't connect ${payerName}. If you use another wallet, pick it above.`
+                : `Couldn't connect ${payerName}. Open it, unlock it and try again.`
             : step === "prepare"
               ? "Couldn't prepare your private deposit. Try again."
               : msg || "Something went wrong. Try again.",
@@ -760,8 +884,9 @@ function BridgeSheet({
 
     if (quote.solanaTx && r.wallet && r.account) {
       let unsure = false;
+      let sig: string | null = null;
       try {
-        await paySolana(r.wallet, r.account, quote.solanaTx);
+        sig = await paySolana(r.wallet, r.account, quote.solanaTx);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
         if (solanaSurelyNotSent(msg)) {
@@ -780,7 +905,7 @@ function BridgeSheet({
       }
       prepared.current = null;
       setStatus(null);
-      setPriv({ kind: "sent", quote, note: r.note, payer: r.wallet.name, hash: null, unsure, at: Date.now() });
+      setPriv({ kind: "sent", quote, note: r.note, payer: r.wallet.name, hash: null, unsure: unsure || !sig, at: Date.now(), sig });
       once(`private-sent:${quote.requestId}`, "bridge_private_sent", { source: quote.send.chain, token: quote.send.symbol });
       return;
     }
@@ -1164,48 +1289,57 @@ function BridgeSheet({
               </div>
             </div>
 
-            {chain.tokens.length > 1 && (
-              <div role="radiogroup" aria-label="Token" className="flex flex-wrap gap-2">
-                {chain.tokens.map((t) => (
-                  <button
-                    key={t.symbol}
-                    type="button"
-                    role="radio"
-                    aria-checked={t.symbol === token.symbol}
-                    onClick={() => {
-                      setSymbol(t.symbol);
-                      setAmount("");
-                    }}
-                    className={`inline-flex h-10 items-center gap-2 rounded-full border pl-1.5 pr-3.5 text-[14px] transition-colors ${
-                      t.symbol === token.symbol ? "border-foreground text-foreground" : "border-line text-soft hover:bg-surface"
-                    }`}
-                  >
-                    <TokenMark src={t.logo} size={26} />
-                    {t.symbol}
-                  </button>
-                ))}
+            {(chain.tokens.length > 1 || (privately && chain.kind === "svm" && solWallets.length > 1)) && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {chain.tokens.length > 1 && (
+                  <div className="min-w-0">
+                    <p className="text-[13px] text-mute">Token</p>
+                    <Select
+                      label="Token"
+                      value={token.symbol}
+                      onChange={(v) => {
+                        setSymbol(v);
+                        setAmount("");
+                      }}
+                      options={chain.tokens.map((t) => ({ value: t.symbol, label: t.symbol, icon: <TokenMark src={t.logo} size={22} /> }))}
+                      className="mt-1.5 h-12 w-full text-[15px]"
+                    />
+                  </div>
+                )}
+                {privately && chain.kind === "svm" && solWallets.length > 1 && (
+                  <div className="min-w-0">
+                    <p className="text-[13px] text-mute">Pay from</p>
+                    <Select
+                      label="Solana wallet"
+                      value={solWallet?.name ?? ""}
+                      onChange={(name) => {
+                        const w = solWallets.find((x) => x.name === name);
+                        if (w) void pickSolWallet(w);
+                      }}
+                      // Wallets already connected to Gloam first, and said so.
+                      options={[...solWallets]
+                        .sort((a, b) => Number(Boolean(solAccounts[b.name])) - Number(Boolean(solAccounts[a.name])))
+                        .map((w) => {
+                          const acct = solAccounts[w.name];
+                          return {
+                            value: w.name,
+                            label: w.name,
+                            // eslint-disable-next-line @next/next/no-img-element -- the wallet's own data-URL icon
+                            icon: <img src={w.icon} alt="" width={22} height={22} className="h-[22px] w-[22px] rounded-full" />,
+                            description: acct ? `Connected, ${acct.address.slice(0, 4)}…${acct.address.slice(-4)}` : "Not connected",
+                          };
+                        })}
+                      className="mt-1.5 h-12 w-full text-[15px]"
+                    />
+                  </div>
+                )}
               </div>
             )}
 
-            {privately && chain.kind === "svm" && solWallets.length > 1 && (
-              <div role="radiogroup" aria-label="Solana wallet" className="flex flex-wrap gap-2">
-                {solWallets.map((w) => (
-                  <button
-                    key={w.name}
-                    type="button"
-                    role="radio"
-                    aria-checked={solWallet?.name === w.name}
-                    onClick={() => setSolName(w.name)}
-                    className={`inline-flex h-10 items-center gap-2 rounded-full border pl-1.5 pr-3.5 text-[14px] transition-colors ${
-                      solWallet?.name === w.name ? "border-foreground text-foreground" : "border-line text-soft hover:bg-surface"
-                    }`}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element -- the wallet's own data-URL icon */}
-                    <img src={w.icon} alt="" width={26} height={26} className="h-[26px] w-[26px] rounded-full" />
-                    {w.name}
-                  </button>
-                ))}
-              </div>
+            {privately && chain.kind === "svm" && solConnectError && (
+              <p role="alert" className="text-[13px] text-danger">
+                {solConnectError}
+              </p>
             )}
 
             {privately ? (
@@ -1235,11 +1369,7 @@ function BridgeSheet({
                     symbol={token.symbol}
                     over={overSource ? chain.name : null}
                     // The amount here is what lands, so Max leaves room for Relay's fee.
-                    onMax={
-                      token.stable && srcBalance != null
-                        ? () => setAmount(String(Math.floor(Number(formatUnits(srcBalance, token.decimals)) * 0.995 * 100) / 100))
-                        : null
-                    }
+                    onMax={token.stable && srcBalance != null ? () => void privateMax(srcBalance) : null}
                   />
                 )}
                 {swapping && maxOut && (
@@ -1251,7 +1381,8 @@ function BridgeSheet({
                     </span>
                     <button
                       type="button"
-                      onClick={() => setAmount(String(Math.floor(maxOut.out * 0.98 * 100) / 100))}
+                      // maxOut is Relay's minimum already (slippage counted): a hair under it, not 2%.
+                      onClick={() => setAmount(String(Math.floor(maxOut.out * 0.997 * 100) / 100))}
                       className="h-9 rounded-full border border-line px-3 text-[12.5px] text-soft transition-colors hover:bg-surface hover:text-foreground"
                     >
                       Max
@@ -2028,11 +2159,13 @@ function PrivateProgress({
           : q.sameChain
             ? `Swapping and adding ${amount} to your private balance…`
             : relay === "waiting"
-              ? stage.unsure
-                ? stage.expired
-                  ? `Relay hasn't seen a payment from ${stage.payer}, so it most likely didn't go out. If it did, it shows in your private balance by itself. Start over to try again.`
-                  : `Checking whether ${stage.payer} sent it…`
-                : `Sent from ${stage.payer}. Waiting for ${q.send.chain} to confirm…`
+              ? stage.kind === "sent" && stage.expired
+                ? `${q.send.chain} never confirmed a payment from ${stage.payer}, so it didn't go out and your money is still in your wallet. Start over to try again.`
+                : stage.kind === "sent" && stage.onChain
+                  ? `Confirmed on ${q.send.chain}. Relay is moving it to ${q.receive.chain}…`
+                  : stage.unsure
+                    ? `Checking whether ${stage.payer} sent it…`
+                    : `Sent from ${stage.payer}. Waiting for ${q.send.chain} to confirm…`
               : `Received. Adding ${amount} to your private balance on ${q.receive.chain}…`;
   return (
     <div className="mt-5">

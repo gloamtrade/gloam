@@ -25,7 +25,6 @@ const groups: {
       // only while people see the testnets (lib/showTestnets)
       ...(SHOW_TESTNETS ? [{ href: "/docs/testnet", label: "Testnet guide" }] : []),
       { href: "/testers", label: "Become a tester" },
-      { href: "/contest", label: "Video contest" },
       { href: "/contest/writers", label: "Writing contest" },
     ],
   },
@@ -48,6 +47,7 @@ const groups: {
       { href: "/research", label: "Research" },
       { href: "/transparency", label: "Transparency" },
       { href: "/stats", label: "Stats" },
+      { href: "https://status.gloam.trade", label: "Status", external: true },
       { href: "/brand", label: "Brand" },
       // public/pitch/index.html through a rewrite: Link's prefetch of it 404'd on every page
       { href: "/pitch", label: "Pitch", document: true },
@@ -88,31 +88,32 @@ function GitHubIcon() {
 /**
  * Footer: an ink panel with an etched dusk landscape bleeding off the bottom,
  * a lone courier carrying a sealed letter. Always dark, in either theme.
+ * Three calm bands: the line and the sign-up, four link columns, then the
+ * small print, each with room to breathe.
  */
 export function Footer() {
   const year = new Date().getFullYear();
+  const linkCls = "gl-tap text-[15px] text-soft transition-colors hover:text-foreground";
+  const columns = [...groups, { title: "Legal", links: legal }];
 
   return (
     <footer className="mx-auto w-full max-w-[1400px] px-4 pb-4 pt-24 sm:px-7 sm:pb-7 sm:pt-32">
       <div className="theme-dark gl-panel rounded-[28px] bg-black text-foreground">
-        <div className="relative z-10 mx-auto max-w-[1240px] px-6 pt-12 sm:px-12 sm:pt-16">
-          <div className="grid gap-12 lg:grid-cols-[1.25fr_2fr]">
+        <div className="relative z-10 mx-auto max-w-[1240px] px-7 pt-16 sm:px-12 sm:pt-24 lg:px-16">
+          {/* the line, and how to keep in touch */}
+          <div className="grid gap-12 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:items-end lg:gap-20">
             <div>
               <div className="flex items-center gap-2.5">
                 <Mark size={26} />
                 <span className="text-[19px] font-medium tracking-[-0.015em]">Gloam</span>
               </div>
-              <p className="mt-6 max-w-[17ch] text-[26px] font-light leading-[1.15] tracking-[-0.02em] text-soft">
+              <p className="mt-10 max-w-[14ch] text-balance text-[40px] font-light leading-[1.05] tracking-[-0.03em] text-foreground sm:text-[56px]">
                 Private money on public chains.
               </p>
-              <a
-                href="mailto:hello@gloam.trade"
-                className="gl-tap mt-4 inline-block text-[15px] text-mute transition-colors hover:text-foreground"
-              >
-                hello@gloam.trade
-              </a>
+            </div>
+            <div className="lg:pb-2">
               <FooterUpdates />
-              <div className="-ml-3 mt-8 flex items-center gap-1">
+              <div className="-ml-2.5 mt-6 flex items-center gap-1">
                 <a
                   href="https://x.com/gloamtrade"
                   target="_blank"
@@ -140,84 +141,62 @@ export function Footer() {
                 >
                   <GitHubIcon />
                 </a>
+                <a href="mailto:hello@gloam.trade" className="gl-tap ml-3 text-[15px] text-soft transition-colors hover:text-foreground">
+                  hello@gloam.trade
+                </a>
               </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-3">
-              {groups.map((g) => (
-                <div key={g.title}>
-                  <p className="text-[13px] font-medium text-foreground">
-                    {g.title}
-                  </p>
-                  <ul className="mt-5 space-y-3">
-                    {g.links.map((l) => (
-                      <li key={l.href}>
-                        {l.external ? (
-                          <a
-                            href={l.href}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="gl-tap text-[14.5px] text-soft transition-colors hover:text-foreground"
-                          >
-                            {l.label}
-                          </a>
-                        ) : l.document ? (
-                          <a href={l.href} className="gl-tap text-[14.5px] text-soft transition-colors hover:text-foreground">
-                            {l.label}
-                          </a>
-                        ) : l.href.startsWith("/app") ? (
-                          <AppLink
-                            href={l.href}
-                            className="gl-tap text-[14.5px] text-soft transition-colors hover:text-foreground"
-                          >
-                            {l.label}
-                          </AppLink>
-                        ) : (
-                          <Link
-                            href={l.href}
-                            className="gl-tap text-[14.5px] text-soft transition-colors hover:text-foreground"
-                          >
-                            {l.label}
-                          </Link>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
             </div>
           </div>
 
-          {/* the official contract on every page, so anyone can check an address against the site */}
-          <p className="mt-12 text-[12.5px] text-mute">
-            $GLOAM contract on Robinhood Chain:{" "}
-            <Link href="/token" className="tnum text-soft [overflow-wrap:anywhere] transition-colors hover:text-foreground">
-              0xDcD885F5c60b3aD49F6D58718696417314e8724d
-            </Link>
-          </p>
+          {/* four columns, evenly spaced */}
+          <div className="mt-16 grid grid-cols-2 gap-x-8 gap-y-12 border-t border-white/10 pt-12 sm:mt-20 sm:grid-cols-4 sm:pt-14">
+            {columns.map((g) => (
+              <div key={g.title}>
+                <p className="text-[13px] text-mute">{g.title}</p>
+                <ul className="mt-6 space-y-4">
+                  {g.links.map((l) => (
+                    <li key={l.href}>
+                      {"external" in l && l.external ? (
+                        <a href={l.href} target="_blank" rel="noreferrer" className={linkCls}>
+                          {l.label}
+                        </a>
+                      ) : "document" in l && l.document ? (
+                        <a href={l.href} className={linkCls}>
+                          {l.label}
+                        </a>
+                      ) : l.href.startsWith("/app") ? (
+                        <AppLink href={l.href} className={linkCls}>
+                          {l.label}
+                        </AppLink>
+                      ) : (
+                        <Link href={l.href} className={linkCls}>
+                          {l.label}
+                        </Link>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
 
-          <div className="mt-5 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <p className="text-[12.5px] text-mute">
-              © {year} Gloam. Live on mainnet. Not investment, legal or tax advice.
-            </p>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-              <ThemeSegmented />
-              <nav aria-label="Legal" className="flex flex-wrap items-center text-[12.5px] text-mute">
-                {legal.map((l, i) => (
-                  <span key={l.href} className="flex items-center">
-                    {i > 0 && <span aria-hidden className="mx-3 h-3 w-px bg-line-strong" />}
-                    <Link href={l.href} className="gl-tap transition-colors hover:text-foreground">
-                      {l.label}
-                    </Link>
-                  </span>
-                ))}
-              </nav>
+          {/* the small print: who, the official contract (so anyone can check an address against the site), the theme */}
+          <div className="mt-16 flex flex-col gap-6 border-t border-white/10 py-8 sm:mt-20 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-col gap-2 text-[13px] text-mute sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-8">
+              <span>© {year} Gloam. Not investment, legal or tax advice.</span>
+              <span>
+                $GLOAM on Robinhood Chain{" "}
+                <Link href="/token" className="tnum text-soft [overflow-wrap:anywhere] transition-colors hover:text-foreground">
+                  0xDcD885F5c60b3aD49F6D58718696417314e8724d
+                </Link>
+              </span>
             </div>
+            <ThemeSegmented />
           </div>
         </div>
 
         {/* the etching bleeds off the bottom; its black sky is the panel */}
-        <div className="relative -mt-6 h-[220px] sm:h-[300px] lg:h-[360px]">
+        <div className="relative -mt-4 h-[220px] sm:h-[300px] lg:h-[360px]">
           <Image
             src="/brand/art/courier-etching.jpg"
             alt="An engraved desert at dusk with a lone courier on horseback carrying a sealed letter"

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { STARKNET_PRIVACY } from "@gloamtrade/sdk";
 import { AppLink } from "@/components/AppLink";
 import { DocsLayout } from "@/components/DocsLayout";
+import { BNB_ENABLED } from "@/lib/bnb";
 import { STARKNET_ENABLED, starknetConfig } from "@/lib/starknetPrivacy/config";
 import { PAYROLL_MAX_ROWS, PAYROLL_PROOF_MAX } from "@/lib/starknetPrivacy/payroll";
 import { STARKNET_DOCS_NAME } from "./starknetDocs";
@@ -213,8 +214,8 @@ export default function DocsStarknetPage() {
           Starknet and adds it.
         </li>
         <li>
-          From Robinhood Chain, Tempo, BNB Chain and Elysium, one Relay order
-          takes the USDC through Base first. You still sign once.
+          {BNB_ENABLED ? "From Robinhood Chain, Tempo, BNB Chain and Elysium" : "From Robinhood Chain, Tempo and Elysium"}, one
+          Relay order takes the USDC through Base first. You still sign once.
         </li>
         <li>From a Solana wallet.</li>
         <li>
