@@ -72,32 +72,34 @@ export default function DocsFreshWalletPage() {
       </p>
 
       <h2 id="public">What is public and what is private</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Public</th>
-            <th>Private</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>The position, its size and everything the fresh wallet does on Borro</td>
-            <td>Which deposit the money came from</td>
-          </tr>
-          <tr>
-            <td>The fresh wallet and its gas station</td>
-            <td>Your other private balance and payments</td>
-          </tr>
-          <tr>
-            <td>Each cash out&apos;s amount, destination and time</td>
-            <td>Who the cash out belongs to, unless something else links it</td>
-          </tr>
-          <tr>
-            <td>That the money came out of the Gloam vault</td>
-            <td></td>
-          </tr>
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Public</th>
+              <th>Private</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>The position, its size and everything the fresh wallet does on Borro</td>
+              <td>Which deposit the money came from</td>
+            </tr>
+            <tr>
+              <td>The fresh wallet and its gas station</td>
+              <td>Your other private balance and payments</td>
+            </tr>
+            <tr>
+              <td>Each cash out&apos;s amount, destination and time</td>
+              <td>Who the cash out belongs to, unless something else links it</td>
+            </tr>
+            <tr>
+              <td>That the money came out of the Gloam vault</td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <p>
         This doesn&apos;t make the position private. It keeps the position from pointing to your main wallet, and only
         for as long as nothing else links the two.

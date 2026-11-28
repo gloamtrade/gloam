@@ -11,13 +11,15 @@
  * read runs without loading it.
  */
 import type { Address } from "viem";
+import { scopedKey, writableKey } from "./accountSlot";
 import { openJson, sealJson } from "./noteVault";
 import type { PayrollBatch, PayrollRow } from "./payroll";
 import { makeSentLink, paymentNullifier } from "./sentLinks";
 import { restoreSentLinks } from "./sentLinksStore";
 import { assetLabel } from "./shield";
 
-const STORE_KEY = "gloam.payroll.v1";
+/** The runs of the browser's first account; every other sign-in's carry a suffix (lib/accountSlot). */
+export const STORE_KEY = "gloam.payroll.v1";
 /** Held while a tab writes runs (Web Locks), so tabs take turns. */
 const STORE_LOCK = "gloam-payroll-store";
 /** Runs this browser could not open (another key, damaged data), set aside so a write never destroys them. */
@@ -35,13 +37,21 @@ export function holdsPendingPayment(r: PayrollRow): boolean {
   return Boolean(r.spendNullifier) && r.status !== "paid" && r.status !== "failed";
 }
 
-async function readAll(raw = typeof window === "undefined" ? null : window.localStorage.getItem(STORE_KEY)): Promise<PayrollBatch[]> {
+/** The bound account's runs as stored (none with no account bound). */
+function storedRaw(): string | null {
+  if (typeof window === "undefined") return null;
+  const key = scopedKey(STORE_KEY);
+  return key ? window.localStorage.getItem(key) : null;
+}
+
+async function readAll(raw = storedRaw()): Promise<PayrollBatch[]> {
   if (typeof window === "undefined") return [];
   if (!raw) return [];
   const all = await openJson<PayrollBatch[]>(raw);
   if (!Array.isArray(all)) {
     // Another key or damaged data: keep the ciphertext aside before anything writes over it.
-    if (!window.localStorage.getItem(UNREADABLE_KEY)) window.localStorage.setItem(UNREADABLE_KEY, raw);
+    const aside = scopedKey(UNREADABLE_KEY);
+    if (aside && !window.localStorage.getItem(aside)) window.localStorage.setItem(aside, raw);
     return [];
   }
   return all;
@@ -61,17 +71,19 @@ function withStoreLock<T>(fn: () => Promise<T>): Promise<T> {
  * Locks, a write that lands meanwhile is read again and the change made over it.
  */
 async function mutate(change: (all: PayrollBatch[]) => PayrollBatch[] | null): Promise<void> {
+  // the bound account's runs: with none bound this throws and nothing is written
+  const key = writableKey(STORE_KEY);
   await withStoreLock(async () => {
     for (let attempt = 0; ; attempt++) {
-      const raw = window.localStorage.getItem(STORE_KEY);
+      const raw = window.localStorage.getItem(key);
       const next = change(await readAll(raw));
       if (!next) return;
       // Claim links are money: stored encrypted under the same device key as notes.
       let others = 0;
       const kept = next.filter((b) => b.rows.some(holdsPendingPayment) || ++others <= KEEP_RUNS);
       const sealed = await sealJson(kept);
-      if (window.localStorage.getItem(STORE_KEY) !== raw && attempt < 5) continue;
-      window.localStorage.setItem(STORE_KEY, sealed);
+      if (window.localStorage.getItem(key) !== raw && attempt < 5) continue;
+      window.localStorage.setItem(key, sealed);
       window.dispatchEvent(new Event(PAYROLL_SAVED_EVENT));
       return;
     }

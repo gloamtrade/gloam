@@ -13,6 +13,12 @@ import { CashOutProofRefresh } from "./CashOutProofRefresh";
 import { ReconnectWatchdog } from "./ReconnectWatchdog";
 import { PeopleCount } from "./PeopleCount";
 import { RecoverySync } from "./RecoverySync";
+import { AccountScope } from "./AccountScope";
+import { SolanaAccountProvider } from "./SolanaAccount";
+import { GloamSolanaAutoConnect } from "./GloamSolanaAutoConnect";
+import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
+import { StarknetAccountProvider } from "./StarknetAccount";
 
 // Brings the private balance back on a new device after sign-in. Loaded apart from the page.
 const AutoRestore = dynamic(() => import("./AutoRestore"), { ssr: false });
@@ -44,13 +50,29 @@ export function Web3Provider({ children }: { children: ReactNode }) {
               <TurnkeyKitGate />
             </>
           )}
+          {/* Binds the signed-in account's own private account before anything private is read (lib/accountScope) */}
+          <AccountScope />
           <CashOutProofRefresh />
           <RecoverySync />
           <AutoRestore />
           <PeopleCount />
-          {children}
+          {/* Gloam on Solana: one account for every page while Solana is the network picked;
+              someone signed in with a Gloam wallet is connected to its Solana account (GloamSolanaAutoConnect) */}
+          {SOLANA_RINGS_ENABLED ? (
+            <SolanaAccountProvider>
+              {EMBEDDED_WALLETS && <GloamSolanaAutoConnect />}
+              <StarknetSide>{children}</StarknetSide>
+            </SolanaAccountProvider>
+          ) : (
+            <StarknetSide>{children}</StarknetSide>
+          )}
         </NetworkProvider>
       </QueryClientProvider>
     </WagmiProvider>
   );
+}
+
+/** Gloam on Starknet: one account for every page while Starknet is the network picked (only while it is on). */
+function StarknetSide({ children }: { children: ReactNode }) {
+  return STARKNET_ENABLED ? <StarknetAccountProvider>{children}</StarknetAccountProvider> : <>{children}</>;
 }

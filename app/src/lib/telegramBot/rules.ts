@@ -565,7 +565,7 @@ export function plain(raw: string): string {
  */
 export function scorable(raw: string): string {
   let text = plain(raw);
-  for (const line of tokenCard().split("\n")) if (line.trim()) text = text.split(line.trim()).join(" ");
+  for (const line of [...tokenCard().split("\n"), ...buyGuide().split("\n")]) if (line.trim()) text = text.split(line.trim()).join(" ");
   return text.replace(new RegExp(SHARED_LABEL.source, "gi"), " ").replace(NO_DROP, " ");
 }
 
@@ -1436,20 +1436,38 @@ const CA_ASKED =
 const BUY_ASKED =
   /\b(?:where|how)\s+(?:can|do|should|to)\s+(?:i\s+|we\s+|one\s+)?(?:buy|purchase|ape(?:\s+into)?|get)\s+(?:some\s+)?(?:\$gloam|gloam\s+tokens?|the\s+gloam\s+token)\b|\b(?:where|how)\s+(?:can|do|should|to)\s+(?:i\s+|we\s+)?(?:buy|purchase|ape)\b[^.!?\n]{0,20}\b(?:\$?gloam|the\s+token)\b/i;
 
+const askText = (raw: string) => norm(raw).replace(/(?<![\w@])@\w+/g, " ").replace(/\s+/g, " ").trim();
+
 /** "CA?", "wen contract", "what's the CA", "where can I buy $GLOAM": asking for the token's address. A message that already has one is not asking. */
 export function asksTokenAddress(raw: string): boolean {
-  const t = norm(raw).replace(/(?<![\w@])@\w+/g, " ").replace(/\s+/g, " ").trim();
+  const t = askText(raw);
   if (!t || wordCount(t) > 25 || EVM_ADDRESS.test(t)) return false;
   return CA_ONLY.test(t) || CA_ASKED.test(t) || BUY_ASKED.test(t);
 }
 
-/** The official answer to "CA?": the address, the facts that matter, and where the rest lives. */
+/** "How do I buy $GLOAM?", "where can I get gloam": asking how to buy, not only for the address. */
+export function asksHowToBuy(raw: string): boolean {
+  const t = askText(raw);
+  return Boolean(t) && wordCount(t) <= 25 && !EVM_ADDRESS.test(t) && BUY_ASKED.test(t);
+}
+
+/** The answer to "CA?": the address, the one warning that matters, and where the rest lives. */
 export function tokenCard(): string {
   return [
-    `$GLOAM on Robinhood Chain mainnet:\n${GLOAM_TOKEN.address}`,
-    "Fixed supply of 500,000. Launch liquidity locked for good. No presale and no team allocation.",
-    `Uses, tokenomics and roadmap: ${GLOAM_TOKEN.page}\nGet it on Orynth: ${GLOAM_TOKEN.orynth}\nChart: ${GLOAM_TOKEN.chart}`,
-    "That address is the only real one. A copycat token also called GLOAM trades on Robinhood Chain too, so on Uniswap paste this address instead of searching the name. Not financial advice.",
+    `$GLOAM on Robinhood Chain:\n${GLOAM_TOKEN.address}`,
+    "On Uniswap, paste this address instead of searching the name. A copycat called GLOAM trades there too.",
+    `Chart: ${GLOAM_TOKEN.chart}\nMore: ${GLOAM_TOKEN.page}`,
+  ].join("\n\n");
+}
+
+/** The answer to "how do I buy $GLOAM?": the practical ways, with the address. */
+export function buyGuide(): string {
+  return [
+    "A few ways to get $GLOAM:",
+    "1. Privately on Gloam. Add ETH or USDG at gloam.trade, on Robinhood Chain or straight from Solana, Base, Ethereum and more. Then Vault > Swap to $GLOAM. Nobody sees who bought.",
+    "2. Any wallet on Robinhood Chain. Swap ETH or USDG for $GLOAM on Uniswap. Paste the address, don't search the name: a copycat uses it.",
+    "3. From an exchange. Withdraw ETH or USDC to your own wallet first, then add it on Gloam or bridge it to Robinhood Chain.",
+    `Address: ${GLOAM_TOKEN.address}\nNot financial advice.`,
   ].join("\n\n");
 }
 

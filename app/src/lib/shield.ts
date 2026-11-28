@@ -8,9 +8,12 @@ import { knownTokens } from "./tokens";
 import { getActiveNetwork, type GloamNetwork } from "./networks";
 import { makeBoundNote } from "./note";
 import { readAmountText } from "./amountText";
-import { dataKeyLocked, getAllNotes, setAllNotes, syncFromDisk, unlockNoteVault } from "./noteVault";
+import { displayAmount } from "./amountShort";
+import { dataKeyLocked, getAllNotes, noteOwnerProblem, setAllNotes, syncFromDisk, unlockNoteVault } from "./noteVault";
+import { accountScopeOn, boundAccount, SIGNED_OUT_MESSAGE } from "./accountSlot";
 import { readDemo } from "./demoFlag";
 import type { VaultSwapRefundInfo } from "./vaultSwap";
+import type { NameClaimRefundInfo } from "./nameClaim";
 import type { DelayWindow } from "./relay/scheduled";
 import { scanDeposits } from "./depositScan";
 import { isElysiumFamilyChainId } from "./elysium";
@@ -362,8 +365,8 @@ export function notesOnNetwork<T extends Pick<LocalNote, "chainId" | "pool">>(no
   return notes.filter((n) => inActiveScope(n, scope));
 }
 
-/** What every view that would show the private balance says while no wallet is connected. */
-export const SIGNED_OUT_BALANCE_MESSAGE = "Connect a wallet to see your private balance.";
+/** What every view that would show the private balance says while no one is signed in. */
+export const SIGNED_OUT_BALANCE_MESSAGE = SIGNED_OUT_MESSAGE;
 
 /**
  * The notes of `notes` a view shows to `wallet`, the wallet connected now.
@@ -381,6 +384,16 @@ export const SIGNED_OUT_BALANCE_MESSAGE = "Connect a wallet to see your private 
  *
  * Display only: nothing here changes or drops a note. Background work (claim
  * sweep, spent checks, cash outs, recovery backup) reads the store itself.
+ *
+ * Since 22 Nov 2026 each sign-in has its own store (lib/accountSlot), and the
+ * store is the line: every note in it is the bound account's, whichever wallet
+ * was connected when it was made here (a browser's first account can hold
+ * notes a second wallet made before the change, and hiding them would leave
+ * them on no screen at all). So with the scope on, `wallet` sees its store's
+ * notes, and the chain rows of its own deposits, when it is the account bound
+ * to this page, and nothing otherwise: a note a view still holds from another
+ * account is in neither. `from` still decides with the scope off (self-tests
+ * that predate it).
  */
 export function notesForWallet<T extends Pick<LocalNote, "from">>(
   notes: readonly T[],
@@ -388,6 +401,15 @@ export function notesForWallet<T extends Pick<LocalNote, "from">>(
 ): T[] {
   if (!wallet) return [];
   const lower = wallet.toLowerCase();
+  if (accountScopeOn() && !readDemo()) {
+    if (boundAccount() !== lower) return [];
+    const held = new Set(getAllNotes().map((n) => `${n.id}|${n.commitment.toLowerCase()}`));
+    return notes.filter((n) => {
+      const x = n as Partial<LocalNote>;
+      if (x.source === "chain") return x.from?.toLowerCase() === lower;
+      return typeof x.id === "string" && typeof x.commitment === "string" && held.has(`${x.id}|${x.commitment.toLowerCase()}`);
+    });
+  }
   return notes.filter((n) => !n.from || n.from.toLowerCase() === lower);
 }
 
@@ -437,8 +459,19 @@ export const NETWORK_SWITCHING_MESSAGE = "The network is still switching. Wait a
  * note's own chain and vault, the network lib code reads (the tree, the
  * proving keys, the relay's chain) must be `net` too: a proof is only ever
  * built and sent for the chain the page shows.
+ *
+ * A note (anything with an id and a commitment) must also be in the store of
+ * the account signed in now (lib/noteVault noteOwnerProblem): nothing is spent
+ * while no one is signed in, and never another sign-in's note.
  */
-export function noteNetworkProblem(note: { chainId: number; pool?: string | null }, net: NetScope): string | null {
+export function noteNetworkProblem(
+  note: { chainId: number; pool?: string | null; id?: unknown; commitment?: unknown },
+  net: NetScope
+): string | null {
+  if (typeof note.id === "string" && typeof note.commitment === "string") {
+    const owner = noteOwnerProblem(note);
+    if (owner) return owner;
+  }
   if (!net.pool || note.chainId !== net.chainId || !note.pool || note.pool.toLowerCase() !== net.pool.toLowerCase()) {
     return NOTE_OTHER_NETWORK_MESSAGE;
   }
@@ -476,28 +509,28 @@ export function assetDecimals(asset: string): number {
   return t?.decimals ?? 18;
 }
 
-/** Human amount for a raw note value, using the asset's real decimals (PathUSD 6, ETH 18). */
-export function formatAssetAmount(raw: bigint | string, asset: string, maxFrac = 6): string {
+/**
+ * A raw note value on screen, in the asset's real decimals (PathUSD 6, ETH 18):
+ * two places, cut down, through lib/amountShort displayAmount ("7.86",
+ * "1,200.00", "0.00", "<0.01"). For what is shown only; the amount field, Max,
+ * what is sent, copied or exported keep every unit (formatAssetAmountExact).
+ */
+export function formatAssetAmount(raw: bigint | string, asset: string): string {
   let v: bigint;
   try {
     v = typeof raw === "bigint" ? raw : BigInt(raw || "0");
   } catch {
     return String(raw);
   }
-  if (v === 0n) return "0";
-  const n = Number(formatUnits(v, assetDecimals(asset)));
-  if (!Number.isFinite(n)) return formatUnits(v, assetDecimals(asset));
-  const floor = 1 / 10 ** Math.min(maxFrac, 4);
-  if (n > 0 && n < floor) return `<${floor}`;
-  return n.toLocaleString("en-US", { maximumFractionDigits: maxFrac });
+  return displayAmount(v, assetDecimals(asset));
 }
 
 /**
- * Decimal places for a total or a balance in a summary (payroll runs, caps,
- * schedules): cents for a stablecoin, whatever its decimals (USDT and USDC
- * have 18 on BNB Chain, 6 elsewhere), 6 places for anything else with more
- * than 6 decimals, such as ETH, where 0.01 is already a real amount (0.004 ETH
- * read "<0.01"). Decided by what the token is, never by its decimals alone.
+ * The step a payroll deposit to add is rounded up to: cents for a stablecoin,
+ * whatever its decimals (USDT and USDC have 18 on BNB Chain, 6 elsewhere), 6
+ * places for anything else with more than 6 decimals, such as ETH, where 0.01
+ * is already a real amount. Decided by what the token is, never by its decimals
+ * alone. Not for display: every shown amount has two places (formatAssetAmount).
  */
 export function summaryDecimals(asset: string): number {
   if (isNativeAsset(asset)) return 6;
@@ -525,9 +558,15 @@ export function formatAssetAmountExact(raw: bigint | string, asset: string, minF
   return digits ? `${grouped}.${digits}` : grouped;
 }
 
-/** "12.5 PathUSD" style label for a raw amount. */
+/** "12.50 PathUSD": formatAssetAmount with the token's symbol, for what is shown. */
 export function formatAssetLabel(raw: bigint | string, asset: string): string {
   return `${formatAssetAmount(raw, asset)} ${assetLabel(asset)}`;
+}
+
+/** A stablecoin on the active network (USDT and USDC have 18 decimals on BNB Chain, 6 elsewhere: decided by the token, not its decimals). */
+export function isStableAsset(asset: string): boolean {
+  if (isNativeAsset(asset)) return false;
+  return knownForActive().find((x) => x.address.toLowerCase() === asset.toLowerCase())?.kind === "stablecoin";
 }
 
 /**
@@ -672,7 +711,13 @@ export type LocalNote = {
    */
   vaultSwap?: VaultSwapRefundInfo;
   /**
-   * On a private swap's refund note, once a sync has found its money at the
+   * On a private name claim's refund note (lib/nameClaimRun): the claim it was made
+   * for, the same way: while the money waits at the claim's escrow the note stays
+   * pending, and a sync sends the claim again to put it back.
+   */
+  nameClaim?: NameClaimRefundInfo;
+  /**
+   * On a private swap's (or name claim's) refund note, once a sync has found its money at the
    * swap's escrow: "returning" while the refund is on its way, "blocked" while
    * the vault won't take it (its limit for the asset is closed or full). The
    * note stays pending and every sync tries again (heldSwapRefunds lists it).
@@ -988,6 +1033,27 @@ function swapInfoOf(v: unknown): VaultSwapRefundInfo | undefined {
   };
 }
 
+function nameClaimInfoOf(v: unknown): NameClaimRefundInfo | undefined {
+  const o = v as Partial<NameClaimRefundInfo> | null;
+  if (!o || typeof o !== "object") return undefined;
+  const addr = (a: unknown): a is Address => typeof a === "string" && HEX_ADDRESS.test(a);
+  const field = (h: unknown): h is Hex => typeof h === "string" && HEX_32.test(h);
+  if (!addr(o.registrar) || !addr(o.holder) || !field(o.keyX) || !field(o.keyY)) return undefined;
+  if (typeof o.amount !== "string" || !DIGITS.test(o.amount) || typeof o.years !== "string" || !DIGITS.test(o.years)) return undefined;
+  if (typeof o.name !== "string" || !/^[a-z0-9_]{3,20}$/.test(o.name)) return undefined;
+  const sent = o.sent && typeof o.sent.hash === "string" && HEX_32.test(o.sent.hash) && timeOrNone(o.sent.at) ? { hash: o.sent.hash, at: o.sent.at } : undefined;
+  return {
+    registrar: o.registrar,
+    amount: o.amount,
+    name: o.name,
+    keyX: o.keyX,
+    keyY: o.keyY,
+    holder: o.holder,
+    years: o.years,
+    ...(sent ? { sent } : {}),
+  };
+}
+
 /**
  * A restored note, rebuilt from what a backup proves (the money fields, checked
  * by backupNoteValid) and nothing it merely says: the spend marker is worked
@@ -1022,6 +1088,7 @@ async function restoredNote(
     else if (!state.taken.has(from.id)) linked = { id: restoredId(from.id, state.taken), nullifier: from.nullifier };
   }
   const swap = linked ? swapInfoOf(n.vaultSwap) : undefined;
+  const nameClaim = linked ? nameClaimInfoOf(n.nameClaim) : undefined;
   const memo = typeof n.note === "string" && n.note.trim() ? n.note.slice(0, 500) : undefined;
   const marks = {
     ...(timeOrNone(n.fundsProofAt) ? { fundsProofAt: n.fundsProofAt } : {}),
@@ -1048,7 +1115,7 @@ async function restoredNote(
     ...(state.waiting ? { unfunded: true } : {}),
     ...(memo ? { note: memo } : {}),
     ...marks,
-    ...(linked ? { sweptFrom: linked, ...(n.sweepPending === true ? { sweepPending: true } : {}), ...(swap ? { vaultSwap: swap } : {}) } : {}),
+    ...(linked ? { sweptFrom: linked, ...(n.sweepPending === true ? { sweepPending: true } : {}), ...(swap ? { vaultSwap: swap } : {}), ...(nameClaim ? { nameClaim } : {}) } : {}),
   };
 }
 
@@ -1303,6 +1370,7 @@ export function updateLocalNote(
       | "proofOutAt"
       | "handoverUntil"
       | "vaultSwap"
+      | "nameClaim"
       | "refundHeld"
     >
   >

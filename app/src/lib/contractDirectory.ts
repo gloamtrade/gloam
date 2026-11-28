@@ -20,22 +20,37 @@ import { swapRoutersOn } from "./vaultSwap";
 import { ELYSIUM_FLAG, ELYSIUM_TESTNET_FLAG } from "./elysium";
 import { BNB_FLAG } from "./bnb";
 import { SHOW_TESTNETS } from "./showTestnets";
+import { GLOAM_NAMES_ADDRESS } from "./gloamNames";
+import { GLOAM_NAMES_DEPLOY_BLOCK } from "./nameStats";
+import { NAMES_REGISTRAR_ADDRESS } from "./nameClaim";
 
 /**
- * Owner of every mainnet vault, and of Base Sepolia's and Ethereum Sepolia's.
- * One wallet at launch; a multisig is planned. It has no function that moves
- * anyone's balance.
+ * The owner wallet. It owned the four first mainnet vaults at launch (and still
+ * owns Base Sepolia's and Ethereum Sepolia's); on 12 November 2026 those vaults
+ * moved to the owner guard below, run by the Gloam Owner Safe, of which this
+ * wallet is one of three signers. It still controls Elysium's guard, since Safe
+ * does not run on Elysium yet, and it signs the ownership statement. It has no
+ * function that moves anyone's balance.
  */
 export const GLOAM_OWNER: Address = "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8";
 
 /**
- * VaultOwnerGuard (contracts/src/VaultOwnerGuard.sol): the contract each mainnet
- * vault's ownership moves to. It forwards deposit limit and fee changes and the
- * sweep of stray native coin, and nothing else, so a vault it holds can never
- * get a new proof checker or a new owner. Set before the first handover
- * (DEPLOY.md, owner guard), so a vault it holds reads as listed while the others
- * are still on GLOAM_OWNER. The same address on Tempo, Ethereum, Base and
- * Robinhood Chain (CREATE2, salt gloam.vault-owner-guard.v1).
+ * The Gloam Owner Safe: 2 of 3 signers (Safe 1.5.0), the same address on
+ * Robinhood Chain, Tempo, Base, Ethereum and BNB Chain. It controls the owner
+ * guard on each of those (acceptController on 12 November 2026, and at deploy on
+ * BNB Chain) and owns the GloamNames registry. Every action it takes needs two
+ * of the three signatures.
+ */
+export const GLOAM_OWNER_SAFE: Address = "0x8E74b2b85b40f36771f92392b42BBaeacDC75507";
+
+/**
+ * VaultOwnerGuard (contracts/src/VaultOwnerGuard.sol): the owner of the vault on
+ * Tempo, Ethereum, Base and Robinhood Chain since 12 November 2026, with the
+ * Gloam Owner Safe as its controller. It forwards deposit limit and fee changes
+ * and the sweep of stray native coin, and nothing else, so a vault it holds can
+ * never get a new proof checker or a new owner. The same address on all four
+ * (CREATE2, salt gloam.vault-owner-guard.v1). BNB Chain and Elysium have their
+ * own guards (BORN_GUARDED).
  */
 export const GLOAM_OWNER_GUARD: Address | null = "0x183e915113cbeF42Bc15a342EC48307e184ECEAB";
 
@@ -62,20 +77,33 @@ export const MAINNET_POSEIDON_T3: Address = "0x1a32C2c2A77225EC2dD3BF7be1018819b
 /**
  * Vaults born guarded, from a deployer of their own, so their addresses differ
  * from the four first mainnets': the deployer, the PoseidonT3 it made and the
- * VaultOwnerGuard that owns the vault from its deploy (contracts/deployments).
- * Only BNB Chain reads from here today; Elysium keeps its rows as they are.
- * BNB Chain's are the planned addresses from deployer 0xec99...6b60 at nonce 0
- * (contracts/deployments/bnb-mainnet.json "plan", checked on an anvil fork by
- * contracts/bnb-mainnet-rehearsal.sh); the read-back on deploy day rewrites that
- * file, and selftest-bnb-everywhere fails if these and the file disagree.
+ * VaultOwnerGuard that owns the vault from its deploy, with that guard's
+ * controller (contracts/deployments/bnb-mainnet.json and elysium-mainnet.json,
+ * both from deployer 0xec99...6b60, which is why the two share addresses).
+ * selftest-bnb-everywhere fails if BNB Chain's and its file disagree.
+ *
+ * `controllerIsSafe`: BNB Chain's guard is run by the Gloam Owner Safe. Elysium's
+ * is still run by the owner wallet, since Safe does not run on Elysium yet.
+ * Keyed by network, not chain family, so a testnet of the same chain never
+ * takes a mainnet guard.
  */
-export const BORN_GUARDED: Partial<Record<GloamNetwork["family"], { deployer: Address; poseidon: Address; guard: Address; controller: Address }>> = {
-  bnb: {
+export const BORN_GUARDED: Partial<
+  Record<NetworkKey, { deployer: Address; poseidon: Address; guard: Address; controller: Address; controllerIsSafe: boolean }>
+> = {
+  "bnb-mainnet": {
     deployer: "0xec9993765e249e8e9DC677B7BCB61F78b31c6b60",
     poseidon: "0x62c435CE6886fa91e3b0e91500c6dC9219723457",
     guard: "0x633B24cf4C48CF68cB815BC87C110c47E218B4af",
     // The Gloam Owner Safe (2 of 3), replayed on BNB Chain at its address on the other chains.
-    controller: "0x8E74b2b85b40f36771f92392b42BBaeacDC75507",
+    controller: GLOAM_OWNER_SAFE,
+    controllerIsSafe: true,
+  },
+  "elysium-mainnet": {
+    deployer: "0xec9993765e249e8e9DC677B7BCB61F78b31c6b60",
+    poseidon: "0x62c435CE6886fa91e3b0e91500c6dC9219723457",
+    guard: "0x268D7CAd645282D1e77461b5B2dd997bd54eFAf5",
+    controller: GLOAM_OWNER,
+    controllerIsSafe: false,
   },
 };
 
@@ -98,6 +126,8 @@ export type DirectoryRole =
   | "fee_recipient"
   | "relayer"
   | "deployer"
+  | "names_registry"
+  | "names_registrar"
   | "proof_checker"
   | "deposit_proof_checker"
   | "cash_out_proof_checker"
@@ -203,7 +233,30 @@ function appRows(n: GloamNetwork): DirectoryRow[] {
       source: "app",
     });
   }
-  const own = BORN_GUARDED[n.family];
+  // Gloam names: on Robinhood Chain mainnet only (lib/gloamNames, lib/nameClaim).
+  if (n.chainId === 4663 && GLOAM_NAMES_ADDRESS) {
+    rows.push({
+      role: "names_registry",
+      name: "Names registry",
+      contract: "GloamNames",
+      what: "Maps an @name to a Gloam address. Holds no balances. Paid in $GLOAM, which goes to the treasury. Owned by the Gloam Owner Safe.",
+      address: getAddress(GLOAM_NAMES_ADDRESS),
+      deployBlock: GLOAM_NAMES_DEPLOY_BLOCK,
+      source: "app",
+    });
+    if (NAMES_REGISTRAR_ADDRESS) {
+      rows.push({
+        role: "names_registrar",
+        name: "Private names registrar",
+        contract: "GloamNamesRegistrar",
+        what: "Pays for a name from a private $GLOAM balance in one transaction. No owner, no admin, no upgrade.",
+        address: getAddress(NAMES_REGISTRAR_ADDRESS),
+        deployBlock: 119_888_677n,
+        source: "app",
+      });
+    }
+  }
+  const own = BORN_GUARDED[n.key];
   if (n.paymentsPool && own) {
     // Born guarded from its own deployer: the guard owns the vault, the Safe runs the guard.
     rows.push(
@@ -220,7 +273,9 @@ function appRows(n: GloamNetwork): DirectoryRow[] {
         role: "owner",
         name: "Guard controller",
         contract: null,
-        what: "The Gloam Owner Safe, 2 of 3. Runs the guard: rule changes wait 3 days in public. Can lower a limit or the fee at once. Has no function to withdraw a balance.",
+        what: own.controllerIsSafe
+          ? "The Gloam Owner Safe, 2 of 3. Runs the guard: rule changes wait 3 days in public. Can lower a limit or the fee at once. Has no function to withdraw a balance."
+          : "The owner wallet, until Safe runs on this network. Runs the guard: rule changes wait 3 days in public. Can lower a limit or the fee at once. Has no function to withdraw a balance.",
         address: own.controller,
         deployBlock: null,
         source: "app",
@@ -235,36 +290,37 @@ function appRows(n: GloamNetwork): DirectoryRow[] {
         source: "app",
       }
     );
-  } else if (n.paymentsPool && n.family === "elysium") {
-    // Elysium's vault was born guarded: its owner is a VaultOwnerGuard made by the
-    // deploy itself (its address is in the live read above and in
-    // contracts/deployments/elysium-mainnet.json), never the owner wallet.
-    rows.push({
-      role: "fee_recipient",
-      name: "Treasury",
-      contract: null,
-      what: "Receives the cash-out fee.",
-      address: GLOAM_TREASURY,
-      deployBlock: null,
-      source: "app",
-    });
   } else if (n.paymentsPool) {
-    rows.push({
-      role: "owner",
-      name: "Owner",
-      contract: null,
-      what: "Queues rule changes, which wait 3 days in public. Can lower a limit or the fee at once. Has no function to withdraw a balance.",
-      address: GLOAM_OWNER,
-      deployBlock: null,
-      source: "app",
-    });
-    if (GLOAM_OWNER_GUARD) {
+    // The four first mainnets: the guard has owned the vault since 12 November 2026, run by the Safe.
+    // The Sepolia testnets were never moved: the owner wallet still holds them.
+    if (GLOAM_OWNER_GUARD && !n.testnet) {
+      rows.push(
+        {
+          role: "owner",
+          name: "Owner guard",
+          contract: "VaultOwnerGuard",
+          what: "Has owned this vault since 12 November 2026. Forwards deposit limit and fee changes and the sweep of coin sent by mistake, nothing else, so its proof checkers and ownership can never change.",
+          address: GLOAM_OWNER_GUARD,
+          deployBlock: null,
+          source: "app",
+        },
+        {
+          role: "owner",
+          name: "Guard controller",
+          contract: null,
+          what: "The Gloam Owner Safe, 2 of 3. Runs the guard: rule changes wait 3 days in public. Can lower a limit or the fee at once. Has no function to withdraw a balance.",
+          address: GLOAM_OWNER_SAFE,
+          deployBlock: null,
+          source: "app",
+        }
+      );
+    } else {
       rows.push({
         role: "owner",
-        name: "Owner guard",
-        contract: "VaultOwnerGuard",
-        what: "Holds a vault once it accepts it. Forwards deposit limit and fee changes and the sweep of coin sent by mistake, nothing else, so that vault's proof checkers and ownership can never change.",
-        address: GLOAM_OWNER_GUARD,
+        name: "Owner",
+        contract: null,
+        what: "Queues rule changes, which wait 3 days in public. Can lower a limit or the fee at once. Has no function to withdraw a balance.",
+        address: GLOAM_OWNER,
         deployBlock: null,
         source: "app",
       });
@@ -495,9 +551,10 @@ export function vaultChecks(n: GloamNetwork, r: VaultRead): VaultCheck[] {
       detail: `The vault's delay is ${formatDelay(r.changeDelay)}.`,
     },
   ];
-  const own = BORN_GUARDED[n.family];
+  const own = BORN_GUARDED[n.key];
   if (n.paymentsPool) {
-    checks.push(ownerCheck(r.owner, own?.guard ?? GLOAM_OWNER_GUARD));
+    // A testnet vault is held by the owner wallet alone, so the guard does not count there.
+    checks.push(ownerCheck(r.owner, own?.guard ?? (n.testnet ? null : GLOAM_OWNER_GUARD)));
   }
   checks.push({
     label: "No handover pending",

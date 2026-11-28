@@ -3,10 +3,12 @@
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { formatUnits } from "viem";
 import { FUNDS_MAX_NOTES, encodeProof, proveFunds } from "@/lib/proofs";
+import { noteOwnerProblem } from "@/lib/noteVault";
 import {
   assetDecimals,
   assetLabel,
   formatAssetAmount,
+  formatAssetAmountExact,
   parseAssetAmount,
   updateLocalNote,
   type LocalNote,
@@ -147,6 +149,12 @@ export function FundsFlow({ notes, empty }: { notes: LocalNote[]; empty: ReactNo
 
   async function create() {
     if (!canCreate || threshold == null) return;
+    // A proof carries each balance's spend marker: only the signed-in account's own (lib/noteVault).
+    const notYours = selected.map((n) => noteOwnerProblem(n)).find(Boolean);
+    if (notYours) {
+      setErr({ tone: "danger", text: notYours });
+      return;
+    }
     setErr(null);
     setBusy(true);
     const expiresAt = expiresAtFor(expiry);
@@ -205,7 +213,8 @@ export function FundsFlow({ notes, empty }: { notes: LocalNote[]; empty: ReactNo
           token={done.token}
           headline={
             <>
-              Holds at least {formatAssetAmount(done.threshold, done.asset)}{" "}
+              {/* what the proof states, so every unit: the rest of the app shows two places */}
+              Holds at least {formatAssetAmountExact(done.threshold, done.asset)}{" "}
               <span className="text-mute">{assetLabel(done.asset)}</span>
             </>
           }
@@ -446,7 +455,7 @@ function FundsAside({
             label: "At least",
             value:
               asset && threshold != null && threshold > 0n
-                ? `${formatAssetAmount(threshold, asset)} ${assetLabel(asset)}`
+                ? `${formatAssetAmountExact(threshold, asset)} ${assetLabel(asset)}`
                 : unset,
           },
           { label: "Who it is for", value: verifier.trim() || unset },

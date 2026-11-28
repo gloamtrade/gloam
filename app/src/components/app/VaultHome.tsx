@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useMemo, type ReactNode } from "react";
 import { formatUnits } from "viem";
 import { formatEth } from "@/lib/chain";
+import { displayAmount } from "@/lib/amountShort";
 import { useAppAccount, useAppBalance, useAppTokenBalances } from "@/lib/demo";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
 import { useAutoRestoreStatus } from "@/hooks/useAutoRestoreStatus";
@@ -35,7 +36,7 @@ import { TokenLogo } from "./TokenLogo";
 import { WalletMenu } from "./WalletMenu";
 import { TempoFaucetButton } from "./TempoFaucetButton";
 
-type Holding = { id: string; symbol: string; logoId: string; text: string; amount: number; dollar: boolean };
+export type Holding = { id: string; symbol: string; logoId: string; text: string; amount: number; dollar: boolean };
 
 const SHOWN = 3;
 
@@ -236,7 +237,7 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
             badge="Only you"
             rows={privateRows}
             loading={privateLoading}
-            empty={balancesVisible ? "0" : null}
+            empty={balancesVisible ? displayAmount(BigInt(0), 0) : null}
             note={
               !isConnected
                 ? SIGNED_OUT_BALANCE_MESSAGE
@@ -257,12 +258,9 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
             badge={null}
             rows={wallet}
             loading={walletLoading}
-            empty={balancesVisible ? "0" : null}
-            note={
-              balancesVisible && !wallet.length && !walletLoading
-                ? `No ${listOr(tokens.map((t) => t.symbol))} in this wallet.`
-                : "Anyone can see this on the explorer."
-            }
+            empty={balancesVisible ? displayAmount(BigInt(0), 0) : null}
+            // what Gloam takes is said once, in the line under both panes
+            note="Anyone can see this on the explorer."
           />
         </div>
 
@@ -331,7 +329,8 @@ export function VaultHome({ actions }: { actions: readonly VaultActionInfo[] }) 
   );
 }
 
-function BalancePane({
+/** One side of "Your money on …": the private balance (sealed) or the wallet. Solana's overview uses it too. */
+export function BalancePane({
   sealed,
   title,
   badge,
@@ -378,7 +377,7 @@ function BalancePane({
             </p>
           ) : (
             <p className={`tnum text-[32px] font-light leading-none tracking-[-0.02em] ${empty ? "text-foreground" : "text-faint"}`}>
-              {empty ?? "0"}
+              {empty ?? displayAmount(BigInt(0), 0)}
             </p>
           )}
         </div>
@@ -406,7 +405,7 @@ function BalancePane({
  * shown but quiet; the list below says why. From a tablet up the list is near
  * the top already, so this row is not drawn (globals.css .vault-quickrow).
  */
-function QuickRow({
+export function QuickRow({
   actions,
   blockedFor,
 }: {
@@ -448,7 +447,7 @@ function QuickRow({
   );
 }
 
-function ActionTile({
+export function ActionTile({
   action,
   blocked,
   compact = false,
@@ -541,11 +540,5 @@ function LockGlyph() {
 function listAnd(items: string[]): string {
   if (items.length <= 1) return items[0] ?? "";
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-}
-
-/** "USDG", "USDG or GLOAM". */
-function listOr(items: string[]): string {
-  if (items.length <= 1) return items[0] ?? "";
-  return `${items.slice(0, -1).join(", ")} or ${items[items.length - 1]}`;
 }
 

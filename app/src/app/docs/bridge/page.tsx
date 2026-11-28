@@ -25,6 +25,9 @@ const LANDS = listed([
   ...(BNB_ENABLED ? ["USDT on BNB Chain"] : []),
 ]);
 
+/** Where a cash out can leave for another chain (lib/cashOutCrossChain CROSS_CHAIN_SOURCES). */
+const XCHAIN_FROM = BNB_ENABLED ? "Robinhood Chain, Base, Ethereum or BNB Chain" : "Robinhood Chain, Base or Ethereum";
+
 export default function DocsBridgePage() {
   return (
     <DocsLayout
@@ -93,9 +96,10 @@ export default function DocsBridgePage() {
 
       <h2 id="cash-out">Cash out to another chain</h2>
       <p>
-        It works the other way too. On Robinhood Chain, Base or Ethereum, a
-        cash out can land as USDC on Base, Ethereum, Arbitrum or Solana, or as
-        USDT or USDC on BNB Chain, in one step. Under <strong>Lands on</strong>,
+        It works the other way too. On {XCHAIN_FROM}, a cash out can land as
+        USDC on Base, Ethereum, Arbitrum or Solana, as USDT or USDC on BNB
+        Chain, or as USDC or USDG on X Layer, in one step, on any chain but
+        the one it leaves. Under <strong>Lands on</strong>,
         pick the chain, then the address there. The vault pays a one-time Relay
         address for exactly the amount after the {CASH_OUT_FEE_PERCENT} cash-out
         fee, and Relay sends the stablecoin on.

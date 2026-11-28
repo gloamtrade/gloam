@@ -83,6 +83,7 @@ A box inside a box takes the outer radius minus the padding between them.
   - Settings and Docs at the foot
 
   Every action is a deep link (`lib/vaultNav`). The Portfolio quick actions use the same names.
+- Solana is picked in the same network menu, but it is not an EVM network: it keeps the EVM network underneath and the pages show their Solana side (`SolanaOr`, `components/app/Solana*`). It has Portfolio, Vault with Add privately, Pay privately, Receive and Cash out, and Payroll, drawn with the same cards and rows. What it doesn't have yet leaves the nav, or says so plainly.
 - For row and column swaps, use real media queries (`.gl-sidebar`, `.gl-pagehead`), not `hidden lg:flex`. Webpack dev can drop the variant.
 - Mind the touch targets: 40px for anything tappable on a phone, and visible focus rings everywhere.
 

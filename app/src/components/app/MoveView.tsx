@@ -16,7 +16,7 @@ import { useWalletState } from "@/hooks/useWalletState";
 import { usePoolDeposited } from "@/hooks/usePoolDeposited";
 import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient, publicClientFor } from "@/lib/rhClient";
-import { HASH_SCHEME, dropUnsentNote, gasFor, noteNetworkProblem, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, SIGNED_OUT_BALANCE_MESSAGE, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
+import { HASH_SCHEME, dropUnsentNote, gasFor, noteNetworkProblem, SHIELD_GAS_LIMIT, TRANSFER_GAS_LIMIT, type LocalNote, assetDecimals, assetLabel, formatAssetAmount, formatAssetAmountExact, formatAssetLabel, formatFeePercent, isNativeAsset, isShieldDeployed, loadLocalNotes, parseAssetAmount, saveLocalNote, SIGNED_OUT_BALANCE_MESSAGE, shieldPoolAbi, updateLocalNote, withdrawFeeOf } from "@/lib/shield";
 import {
   claimNoteId,
   isClaimedNote,
@@ -52,6 +52,7 @@ import {
   isValidReceiveTag,
   encryptTicketForTag,
   rotateReceiveIdentity,
+  shortTag,
   type ReceiveIdentity,
 } from "@/lib/receiveTag";
 import {
@@ -94,6 +95,7 @@ import {
 import { PAYMENT_NOTE_MAX, cleanPaymentNote } from "@/lib/paymentNote";
 import { NoteGlyph, PaymentNoteLine } from "./PaymentNote";
 import { SuccessModal } from "./SuccessModal";
+import { Select } from "@/components/ui/Select";
 import {
   markPrivatePaid,
   readFirstPaySuggestion,
@@ -102,6 +104,7 @@ import {
 import { DevKeysBanner } from "./DevKeysBanner";
 import { PaymentTicketShare } from "./PaymentTicketShare";
 import { SentLinks } from "./SentLinks";
+import { useShownAccount } from "./AccountScope";
 import { makeSentLink, paymentNullifier, type SentLink } from "@/lib/sentLinks";
 import { removeSentLink, saveSentLink } from "@/lib/sentLinksStore";
 import { surelyNotSent, walletErrorForPeople } from "@/lib/walletErrors";
@@ -117,6 +120,7 @@ import {
   type CashOutWindow,
 } from "@/lib/cashOutLater";
 import { freshPath, networkOfNote, roundDownToWhole, spendPlanFor, spendWaitMessage, splitForCashOut } from "@/lib/cashOutSplit";
+import { CASH_OUT_EMPTY_HELP, readCashOutAmount } from "@/lib/cashOutAmount";
 import {
   findCashOutLink,
   linkMessage,
@@ -147,6 +151,7 @@ import {
 import { cashOutPrivacyWarnings, depositWallets } from "@/lib/cashOutPrivacy";
 import { CashOutPercentChips, CashOutWarnings } from "./CashOutPrivacy";
 import { BalancePicker } from "./BalancePicker";
+import { heldBalance, payCardShows, withHeld } from "@/lib/heldBalance";
 import { PrivacyCard } from "./PrivacyCard";
 import { countLinkClaimed, countLinkCreated, countLinkOpened, countSendAfterClaim } from "@/lib/funnel";
 import { codeFromHash } from "@/lib/claimLink";
@@ -171,8 +176,13 @@ import { checkSweep, sweepVerdict, type SweepCheck, type SweepReader } from "@/l
 import { EMBEDDED_CONNECTOR_ID, EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
 import { embeddedAvailability, onEmbeddedAvailability } from "@/lib/turnkeyBridge";
 import { moveModeFromParam, searchWithMoveMode } from "@/lib/vaultNav";
-import { cashOutHandoff, classifyPayRecipient, isWalletRecipient } from "@/lib/payRecipient";
+import { OWN_GLOAM_ADDRESS_NOTE, cashOutHandoff, classifyPayRecipient, isOwnGloamAddress, isWalletRecipient } from "@/lib/payRecipient";
 import { useEnsAddress } from "@/hooks/useEnsAddress";
+import { lookupGloamName, useGloamName } from "@/hooks/useGloamName";
+import { GloamNameCard } from "./GloamNameCard";
+import { GLOAM_NAMES_ADDRESS } from "@/lib/gloamNames";
+import { BackupStep, useBackupGate } from "./RecoveryPanel";
+import { keepStorage } from "@/lib/backupGate";
 
 /** How securing a claim ended (lib/claimSweep), or "error" when it threw. */
 type SweepStatus = SweepResult["status"] | "error";
@@ -188,6 +198,9 @@ class DeadCodeError extends Error {}
 /** Direct (pay to sticky tag) vs open bearer ticket */
 type PayStyle = "direct" | "bearer";
 
+/** A payment's amount for its claim code: two places on screen, every unit in the text it is shared with. */
+type ShareAmount = { shown: string; exact: string };
+
 /**
  * Move = direct pay-to-tag + bearer tickets + cash out.
  * Never uses a public 0x as the private path.
@@ -201,10 +214,47 @@ const RELAY_MAYBE_SENT = new Set(["maybe_sent", "rpc", "network", "error", "inte
 /** No payments listed: one constant, so the wallet-scoped list starts over on the same empty list. */
 const NO_INBOX: { memo: ScannedMemo; label: string; ticket: string; note?: string }[] = [];
 
+/** What the Pay box's To field holds. */
+type ToKind = "name" | "gloam" | "wallet";
+
+const TO_KINDS = [
+  { value: "name" as const, label: "Name" },
+  { value: "gloam" as const, label: "Gloam address" },
+  { value: "wallet" as const, label: "Wallet or ENS" },
+];
+
+const TO_PLACEHOLDER: Record<ToKind, string> = {
+  name: "theirname",
+  gloam: "gloamr1…",
+  wallet: "0x… or name.eth",
+};
+
+/**
+ * The kind the text itself says, else the one picked. Only text that can be
+ * nothing else switches it: a gloamr1 address, "@name", a full 0x address or
+ * an ENS name (it has a dot). "0xsam" could be a name, so the pick stands.
+ */
+function toKindOf(text: string, picked: ToKind): ToKind {
+  const t = text.trim();
+  if (t.startsWith("gloamr1.")) return "gloam";
+  if (t.startsWith("@")) return "name";
+  if (/^0x[0-9a-fA-F]{40}$/.test(t) || t.includes(".")) return "wallet";
+  return picked;
+}
+
+/** What to keep for typed text: a name gets its "@" back, anything that says what it is stays as typed. */
+function toValue(text: string, picked: ToKind): string {
+  const t = text.trim();
+  if (!t) return "";
+  return toKindOf(t, picked) === "name" && !t.startsWith("@") ? `@${t}` : t;
+}
+
 export function MoveView() {
   const shieldLive = isShieldDeployed();
   const poseidonMode = HASH_SCHEME === "poseidon";
   const { address, isConnected, chainId, connector } = useAppAccount();
+  /** The signed-in account once its own private account is bound to this page (lib/accountScope): null before, and signed out. */
+  const shownAccount = useShownAccount();
   /** `to` is the Gloam wallet connected now (lib/sweepCheck sweepVerdict: its own sponsored deposits look like a sweep). */
   const ownGloamWallet = (to: string | null | undefined) =>
     Boolean(
@@ -261,8 +311,10 @@ export function MoveView() {
     request ? null : readFirstPaySuggestion(searchParams, network.chainId)
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Cash out: how much ("" is the whole balance), when, and to which wallet.
-  const [cashOutInput, setCashOutInput] = useState("");
+  // Cash out: how much, when, and to which wallet. The amount (lib/cashOutAmount): null until
+  // something is typed or picked, which writes the whole balance into the field; "" is no
+  // amount, never the whole balance.
+  const [cashOutInput, setCashOutInput] = useState<string | null>(null);
   const cashOutInputRef = useRef<HTMLInputElement>(null);
   const [cashOutWhen, setCashOutWhen] = useState<"now" | CashOutWindow>("now");
   const [cashOutDest, setCashOutDest] = useState<"mine" | "other">("mine");
@@ -293,6 +345,11 @@ export function MoveView() {
   const [planRun, setPlanRun] = useState<PieceProgress[] | null>(null);
   /** The note a private cash out started from: the form stays on it while the run spends it. */
   const [runNote, setRunNote] = useState<LocalNote | null>(null);
+  /**
+   * The note a payment or cash out started from. The form stays on it until the result closes,
+   * even once the balance list drops it (lib/heldBalance), so it never falls back to the empty state.
+   */
+  const [flowNote, setFlowNote] = useState<LocalNote | null>(null);
   /** The piece being scheduled again from its notice. */
   const [leftoverBusy, setLeftoverBusy] = useState<string | null>(null);
   const [sendAmount, setSendAmount] = useState(
@@ -305,12 +362,14 @@ export function MoveView() {
   const [noteOpen, setNoteOpen] = useState(() => Boolean(request?.note));
   /** The note the last payment carried, for the success message. */
   const [sentNote, setSentNote] = useState<string | null>(null);
+  /** What a direct private payment was and who it went to, for the success dialog ("25 USDG to @duke"). */
+  const [sentTo, setSentTo] = useState<{ amount: string; to: string } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [shareBlob, setShareBlob] = useState<string | null>(null);
   /** The claim code the sender has copied, downloaded or shared, so the success dialog can let go. */
   const [savedCode, setSavedCode] = useState<string | null>(null);
-  const [shareAmountLabel, setShareAmountLabel] = useState<string | null>(null);
+  const [shareAmountLabel, setShareAmountLabel] = useState<ShareAmount | null>(null);
   const [sendPassphrase, setSendPassphrase] = useState("");
   const [importText, setImportText] = useState("");
   const [importPassphrase, setImportPassphrase] = useState("");
@@ -334,6 +393,9 @@ export function MoveView() {
   const [cashOutChecking, setCashOutChecking] = useState(false);
   /** Opening a claim code (PBKDF2, spent check, tree sync) before it is saved: one at a time. */
   const claimGate = useRef(false);
+  /** Before a claim first lands in this browser: the backup step shows in place of the button (lib/backupGate). */
+  const backupGate = useBackupGate();
+  const [claimBackupAsk, setClaimBackupAsk] = useState(false);
   const [claimOpening, setClaimOpening] = useState(false);
   /** The newest inbox scan: Check now waits for it, and an older one never ends its spinner. */
   const scanRun = useRef(0);
@@ -345,6 +407,15 @@ export function MoveView() {
   // Cash out to that wallet instead (lib/payRecipient). The name is looked up on Ethereum mainnet,
   // for the address it sets for this network (useEnsAddress).
   const payRecipient = useMemo(() => classifyPayRecipient(recipientTag), [recipientTag]);
+  /**
+   * What the To box holds, picked in its dropdown: a Gloam name (typed without "@"),
+   * a Gloam address, or a wallet (0x or ENS). Pasting a gloamr1 or 0x address, or an
+   * ENS name, switches it by itself; plain text follows the pick. A name is kept as
+   * "@name" underneath, so everything downstream reads it the same way.
+   */
+  const [pickedToKind, setPickedToKind] = useState<ToKind>(GLOAM_NAMES_ADDRESS ? "name" : "gloam");
+  const toKind = toKindOf(recipientTag, pickedToKind);
+  const shownTo = toKind === "name" ? recipientTag.replace(/^@/, "") : recipientTag;
   const ensLookup = useEnsAddress(
     payStyle === "direct" && payRecipient.kind === "ens" ? payRecipient.name : null,
     network.chainId
@@ -358,7 +429,20 @@ export function MoveView() {
           ? ensLookup.address
           : null;
   const payToWallet = payStyle === "direct" && (isWalletRecipient(payRecipient) || payRecipient.kind === "badAddress");
-  const [myIdentity, setMyIdentity] = useState<ReceiveIdentity | null>(null);
+  // "@duke" pays the Gloam address the name points at, read from the registry on Robinhood Chain (lib/gloamNames).
+  const [nameRefresh, setNameRefresh] = useState(0);
+  const nameLookup = useGloamName(
+    payStyle === "direct" && payRecipient.kind === "name" ? payRecipient.name : null,
+    nameRefresh
+  );
+  /** The Gloam address a direct payment is sealed to: the one typed, or the one the name points at. */
+  const payTag =
+    payRecipient.kind === "name" ? (nameLookup.status === "found" ? nameLookup.record.tag : "") : recipientTag.trim();
+  // The signed-in account's own Gloam address: gone on sign out (Duke, 22 Nov 2026: Receive still
+  // showed his address and QR after Sign out), and another sign-in reads its own.
+  const [myIdentity, setMyIdentity] = useWalletState<ReceiveIdentity | null>(shownAccount, null);
+  /** To is the signed-in account's own Gloam address (typed, or behind an @name): still sent, with a note on why it helps. */
+  const payingSelf = payStyle === "direct" && !payToWallet && isValidReceiveTag(payTag) && isOwnGloamAddress(payTag, myIdentity?.tag);
   const [tagCopied, setTagCopied] = useState(false);
   const [shareLocked, setShareLocked] = useState(false);
   // Payments to this browser's Gloam address, with their amounts: read and listed
@@ -621,7 +705,7 @@ export function MoveView() {
   const spentNoteId = useRef<string | null>(null);
   /** Change only, never store the payment note on the sender */
   const pendingChange = useRef<LocalNote | null>(null);
-  const pendingShare = useRef<{ blob: string; amountLabel: string } | null>(
+  const pendingShare = useRef<{ blob: string; amountLabel: ShareAmount } | null>(
     null
   );
   /**
@@ -962,8 +1046,19 @@ export function MoveView() {
     return (covering ?? bySize[bySize.length - 1]).id;
   }, [suggestion, notes]);
 
+  // A payment or cash out from its start until its result closes: proving, in the wallet, on its
+  // way, confirming, the heads-up after it, and the success dialog. The balance it spends stays
+  // picked the whole time, even after the list drops it (spent, its change not landed yet).
+  const inFlow = busy || isPending || confirming || (showSuccess && Boolean(txHash));
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the flow is over: the next one holds its own balance
+    if (!inFlow) setFlowNote(null);
+  }, [inFlow]);
+  const heldNote = runNote ?? heldBalance(notes, flowNote, inFlow);
+  const pickable = withHeld(notes, heldNote);
+
   const selected =
-    runNote ??
+    heldNote ??
     notes.find((n) => n.id === selectedId) ??
     notes.find((n) => n.id === requestNoteId) ??
     notes.find((n) => n.id === suggestNoteId) ??
@@ -979,14 +1074,17 @@ export function MoveView() {
   const { deposited: poolForCashOut } = usePoolDeposited(
     mode === "cashout" ? cashOutAsset : null
   );
-  // The whole balance unless a smaller amount is typed; a smaller one is set
-  // aside privately first (lib/cashOutSplit), then cashed out.
+  // The whole balance, written into the field, unless a smaller amount is typed; a smaller
+  // one is set aside privately first (lib/cashOutSplit), then cashed out. An empty field is
+  // no amount (lib/cashOutAmount).
   const noteWei = selected ? BigInt(selected.amountWei) : 0n;
-  const typedWei = cashOutInput.trim() && selected ? parseAssetAmount(cashOutInput.trim(), selected.asset) : null;
-  const cashOutAmountInvalid =
-    cashOutInput.trim() !== "" && (typedWei === null || typedWei <= 0n || typedWei > noteWei);
-  const cashOutAmount = typedWei !== null && !cashOutAmountInvalid ? typedWei : noteWei;
-  const cashOutPartial = !cashOutAmountInvalid && cashOutAmount < noteWei;
+  const cashOutRead = readCashOutAmount(cashOutInput, noteWei, selected ? assetDecimals(selected.asset) : 18);
+  /** The field's text: the whole balance, every unit, until something else is typed. */
+  const cashOutText = cashOutRead.text;
+  /** Nothing to cash out: the field is empty, or holds something that isn't an amount up to the balance. */
+  const cashOutAmountInvalid = cashOutRead.amount === null;
+  const cashOutAmount = cashOutRead.amount ?? 0n;
+  const cashOutPartial = cashOutRead.partial;
   // Where it goes: the connected wallet, or another address (a fresh one is best).
   const otherToClean = otherTo.trim();
   const cashOutTo: Address | null =
@@ -1272,6 +1370,7 @@ export function MoveView() {
     // the last payment's claim code (kept under Sent links) is not this cash out's success
     setShareBlob(null);
     setMemoPosted(false);
+    setFlowNote(selected);
     reset();
     setRelayHash(undefined);
     handledHash.current = null;
@@ -1374,7 +1473,7 @@ export function MoveView() {
         countPerson("cashout", address, network.testnet);
         if (fromLink) queuePartnerJobs(network.chainId, [job.id]);
         setScheduledNotice({ at: job.sendAfter, label: formatAssetLabel(target.amountWei, target.asset) });
-        setCashOutInput("");
+        setCashOutInput(null);
         refreshNotes();
         setBusy(false);
         setStatus(null);
@@ -1392,7 +1491,7 @@ export function MoveView() {
         else setCashedOut({ to, asset: target.asset as Address });
         setRelayHash(h);
         setSuccessTitle("Cashed out");
-        setCashOutInput("");
+        setCashOutInput(null);
         return;
       }
       // from the wallet: registered under the code now, before the wallet is asked, bound to this cash out's proof
@@ -1409,7 +1508,7 @@ export function MoveView() {
       if (xOrder) setXSent(xOrder);
       else setCashedOut({ to, asset: target.asset as Address });
       setSuccessTitle("Cashed out");
-      setCashOutInput("");
+      setCashOutInput(null);
       void import("@/lib/track").then(({ track }) => {
         track(xOrder ? "unshield_xchain" : "unshield_success");
       });
@@ -1575,7 +1674,7 @@ export function MoveView() {
         });
       }
       if (r.stoppedAt === null) {
-        setCashOutInput("");
+        setCashOutInput(null);
         setPieceTo([]);
         setPerPiece(false);
         setPlanSeed((v) => v + 7919);
@@ -1691,6 +1790,7 @@ export function MoveView() {
     }
     setShareBlob(null);
     setBusy(true);
+    setFlowNote(selected);
     reset();
     setRelayHash(undefined);
     handledHash.current = null;
@@ -1709,8 +1809,23 @@ export function MoveView() {
         throw new Error("That is more than this balance holds.");
       }
       // a mistyped Gloam address is caught before anything is proven or sent
-      if (payStyle === "direct" && !isValidReceiveTag(recipientTag)) {
-        throw new Error("That Gloam address is incomplete or mistyped. Copy it again from their Receive page.");
+      if (payStyle === "direct" && !isValidReceiveTag(payTag)) {
+        throw new Error(
+          payRecipient.kind === "name"
+            ? nameLookup.status === "blocked"
+              ? `@${payRecipient.name} can't be paid on Gloam. Paste their Gloam address instead.`
+              : `No one has @${payRecipient.name} yet. Check the spelling, or paste their Gloam address.`
+            : "That Gloam address is incomplete or mistyped. Copy it again from their Receive page."
+        );
+      }
+      // a name is read again right before sealing: it pays whoever holds it now, not when it was typed
+      if (payStyle === "direct" && payRecipient.kind === "name") {
+        const fresh = await lookupGloamName(payRecipient.name);
+        if (fresh === "failed") throw new Error(`Could not check @${payRecipient.name} just now. Try again in a moment.`);
+        if (!fresh || fresh.tag !== payTag) {
+          setNameRefresh((n) => n + 1);
+          throw new Error(`@${payRecipient.name} just changed. Check who it pays, then try again.`);
+        }
       }
 
       const path = await notePath(selected);
@@ -1747,9 +1862,11 @@ export function MoveView() {
       const { proofBytes } = await proveTransferInBrowser(w.circomInput);
 
       // Change stays with sender only. Payment secret goes solely into share package.
+      // eslint-disable-next-line react-hooks/purity -- runs from the Pay button's handler, never during render
+      const now = Date.now();
       if (BigInt(w.changeNote.amountWei) > 0n) {
         pendingChange.current = {
-          id: `chg-${Date.now()}`,
+          id: `chg-${now}`,
           chainId: network.chainId,
           pool: network.pool,
           asset: selected.asset,
@@ -1760,7 +1877,7 @@ export function MoveView() {
           bound: true,
           scheme: "poseidon",
           from: address,
-          createdAt: Date.now(),
+          createdAt: now,
           status: "open",
           source: "local",
         };
@@ -1781,11 +1898,19 @@ export function MoveView() {
         seed: w.paymentNote.seed,
       });
       setSentNote(pack.note ?? null);
+      setSentTo(
+        payStyle === "direct"
+          ? {
+              amount: formatAssetLabel(w.paymentNote.amountWei, w.paymentNote.asset),
+              to: payRecipient.kind === "name" ? `@${payRecipient.name}` : shortTag(payTag, 8, 10),
+            }
+          : null
+      );
       payTrack.current = { chainId: network.chainId, request: Boolean(request), note: Boolean(pack.note) };
       let share: string;
       let locked = false;
       if (payStyle === "direct") {
-        const tag = recipientTag.trim();
+        const tag = payTag;
         if (!isValidReceiveTag(tag)) {
           throw new Error(
             "Paste their Gloam address (it starts with gloamr1) to pay them privately."
@@ -1802,7 +1927,11 @@ export function MoveView() {
       }
       pendingShare.current = {
         blob: share,
-        amountLabel: formatAssetLabel(w.paymentNote.amountWei, w.paymentNote.asset),
+        amountLabel: {
+          shown: formatAssetLabel(w.paymentNote.amountWei, w.paymentNote.asset),
+          // the share text keeps every unit
+          exact: `${formatAssetAmountExact(w.paymentNote.amountWei, w.paymentNote.asset)} ${assetLabel(w.paymentNote.asset)}`,
+        },
       };
       // Sent links record. The nullifier is worked out now, the same way a claim
       // does, so its status can be checked later without the phrase.
@@ -1921,9 +2050,9 @@ export function MoveView() {
   }
 
   async function scanInbox() {
-    // This browser's Gloam address is not a wallet's: what it was paid is read only
-    // while one is connected, so a signed-out page never lists anyone's payments.
-    if (!address) return;
+    // Payments to the signed-in account's own Gloam address: read only once its account is
+    // bound, so a signed-out page never lists anyone's payments.
+    if (!address || !shownAccount) return;
     if (!isPayMemoLive()) {
       setInboxStatus(
         "Not available on this network yet. Ask the sender for a claim link."
@@ -1954,6 +2083,8 @@ export function MoveView() {
             await noteCommitmentPoseidon(hexToField(pack.secret), BigInt(pack.amountWei), pack.asset)
           ).toLowerCase();
           if (commitment !== m.paymentCommitment.toLowerCase() || seen.has(commitment)) continue;
+          // already in this balance: it landed on its own (lib/autoReceive) or was claimed here
+          if (loadLocalNotes(address, network).some((n) => n.commitment.toLowerCase() === commitment)) continue;
           if (!network.pool || (pack.pool && pack.pool.toLowerCase() !== network.pool.toLowerCase())) continue;
           const [inVault, spent] = await Promise.all([
             client.readContract({ address: network.pool, abi: shieldPoolAbi, functionName: "commitmentSeen", args: [commitment as Hex] }),
@@ -1982,7 +2113,7 @@ export function MoveView() {
       setInboxStatus(
         hits.length
           ? `Found ${hits.length} ${hits.length === 1 ? "payment" : "payments"} for you.`
-          : "No new payments yet."
+          : "Nothing waiting. Payments to your Gloam address land in your balance on their own."
       );
     } catch {
       // an RPC error's text names the endpoint and the request: no use to read
@@ -2140,6 +2271,8 @@ export function MoveView() {
     if (!network.pool || !address) {
       throw new Error("Connect a wallet first.");
     }
+    // A claimed payment lives in this browser: ask it to keep its storage.
+    keepStorage();
     // the vault reads below must be of the network shown, where the claim is saved
     const switching = noteNetworkProblem({ chainId: network.chainId, pool: network.pool }, network);
     if (switching) throw new Error(switching);
@@ -2247,8 +2380,15 @@ export function MoveView() {
     return { label, note: pack.note, local, isNew: !known, already: false, demo };
   }
 
-  async function onImportNote() {
+  /** `afterBackup`: the backup step just finished or was skipped, so it isn't asked again. */
+  async function onImportNote(afterBackup = false) {
     if (claimGate.current) return;
+    // Nothing is opened or saved yet: a browser with no backup is asked for one first.
+    if (!afterBackup && backupGate.needed()) {
+      setError(null);
+      setClaimBackupAsk(true);
+      return;
+    }
     claimGate.current = true;
     setClaimOpening(true);
     setError(null);
@@ -2304,15 +2444,16 @@ export function MoveView() {
     }
   }
 
-  // Sticky receive tag for direct private pay
+  // Sticky receive tag for direct private pay: the signed-in account's own, and none while signed out
   useEffect(() => {
     if (mode !== "receive" && mode !== "send") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- saved contacts are the signed-in account's; read again each time Send opens
+    if (mode === "send") setContacts(shownAccount ? loadContacts() : []);
+    if (!shownAccount) return;
     void getOrCreateReceiveIdentity().then(setMyIdentity).catch(() => {
-      /* crypto unavailable */
+      /* crypto unavailable, or signed out meanwhile */
     });
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- saved contacts live in this browser; read again each time Send opens
-    if (mode === "send") setContacts(loadContacts());
-  }, [mode]);
+  }, [mode, shownAccount, setMyIdentity]);
 
   // Payments found for one network are never listed on another: a switch clears the list.
   const shownNetworkKey = useRef(networkKey);
@@ -2326,11 +2467,11 @@ export function MoveView() {
   // Auto-scan inbox when opening Receive (if memo board live), again on a network switch,
   // and once a wallet connects (or another one does: the list starts over for it)
   useEffect(() => {
-    if (mode !== "receive" || !isPayMemoLive() || !address) return;
+    if (mode !== "receive" || !isPayMemoLive() || !address || !shownAccount) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- opening Receive scans the payment-message board, which marks the scan as running
     void scanInbox();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- open-tab scan once per enter
-  }, [mode, networkKey, address]);
+  }, [mode, networkKey, address, shownAccount]);
 
   // Live preview when pasting a ticket (amount only, not a full claim)
   useEffect(() => {
@@ -2405,7 +2546,8 @@ export function MoveView() {
     : null;
   const requestHint = ((): { text: string; addHref?: string } | null => {
     const asset = request?.asset;
-    if (!asset || !shieldLive) return null;
+    // mid-payment the list can drop the balance being spent: no "you have none" while it goes out
+    if (!asset || !shieldLive || inFlow) return null;
     if (!requestNoteId) {
       return {
         text: `You have no private ${asset.symbol} on ${network.label} yet. Add some, then open this link again.`,
@@ -2445,7 +2587,8 @@ export function MoveView() {
     const h = cashOutHandoff(to, sendAmount);
     setCashOutDest(h.dest);
     setOtherTo(h.to);
-    setCashOutInput(h.amount);
+    // none typed in Pay: the whole balance is written in, as when Cash out opens
+    setCashOutInput(h.amount === "" ? null : h.amount);
     selectMode("cashout");
   }
 
@@ -2471,7 +2614,7 @@ export function MoveView() {
       const h = cashOutHandoff(to, amount);
       setCashOutDest(h.dest);
       setOtherTo(h.to);
-      setCashOutInput(h.amount);
+      setCashOutInput(h.amount === "" ? null : h.amount);
       setMode("cashout");
       setError(null);
       setStatus(null);
@@ -2518,8 +2661,8 @@ export function MoveView() {
     if (id === "cashout" && claimed) {
       const pick = notes.find((n) => n.id === claimed || n.sweptFrom?.id === claimed);
       if (pick) setSelectedId(pick.id);
-      // a fresh cash out of it: no amount typed earlier carries over
-      setCashOutInput("");
+      // a fresh cash out of it: no amount typed earlier carries over, the whole balance is written in
+      setCashOutInput(null);
     }
     selectMode(id);
     window.setTimeout(() => {
@@ -2542,6 +2685,15 @@ export function MoveView() {
     );
   };
 
+  // A cash out just scheduled: said under the form, and in place of it once the whole balance is waiting to go out.
+  const scheduledLine = scheduledNotice ? (
+    <div className="rounded-[16px] bg-sealed-soft px-4 py-3.5 text-[13px] leading-relaxed text-foreground">
+      {scheduledNotice.count && scheduledNotice.count > 1 && scheduledNotice.until
+        ? `${scheduledNotice.count} pieces, ${scheduledNotice.label} in all, scheduled to go out between ${aboutTime(scheduledNotice.at)} and ${aboutTime(scheduledNotice.until).replace(/^about /, "")}. You can close Gloam: the relay sends each one then.`
+        : `Cash out of ${scheduledNotice.label} scheduled for ${aboutTime(scheduledNotice.at)}. You can close Gloam: the relay sends it then.`}
+    </div>
+  ) : null;
+
   const connectPrompt = (action: string) => (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-[16px] bg-surface px-4 py-3">
       <p className="text-[14px] text-mute">
@@ -2563,6 +2715,18 @@ export function MoveView() {
             the card has no row of its own; the first block sits at the top. */}
         <div id="pay-card" className="gl-card min-w-0 scroll-mt-24 p-5 sm:p-7 [&>*:first-child]:mt-0">
           <DevKeysBanner compact />
+
+          {/* A title and one line, like Add, Swap and Public send here and Pay and Cash out on Solana. Receive titles its own parts. */}
+          {mode !== "receive" && (
+            <div className="min-w-0">
+              <h2 className="t-title text-foreground">{mode === "cashout" ? "Cash out" : "Pay privately"}</h2>
+              <p className="mt-1 text-[14px] leading-relaxed text-mute">
+                {mode === "cashout"
+                  ? "From your private balance back to any wallet."
+                  : "Send from your private balance to a Gloam address or a claim link."}
+              </p>
+            </div>
+          )}
 
           {!poseidonMode && (
             <p className="mt-5 rounded-xl bg-warn-soft px-4 py-3 text-[13.5px] leading-relaxed text-warn">
@@ -2670,14 +2834,15 @@ export function MoveView() {
             </div>
           )}
 
-          {shieldLive && notes.length > 0 && mode !== "receive" ? (
+          {shieldLive && payCardShows(notes.length, heldNote) === "form" && mode !== "receive" ? (
             <>
               <section className="mt-6">
                 <BalancePicker
                   label={mode === "cashout" ? "Cash out from" : "Pay from"}
                   value={selected?.id ?? null}
                   onChange={setSelectedId}
-                  options={notes.map((n) => {
+                  disabled={Boolean(heldNote)}
+                  options={pickable.map((n) => {
                     const exposed = isUnsecuredClaim(n);
                     const kind = exposed
                       ? "Claimed, not secured yet"
@@ -2692,11 +2857,13 @@ export function MoveView() {
                     return {
                       id: n.id,
                       mark: <AssetMark id={logoIdFor(n.asset)} symbol={assetLabel(n.asset)} size={32} />,
+                      // two places, cut down, never rounded up: the field and Max keep every unit
                       title: (
                         <>
                           {formatAssetAmount(n.amountWei, n.asset)} <span className="text-mute">{assetLabel(n.asset)}</span>
                         </>
                       ),
+                      network: network.label,
                       sub: exposed ? `${kind}, ${day}` : day,
                       warn: exposed,
                       extra: n.note ? <PaymentNoteLine note={n.note} className="mt-0.5 text-[12px] text-soft" /> : undefined,
@@ -2788,22 +2955,43 @@ export function MoveView() {
                     ) : (
                     <>
                     <label htmlFor="recv-tag" className="sr-only">
-                      Their Gloam address, 0x address or ENS name
+                      {toKind === "name" ? "Their Gloam name" : toKind === "gloam" ? "Their Gloam address" : "Their wallet address or ENS name"}
                     </label>
-                    <input
-                      id="recv-tag"
-                      value={recipientTag}
-                      autoComplete="off"
-                      spellCheck={false}
-                      onChange={(e) => {
-                        const v = e.target.value.trim();
-                        setRecipientTag(v);
-                        if (v.startsWith("gloamr1.")) setPayStyle("direct");
-                        else if (v === "") setPayStyle("direct");
-                      }}
-                      placeholder="Gloam address, 0x address or ENS name"
-                      className="gl-input tnum mt-3"
-                    />
+                    {/* one box: what they're paid at, and what kind it is in a dropdown at its end */}
+                    <div className="gl-inputcard mt-3 flex items-center gap-1 rounded-[14px] py-1.5 pl-3.5 pr-1.5">
+                      {toKind === "name" && <span className="text-[15px] text-mute">@</span>}
+                      <input
+                        id="recv-tag"
+                        value={shownTo}
+                        autoComplete="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        onChange={(e) => {
+                          const v = toValue(e.target.value.trim(), pickedToKind);
+                          setRecipientTag(v);
+                          if (v.startsWith("gloamr1.") || v.startsWith("@")) setPayStyle("direct");
+                          else if (v === "") setPayStyle("direct");
+                        }}
+                        placeholder={TO_PLACEHOLDER[toKind]}
+                        className="tnum h-10 min-w-0 flex-1 bg-transparent text-[15px] text-foreground outline-none! placeholder:text-faint"
+                      />
+                      {GLOAM_NAMES_ADDRESS && (
+                        <Select
+                          variant="pill"
+                          align="end"
+                          className="shrink-0"
+                          label="Pay to"
+                          value={toKind}
+                          onChange={(k) => {
+                            setPickedToKind(k);
+                            const v = toValue(recipientTag.replace(/^@/, ""), k);
+                            setRecipientTag(v);
+                            if (v.startsWith("@")) setPayStyle("direct");
+                          }}
+                          options={TO_KINDS}
+                        />
+                      )}
+                    </div>
                     {payToWallet ? (
                       <div
                         id="pay-wallet"
@@ -2863,7 +3051,33 @@ export function MoveView() {
                       <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
                         That Gloam address looks incomplete or mistyped. Copy it again from their Receive page.
                       </p>
+                    ) : payRecipient.kind === "name" && nameLookup.status !== "off" && nameLookup.status !== "idle" ? (
+                      nameLookup.status === "blocked" ? (
+                        <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
+                          @{payRecipient.name} can&apos;t be paid on Gloam. Paste their Gloam address instead.
+                        </p>
+                      ) : nameLookup.status === "error" ? (
+                        <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
+                          Could not look up @{payRecipient.name} just now. Try again in a moment.
+                        </p>
+                      ) : nameLookup.status === "none" ? (
+                        <p role="alert" className="mt-2 text-[12.5px] leading-relaxed text-danger">
+                          No one has @{payRecipient.name} yet. Check the spelling.
+                        </p>
+                      ) : (
+                        <p aria-live="polite" className="tnum mt-2 text-[12.5px] leading-relaxed text-mute">
+                          {nameLookup.status === "found"
+                            ? `@${nameLookup.record.name} · ${shortTag(nameLookup.record.tag, 8, 14)}`
+                            : "Looking up name…"}
+                        </p>
+                      )
                     ) : null}
+                    {/* Paying yourself is allowed and useful: a quiet line, no warning and no extra step. */}
+                    {payingSelf && (
+                      <p aria-live="polite" className="mt-2 text-[12.5px] leading-relaxed text-mute">
+                        {OWN_GLOAM_ADDRESS_NOTE}
+                      </p>
+                    )}
                     {(contacts.length > 0 || recipientTag.trim().startsWith("gloamr1.")) && (
                       <div className="mt-3 flex flex-wrap items-center gap-1.5">
                         {contacts.map((c) => (
@@ -2980,7 +3194,8 @@ export function MoveView() {
                         !relayChecked ||
                         working ||
                         payToWallet ||
-                        (payStyle !== "bearer" && !recipientTag.trim())
+                        (payStyle !== "bearer" && !recipientTag.trim()) ||
+                        (payStyle === "direct" && payRecipient.kind === "name" && nameLookup.status !== "found")
                       }
                       onClick={() => {
                         if (recipientTag.trim()) setPayStyle("direct");
@@ -2999,6 +3214,9 @@ export function MoveView() {
                         "Syncing your balance…"
                       ) : payStyle === "bearer" ? (
                         "Make the claim link"
+                      ) : !recipientTag.trim() ? (
+                        // greyed out for one reason only: say it, as Solana's Pay does
+                        "Enter who to pay"
                       ) : (
                         "Send privately"
                       )}
@@ -3031,7 +3249,8 @@ export function MoveView() {
                   {shareBlob && (
                     <PaymentTicketShare
                       code={shareBlob}
-                      amountLabel={shareAmountLabel}
+                      amountLabel={shareAmountLabel?.shown}
+                      shareLabel={shareAmountLabel?.exact}
                       locked={shareLocked}
                       onSaved={() => setSavedCode(shareBlob)}
                     />
@@ -3085,25 +3304,21 @@ export function MoveView() {
                           inputMode="decimal"
                           autoComplete="off"
                           ref={cashOutInputRef}
-                          value={cashOutInput}
+                          // The whole balance is real text here until something else is typed. Cleared,
+                          // the field is empty and cashes out nothing: a muted 0, never a value.
+                          value={cashOutText}
                           onChange={(e) => setCashOutInput(e.target.value)}
-                          // Empty means the whole balance, shown as the placeholder. On focus the
-                          // number becomes real text, so the cursor lands at its end and it can be edited.
-                          onFocus={(e) => {
-                            if (cashOutInput.trim() !== "") return;
-                            const el = e.currentTarget;
-                            setCashOutInput(maxEth);
-                            requestAnimationFrame(() => el.setSelectionRange(maxEth.length, maxEth.length));
-                          }}
-                          placeholder={maxEth}
+                          placeholder="0"
                           aria-describedby="cashout-amt-help"
-                          className="tnum min-w-0 flex-1 bg-transparent text-[32px] font-light leading-[1.25] tracking-[-0.02em] text-foreground outline-none! placeholder:text-foreground"
+                          className="tnum min-w-0 flex-1 bg-transparent text-[32px] font-light leading-[1.25] tracking-[-0.02em] text-foreground outline-none! placeholder:text-faint"
                         />
                         <span className="shrink-0 text-[15px] text-mute">{assetLabel(selected.asset)}</span>
                       </div>
-                      <p id="cashout-amt-help" className={`mt-1 text-[12.5px] leading-relaxed ${cashOutAmountInvalid ? "text-warn" : "text-mute"}`}>
-                        {cashOutAmountInvalid
-                          ? (amountTextError(cashOutInput, assetDecimals(selected.asset)) ??
+                      <p id="cashout-amt-help" className={`mt-1 text-[12.5px] leading-relaxed ${cashOutRead.invalid ? "text-warn" : "text-mute"}`}>
+                        {cashOutRead.empty
+                          ? CASH_OUT_EMPTY_HELP
+                          : cashOutRead.invalid
+                          ? (amountTextError(cashOutText, assetDecimals(selected.asset)) ??
                             `Enter an amount up to ${formatAssetLabel(noteWei, selected.asset)}.`)
                           : cashOutPartial
                             ? planActive
@@ -3114,15 +3329,14 @@ export function MoveView() {
                       <CashOutPercentChips
                         balance={noteWei}
                         decimals={assetDecimals(selected.asset)}
-                        current={cashOutAmountInvalid ? null : typedWei}
-                        maxActive={cashOutInput.trim() === "" || (!cashOutAmountInvalid && typedWei === noteWei)}
+                        current={cashOutRead.amount}
+                        maxActive={cashOutRead.max}
                         onPick={setCashOutInput}
-                        onMax={() => setCashOutInput("")}
+                        // the whole balance written back in, to the last unit
+                        onMax={() => setCashOutInput(null)}
                         onCustom={() => {
                           const el = cashOutInputRef.current;
                           if (!el) return;
-                          const v = cashOutInput.trim() === "" ? maxEth : cashOutInput;
-                          if (v !== cashOutInput) setCashOutInput(v);
                           el.focus();
                           requestAnimationFrame(() => el.select());
                         }}
@@ -3518,13 +3732,7 @@ export function MoveView() {
                     </p>
                   )}
 
-                  {scheduledNotice && (
-                    <div className="rounded-[16px] bg-sealed-soft px-4 py-3.5 text-[13px] leading-relaxed text-foreground">
-                      {scheduledNotice.count && scheduledNotice.count > 1 && scheduledNotice.until
-                        ? `${scheduledNotice.count} pieces, ${scheduledNotice.label} in all, scheduled to go out between ${aboutTime(scheduledNotice.at)} and ${aboutTime(scheduledNotice.until).replace(/^about /, "")}. You can close Gloam: the relay sends each one then.`
-                        : `Cash out of ${scheduledNotice.label} scheduled for ${aboutTime(scheduledNotice.at)}. You can close Gloam: the relay sends it then.`}
-                    </div>
-                  )}
+                  {scheduledLine}
 
                   <ScheduledCashOuts rows={scheduledRows} liveFeeBps={liveFeeBps} gasHigh={gasHigh} onCancel={cancelScheduled} />
                 </div>
@@ -3532,10 +3740,23 @@ export function MoveView() {
             </>
           ) : mode !== "receive" ? (
             <>
-            {/* The whole balance can be waiting to go out: its rows, and Cancel, still show. */}
-            {mode === "cashout" && scheduledRows.length > 0 && (
-              <div className="mt-6">
+            {/* The whole balance can be waiting to go out: what was just scheduled, its rows, and Cancel, still show. */}
+            {mode === "cashout" && (scheduledLine || scheduledRows.length > 0) && (
+              <div className="mt-6 space-y-4">
+                {scheduledLine}
                 <ScheduledCashOuts rows={scheduledRows} liveFeeBps={liveFeeBps} gasHigh={gasHigh} onCancel={cancelScheduled} />
+              </div>
+            )}
+            {/* A payment that spent the whole balance: its claim code stays on screen, as it does under the form. */}
+            {mode === "send" && shareBlob && mustSaveCode && (
+              <div className="mt-6">
+                <PaymentTicketShare
+                  code={shareBlob}
+                  amountLabel={shareAmountLabel?.shown}
+                  shareLabel={shareAmountLabel?.exact}
+                  locked={shareLocked}
+                  onSaved={() => setSavedCode(shareBlob)}
+                />
               </div>
             )}
             <div className="mt-6 rounded-[16px] bg-surface px-5 py-9 text-center">
@@ -3594,7 +3815,7 @@ export function MoveView() {
                         void rotateReceiveIdentity().then(setMyIdentity);
                       }}
                       title="Makes a new address to share. Payments to your earlier addresses still open in this browser."
-                      className="btn btn-quiet btn-sm -mr-2 text-mute"
+                      className="btn btn-quiet btn-sm -my-2 -mr-2 text-mute"
                     >
                       New address
                     </button>
@@ -3640,6 +3861,7 @@ export function MoveView() {
                         </button>
                       </div>
                     </div>
+                    <GloamNameCard tag={myIdentity.tag} />
                     <div className="mt-3">
                       <PaymentTicketShare
                         code={myIdentity.tag}
@@ -3648,6 +3870,10 @@ export function MoveView() {
                       />
                     </div>
                   </>
+                ) : !shownAccount ? (
+                  <p className="mt-3 rounded-[16px] bg-surface p-[16px] text-[13px] text-mute">
+                    {isConnected ? "Opening your private account…" : SIGNED_OUT_BALANCE_MESSAGE}
+                  </p>
                 ) : (
                   <p className="mt-3 rounded-[16px] bg-surface p-[16px] text-[13px] text-mute">
                     Making your address… This needs a secure browser connection.
@@ -3726,6 +3952,19 @@ export function MoveView() {
                   />
                   {!isConnected ? (
                     connectPrompt("claim it")
+                  ) : claimBackupAsk && backupGate.route ? (
+                    <BackupStep
+                      route={backupGate.route}
+                      onDone={() => {
+                        setClaimBackupAsk(false);
+                        void onImportNote(true);
+                      }}
+                      onSkip={() => {
+                        backupGate.skip();
+                        setClaimBackupAsk(false);
+                        void onImportNote(true);
+                      }}
+                    />
                   ) : (
                     <button
                       id="claim-submit"
@@ -3744,6 +3983,8 @@ export function MoveView() {
                           <Spinner />
                           <span className="truncate">Opening the payment…</span>
                         </>
+                      ) : !importText.trim() ? (
+                        "Paste a link or code to claim"
                       ) : (
                         "Claim and secure"
                       )}
@@ -3770,7 +4011,7 @@ export function MoveView() {
                   <h3 className="text-[15px] font-medium text-foreground">
                     Payments to you
                   </h3>
-                  {address && (
+                  {shownAccount && (
                     <button
                       type="button"
                       onClick={() => void scanInbox()}
@@ -3793,9 +4034,7 @@ export function MoveView() {
                     Not on this network yet. Paste the claim link under Claim a payment.
                   </p>
                 )}
-                {!address && memoLive && (
-                  <p className="mt-3 text-[13px] text-soft">Connect a wallet to see payments to you.</p>
-                )}
+                {!address && memoLive && <p className="mt-3 text-[13px] text-soft">{SIGNED_OUT_BALANCE_MESSAGE}</p>}
                 {inboxStatus && (
                   <p className="mt-3 text-[13px] text-soft" aria-live="polite">
                     {inboxStatus}
@@ -3885,7 +4124,8 @@ export function MoveView() {
           mustSaveCode && shareBlob ? (
             <PaymentTicketShare
               code={shareBlob}
-              amountLabel={shareAmountLabel}
+              amountLabel={shareAmountLabel?.shown}
+              shareLabel={shareAmountLabel?.exact}
               locked={shareLocked}
               stacked
               onSaved={() => setSavedCode(shareBlob)}
@@ -3901,6 +4141,11 @@ export function MoveView() {
                 <LockIcon size={11} />
                 Private payment
               </span>
+              {sentTo && memoPosted && (
+                <p className="tnum mt-3">
+                  <span className="text-foreground">{sentTo.amount}</span> to <span className="text-foreground">{sentTo.to}</span>
+                </p>
+              )}
               {!memoPosted && <p className="mt-3">This code is the money. Save or share it now.</p>}
               {sentNote && (
                 <p className="mt-3 break-words">

@@ -15,6 +15,9 @@
 import type { Address } from "viem";
 import { anySanctioned, normalizeAddress, type ScreenOptions, type ScreenResult } from "./screening";
 import { screenTip403, tip403Applies } from "./tip403Server";
+import ofacSolana from "./solanaRings/ofacSolana.json";
+
+const OFAC_SOLANA: ReadonlySet<string> = new Set(ofacSolana.addresses);
 
 const CHAINALYSIS_URL = "https://public.chainalysis.com/api/v1/address/";
 const CACHE_MS = 60 * 60_000;
@@ -68,4 +71,18 @@ export async function screenAddresses(
   if (hits.some(Boolean)) return { allowed: false };
   if (!verdict.allowed) return { allowed: false, message: verdict.message, scope: "asset" };
   return { allowed: true };
+}
+
+/**
+ * Screen Solana addresses: OFAC's Solana entries (vendored in
+ * solanaRings/ofacSolana.json, from the same source as the EVM list), then the
+ * Chainalysis sanctions API when it is set up. Same caching and failure rules
+ * as above. True when none is flagged.
+ */
+export async function screenOtherChainAddresses(addresses: readonly string[]): Promise<boolean> {
+  const list = [...new Set(addresses.filter((a) => typeof a === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)))];
+  if (list.some((a) => OFAC_SOLANA.has(a))) return false;
+  if (!chainalysisEnabled()) return true;
+  const hits = await Promise.all(list.slice(0, 16).map(chainalysisHit));
+  return !hits.some(Boolean);
 }

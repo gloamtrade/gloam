@@ -1,0 +1,15 @@
+{
+  "name": "OFAC SDN sanctioned digital currency addresses (Solana)",
+  "source": "https://github.com/0xB10C/ofac-sanctioned-digital-currency-addresses/tree/lists",
+  "sourceCommit": "4acd0ef8ec5f6801dd2f9bab8a6ed7130f043cb0",
+  "sourceUpdatedAt": "2026-11-20T08:40:43Z",
+  "snapshotDate": "2026-11-22",
+  "list": "sanctioned_addresses_SOL.json",
+  "count": 4,
+  "addresses": [
+    "42RLPACwZPx3vYYmxSueqsogfynBDqXK298EDsNoyoHi",
+    "6wjqWWra8ombzaw6VHrG5xpQ972jCYF6bbHiFCbWmr4U",
+    "Fc1EwQUZyTEagaDvA1utHXCcZNyG1x2PLt2DfNu1cJdH",
+    "FuCC7GoYwt5TsNTjWL23Xx9UKCvC18chjMEFPL3vJDCC"
+  ]
+}

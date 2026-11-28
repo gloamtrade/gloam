@@ -7,9 +7,15 @@
  * it was typed, and the route refuses any other field.
  */
 
-/** Where someone asked for updates. */
-export const UPDATES_SOURCES = ["sign-in", "settings", "site"] as const;
+/**
+ * Where someone joined: a form ("sign-in", "settings", "site"), or "contest"
+ * when the admin added the video and writing contest entrants' emails
+ * (api/updates/import). Only the forms' sources come in from the public route.
+ */
+export const UPDATES_SOURCES = ["sign-in", "settings", "site", "contest"] as const;
 export type UpdatesSource = (typeof UPDATES_SOURCES)[number];
+export const FORM_UPDATES_SOURCES = ["sign-in", "settings", "site"] as const satisfies readonly UpdatesSource[];
+export type FormUpdatesSource = (typeof FORM_UPDATES_SOURCES)[number];
 
 export const EMAIL_MAX = 254;
 
@@ -28,6 +34,8 @@ export function normalizeEmail(raw: unknown): string | null {
   const local = email.slice(0, at);
   const domain = email.slice(at + 1);
   if (local.length > 64 || local.startsWith(".") || local.endsWith(".") || local.includes("..")) return null;
+  // the plain characters every mail service takes; others are valid on paper but refused by some senders
+  if (!/^[a-z0-9._%+-]+$/.test(local)) return null;
   const labels = domain.split(".");
   if (labels.length < 2) return null;
   if (!labels.every((l) => /^[a-z0-9-]{1,63}$/.test(l) && !l.startsWith("-") && !l.endsWith("-"))) return null;
@@ -37,4 +45,9 @@ export function normalizeEmail(raw: unknown): string | null {
 
 export function isUpdatesSource(v: unknown): v is UpdatesSource {
   return typeof v === "string" && (UPDATES_SOURCES as readonly string[]).includes(v);
+}
+
+/** A source the public sign-up forms may give. "contest" is the admin's import only. */
+export function isFormUpdatesSource(v: unknown): v is FormUpdatesSource {
+  return typeof v === "string" && (FORM_UPDATES_SOURCES as readonly string[]).includes(v);
 }

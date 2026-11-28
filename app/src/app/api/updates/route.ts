@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/adminAuth";
 import { clientIp, hitRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { KvUnavailableError, kvBackend } from "@/lib/partnersKv";
-import { isUpdatesSource, normalizeEmail } from "@/lib/updatesEmail";
+import { gloamOriginJson } from "@/lib/partnersAuth";
+import { isFormUpdatesSource, normalizeEmail } from "@/lib/updatesEmail";
 import {
   UpdatesListFullError,
   listUpdatesSubscribers,
@@ -69,6 +70,9 @@ function storeFailed(e: unknown) {
  * or "site". The answer is the same whether the email was on the list already.
  */
 export async function POST(req: Request) {
+  // JSON from gloam.trade only: a form on another site can't sign people up
+  // (it would need a CORS preflight, which this never answers)
+  if (!gloamOriginJson(req)) return fail(403, "Sign up for updates on gloam.trade.");
   const read = await readBody(req, SUBSCRIBE_FIELDS);
   if ("res" in read) return read.res;
   const { body } = read;
@@ -78,7 +82,7 @@ export async function POST(req: Request) {
 
   const email = normalizeEmail(body.email);
   if (!email) return fail(400, "That email doesn't look right. Check it and try again.");
-  const source = isUpdatesSource(body.source) ? body.source : "site";
+  const source = isFormUpdatesSource(body.source) ? body.source : "site";
 
   const hourly = await hitRateLimit(clientIp(req), "updates-subscribe", SUBSCRIBES_PER_HOUR, Date.now(), 3600);
   if (!hourly.allowed) {

@@ -7,6 +7,8 @@ import { useWriteContract } from "wagmi";
 import type { Address, Hex } from "viem";
 import { demoHistory, simulatePayroll, useAppAccount } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
+import { useShownAccount } from "./AccountScope";
+import { useWalletState } from "@/hooks/useWalletState";
 import { PayrollInvoice } from "./PayrollInvoice";
 import { PaymentNoteLine } from "./PaymentNote";
 import { DueBanner } from "./payroll/DueBanner";
@@ -15,8 +17,10 @@ import { ScheduleEditor } from "./payroll/ScheduleEditor";
 import { ScheduleList } from "./payroll/ScheduleList";
 import { ScheduleIcon } from "./payroll/scheduleUi";
 import { useSchedules } from "./payroll/useSchedules";
+import { nameChangeMessage, usePayrollNames } from "./payroll/usePayrollNames";
 import { RelayToggle } from "./RelayToggle";
 import { TokenLogo } from "./TokenLogo";
+import { Select } from "@/components/ui/Select";
 import { SealDots } from "@/components/ui/SealDots";
 import { SealedField } from "@/components/ui/SealedField";
 import { useLocalShieldNotes } from "@/hooks/useLocalShieldNotes";
@@ -24,7 +28,7 @@ import { useShieldTree } from "@/hooks/useShieldTree";
 import { getRhPublicClient, publicClientFor } from "@/lib/rhClient";
 import { track } from "@/lib/track";
 import { countPerson } from "@/lib/people";
-import { addableTokensFor, isNativeAddable, shieldTokensFor } from "@/lib/tokens";
+import { addableTokensFor, isNativeAddable } from "@/lib/tokens";
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
 import {
   NATIVE_ASSET,
@@ -275,7 +279,7 @@ function Amount({
 }) {
   return (
     <span className={`inline-flex items-center whitespace-nowrap ${logo ? "gap-2" : "gap-1.5"} ${className}`}>
-      <span className="tnum">{formatAssetAmount(raw, asset, 6)}</span>
+      <span className="tnum">{formatAssetAmount(raw, asset)}</span>
       {logo ? (
         <TokenLogo id={logoId} symbol={symbol} size={size} />
       ) : (
@@ -333,12 +337,16 @@ function Rail({
 
 // ------------------------------------------------------------------ view
 
+const NO_BATCHES: PayrollBatch[] = [];
+
 export function PayrollView() {
   const reduce = useReducedMotion();
   const { address, isConnected, chainId: walletChainId, demo } = useAppAccount();
   const { network, networkKey } = useNetwork();
   const pool = network.pool;
   const { open, refresh: refreshNotes } = useLocalShieldNotes(address);
+  // Runs are the signed-in account's own (lib/accountScope): read once its account is bound, gone on sign out.
+  const shownAccount = useShownAccount();
   const { loading: treeLoading, leafIndexForCommitment, refresh: refreshTree } = useShieldTree();
   const { writeContractAsync } = useWriteContract();
   const openGated = useOpenGatedTokens();
@@ -365,11 +373,6 @@ export function PayrollView() {
   const token: AssetOption = assetOptions.find((o) => o.address === assetChoice) ??
     assetOptions[0] ?? { address: NATIVE_ASSET, symbol: "ETH", logoId: "eth" };
   const asset = token.address;
-  // Stablecoins (and the native coin) lead; anything else waits behind "More".
-  const [moreAssets, setMoreAssets] = useState(false);
-  const leadCount =
-    shieldTokensFor(network.chainId).filter((t) => t.kind === "stablecoin").length +
-    (isNativeAddable(network.chainId, openGated) ? 1 : 0);
 
   /** Spendable private balance per asset (only entries the vault tree knows). */
   const balances = useMemo(() => {
@@ -401,13 +404,22 @@ export function PayrollView() {
   );
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const parsed = useMemo(() => parsePayrollCsv(csv, asset), [csv, asset]);
+  const rawParsed = useMemo(() => parsePayrollCsv(csv, asset), [csv, asset]);
+  // "@ada" in the address column: each name looked up once, then again right before paying
+  const names = usePayrollNames(rawParsed.rows);
+  const parsed = useMemo(() => ({ ...rawParsed, rows: names.rows }), [rawParsed, names.rows]);
+  const retryNames = names.retry;
+  const nameRetry = names.failed;
+  /** A name still being looked up: the run waits, so no one on the list is skipped by accident. */
+  const namesPending = names.pending;
+  /** A name that is pending or has no address: the list can't become a schedule until it is fixed. */
+  const nameProblem = names.pending || names.failed;
   const validRows = useMemo(() => parsed.rows.filter((r) => !r.error), [parsed.rows]);
   const badCount = parsed.rows.length - validRows.length;
   const total = draftTotal(parsed.rows);
   const directCount = validRows.filter((r) => r.kind === "gloam").length;
-  // The deposit to add is rounded up to what the summary shows (whole cents for a
-  // stablecoin, 0.000001 ETH), so it can be typed as shown; 0.01 ETH steps asked for too much.
+  // The deposit to add is rounded up to whole cents for a stablecoin (0.000001 ETH
+  // otherwise), so a stablecoin shortfall shows exactly at two places; 0.01 ETH steps asked for too much.
   const plan = useMemo(
     () =>
       fundingPlan(
@@ -488,7 +500,7 @@ export function PayrollView() {
   }, [network.chainId, demo]);
 
   // ---------------------------------------------------------------- runs
-  const [batches, setBatches] = useState<PayrollBatch[]>([]);
+  const [batches, setBatches] = useWalletState<PayrollBatch[]>(demo ? "demo" : shownAccount, NO_BATCHES);
   const [active, setActive] = useState<PayrollBatch | null>(null);
   const [running, setRunning] = useState(false);
   const startGate = useRef(false);
@@ -514,9 +526,9 @@ export function PayrollView() {
 
   const reloadBatches = useCallback(() => {
     // A demo keeps its runs in memory only.
-    if (!pool || demo) return Promise.resolve();
+    if (!pool || demo || !shownAccount) return Promise.resolve();
     return loadBatches(network.chainId, pool).then(setBatches);
-  }, [network.chainId, pool, demo]);
+  }, [network.chainId, pool, demo, shownAccount, setBatches]);
   useEffect(() => {
     if (!pool) return;
     let live = true;
@@ -529,14 +541,16 @@ export function PayrollView() {
               withDemoProofRecords
             )
           )
-        : loadBatches(network.chainId, pool);
+        : shownAccount
+          ? loadBatches(network.chainId, pool)
+          : Promise.resolve(NO_BATCHES);
     void load.then((b) => {
       if (live) setBatches(b);
     });
     return () => {
       live = false;
     };
-  }, [network.chainId, pool, demo, assetOptions]);
+  }, [network.chainId, pool, demo, assetOptions, shownAccount, setBatches]);
 
   const walletOnChain = walletChainId === network.chainId;
   const blocker = !isConnected
@@ -545,10 +559,12 @@ export function PayrollView() {
       ? "Payroll is not available on this network."
       : validRows.length === 0
         ? null
+        : namesPending
+          ? "Looking up the @names in your list…"
         : loaded && wrongAsset
           ? `${loaded.name} pays in ${loadedSymbol}. Switch back to ${loadedSymbol} to run it.`
           : loaded && capOver > 0n
-            ? `This list is ${formatAssetAmountExact(capOver, asset)} ${token.symbol} over the schedule's cap, so the run is blocked. Edit the schedule or the list.`
+            ? `This list is ${formatAssetAmount(capOver, asset)} ${token.symbol} over the schedule's cap, so the run is blocked. Edit the schedule or the list.`
             : !relayOn && !walletOnChain
           ? `Switch your wallet to ${network.label}, or turn on Hide my wallet.`
           : relayOn && relayStatus?.gasHigh
@@ -657,6 +673,14 @@ export function PayrollView() {
     setStartError(null);
     let batch: PayrollBatch;
     try {
+      // a name can point somewhere new since the list loaded: read every one again before paying
+      if (!demo) {
+        const changes = await names.confirm(parsed.rows);
+        if (changes.length) {
+          setStartError(nameChangeMessage(changes));
+          return;
+        }
+      }
       batch = newBatch({
       title: title.trim() || "Payroll",
       chainId: network.chainId,
@@ -709,7 +733,8 @@ export function PayrollView() {
   }
 
   function newScheduleFromDraft() {
-    if (!pool) return;
+    // a row whose name is still being looked up (or has no address) would be dropped: fix it first
+    if (!pool || nameProblem) return;
     const from = validRows.length > 0 ? peopleFromDraft(parsed.rows) : [];
     setEditor({
       isNew: true,
@@ -935,7 +960,7 @@ export function PayrollView() {
 
             <p className="mt-4 flex items-center gap-2.5 text-foreground">
               <span className="tnum text-[34px] font-light leading-none tracking-[-0.02em]">
-                {formatAssetAmount(paidTotal, b.asset, summaryDecimals(b.asset))}
+                {formatAssetAmount(paidTotal, b.asset)}
               </span>
               <TokenLogo id={opt.logoId} symbol={opt.symbol} size={22} />
             </p>
@@ -1089,61 +1114,24 @@ export function PayrollView() {
               <h2 className="text-[17px] text-foreground">Pay in</h2>
               <p className="max-sm:hidden text-[13px] text-mute sm:block">Comes out of your private balance</p>
             </div>
-            <div
-              className="max-sm:-mx-5 mt-4 flex gap-2 overflow-x-auto max-sm:px-5 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0 [&::-webkit-scrollbar]:hidden"
-              role="radiogroup"
-              aria-label="Currency"
-            >
-              {assetOptions.map((o, i) => {
-                const selected = o.address === asset;
-                const b = balances.get(o.address.toLowerCase())?.total ?? 0n;
-                if (!moreAssets && i >= leadCount && !selected) return null;
-                return (
-                  <button
-                    key={o.address}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    onClick={() => setAsset(o.address)}
-                    className={`flex h-14 shrink-0 items-center gap-3 rounded-full border pl-2 pr-5 text-left transition-[border-color,box-shadow,background-color] duration-200 ${
-                      selected
-                        ? "border-foreground bg-panel shadow-card"
-                        : "border-line bg-panel hover:border-line-strong hover:bg-surface"
-                    }`}
-                  >
-                    <TokenLogo id={o.logoId} symbol={o.symbol} size={38} />
-                    <span className="min-w-0">
-                      <span className="block text-[14px] font-medium leading-tight text-foreground">{o.symbol}</span>
-                      {/* Signed out no balance is read, so none is named, not even "No private balance". */}
-                      {isConnected && (
-                        <span className="tnum mt-0.5 block text-[12px] leading-tight text-mute">
-                          {b > 0n ? `${formatAssetAmount(b, o.address, summaryDecimals(o.address))} private` : "No private balance"}
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                );
-              })}
-              {assetOptions.length > leadCount && (
-                <button
-                  type="button"
-                  onClick={() => setMoreAssets((v) => !v)}
-                  aria-expanded={moreAssets}
-                  className="flex h-14 shrink-0 items-center gap-2 rounded-full px-4 text-[13px] text-mute transition-colors hover:bg-surface hover:text-foreground"
-                >
-                  {moreAssets ? "Fewer" : `${assetOptions.length - leadCount} more`}
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    aria-hidden
-                    className={`transition-transform duration-200 ${moreAssets ? "rotate-180" : ""}`}
-                  >
-                    <path d="M6 9.5l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-              )}
+            {/* one dropdown, stablecoins first, each with what you hold privately */}
+            <div className="mt-4 max-w-[380px]">
+              <Select
+                label="Pay in"
+                value={asset}
+                onChange={(v) => setAsset(v as Address)}
+                options={assetOptions.map((o) => {
+                  const b = balances.get(o.address.toLowerCase())?.total ?? 0n;
+                  return {
+                    value: o.address,
+                    label: o.symbol,
+                    icon: <TokenLogo id={o.logoId} symbol={o.symbol} size={22} />,
+                    // Signed out no balance is read, so none is named, not even "No private balance".
+                    description: isConnected ? (b > 0n ? `${formatAssetAmount(b, o.address)} private` : "No private balance") : undefined,
+                  };
+                })}
+                className="h-12 w-full text-[15px]"
+              />
             </div>
           </section>
 
@@ -1246,7 +1234,7 @@ export function PayrollView() {
                       {dragging ? "Drop it here" : "Drop your team’s CSV"}
                     </p>
                     <p className="mt-1.5 max-w-[42ch] text-[13.5px] leading-relaxed text-mute">
-                      One line per person. Leave the address blank and they get a claim link instead.
+                      One line per person. Put their Gloam address or @name, or leave it blank and they get a claim link instead.
                     </p>
                     <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5" aria-label="Columns">
                       {["name", "gloam_address", "amount"].map((c) => (
@@ -1335,6 +1323,11 @@ export function PayrollView() {
                 <Icon name="alert" className="mt-0.5 h-4 w-4 shrink-0" /> {parsed.error}
               </p>
             )}
+            {nameRetry && (
+              <button type="button" className="btn btn-ghost btn-sm mt-4" onClick={retryNames}>
+                Look the names up again
+              </button>
+            )}
           </section>
 
           {/* pay list, with the "who sees what" switch */}
@@ -1413,7 +1406,9 @@ export function PayrollView() {
                                   ? "Sent by Gloam. No name, no amount."
                                   : "No name, no amount."
                                 : r.kind === "gloam"
-                                  ? `Gloam address ${short(r.recipient)}`
+                                  ? r.payName
+                                    ? `@${r.payName}, Gloam address ${short(r.recipient)}`
+                                    : `Gloam address ${short(r.recipient)}`
                                   : "Claim link, you share it after the run"}
                           </p>
                           {!pub && !r.error && r.note && (
@@ -1473,7 +1468,7 @@ export function PayrollView() {
                   total === 0n ? "text-faint" : ""
                 }`}
               >
-                {formatAssetAmountExact(total, asset)}
+                {formatAssetAmount(total, asset)}
               </span>
               <TokenLogo id={token.logoId} symbol={token.symbol} size={24} />
             </p>
@@ -1495,7 +1490,7 @@ export function PayrollView() {
                 <div className="mt-3.5 flex items-center justify-between gap-3 text-[13px]">
                   <span className="text-mute">Cap per run</span>
                   <span className="tnum text-foreground">
-                    {formatAssetAmount(loaded.cap, loaded.asset, summaryDecimals(loaded.asset))} {loadedSymbol}
+                    {formatAssetAmount(loaded.cap, loaded.asset)} {loadedSymbol}
                   </span>
                 </div>
                 <div className="mt-3">
@@ -1509,8 +1504,8 @@ export function PayrollView() {
                   {wrongAsset
                     ? `This schedule pays in ${loadedSymbol}.`
                     : capOver > 0n
-                      ? `${formatAssetAmountExact(capOver, asset)} ${token.symbol} over the cap. This run is blocked.`
-                      : `${formatAssetAmount(BigInt(loaded.cap) - total, asset, summaryDecimals(asset))} ${token.symbol} under the cap.`}
+                      ? `${formatAssetAmount(capOver, asset)} ${token.symbol} over the cap. This run is blocked.`
+                      : `${formatAssetAmount(BigInt(loaded.cap) - total, asset)} ${token.symbol} under the cap.`}
                 </p>
               </div>
             )}
@@ -1527,7 +1522,7 @@ export function PayrollView() {
                   <div className="flex items-center justify-between gap-3 text-[13px]">
                     <span className="text-mute">Private balance</span>
                     <span className="tnum text-foreground">
-                      {formatAssetAmount(bal.total, asset, summaryDecimals(asset))} {token.symbol}
+                      {formatAssetAmount(bal.total, asset)} {token.symbol}
                     </span>
                   </div>
                   <div className="mt-3">
@@ -1543,7 +1538,8 @@ export function PayrollView() {
                       ? "Payments come out of your private balance."
                       : plan.shortfall === 0n
                         ? "Covers this run."
-                        : `${formatAssetAmountExact(plan.shortfall, asset)} ${token.symbol} short. Add it as one deposit.`}
+                        : // a deposit to make, so every unit: two places cut down reads less than the run needs (0.019 ETH read "0.01")
+                          `${formatAssetAmountExact(plan.shortfall, asset)} ${token.symbol} short. Add it as one deposit.`}
                   </p>
                 </>
               )}
@@ -1606,10 +1602,12 @@ export function PayrollView() {
                 <button
                   type="button"
                   onClick={newScheduleFromDraft}
+                  disabled={nameProblem}
+                  title={nameProblem ? "Fix the @names in the list first" : undefined}
                   className="btn btn-quiet btn-block mt-2 text-mute hover:text-foreground"
                 >
                   <ScheduleIcon name="calendar" className="h-3.5 w-3.5" />
-                  Save as a schedule
+                  {names.pending ? "Looking up the @names…" : "Save as a schedule"}
                 </button>
               )}
             </div>
@@ -1667,7 +1665,7 @@ export function PayrollView() {
                         <span className="min-w-0">
                           <span className="block truncate text-[14px] text-foreground">{b.title}</span>
                           <span className="tnum mt-0.5 block truncate text-[12px] text-mute">
-                            {paid.length} of {b.rows.length} paid, {formatAssetAmount(sum, b.asset, summaryDecimals(b.asset))} {opt?.symbol ?? ""}
+                            {paid.length} of {b.rows.length} paid, {formatAssetAmount(sum, b.asset)} {opt?.symbol ?? ""}
                           </span>
                         </span>
                       </button>

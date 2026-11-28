@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { getNetwork, networkName, type NetworkKey } from "@/lib/networks";
 import { amountTextError } from "@/lib/amountText";
+import { typedAmount } from "@/lib/amountShort";
 import { shortAddress } from "@/lib/chain";
 import {
   REQUEST_NAME_MAX,
@@ -39,8 +40,10 @@ type Created = {
   url: string;
   net: NetworkKey;
   tag: string;
-  /** "1,250 USDG" or "any amount of USDG" */
+  /** "1,250.5 USDG" or "any amount of USDG": every unit, for the text the link is shared with. */
   label: string;
+  /** The same with the amount to two places ("1,250.50 USDG"), as shown. */
+  shown: string;
   note: string;
 };
 
@@ -84,6 +87,7 @@ export function RequestPaymentCard({ tag }: { tag: string }) {
       net: network.key,
       tag,
       label: r.value ? `${formatRequestAmount(r.value)} ${asset.symbol}` : `any amount of ${asset.symbol}`,
+      shown: r.value ? `${typedAmount(r.value)} ${asset.symbol}` : `any amount of ${asset.symbol}`,
       note: cleanRequestText(note, REQUEST_NOTE_MAX),
     });
     void import("@/lib/track").then(({ track }) => {
@@ -305,7 +309,7 @@ function RequestLinkResult({ created }: { created: Created }) {
         <div className="min-w-0 flex-1 max-sm:w-full">
           <p className="text-[15px] font-medium text-foreground">
             Request ready
-            <span className="tnum font-normal text-mute">, {created.label}</span>
+            <span className="tnum font-normal text-mute">, {created.shown}</span>
           </p>
           <p className="mt-1 text-[13px] leading-relaxed text-mute">
             Send it any way you like, or let them scan the code. Gloam fills in
@@ -364,7 +368,7 @@ export function PaymentRequestBanner({
 }) {
   const who = contactLabel ?? request.name;
   const amount = request.amount
-    ? `${formatRequestAmount(request.amount)}${request.asset ? ` ${request.asset.symbol}` : ""}`
+    ? `${typedAmount(request.amount)}${request.asset ? ` ${request.asset.symbol}` : ""}`
     : null;
   const wrongNet = request.network && request.network !== currentNetwork ? getNetwork(request.network) : null;
   // A 0x address or an ENS name is paid through Cash out (lib/paymentRequest).

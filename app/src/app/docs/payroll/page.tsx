@@ -5,11 +5,15 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
+import { liveMainnetNames } from "@/lib/mainnet";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
+import { PAYROLL_PROOF_MAX } from "@/lib/starknetPrivacy/payroll";
+import { STARKNET_DOCS_NAME } from "../starknet/starknetDocs";
 
 export const metadata: Metadata = {
   title: "Private payroll",
   description:
-    "Pay a whole team privately on Robinhood Chain or Tempo: upload a list, pay everyone at once, and nobody sees who got what. Includes the Gloam relay, which keeps your wallet off the record.",
+    `Pay a whole team privately on ${liveMainnetNames()}: upload a list, pay everyone at once, and nobody sees who got what. Includes the Gloam relay, which keeps your wallet off the record.`,
 };
 
 export default function DocsPayrollPage() {
@@ -18,7 +22,7 @@ export default function DocsPayrollPage() {
       title="Private payroll"
       lede="Upload a list, pay everyone at once, and nobody sees who got what. Not even your wallet shows up, because Gloam sends each payment for you."
       glance={[
-        { label: "Networks", value: "Robinhood Chain, Tempo" },
+        { label: "Networks", value: liveMainnetNames() },
         { label: "Pay in", value: "USDG, USDC.e and other stablecoins" },
         { label: "People per run", value: "Up to 200" },
         { label: "Status", value: "Live on mainnet and testnet" },
@@ -27,6 +31,7 @@ export default function DocsPayrollPage() {
         { href: "/app/payroll", label: "Open payroll" },
         { href: "#csv", label: "List format" },
         { href: "#relay", label: "The Gloam relay" },
+        { href: "#headless", label: "Run from a script" },
       ]}
     >
       <h2>Why payroll needs privacy</h2>
@@ -44,7 +49,7 @@ export default function DocsPayrollPage() {
           {
             n: "1",
             title: "Add your team",
-            body: "Upload a CSV: name, Gloam address, amount. No address means that person gets a claim link.",
+            body: "Upload a CSV: name, Gloam address or @name, amount. No address means that person gets a claim link.",
           },
           {
             n: "2",
@@ -117,7 +122,14 @@ Robin,gloamr1.3mPz...c4Ta,4200`}</code>
       <ul>
         <li>
           <strong>Gloam address</strong> (starts with <code>gloamr1.</code>):
-          they are paid directly and the payment shows up in their app.
+          they are paid directly, and the payment lands in their private
+          balance on its own the next time their app is open.
+        </li>
+        <li>
+          <strong>Gloam name</strong> (like <code>@ada</code>): looked up when
+          you load the list, then paid like their Gloam address. Each row shows
+          the address the name points to, and a name nobody holds is flagged
+          before anything is sent.
         </li>
         <li>
           <strong>Blank</strong>: they get a claim link after the run. Anyone
@@ -151,6 +163,17 @@ Robin,gloamr1.3mPz...c4Ta,4200`}</code>
         Paying out of a balance you built up over time hides your payroll total
         too. More detail in <Link href="/docs/privacy-model">What stays private</Link>.
       </p>
+      {STARKNET_ENABLED && (
+        <p>
+          <strong>On {STARKNET_DOCS_NAME}</strong> payroll pays up to{" "}
+          {PAYROLL_PROOF_MAX} people in one proof, with Gloam&apos;s fee once per
+          proof. A person with no private account on Starknet gets a claim link.
+          The first payment to someone shows their private account, and a proof
+          with several first payments shows those accounts together. Payments
+          over channels already open show nobody and no amount. See{" "}
+          <Link href="/docs/starknet#payroll">{STARKNET_DOCS_NAME}</Link>.
+        </p>
+      )}
 
       <h2 id="schedules">Scheduled payroll</h2>
       <p>
@@ -237,13 +260,27 @@ const hash = await relayIntent(payment.intent); // your wallet stays off the rec
         <code>GLOAM_USE_RELAY=1</code>. See <Link href="/docs/agents">Agents</Link>.
       </p>
 
+      <h3 id="headless">Run payroll from a script</h3>
+      <p>
+        <a href="https://github.com/Olalolo22/gloam-payroll-cli">gloam-payroll-cli</a>,
+        a community tool by Olu, runs the same payroll without a browser, from a
+        server or a CI job. It reads the same list format, pays each row through
+        the Gloam relay, picks a run back up if it stopped halfway without paying
+        anyone twice, and makes a payroll total proof you can check at{" "}
+        <Link href="/verify">/verify</Link>. It is built on{" "}
+        <code>@gloamtrade/sdk</code> and maintained by its author, not by Gloam,
+        so read it before you run it with real money.
+      </p>
+
       <h2>No middlemen</h2>
       <p>
-        The vaults on both networks were redeployed so that nobody, including
+        The vaults on every network are built so that nobody, including
         the Gloam team, can move your money or quietly change the rules. There is
-        no admin withdraw, and any change to how proofs or prices are checked
-        has to be announced on-chain three days before it can take effect. Pool
-        addresses are on <Link href="/docs/chain">Networks</Link>.
+        no admin withdraw, and the proof checkers can never be replaced. Raising a
+        limit, listing an asset or raising the fee has to be announced on-chain
+        three days before it takes effect. Who can change what is on{" "}
+        <Link href="/compliance">Compliance</Link>, and pool addresses are on{" "}
+        <Link href="/docs/chain">Networks</Link>.
       </p>
     </DocsLayout>
   );

@@ -36,15 +36,21 @@ import { MAINNET_ENABLED, type GloamChainId } from "@/lib/networks";
 import { originChain } from "@/lib/originChains";
 import { useVaultStatus } from "@/lib/passkey";
 import { dropUnsentNote, formatFeePercent, saveLocalNote, updateLocalNote, type LocalNote } from "@/lib/shield";
-import { connectSolana, paySolana, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
+import { connectSolana, paySolana, preferredSolanaWallet, readSolanaBalance, reconnectSolana, rememberSolanaWallet, solanaTxState, useSolanaWallets, type SolanaAccount, type SolanaWallet } from "@/lib/solanaWallet";
 import { track } from "@/lib/track";
 import type { TrackEvent } from "@/lib/trackEvents";
 import { failedBeforeSend, solanaDeclined, solanaSurelyNotSent, surelyNotSent, walletDeclined, walletErrorText } from "@/lib/walletErrors";
+import { payRelayTxs, wagmiPayActions } from "@/lib/relayWalletPay";
 import { SealedField } from "@/components/ui/SealedField";
+import { Select } from "@/components/ui/Select";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useNetwork } from "./NetworkProvider";
+import { useAccountScope } from "./AccountScope";
 import { AmountProblem } from "./AmountProblem";
+import { BackupStep, useBackupGate } from "./RecoveryPanel";
+import { keepStorage } from "@/lib/backupGate";
 import { SuccessReceipt } from "./SuccessModal";
+import { displayAmount, displayAmountNumber, displayAmountText, typedAmount } from "@/lib/amountShort";
 
 const noopSubscribe = () => () => {};
 const noop = () => {};
@@ -95,6 +101,10 @@ type PrivateStage =
        * hasn't seen: most likely never sent. Not proof, so its note is kept.
        */
       expired?: boolean;
+      /** The Solana transaction's signature, when the wallet or Gloam's send gave one. */
+      sig?: string | null;
+      /** Seen confirmed on Solana: only Relay is left to wait for. */
+      onChain?: boolean;
     }
   | { kind: "landed"; quote: PrivateBridgeQuote }
   | { kind: "late"; quote: PrivateBridgeQuote }
@@ -112,7 +122,7 @@ type WalletStage =
   | { kind: "sent"; quote: BridgeQuote; hash: Hex | null; unsure: boolean };
 
 /** A chain's logo, with its dark-theme version when Relay ships one. */
-function ChainLogo({ id, size = 24, className = "" }: { id: number; size?: number; className?: string }) {
+export function ChainLogo({ id, size = 24, className = "" }: { id: number; size?: number; className?: string }) {
   return (
     <span className={`relative inline-block shrink-0 overflow-hidden rounded-full ${className}`} style={{ width: size, height: size }}>
       {/* eslint-disable-next-line @next/next/no-img-element -- small local logos */}
@@ -123,7 +133,7 @@ function ChainLogo({ id, size = 24, className = "" }: { id: number; size?: numbe
   );
 }
 
-function TokenMark({ src, size = 20 }: { src: string; size?: number }) {
+export function TokenMark({ src, size = 20 }: { src: string; size?: number }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element -- small local logos
     <img src={src} alt="" width={size} height={size} className="shrink-0 rounded-full" style={{ width: size, height: size }} />
@@ -162,7 +172,6 @@ export function BridgeInCard({
 }) {
   const { network } = useNetwork();
   const dest = BRIDGE_DESTINATIONS[network.family];
-  const swap = swapSource(network);
   const [opened, setOpen] = useState(false);
   // Closing it, or opening it by hand, uses up the link's one opening.
   const [startUsed, setStartUsed] = useState(false);
@@ -175,7 +184,7 @@ export function BridgeInCard({
   if (!dest) return null;
 
   return (
-    <div className="gl-card p-5">
+    <div className="gl-card p-5 sm:p-7">
       <p className="text-[13px] text-mute">Money on another chain?</p>
       <div className="mt-3 flex items-center">
         {featured.map((id, i) => (
@@ -186,11 +195,10 @@ export function BridgeInCard({
       <p className="mt-3 text-[14px] leading-relaxed text-foreground">
         Bring money over from {sources.length} chains, or straight from an exchange.
       </p>
-      <p className="mt-1.5 text-[12.5px] leading-relaxed text-mute">
+      <p className="mt-1.5 max-w-[52ch] text-[13px] leading-relaxed text-mute">
         {solanaPrivate
-          ? `From a Solana wallet it goes straight into your private balance. From anywhere else it lands in your wallet on ${dest.chain} as ${dest.token.symbol}, then you add it here privately.`
-          : `It lands in your wallet on ${dest.chain} as ${dest.token.symbol}. Then you add it here privately.`}
-        {swap && ` Holding ${swap.tokens[0]!.symbol} on ${swap.name}? Swap it to ${dest.token.symbol} here too.`}
+          ? "From your own wallet it can land straight in your private balance."
+          : `It lands in your wallet on ${dest.chain}, then you add it here privately.`}
       </p>
       <button type="button" disabled={!recipient} onClick={() => setOpen(true)} className="btn btn-ghost btn-sm mt-4">
         {recipient ? "Bring money over" : "Connect a wallet first"}
@@ -265,6 +273,8 @@ function BridgeSheet({
   onPrivate?: () => void;
 }) {
   const { network } = useNetwork();
+  // the wallet keeps switching accounts and the page can't reload yet (lib/accountScope "leaving")
+  const scopeLeaving = useAccountScope().phase === "leaving";
   // Only opened from BridgeInCard and SwapToStableButton, which render nothing
   // on a chain without a bridge, so the destination is always there.
   const dest = BRIDGE_DESTINATIONS[network.family]!;
@@ -297,7 +307,46 @@ function BridgeSheet({
   const solWallets = useSolanaWallets();
   const vault = useVaultStatus();
   const [solName, setSolName] = useState("");
-  const solWallet = chain.kind === "svm" ? (solWallets.find((w) => w.name === solName) ?? solWallets[0] ?? null) : null;
+  // Solana wallets already connected to this site, found with a silent reconnect (no prompt):
+  // the one that pays by default, and its account, so its balance shows and Continue asks nothing.
+  const [solAccounts, setSolAccounts] = useState<Record<string, SolanaAccount>>({});
+  const solActive = open && chain.kind === "svm";
+  useEffect(() => {
+    if (!solActive || solWallets.length === 0) return;
+    let live = true;
+    void Promise.all(
+      solWallets.map(async (w) => {
+        const acct = await Promise.race([reconnectSolana(w), new Promise<null>((r) => window.setTimeout(() => r(null), 4000))]);
+        return [w.name, acct] as const;
+      })
+    ).then((rows) => {
+      if (!live) return;
+      const found: Record<string, SolanaAccount> = {};
+      for (const [n, a] of rows) if (a) found[n] = a;
+      setSolAccounts((prev) => ({ ...found, ...prev }));
+    });
+    return () => {
+      live = false;
+    };
+  }, [solActive, solWallets]);
+  const solWallet =
+    chain.kind === "svm" ? preferredSolanaWallet(solWallets, { picked: solName, evmName: connector?.name, trusted: Object.keys(solAccounts) }) : null;
+  const solAccount = solWallet ? (solAccounts[solWallet.name] ?? null) : null;
+  const [solConnectError, setSolConnectError] = useState<string | null>(null);
+  /** Pick a Solana wallet: remembered for next time, and connected now so its balance shows. */
+  async function pickSolWallet(w: SolanaWallet) {
+    setSolName(w.name);
+    rememberSolanaWallet(w.name);
+    setSolConnectError(null);
+    if (solAccounts[w.name]) return;
+    try {
+      const acct = await connectSolana(w);
+      setSolAccounts((prev) => ({ ...prev, [w.name]: acct }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message.split("\n")[0]! : "";
+      setSolConnectError(solanaDeclined(msg) ? `${w.name} didn't connect.` : `Couldn't connect ${w.name}. Open it, unlock it and try again, or pick another wallet.`);
+    }
+  }
   const switchable = connector?.type === "injected" || connector?.type === "walletConnect";
   const canPrivate =
     !demo &&
@@ -310,6 +359,9 @@ function BridgeSheet({
   const privately = canPrivate && privateOn;
   const payerName = solWallet?.name ?? "your wallet";
   const [priv, setPriv] = useState<PrivateStage>({ kind: "idle" });
+  // Paying in privately makes a note only this browser holds: offer a backup first, as Shield does.
+  const backupGate = useBackupGate();
+  const [backupAsk, setBackupAsk] = useState(false);
   // The note and proof for the amount typed, kept until it is sent so a fresh price reuses them.
   const prepared = useRef<{ key: string; note: LocalNote; proof: Hex } | null>(null);
 
@@ -362,8 +414,27 @@ function BridgeSheet({
     query: { enabled: balanceReadable && nativeToken, retry: 1 },
   });
   const srcRead = nativeToken ? srcCoin : srcToken;
-  const srcBalance: bigint | null = balanceReadable && !srcRead.isError ? (nativeToken ? srcCoin.data?.value : srcToken.data) ?? null : null;
-  const srcLoading = balanceReadable && srcRead.isLoading;
+  // The paying Solana wallet's balance of the picked token, once it is connected.
+  const solOwner = solActive ? (solAccount?.address ?? null) : null;
+  const solKey = solOwner ? `${solOwner}:${token.address}` : null;
+  const [solBal, setSolBal] = useState<{ key: string; value: bigint | null } | null>(null);
+  useEffect(() => {
+    if (!solOwner || !solKey) return;
+    let live = true;
+    void readSolanaBalance(solOwner, token.address).then((value) => live && setSolBal({ key: solKey, value }));
+    return () => {
+      live = false;
+    };
+  }, [solOwner, solKey, token.address]);
+  const srcBalance: bigint | null =
+    chain.kind === "svm"
+      ? solKey && solBal?.key === solKey
+        ? solBal.value
+        : null
+      : balanceReadable && !srcRead.isError
+        ? ((nativeToken ? srcCoin.data?.value : srcToken.data) ?? null)
+        : null;
+  const srcLoading = chain.kind === "svm" ? Boolean(solKey && solBal?.key !== solKey) : balanceReadable && srcRead.isLoading;
   // Not private, from an EVM chain, with a wallet that can switch there: the wallet
   // signs the bridge to itself. A deposit address stays one tap away, for an exchange.
   const walletPays =
@@ -383,6 +454,7 @@ function BridgeSheet({
     setStage({ kind: "form", error: null });
     setStatus(null);
     setPriv({ kind: "idle" });
+    setBackupAsk(false);
     setWallet({ kind: "idle" });
     resetSend();
   }, [resetSend]);
@@ -606,8 +678,31 @@ function BridgeSheet({
   // out, so the person may start over. Its note stays saved, out of the
   // balance: Relay not seeing it (or a status read that failed) is no proof,
   // and if it lands after all the sync counts it (lib/claimSweep).
+  // A Solana send with a signature: read it on Solana every few seconds until it
+  // lands. Landed with an error, nothing moved: the note goes and the person can
+  // try again. Not seen at all past the transaction's life: expired below.
   useEffect(() => {
-    if (!sentPriv?.unsure || !sentPriv.quote.solanaTx || sentPriv.expired) return;
+    const sig = sentPriv?.sig;
+    if (!sentPriv || !sig || !sentPriv.quote.solanaTx || sentPriv.onChain || sentPriv.expired) return;
+    let live = true;
+    const check = async () => {
+      const state = await solanaTxState(sig);
+      if (!live) return;
+      if (state === "landed") setPriv((p) => (p === sentPriv ? { ...sentPriv, onChain: true } : p));
+      else if (state === "failed") {
+        dropUnsentNote(sentPriv.note.id);
+        setPriv({ kind: "failed", quote: sentPriv.quote });
+      }
+    };
+    void check();
+    const t = window.setInterval(() => void check(), 4000);
+    return () => {
+      live = false;
+      window.clearInterval(t);
+    };
+  }, [sentPriv]);
+  useEffect(() => {
+    if (!sentPriv || sentPriv.onChain || !(sentPriv.unsure || sentPriv.sig) || !sentPriv.quote.solanaTx || sentPriv.expired) return;
     const left = Math.max(0, sentPriv.at + 150_000 - Date.now());
     const t = window.setTimeout(() => setPriv((p) => (p === sentPriv ? { ...sentPriv, expired: true } : p)), left);
     return () => window.clearTimeout(t);
@@ -654,6 +749,39 @@ function BridgeSheet({
     return json.data;
   }
 
+  /**
+   * Max when the amount is what lands: the whole balance less Relay's real fee, read
+   * from a price for the whole balance (/api/bridge/quote, what you pay in), with a
+   * quarter of the fee and a cent kept over for the add on arrival and the price
+   * moving. Was a flat 0.5% (826.32 USDC left 4.13 behind for a 0.23 fee). With no
+   * price it falls back to that 0.5%.
+   */
+  async function privateMax(balance: bigint) {
+    const whole = Number(formatUnits(balance, token.decimals));
+    const flat = () => setAmount(String(Math.floor(whole * 0.995 * 100) / 100));
+    try {
+      const res = await fetch("/api/bridge/quote", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chainId: chain.id,
+          symbol: token.symbol,
+          network: network.key,
+          amount: formatUnits(balance, token.decimals),
+          recipient,
+          ...(chain.kind === "svm" && solOwner ? { refundTo: solOwner } : {}),
+        }),
+      });
+      const json = (await res.json()) as { ok: boolean; data?: BridgeQuote };
+      const out = json.ok && json.data ? Number(json.data.receive.amount) : NaN;
+      if (!Number.isFinite(out) || out <= 0 || out > whole) return flat();
+      const fee = whole - out;
+      setAmount(String(Math.max(0, Math.floor((whole - fee * 1.25 - 0.01) * 100) / 100)));
+    } catch {
+      flat();
+    }
+  }
+
   /** Connect the Solana wallet if it pays, make the note and its proof, and price the order. */
   async function startPrivate(e: React.FormEvent) {
     e.preventDefault();
@@ -669,8 +797,13 @@ function BridgeSheet({
     try {
       let account: SolanaAccount | null = null;
       if (wallet) {
-        setPriv({ kind: "working", text: `Connecting ${wallet.name}…` });
-        account = await connectSolana(wallet);
+        account = solAccounts[wallet.name] ?? null;
+        if (!account) {
+          setPriv({ kind: "working", text: `Connecting ${wallet.name}…` });
+          account = await connectSolana(wallet);
+          const got = account;
+          setSolAccounts((prev) => ({ ...prev, [wallet.name]: got }));
+        }
       }
       step = "prepare";
       const key = `${network.key}:${dest.token.address}:${wei}`;
@@ -706,7 +839,9 @@ function BridgeSheet({
           step === "connect"
             ? solanaDeclined(msg)
               ? `${payerName} didn't connect. Nothing moved.`
-              : `Couldn't connect ${payerName}. Try again.`
+              : solWallets.length > 1
+                ? `Couldn't connect ${payerName}. If you use another wallet, pick it above.`
+                : `Couldn't connect ${payerName}. Open it, unlock it and try again.`
             : step === "prepare"
               ? "Couldn't prepare your private deposit. Try again."
               : msg || "Something went wrong. Try again.",
@@ -715,8 +850,18 @@ function BridgeSheet({
   }
 
   /** Save the note, then have the wallet sign and send the order. */
-  async function confirmPrivate() {
+  async function confirmPrivate(afterBackup = false) {
     if (priv.kind !== "review" || priv.signing) return;
+    // the page is bound to another account than the one signed in: nothing is deposited
+    if (scopeLeaving) {
+      setPriv({ ...priv, error: "Your wallet switched accounts. Reload the page to add money." });
+      return;
+    }
+    if (!afterBackup && backupGate.needed()) {
+      setBackupAsk(true);
+      return;
+    }
+    keepStorage();
     const r = priv;
     setPriv({ ...r, signing: true, progress: null, error: null });
     let quote = r.quote;
@@ -739,8 +884,9 @@ function BridgeSheet({
 
     if (quote.solanaTx && r.wallet && r.account) {
       let unsure = false;
+      let sig: string | null = null;
       try {
-        await paySolana(r.wallet, r.account, quote.solanaTx);
+        sig = await paySolana(r.wallet, r.account, quote.solanaTx);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
         if (solanaSurelyNotSent(msg)) {
@@ -759,7 +905,7 @@ function BridgeSheet({
       }
       prepared.current = null;
       setStatus(null);
-      setPriv({ kind: "sent", quote, note: r.note, payer: r.wallet.name, hash: null, unsure, at: Date.now() });
+      setPriv({ kind: "sent", quote, note: r.note, payer: r.wallet.name, hash: null, unsure: unsure || !sig, at: Date.now(), sig });
       once(`private-sent:${quote.requestId}`, "bridge_private_sent", { source: quote.send.chain, token: quote.send.symbol });
       return;
     }
@@ -894,80 +1040,21 @@ function BridgeSheet({
       return;
     }
     const at = quote === r.quote ? r.at : Date.now();
-    const txs = quote.evmTxs ?? [];
-    let hash: Hex | null = null;
-    let approved = false;
-    // Set once the last transaction (the deposit) is handed to the wallet.
-    let paying = false;
-    try {
-      for (let i = 0; i < txs.length; i++) {
-        const tx = txs[i]!;
-        const last = i === txs.length - 1;
-        const chainId = tx.chainId as GloamChainId;
-        setWallet({
-          kind: "review",
-          quote,
-          at,
-          signing: true,
-          error: null,
-          progress: txs.length > 1 ? (last ? "Now confirm the bridge in your wallet…" : "Approve in your wallet first (1 of 2)…") : null,
-        });
-        if (getAccount(config).chainId !== tx.chainId) {
-          if (tx.chainId !== network.chainId) switchedAway.current = true;
-          await switchChain(config, { chainId });
-        }
-        paying = last;
-        const sent = await sendTransaction(config, { to: tx.to as Address, data: tx.data as Hex, value: BigInt(tx.value), chainId });
-        if (last) {
-          hash = sent;
-        } else {
-          // wagmi throws on a reverted receipt, with a reason decoded from raw bytes: read it plainly then
-          const rec = await waitForTransactionReceipt(config, { hash: sent, chainId }).catch(async (e) => {
-            const plain = await getTransactionReceipt(config, { hash: sent, chainId }).catch(() => null);
-            if (plain) return plain;
-            throw e;
-          });
-          if (rec.status !== "success") throw new Error("The approval didn't go through.");
-          // Some wallets (OKX among them) let the approval be edited down. A bridge
-          // above what was approved fails in the wallet's own check, so stop here and
-          // say so instead of handing over a deposit that cannot go through.
-          if (tx.data.slice(0, 10).toLowerCase() === "0x095ea7b3") {
-            const spender = `0x${tx.data.slice(34, 74)}` as Address;
-            const needed = BigInt(`0x${tx.data.slice(74, 138)}`);
-            const allowed = await readContract(config, { address: tx.to as Address, abi: erc20Abi, functionName: "allowance", args: [getAccount(config).address as Address, spender], chainId }).catch(() => null);
-            if (allowed !== null && allowed < needed) {
-              throw new Error(`Your wallet approved less than this payment needs (${formatUnits(allowed, token.decimals)} of ${quote.send.amount} ${quote.send.symbol}). Try again and approve the amount shown, without editing it.`);
-            }
-          }
-          approved = true;
-          // Some wallets check the deposit against a node that hasn't seen the approval yet
-          // and call it a failed contract call: give the chain a few seconds first.
-          setWallet({ kind: "review", quote, at, signing: true, error: null, progress: "Approval done. Getting the bridge ready…" });
-          await new Promise((res) => window.setTimeout(res, 4000));
-        }
+    // The same path as the bridge into a private account on Solana (lib/relayWalletPay).
+    const paid = await payRelayTxs(
+      quote.evmTxs ?? [],
+      { amount: quote.send.amount, symbol: quote.send.symbol, chain: quote.send.chain, decimals: token.decimals },
+      wagmiPayActions(config),
+      (progress) => setWallet({ kind: "review", quote, at, signing: true, error: null, progress }),
+      (chainId) => {
+        if (chainId !== network.chainId) switchedAway.current = true;
       }
-    } catch (err) {
-      // Before the deposit, or a clear no from the wallet: nothing went out. A
-      // timeout or lost reply on the deposit may come after the wallet sent it:
-      // follow the order then, Relay says whether it arrived.
-      if (!paying || surelyNotSent(err)) {
-        setWallet({
-          kind: "review",
-          quote,
-          at,
-          signing: false,
-          progress: null,
-          error: walletDeclined(err)
-            ? approved
-              ? "You cancelled the bridge. Nothing moved; the approval can be used next time."
-              : "You cancelled it in your wallet. Nothing moved."
-            : failedBeforeSend(err) && /chain/i.test(walletErrorText(err))
-              ? `Switch your wallet to ${quote.send.chain} to bridge from there.`
-              : walletErrorText(err) || "It didn't send. Try again.",
-        });
-        return;
-      }
+    );
+    if (!paid.sent) {
+      setWallet({ kind: "review", quote, at, signing: false, progress: null, error: paid.error });
+      return;
     }
+    const hash = paid.hash;
     setStatus(null);
     setWallet({ kind: "sent", quote, hash, unsure: !hash });
     once(`wallet-sent:${quote.requestId}`, "bridge_wallet_sent", { source: quote.send.chain, token: quote.send.symbol });
@@ -1202,48 +1289,57 @@ function BridgeSheet({
               </div>
             </div>
 
-            {chain.tokens.length > 1 && (
-              <div role="radiogroup" aria-label="Token" className="flex flex-wrap gap-2">
-                {chain.tokens.map((t) => (
-                  <button
-                    key={t.symbol}
-                    type="button"
-                    role="radio"
-                    aria-checked={t.symbol === token.symbol}
-                    onClick={() => {
-                      setSymbol(t.symbol);
-                      setAmount("");
-                    }}
-                    className={`inline-flex h-10 items-center gap-2 rounded-full border pl-1.5 pr-3.5 text-[14px] transition-colors ${
-                      t.symbol === token.symbol ? "border-foreground text-foreground" : "border-line text-soft hover:bg-surface"
-                    }`}
-                  >
-                    <TokenMark src={t.logo} size={26} />
-                    {t.symbol}
-                  </button>
-                ))}
+            {(chain.tokens.length > 1 || (privately && chain.kind === "svm" && solWallets.length > 1)) && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {chain.tokens.length > 1 && (
+                  <div className="min-w-0">
+                    <p className="text-[13px] text-mute">Token</p>
+                    <Select
+                      label="Token"
+                      value={token.symbol}
+                      onChange={(v) => {
+                        setSymbol(v);
+                        setAmount("");
+                      }}
+                      options={chain.tokens.map((t) => ({ value: t.symbol, label: t.symbol, icon: <TokenMark src={t.logo} size={22} /> }))}
+                      className="mt-1.5 h-12 w-full text-[15px]"
+                    />
+                  </div>
+                )}
+                {privately && chain.kind === "svm" && solWallets.length > 1 && (
+                  <div className="min-w-0">
+                    <p className="text-[13px] text-mute">Pay from</p>
+                    <Select
+                      label="Solana wallet"
+                      value={solWallet?.name ?? ""}
+                      onChange={(name) => {
+                        const w = solWallets.find((x) => x.name === name);
+                        if (w) void pickSolWallet(w);
+                      }}
+                      // Wallets already connected to Gloam first, and said so.
+                      options={[...solWallets]
+                        .sort((a, b) => Number(Boolean(solAccounts[b.name])) - Number(Boolean(solAccounts[a.name])))
+                        .map((w) => {
+                          const acct = solAccounts[w.name];
+                          return {
+                            value: w.name,
+                            label: w.name,
+                            // eslint-disable-next-line @next/next/no-img-element -- the wallet's own data-URL icon
+                            icon: <img src={w.icon} alt="" width={22} height={22} className="h-[22px] w-[22px] rounded-full" />,
+                            description: acct ? `Connected, ${acct.address.slice(0, 4)}…${acct.address.slice(-4)}` : "Not connected",
+                          };
+                        })}
+                      className="mt-1.5 h-12 w-full text-[15px]"
+                    />
+                  </div>
+                )}
               </div>
             )}
 
-            {privately && chain.kind === "svm" && solWallets.length > 1 && (
-              <div role="radiogroup" aria-label="Solana wallet" className="flex flex-wrap gap-2">
-                {solWallets.map((w) => (
-                  <button
-                    key={w.name}
-                    type="button"
-                    role="radio"
-                    aria-checked={solWallet?.name === w.name}
-                    onClick={() => setSolName(w.name)}
-                    className={`inline-flex h-10 items-center gap-2 rounded-full border pl-1.5 pr-3.5 text-[14px] transition-colors ${
-                      solWallet?.name === w.name ? "border-foreground text-foreground" : "border-line text-soft hover:bg-surface"
-                    }`}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element -- the wallet's own data-URL icon */}
-                    <img src={w.icon} alt="" width={26} height={26} className="h-[26px] w-[26px] rounded-full" />
-                    {w.name}
-                  </button>
-                ))}
-              </div>
+            {privately && chain.kind === "svm" && solConnectError && (
+              <p role="alert" className="text-[13px] text-danger">
+                {solConnectError}
+              </p>
             )}
 
             {privately ? (
@@ -1271,26 +1367,22 @@ function BridgeSheet({
                     loading={srcLoading}
                     decimals={token.decimals}
                     symbol={token.symbol}
-                    stable={token.stable}
                     over={overSource ? chain.name : null}
                     // The amount here is what lands, so Max leaves room for Relay's fee.
-                    onMax={
-                      token.stable && srcBalance != null
-                        ? () => setAmount(String(Math.floor(Number(formatUnits(srcBalance, token.decimals)) * 0.995 * 100) / 100))
-                        : null
-                    }
+                    onMax={token.stable && srcBalance != null ? () => void privateMax(srcBalance) : null}
                   />
                 )}
                 {swapping && maxOut && (
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                     <span className="tnum text-[12px] text-mute">
                       {amountNum > 0 && /^\d+(\.\d+)?$/.test(amount)
-                        ? `About ${trimAmount(formatUnits((maxOut.wei * BigInt(Math.round(amountNum * 100))) / BigInt(Math.max(1, Math.round(maxOut.out * 100))), token.decimals))} ${token.symbol}`
-                        : `Your ${token.symbol} buys up to about ${Math.floor(maxOut.out * 100) / 100} ${dest.token.symbol}`}
+                        ? `About ${displayAmount((maxOut.wei * BigInt(Math.round(amountNum * 100))) / BigInt(Math.max(1, Math.round(maxOut.out * 100))), token.decimals)} ${token.symbol}`
+                        : `Your ${token.symbol} buys up to about ${displayAmountNumber(maxOut.out)} ${dest.token.symbol}`}
                     </span>
                     <button
                       type="button"
-                      onClick={() => setAmount(String(Math.floor(maxOut.out * 0.98 * 100) / 100))}
+                      // maxOut is Relay's minimum already (slippage counted): a hair under it, not 2%.
+                      onClick={() => setAmount(String(Math.floor(maxOut.out * 0.997 * 100) / 100))}
                       className="h-9 rounded-full border border-line px-3 text-[12.5px] text-soft transition-colors hover:bg-surface hover:text-foreground"
                     >
                       Max
@@ -1301,7 +1393,7 @@ function BridgeSheet({
                   {swapping && `Type the ${dest.token.symbol} you want to add, not the ${token.symbol}. `}
                   Paid in {token.symbol}{" "}
                   {solWallet ? `from ${solWallet.name}` : swapping ? "from this wallet" : `from this wallet on ${chain.name}`}.
-                  {swapping && gasCoin != null && ` You hold ${trimAmount(formatUnits(gasCoin.value, token.decimals))} ${token.symbol}.`} You
+                  {swapping && gasCoin != null && ` You hold ${displayAmount(gasCoin.value, token.decimals)} ${token.symbol}.`} You
                   see the exact cost before you sign.
                 </p>
               </div>
@@ -1333,7 +1425,6 @@ function BridgeSheet({
                   loading={srcLoading}
                   decimals={token.decimals}
                   symbol={token.symbol}
-                  stable={token.stable}
                   over={overSource ? chain.name : null}
                   // Stablecoins only: a chain's own coin also pays the network fee to send it.
                   onMax={token.stable && srcBalance != null ? () => setAmount(stableMax(srcBalance, token.decimals)) : null}
@@ -1342,7 +1433,7 @@ function BridgeSheet({
               {swapping && gasCoin != null && (
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                   <span className="tnum text-[12px] text-mute">
-                    In your wallet: {trimAmount(formatUnits(gasCoin.value, token.decimals))} {token.symbol}
+                    In your wallet: {displayAmount(gasCoin.value, token.decimals)} {token.symbol}
                   </span>
                   <div role="group" aria-label="Amount shortcuts" className="flex gap-1.5">
                     {[25, 50, 75, 100].map((pct) => {
@@ -1367,7 +1458,7 @@ function BridgeSheet({
                 {overBalance
                   ? `That's more ${token.symbol} than this wallet holds.`
                   : token.stable
-                    ? `From ${BRIDGE_MIN_USD} to ${BRIDGE_MAX_USD.toLocaleString("en-US")} ${token.symbol}.`
+                    ? `From ${displayAmountNumber(BRIDGE_MIN_USD)} to ${displayAmountNumber(BRIDGE_MAX_USD)} ${token.symbol}.`
                     : swapping
                       ? `Keep a little ${token.symbol} for network fees. It arrives as ${dest.token.symbol} in this wallet.`
                       : `Up to about $${BRIDGE_MAX_USD.toLocaleString("en-US")} worth. It arrives as ${dest.token.symbol}.`}
@@ -1443,7 +1534,7 @@ function BridgeSheet({
                       ? "Review the swap"
                       : walletPays
                         ? amountNum > 0 && /^\d+(\.\d+)?$/.test(amount)
-                          ? `Bridge ${amount} ${token.symbol} from your wallet`
+                          ? `Bridge ${typedAmount(amount)} ${token.symbol} from your wallet`
                           : "Bridge from your wallet"
                         : "Get a deposit address")}
             </button>
@@ -1477,6 +1568,22 @@ function BridgeSheet({
           <PrivateReview
             review={priv}
             onConfirm={() => void confirmPrivate()}
+            backup={
+              backupAsk && backupGate.route ? (
+                <BackupStep
+                  route={backupGate.route}
+                  onDone={() => {
+                    setBackupAsk(false);
+                    void confirmPrivate(true);
+                  }}
+                  onSkip={() => {
+                    backupGate.skip();
+                    setBackupAsk(false);
+                    void confirmPrivate(true);
+                  }}
+                />
+              ) : null
+            }
             onReset={() => {
               reset();
               backToNetwork();
@@ -1529,13 +1636,13 @@ function BridgeSheet({
                 <dt className="text-mute">Sent</dt>
                 <dd className="tnum flex items-center gap-1.5 text-right text-foreground">
                   <TokenMark src={wallet.quote.send.logo} size={18} />
-                  {wallet.quote.send.amount} {wallet.quote.send.symbol} on {wallet.quote.send.chain}
+                  {typedAmount(wallet.quote.send.amount)} {wallet.quote.send.symbol} on {wallet.quote.send.chain}
                 </dd>
               </div>
               <div className="flex min-h-11 items-center justify-between gap-3">
                 <dt className="text-mute">You get about</dt>
                 <dd className="tnum text-right text-foreground">
-                  {Number(wallet.quote.receive.amount).toFixed(2)} {wallet.quote.receive.symbol}
+                  {displayAmountText(wallet.quote.receive.amount)} {wallet.quote.receive.symbol}
                 </dd>
               </div>
               {wallet.hash && txLink(wallet.quote.send.chainId, wallet.hash) && (
@@ -1639,13 +1746,13 @@ function BridgeSheet({
                 <dt className="text-mute">You get about</dt>
                 <dd className="tnum flex items-center gap-1.5 text-right text-foreground">
                   <TokenMark src={stage.quote.receive.logo} size={18} />
-                  {Number(stage.quote.receive.amount).toFixed(2)} {stage.quote.receive.symbol}
+                  {displayAmountText(stage.quote.receive.amount)} {stage.quote.receive.symbol}
                 </dd>
               </div>
               <div className="flex min-h-11 items-center justify-between gap-3">
                 <dt className="text-mute">At least</dt>
                 <dd className="tnum text-right text-foreground">
-                  {Number(stage.quote.receive.minimum).toFixed(2)} {stage.quote.receive.symbol}
+                  {displayAmountText(stage.quote.receive.minimum)} {stage.quote.receive.symbol}
                 </dd>
               </div>
               {feeRows(stage.quote, "Bridge fee").map(([k, v]) => (
@@ -1763,7 +1870,7 @@ function WalletReview({
         Bridge
         <TokenMark src={q.send.logo} size={18} />
         <span className="tnum font-medium">
-          {q.send.amount} {q.send.symbol}
+          {typedAmount(q.send.amount)} {q.send.symbol}
         </span>
         from your wallet on
         <ChainLogo id={q.send.chainId} size={18} />
@@ -1778,13 +1885,13 @@ function WalletReview({
           <dt className="text-mute">You get about</dt>
           <dd className="tnum flex items-center gap-1.5 text-right text-foreground">
             <TokenMark src={q.receive.logo} size={18} />
-            {Number(q.receive.amount).toFixed(2)} {q.receive.symbol}
+            {displayAmountText(q.receive.amount)} {q.receive.symbol}
           </dd>
         </div>
         <div className="flex min-h-11 items-center justify-between gap-3">
           <dt className="text-mute">At least</dt>
           <dd className="tnum text-right text-foreground">
-            {Number(q.receive.minimum).toFixed(2)} {q.receive.symbol}
+            {displayAmountText(q.receive.minimum)} {q.receive.symbol}
           </dd>
         </div>
         <div className="flex min-h-11 items-center justify-between gap-3">
@@ -1881,14 +1988,17 @@ function arrivesText(q: PrivateBridgeQuote): string {
 function PrivateReview({
   review,
   onConfirm,
+  backup,
   onReset,
 }: {
   review: Extract<PrivateStage, { kind: "review" }>;
   onConfirm: () => void;
+  /** The backup step, shown in place of the confirm button until it is done or skipped. */
+  backup: React.ReactNode;
   onReset: () => void;
 }) {
   const q = review.quote;
-  const pay = Number(q.send.amount).toLocaleString("en-US", { maximumFractionDigits: 6 });
+  const pay = displayAmountText(q.send.amount);
   const payer = review.wallet ? review.wallet.name : q.sameChain ? "this wallet" : `this wallet on ${q.send.chain}`;
   const steps = q.evmTxs?.length ?? 1;
   const confirm = review.wallet
@@ -1904,7 +2014,8 @@ function PrivateReview({
       "Added privately",
       <span key="a" className="flex items-center gap-1.5 font-medium">
         <TokenMark src={q.receive.logo} size={18} />
-        {fmtMoney(Number(q.receive.amount))} {q.receive.symbol}
+        {/* What lands is the amount typed (exact output), said back as typed. */}
+        {typedAmount(q.receive.amount)} {q.receive.symbol}
       </span>,
     ],
     ["On", q.receive.chain],
@@ -1959,9 +2070,13 @@ function PrivateReview({
         </p>
       )}
 
-      <button type="button" onClick={onConfirm} disabled={review.signing} className="btn btn-ink btn-lg btn-block mt-4">
-        {review.signing ? "Waiting for your wallet…" : confirm}
-      </button>
+      {backup ? (
+        <div className="mt-4">{backup}</div>
+      ) : (
+        <button type="button" onClick={onConfirm} disabled={review.signing} className="btn btn-ink btn-lg btn-block mt-4">
+          {review.signing ? "Waiting for your wallet…" : confirm}
+        </button>
+      )}
       {!review.signing && (
         <button type="button" onClick={onReset} className="btn btn-ghost btn-sm mt-3">
           Start over
@@ -1992,7 +2107,7 @@ function PrivateLanded({ quote: q, onDone }: { quote: PrivateBridgeQuote; onDone
         logo={<TokenMark src={q.receive.logo} size={56} />}
         amount={
           <>
-            {fmtMoney(Number(q.receive.amount))}{" "}
+            {displayAmountText(q.receive.amount)}{" "}
             <span className="text-[16px] tracking-normal text-mute">{q.receive.symbol}</span>
           </>
         }
@@ -2030,7 +2145,7 @@ function PrivateProgress({
   onGiveUp: () => void;
 }) {
   const q = stage.quote;
-  const amount = `${fmtMoney(Number(q.receive.amount))} ${q.receive.symbol}`;
+  const amount = `${displayAmountText(q.receive.amount)} ${q.receive.symbol}`;
   const relay = status?.stage ?? "waiting";
   const failed =
     stage.kind === "failed" || (stage.kind === "sent" && !q.sameChain && (relay === "refunded" || relay === "failed"));
@@ -2044,11 +2159,13 @@ function PrivateProgress({
           : q.sameChain
             ? `Swapping and adding ${amount} to your private balance…`
             : relay === "waiting"
-              ? stage.unsure
-                ? stage.expired
-                  ? `Relay hasn't seen a payment from ${stage.payer}, so it most likely didn't go out. If it did, it shows in your private balance by itself. Start over to try again.`
-                  : `Checking whether ${stage.payer} sent it…`
-                : `Sent from ${stage.payer}. Waiting for ${q.send.chain} to confirm…`
+              ? stage.kind === "sent" && stage.expired
+                ? `${q.send.chain} never confirmed a payment from ${stage.payer}, so it didn't go out and your money is still in your wallet. Start over to try again.`
+                : stage.kind === "sent" && stage.onChain
+                  ? `Confirmed on ${q.send.chain}. Relay is moving it to ${q.receive.chain}…`
+                  : stage.unsure
+                    ? `Checking whether ${stage.payer} sent it…`
+                    : `Sent from ${stage.payer}. Waiting for ${q.send.chain} to confirm…`
               : `Received. Adding ${amount} to your private balance on ${q.receive.chain}…`;
   return (
     <div className="mt-5">
@@ -2086,7 +2203,7 @@ function PrivateProgress({
   );
 }
 
-/** At most six decimals, trailing zeros dropped, rounded down so Max never asks for more than is there. */
+/** For an amount field: at most six decimals, trailing zeros dropped, rounded down so Max never asks for more than is there. */
 function trimAmount(text: string): string {
   const [whole, frac = ""] = text.split(".");
   const f = frac.slice(0, 6).replace(/0+$/, "");
@@ -2094,18 +2211,17 @@ function trimAmount(text: string): string {
 }
 
 /** Max for a stablecoin sent to a deposit address: all of it, up to the bridge's limit. */
-function stableMax(value: bigint, decimals: number): string {
+export function stableMax(value: bigint, decimals: number): string {
   const cap = parseUnits(String(BRIDGE_MAX_USD), decimals);
   return trimAmount(formatUnits(value > cap ? cap : value, decimals));
 }
 
 /** "Balance 727.49 USDC" under the amount, with Max when it has one. Nothing without a reading. */
-function SourceBalance({
+export function SourceBalance({
   value,
   loading,
   decimals,
   symbol,
-  stable,
   over,
   onMax,
 }: {
@@ -2113,7 +2229,6 @@ function SourceBalance({
   loading: boolean;
   decimals: number;
   symbol: string;
-  stable?: boolean;
   /** The source chain's name when the amount is more than the balance there. */
   over: string | null;
   onMax: (() => void) | null;
@@ -2130,7 +2245,7 @@ function SourceBalance({
     <>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
         <span className="tnum text-[12px] text-mute">
-          Balance {formatBridgeBalance(value, decimals, stable)} {symbol}
+          Balance {formatBridgeBalance(value, decimals)} {symbol}
         </span>
         {onMax && (
           <button
@@ -2149,7 +2264,7 @@ function SourceBalance({
 }
 
 /** "Powered by" Relay's own wordmark, dark or light with the theme, linking to Relay. */
-function PoweredByRelay() {
+export function PoweredByRelay() {
   return (
     <span className="whitespace-nowrap">
       Powered by{" "}
@@ -2211,7 +2326,7 @@ function SwapReview({
         Swap
         <TokenMark src={quote.send.logo} size={18} />
         <span className="tnum font-medium">
-          {quote.send.amount} {quote.send.symbol}
+          {typedAmount(quote.send.amount)} {quote.send.symbol}
         </span>
         on
         <ChainLogo id={quote.send.chainId} size={18} />
@@ -2224,7 +2339,7 @@ function SwapReview({
           <dt className="text-mute">You get about</dt>
           <dd className="tnum flex items-center gap-1.5 text-right text-foreground">
             <TokenMark src={quote.receive.logo} size={18} />
-            {Number(quote.receive.amount).toFixed(2)} {quote.receive.symbol}
+            {displayAmountText(quote.receive.amount)} {quote.receive.symbol}
           </dd>
         </div>
         <div className="flex min-h-11 items-center justify-between gap-3">
@@ -2234,7 +2349,7 @@ function SwapReview({
         <div className="flex min-h-11 items-center justify-between gap-3">
           <dt className="text-mute">At least</dt>
           <dd className="tnum text-right text-foreground">
-            {Number(quote.receive.minimum).toFixed(2)} {quote.receive.symbol}
+            {displayAmountText(quote.receive.minimum)} {quote.receive.symbol}
           </dd>
         </div>
         {feeRows(quote, "Swap fee").map(([k, v]) => (
@@ -2302,15 +2417,15 @@ function SwapReview({
   );
 }
 
-/** Dollars with cents and thousands separators. */
-function fmtMoney(n: number): string {
+/** Dollars with cents and thousands separators (token amounts go through lib/amountShort). */
+export function fmtMoney(n: number): string {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /** "1 ETH = 2,504.83 USDG", from what a quote sends and returns. */
 function rateLine(q: BridgeQuote): string {
   const rate = Number(q.receive.amount) / Number(q.send.amount);
-  return Number.isFinite(rate) && rate > 0 ? `1 ${q.send.symbol} = ${fmtMoney(rate)} ${q.receive.symbol}` : "";
+  return Number.isFinite(rate) && rate > 0 ? `1 ${q.send.symbol} = ${displayAmountNumber(rate)} ${q.receive.symbol}` : "";
 }
 
 /** The live price under the swap amount: what arrives, the rate and the fees. */
@@ -2322,14 +2437,14 @@ function SwapPrice({ quote, from, to }: { quote: BridgeQuote | null; from: strin
       quote ? (
         <span className="flex items-center gap-1.5 font-medium">
           <TokenMark src={quote.receive.logo} size={16} />
-          {fmtMoney(Number(quote.receive.amount))} {to}
+          {displayAmountText(quote.receive.amount)} {to}
         </span>
       ) : (
         wait
       ),
     ],
     ["Rate", quote ? rateLine(quote) : wait],
-    ["At least", quote ? `${fmtMoney(Number(quote.receive.minimum))} ${to}` : wait],
+    ["At least", quote ? `${displayAmountText(quote.receive.minimum)} ${to}` : wait],
     ...(quote ? feeRows(quote, "Swap fee") : ([["Swap fee", wait]] as [string, React.ReactNode][])),
     ["Network fee", `A few cents of ${from}`],
   ];
@@ -2349,7 +2464,7 @@ function SwapPrice({ quote, from, to }: { quote: BridgeQuote | null; from: strin
 }
 
 /** Relay's fee under `label`, then Gloam's own on a line of its own when it takes one (BRIDGE_FEE_BPS). */
-function feeRows(q: { feeUsd: number; appFee: BridgeAppFee | null }, label: string): [string, string][] {
+export function feeRows(q: { feeUsd: number; appFee: BridgeAppFee | null }, label: string): [string, string][] {
   const { relayUsd, app } = bridgeFeeLines(q);
   const said = (usd: number) => (usd < 0.01 ? "Under a cent" : `about $${fmtMoney(usd)}`);
   return [[label, said(relayUsd)], ...(app ? ([[`Gloam fee (${formatFeePercent(app.bps)})`, said(app.usd)]] as [string, string][]) : [])];
@@ -2360,7 +2475,7 @@ function feeRows(q: { feeUsd: number; appFee: BridgeAppFee | null }, label: stri
  * (lib/bridge expensiveRoute). The fees are already in the rows above; this
  * puts the total in plain words and says what tends to cost less.
  */
-function CostWarning({ quote }: { quote: CostedQuote & { receive: { symbol: string } } }) {
+export function CostWarning({ quote }: { quote: CostedQuote & { receive: { symbol: string } } }) {
   const cost = expensiveRoute(quote);
   if (!cost) return null;
   const pct = cost.share >= 0.1 ? Math.round(cost.share * 100) : Math.round(cost.share * 1000) / 10;

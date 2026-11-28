@@ -1,8 +1,8 @@
 {
   "name": "@gloamtrade/sdk",
-  "version": "0.8.1",
+  "version": "0.10.0",
   "type": "module",
-  "description": "Gloam SDK: shielded balances, private payments, and selective disclosure on Robinhood Chain, Tempo, Base, Ethereum, Elysium and BNB Chain. The private path other apps and agents plug into.",
+  "description": "Gloam SDK: shielded balances, private payments, and selective disclosure on Robinhood Chain, Tempo, Base, Ethereum, Elysium, BNB Chain and Solana, with Starknet ready for when it opens. The private path other apps and agents plug into.",
   "license": "MIT",
   "homepage": "https://gloam.trade/docs/sdk",
   "repository": {
@@ -27,6 +27,10 @@
     "shielded",
     "defi",
     "arbitrum-orbit",
+    "solana",
+    "privacy-rings",
+    "starknet",
+    "strk20",
     "sdk"
   ],
   "main": "src/index.ts",
@@ -35,6 +39,14 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./solana": {
+      "types": "./src/solana.ts",
+      "default": "./src/solana.ts"
+    },
+    "./starknet": {
+      "types": "./src/starknet.ts",
+      "default": "./src/starknet.ts"
     }
   },
   "sideEffects": false,
@@ -46,6 +58,14 @@
       ".": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
+      },
+      "./solana": {
+        "types": "./dist/solana.d.ts",
+        "default": "./dist/solana.js"
+      },
+      "./starknet": {
+        "types": "./dist/starknet.d.ts",
+        "default": "./dist/starknet.js"
       }
     }
   },
@@ -61,7 +81,9 @@
     "prepublishOnly": "node scripts/publish-guard.mjs && npm run build",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "test": "tsc && node test/version.selftest.mjs && node test/rates.selftest.mjs && node test/note.selftest.mjs && node test/witness.selftest.mjs && node test/proofs.selftest.mjs && node test/intents.selftest.mjs && node test/sync.selftest.mjs && node test/treeSync.selftest.mjs && node test/x402.selftest.mjs && node test/x402.edge.selftest.mjs && node test/x402Cashout.selftest.mjs && node test/receiveTag.selftest.mjs && node test/sweep.selftest.mjs && node test/limits.selftest.mjs && node test/cashOutRecipient.selftest.mjs && node test/chainGuard.selftest.mjs && node test/api.selftest.mjs && node test/mainnet.selftest.mjs && node test/base.selftest.mjs && node test/ethereum-sepolia.selftest.mjs && node test/ethereum.selftest.mjs && node test/elysium.selftest.mjs && node test/bnb.selftest.mjs && node test/rpc.selftest.mjs && node test/requests.selftest.mjs && node test/shortLink.selftest.mjs && node test/shortLinkTable.selftest.mjs && node test/incoming.selftest.mjs && node test/commerce.selftest.mjs && node test/examples.selftest.mjs && node test/swap.selftest.mjs && node test/swapIntent.selftest.mjs"
+    "test": "tsc && node test/version.selftest.mjs && node test/rates.selftest.mjs && node test/note.selftest.mjs && node test/witness.selftest.mjs && node test/proofs.selftest.mjs && node test/intents.selftest.mjs && node test/sync.selftest.mjs && node test/treeSync.selftest.mjs && node test/x402.selftest.mjs && node test/x402.edge.selftest.mjs && node test/x402Cashout.selftest.mjs && node test/receiveTag.selftest.mjs && node test/sweep.selftest.mjs && node test/limits.selftest.mjs && node test/cashOutRecipient.selftest.mjs && node test/chainGuard.selftest.mjs && node test/api.selftest.mjs && node test/mainnet.selftest.mjs && node test/base.selftest.mjs && node test/ethereum-sepolia.selftest.mjs && node test/ethereum.selftest.mjs && node test/elysium.selftest.mjs && node test/bnb.selftest.mjs && node test/rpc.selftest.mjs && node test/requests.selftest.mjs && node test/shortLink.selftest.mjs && node test/shortLinkTable.selftest.mjs && node test/incoming.selftest.mjs && node test/commerce.selftest.mjs && node test/examples.selftest.mjs && node test/swap.selftest.mjs && node test/swapIntent.selftest.mjs && node test/solana.selftest.mjs && node test/starknet.selftest.mjs",
+    "test:solana-e2e": "tsc && node test/solana.e2e.mjs",
+    "test:starknet-e2e": "echo \"Runs from app/: STARKNET_POOL_ARTIFACTS=<pool target/dev> ../mcp/node_modules/.bin/tsx scripts/e2e-starknet-sdk-devnet.mts\""
   },
   "dependencies": {
     "viem": "^2.55.2",
@@ -70,13 +92,33 @@
   "devDependencies": {
     "@types/node": "^20",
     "typescript": "^5",
-    "snarkjs": "^0.7.5"
+    "snarkjs": "^0.7.5",
+    "@heliuslabs/spr": "0.9.0-alpha",
+    "@solana/kit": "^8.3.0",
+    "starknet": "10.5.0",
+    "@starkware-libs/starknet-privacy-sdk": "file:../../app/vendor/starknet-privacy/starknet-privacy-sdk-0.14.4-rc.2-gloam.1.tgz"
   },
   "peerDependencies": {
-    "snarkjs": "*"
+    "snarkjs": "*",
+    "@heliuslabs/spr": "0.9.0-alpha",
+    "@solana/kit": "^8.3.0",
+    "starknet": "^10.5.0",
+    "@starkware-libs/starknet-privacy-sdk": "0.14.4-rc.2"
   },
   "peerDependenciesMeta": {
     "snarkjs": {
+      "optional": true
+    },
+    "@heliuslabs/spr": {
+      "optional": true
+    },
+    "@solana/kit": {
+      "optional": true
+    },
+    "starknet": {
+      "optional": true
+    },
+    "@starkware-libs/starknet-privacy-sdk": {
       "optional": true
     }
   }

@@ -120,7 +120,7 @@ export function EmptyCard({
   return (
     <section className="gl-card relative overflow-hidden">
       <SealedField tone="soft" />
-      <div className="relative z-[1] flex flex-col items-start max-sm:p-6 sm:p-8">
+      <div className="relative z-[1] flex flex-col items-start max-sm:p-5 sm:p-7">
         <ShieldCheck className="h-6 w-6 text-foreground" />
         <h2 className="mt-5 text-[22px] font-light tracking-[-0.012em] text-foreground">{title}</h2>
         <p className="mt-2 max-w-[48ch] text-[14px] leading-relaxed text-mute">{body}</p>
@@ -307,7 +307,7 @@ export function ShowsPanel({
   note?: ReactNode;
 }) {
   return (
-    <section className="gl-card max-sm:p-5 sm:p-6">
+    <section className="gl-card max-sm:p-5 sm:p-7 lg:p-6">
       <div className="flex items-center justify-between gap-3">
         <p className="text-[13px] text-mute">What the proof shows</p>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-sealed-soft px-2.5 py-0.5 text-[12px] font-medium text-sealed">
@@ -341,7 +341,7 @@ export function ShowsPanel({
 
 export function SafeToShare() {
   return (
-    <section className="rounded-[18px] border border-line max-sm:p-5 sm:p-6">
+    <section className="rounded-[18px] border border-line max-sm:p-5 sm:p-7 lg:p-6">
       <p className="text-[14px] text-foreground">Safe to share</p>
       <p className="mt-1.5 text-[13px] leading-relaxed text-mute">
         A proof is not your key. It can never be used to spend your money. Whoever gets it can
@@ -369,11 +369,16 @@ export function ProofShareCard({
   headline,
   rows,
   onEdit,
+  badge = "Proof ready",
+  tokenLabel = "Your proof. Send it to them however you like.",
 }: {
   token: string;
   headline: ReactNode;
   rows: ShowsRow[];
   onEdit: () => void;
+  /** What the card is called (a disclosure is not a proof). */
+  badge?: string;
+  tokenLabel?: string;
 }) {
   const id = useId();
   const [copied, setCopied] = useState<"proof" | "link" | null>(null);
@@ -398,7 +403,7 @@ export function ProofShareCard({
         <div className="relative">
           <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-sealed-soft px-2.5 text-[12px] font-medium text-sealed">
             <ShieldCheck className="h-3.5 w-3.5" />
-            Proof ready
+            {badge}
           </span>
           <p id={`${id}-title`} className="tnum mt-4 text-[26px] font-light leading-tight tracking-[-0.018em] text-foreground sm:text-[30px]">
             {headline}
@@ -416,7 +421,7 @@ export function ProofShareCard({
 
       <div className="bg-surface/50 max-sm:p-5 sm:p-7">
         <label htmlFor={`${id}-token`} className="text-[13px] text-mute">
-          Your proof. Send it to them however you like.
+          {tokenLabel}
         </label>
         <textarea
           id={`${id}-token`}

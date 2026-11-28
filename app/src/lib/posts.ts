@@ -4,7 +4,9 @@
  * is one entry here plus its page under app/blog/<slug>.
  */
 
-export type PostCoverId = "acp" | "agents" | "build" | "mainnet" | "operator" | "tempo";
+import { SOLANA_RINGS_ENABLED } from "./solanaRings/config";
+
+export type PostCoverId = "acp" | "agents" | "build" | "mainnet" | "operator" | "solana" | "tempo";
 
 export type Post = {
   slug: string;
@@ -29,7 +31,22 @@ export const AUTHOR = {
   avatar: "/brand/people/memoji/duke.png",
 } as const;
 
+const SOLANA_POST: Post = {
+  slug: "live-on-solana",
+  title: "Gloam is live on Solana",
+  short: "Live on Solana",
+  summary:
+    "Private payments on Solana for people, teams and agents, built on Helius Privacy Rings.",
+  date: "2026-11-23",
+  dateLabel: "November 23, 2026",
+  kind: "Announcement",
+  minutes: 3,
+  cover: "solana",
+};
+
 export const POSTS: Post[] = [
+  // Shown once Solana is on (NEXT_PUBLIC_SOLANA_RINGS_ENABLED), like the rest of Solana's copy.
+  ...(SOLANA_RINGS_ENABLED ? [SOLANA_POST] : []),
   {
     slug: "build-with-gloam-at-the-near-hackathon",
     title: "Come build with Gloam at the NEAR hackathon",

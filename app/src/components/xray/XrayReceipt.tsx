@@ -8,6 +8,7 @@ import { TokenLogo } from "@/components/app/TokenLogo";
 import { chainLogoSrc } from "@/lib/chainLogo";
 import { SealedField } from "@/components/ui/SealedField";
 import { formatUsdCompact } from "@/lib/markets";
+import { displayAmountText } from "@/lib/amountShort";
 import type { XrayBalances, XrayHolding } from "@/lib/xray/balances";
 import { readWalletHistory, type XrayHistory, type XrayProgress } from "@/lib/xray/historyRead";
 import { shortAddress, type XrayQuery } from "@/lib/xray/input";
@@ -38,11 +39,9 @@ function usd(n: number): string {
   return n < 1_000_000 ? usdFmt.format(n) : formatUsdCompact(n);
 }
 
+/** A token amount as text, two places, cut down (lib/amountShort). */
 function amount(text: string): string {
-  const n = Number(text);
-  if (!Number.isFinite(n)) return text;
-  if (n > 0 && n < 0.0001) return "<0.0001";
-  return n.toLocaleString("en-US", { maximumFractionDigits: n < 1 ? 4 : 2 });
+  return displayAmountText(text);
 }
 
 function utcDate(ms: number): string {

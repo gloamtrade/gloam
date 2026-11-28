@@ -46,6 +46,7 @@ import { EVERY_SWAP_ROUTER } from "./vaultSwap";
 import { addChainPeople } from "./peopleStore";
 import { hasUiMultiplier, holdableTokens, SWAP_LANDABLE, swapTokenPrice } from "./vaultAssets";
 import { dailyMeans, priceAt, usdSeries } from "./priceHistory";
+import { SOLANA_ADMIN_ON, type SolanaMetrics } from "./solanaRings/metrics";
 
 // Moved to lib/vaultAssets so the browser's read on /transparency uses them too.
 export { holdableTokens, swapTokenPrice };
@@ -245,6 +246,12 @@ export type OnchainMetrics = {
   testnet?: CombinedMetrics;
   /** $GLOAM creator fees on Robinhood Chain; absent before it was added or while that chain is not live. */
   creator?: CreatorFees | { error: string };
+  /**
+   * Gloam on Solana (lib/solanaRings/metrics), a mainnet network kept apart
+   * from `networks`, `mainnet` and `combined`: the admin page adds it to its
+   * mainnet totals (withSolana). Absent while Solana is off.
+   */
+  solana?: SolanaMetrics;
   /** Both networks, newest first. */
   recent: RecentRow[];
 };
@@ -575,7 +582,7 @@ async function loadSwapTokenMarks(marketsRead: Promise<LiveMarkets>): Promise<Ma
 
 /**
  * Listed tokens only CoinGecko prices that loadSwapTokenMarks does not reach: BDX
- * on BNB Chain, and GRIFT, AI and ORBIO on Robinhood Chain. $GLOAM is priced from DEX Screener, dollar stablecoins
+ * on BNB Chain, and AI and ORBIO on Robinhood Chain. $GLOAM is priced from DEX Screener, dollar stablecoins
  * are $1 and EURC is left unpriced, as before.
  */
 const SWAP_MARKED = new Set((SWAP_LANDABLE[4663] ?? []).map((t) => t.address.toLowerCase()));
@@ -1402,6 +1409,15 @@ async function readAll(): Promise<OnchainMetrics> {
         return { error: "Could not read creator fees. The details are in the server logs." };
       })
     : Promise.resolve(undefined);
+  // Solana beside the vaults; it never throws and waits on Solana at most a set time (metricsServer).
+  const solanaRead = SOLANA_ADMIN_ON
+    ? import("./solanaRings/metricsServer")
+        .then((m) => m.readSolanaMetrics(days, revenueDays, daysSince(MAINNET_LAUNCH_MS)))
+        .catch((e: unknown) => {
+          console.warn("gloam_solana_metrics", errText(e).split("\n")[0].slice(0, 120));
+          return null;
+        })
+    : Promise.resolve(null);
   const reads = await Promise.all(nets.map((n) => readNetwork(n, days, revenueDays)));
   // People counts (lib/peopleStore): the public depositor and cash-out wallets, one-way. Never holds up the figures.
   await withTimeout(
@@ -1421,6 +1437,7 @@ async function readAll(): Promise<OnchainMetrics> {
   const prices = await pricing;
   const networks = reads.map((r) => r.metrics(prices));
   const creator = await creatorRead;
+  const solana = await solanaRead;
 
   const all = combine(networks, reads.map((r) => r.state.events), days, revenueDays);
   const part = (testnet: boolean) => {
@@ -1449,6 +1466,7 @@ async function readAll(): Promise<OnchainMetrics> {
     },
     testnet: part(true),
     ...(creator ? { creator } : {}),
+    ...(solana ? { solana } : {}),
     recent: networks
       .flatMap((m) => m.recent)
       .sort((a, b) => b.ts - a.ts || Number(b.block) - Number(a.block))

@@ -168,7 +168,7 @@ export function WritingForm({ closed }: { closed: boolean }) {
         />
       </Row>
 
-      <Row label="Email" optional htmlFor="w-email" hint="Only used to reach you if you win." error={fieldError("email")}>
+      <Row label="Email" optional htmlFor="w-email" hint="To reach you if you win, and for Gloam updates. Unsubscribe any time." error={fieldError("email")}>
         <input
           id="w-email"
           name="email"

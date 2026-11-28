@@ -29,6 +29,7 @@ import {
 } from "@/lib/recovery";
 import { isTempoWallet } from "@/lib/tempoWallet";
 import { getActiveTurnkeyAccount } from "@/lib/turnkeyBridge";
+import { useShownAccount } from "@/components/app/AccountScope";
 
 const IDLE_SERVER: AutoRestoreStatus = { kind: "idle" };
 
@@ -49,7 +50,9 @@ export function useAutoRestore(missing: boolean | null) {
     () => autoRestoreStatus(address),
     () => IDLE_SERVER,
   );
-  const active = Boolean(isConnected && !demo && address);
+  // Only once the signed-in account's own private account is bound (lib/accountScope): a restore lands there.
+  const shownAccount = useShownAccount();
+  const active = Boolean(isConnected && !demo && address && shownAccount === address.toLowerCase());
   const kind: WalletKind = connector?.id === EMBEDDED_CONNECTOR_ID ? "embedded" : isTempoWallet(connector) ? "tempo" : "browser";
   /** Notes here from other wallets, read once the notes are open. */
   const [held, setHeld] = useState<{ for: string; other: number } | null>(null);

@@ -11,7 +11,8 @@
  *    list's prefix holds an address, an IP or a wallet id
  *  - bad emails, oversized bodies, the bot field, the hourly limit per IP
  *  - unsubscribe by link token only; an email alone is refused (anyone can type
- *    anyone's email); a used or made-up token does nothing
+ *    anyone's email); a used or made-up token does nothing; opening the page asks
+ *    first (the one-click route and the page's button are in selftest-updates-mail)
  *  - admin: the count and the CSV need an admin session; the CSV has email,
  *    day, source and the unsubscribe link only
  *  - the browser helper sends the email and source alone, without cookies
@@ -56,7 +57,7 @@ const WALLET = "0x1111111111111111111111111111111111111111";
 function req(method: string, body: unknown, ip = "203.0.113.1", raw?: string): Request {
   return new Request("https://gloam.trade/api/updates", {
     method,
-    headers: { "Content-Type": "application/json", "x-forwarded-for": ip },
+    headers: { "Content-Type": "application/json", "x-forwarded-for": ip, Origin: "https://www.gloam.trade" },
     body: raw ?? JSON.stringify(body),
   });
 }
@@ -120,8 +121,12 @@ resetMemoryKv();
   const all = await list.listUpdatesSubscribers();
   assert.equal(all.length, 3);
   assert.equal(all.find((s) => s.email === "cy@example.net")?.source, "site", "no source reads as the site");
-  assert.deepEqual(list.updatesSummary(all), { count: 3, bySource: { "sign-in": 1, settings: 1, site: 1 } });
-  n += 7;
+  assert.deepEqual(list.updatesSummary(all), { count: 3, bySource: { "sign-in": 1, settings: 1, site: 1, contest: 0 } });
+  // "contest" is the admin import's source; the public form can't claim it
+  await call("POST", { email: "dee@example.com", source: "contest" }, "203.0.113.3");
+  assert.equal((await list.listUpdatesSubscribers()).find((s) => s.email === "dee@example.com")?.source, "site", "a form can't say it came from a contest");
+  await list.unsubscribeEmail("dee@example.com");
+  n += 8;
 }
 
 // ------------------------------------------------------------ no wallet data, ever
@@ -223,16 +228,18 @@ resetMemoryKv();
 // ------------------------------------------------------------ the unsubscribe page
 {
   const sub = (await list.listUpdatesSubscribers())[0]!;
-  let page: { default: (p: { searchParams: Promise<{ token?: string }> }) => Promise<unknown> } | null = null;
+  let page: { default: (p: { searchParams: Promise<{ token?: string; done?: string }> }) => Promise<unknown> } | null = null;
   try {
     page = await import("../src/app/unsubscribe/page");
   } catch {
     page = null; // the page's components need the Next bundler; the lib call above covers it
   }
   if (page) {
+    // opening the link only asks: mail scanners open links, so the button does it (api/updates/unsubscribe)
     await page.default({ searchParams: Promise.resolve({ token: sub.token }) });
-    assert.equal((await list.listUpdatesSubscribers()).some((s) => s.email === sub.email), false, "GET /unsubscribe?token= removes it");
+    assert.equal((await list.listUpdatesSubscribers()).some((s) => s.email === sub.email), true, "GET /unsubscribe?token= asks first and changes nothing");
     await page.default({ searchParams: Promise.resolve({}) });
+    await page.default({ searchParams: Promise.resolve({ done: "1" }) });
     n += 1;
   } else {
     console.log("  (unsubscribe page not importable under tsx; covered by unsubscribeToken)");
@@ -266,12 +273,90 @@ resetMemoryKv();
   for (const line of lines.slice(1)) {
     const cells = line.split('","');
     assert.equal(cells.length, 4);
-    assert.match(cells[3]!, /^https:\/\/gloam\.trade\/unsubscribe\?token=[A-Za-z0-9_-]{32}"$/);
+    assert.match(cells[3]!, /^https:\/\/www\.gloam\.trade\/unsubscribe\?token=[A-Za-z0-9_-]{32}"$/);
   }
   assert.ok(!/0x[0-9a-f]{40}/i.test(csv), "no address in the CSV");
   assert.equal(list.updatesCsv([{ email: "=cmd@example.com", day: "2026-11-05", source: "site", token: "t".repeat(32) }]).split("\r\n")[1]?.startsWith(`"'=cmd`), true, "a formula-looking cell is quoted as text");
   g.__testCookies = {};
   n += 14;
+}
+
+// ------------------------------------------------------------ sign-ups only from gloam.trade
+{
+  const before = (await list.listUpdatesSubscribers()).length;
+  const cross = (headers: Record<string, string>) =>
+    route.POST(new Request("https://gloam.trade/api/updates", { method: "POST", headers: { "x-forwarded-for": "203.0.113.9", ...headers }, body: JSON.stringify({ email: "victim@example.com", source: "site" }) }));
+  assert.equal((await cross({ "Content-Type": "text/plain", Origin: "https://evil.example" })).status, 403, "a no-cors post from another site is refused");
+  assert.equal((await cross({ "Content-Type": "application/json", Origin: "https://evil.example" })).status, 403, "JSON from another site is refused");
+  assert.equal((await cross({ "Content-Type": "text/plain", Origin: "https://www.gloam.trade" })).status, 403, "the site's own form sends JSON");
+  assert.equal((await cross({ "Content-Type": "application/json" })).status, 403, "no Origin, no sign-up");
+  assert.equal((await list.listUpdatesSubscribers()).length, before, "nobody added");
+  // emails only with the plain characters every sender takes
+  assert.equal(normalizeEmail("a!b@example.com"), null, "a ! in the name part is refused");
+  assert.equal(normalizeEmail("first.last+tag@example.com"), "first.last+tag@example.com");
+  n += 7;
+}
+
+// ------------------------------------------------------------ who left stays off
+{
+  await list.subscribeToUpdates("leaver@example.com", "site");
+  const leaver = (await list.listUpdatesSubscribers()).find((s) => s.email === "leaver@example.com")!;
+  assert.equal(await list.unsubscribeToken(leaver.token), true);
+  assert.deepEqual(await list.subscribeToUpdates("leaver@example.com", "contest"), { added: false, suppressed: true }, "the contest import never brings back someone who unsubscribed");
+  assert.deepEqual(await list.subscribeToUpdates("leaver@example.com", "site"), { added: true }, "they can sign themselves back up");
+  assert.deepEqual(await list.subscribeToUpdates("leaver@example.com", "contest"), { added: false }, "and then they're simply on it");
+  await list.unsubscribeEmail("spammy@example.com", "complained");
+  assert.deepEqual(await list.subscribeToUpdates("spammy@example.com", "site"), { added: false, suppressed: true }, "a spam report is for good");
+  n += 5;
+}
+
+// ------------------------------------------------------------ add the contest entrants
+{
+  const imp = await import("../src/app/api/updates/import/route");
+  const { addContestEmailsToUpdates } = await import("../src/lib/updatesImport");
+  const { saveContestEntry } = await import("../src/lib/contestEntries");
+  const { saveWritingEntry } = await import("../src/lib/writingEntries");
+  const before = await list.listUpdatesSubscribers();
+  const onList = before[0]!;
+  const video = (handle: string, email: string | null) =>
+    ({ name: handle, handle, postUrl: `https://x.com/${handle}/status/1${handle.length}`, postUser: handle, postId: `1${handle.length}`, note: null, email, network: "robinhood" }) as never;
+  const writing = (handle: string, email: string | null) =>
+    ({ name: handle, handle, postUrl: `https://x.com/${handle}/status/2${handle.length}`, postUser: handle, postId: `2${handle.length}`, kind: "thread", title: null, email }) as never;
+  await saveContestEntry(video("vidone", "Vid.One@Example.com "));
+  await saveContestEntry(video("vidtwo", null));
+  await saveContestEntry(video("vidthree", "not an email"));
+  await saveContestEntry(video("vidfour", onList.email.toUpperCase()));
+  await saveWritingEntry(writing("writeone", "write.one@example.org"));
+  await saveWritingEntry(writing("writetwo", "vid.one@example.com"));
+
+  const post = (body: unknown, headers: Record<string, string> = { "Content-Type": "application/json", Origin: "https://www.gloam.trade" }) =>
+    imp.POST(new Request("https://www.gloam.trade/api/updates/import", { method: "POST", headers: { "x-forwarded-host": "www.gloam.trade", ...headers }, body: JSON.stringify(body) }));
+  g.__testCookies = {};
+  assert.equal((await post({ from: "contests" })).status, 401, "no admin session, nobody added");
+  g.__testCookies = { [ADMIN_COOKIE]: createAdminSession()! };
+  assert.equal((await post({ from: "contests" }, { "Content-Type": "text/plain", Origin: "https://www.gloam.trade" })).status, 403, "JSON only");
+  assert.equal((await post({ from: "contests" }, { "Content-Type": "application/json", Origin: "https://evil.example" })).status, 403, "another site can't call it");
+  assert.equal((await post({ emails: ["x@example.com"] })).status, 400, "no list of emails from the browser");
+  assert.equal((await list.listUpdatesSubscribers()).length, before.length, "nothing added by a refused call");
+
+  const res = await post({ from: "contests" });
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { ok: boolean; data: { found: number; added: number; already: number; skipped: number } };
+  assert.deepEqual(body.data, { found: 3, added: 2, already: 1, suppressed: 0, skipped: 1 }, "two new, one already on the list, one not an email, one entry without");
+  assert.ok(!JSON.stringify(body).includes("@"), "counts only, never an email");
+  const after = await list.listUpdatesSubscribers();
+  assert.equal(after.length, before.length + 2);
+  const vid = after.find((s) => s.email === "vid.one@example.com")!;
+  assert.equal(vid.source, "contest", "marked as from a contest");
+  assert.match(vid.token, list.UNSUBSCRIBE_TOKEN, "with their own unsubscribe link");
+  assert.equal(after.find((s) => s.email === "write.one@example.org")?.source, "contest");
+  assert.deepEqual(after.find((s) => s.email === onList.email), onList, "someone already on the list keeps their day, source and link");
+  assert.deepEqual(await addContestEmailsToUpdates(), { found: 3, added: 0, already: 3, suppressed: 0, skipped: 1 }, "running it again adds nobody");
+  assert.equal(list.updatesSummary(after).bySource.contest, 2);
+  assert.equal(await list.unsubscribeToken(vid.token), true, "a contest entrant can unsubscribe like anyone");
+  await list.unsubscribeEmail("write.one@example.org");
+  g.__testCookies = {};
+  n += 17;
 }
 
 // ------------------------------------------------------------ the browser helper

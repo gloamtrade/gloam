@@ -237,6 +237,28 @@ function memCommand(cmd: KvCommand): unknown {
       const e = live(a[0]!);
       return e && isSet(e.v) && e.v.has(a[1]!) ? 1 : 0;
     }
+    case "SDIFF": {
+      // the first set's members that are in none of the others
+      const sets = a.map((key) => {
+        const e = live(key);
+        if (e && !isSet(e.v)) throw new Error("WRONGTYPE");
+        return e ? (e.v as Set<string>) : new Set<string>();
+      });
+      const [first, ...rest] = sets;
+      return [...(first ?? [])].filter((v) => !rest.some((s) => s.has(v)));
+    }
+    case "SUNIONSTORE": {
+      // the union of the sets, stored at the first key; an empty union leaves no key, as Redis does
+      const union = new Set<string>();
+      for (const key of a.slice(1)) {
+        const e = live(key);
+        if (e && !isSet(e.v)) throw new Error("WRONGTYPE");
+        if (e) for (const v of e.v as Set<string>) union.add(v);
+      }
+      m.delete(a[0]!);
+      if (union.size) m.set(a[0]!, { v: union, exp: null });
+      return union.size;
+    }
     case "PFADD": {
       // a HyperLogLog kept as a string of registers (lib/hll); the items are never kept
       const e = live(a[0]!);

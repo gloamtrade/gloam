@@ -40,7 +40,9 @@ import { relayFor, relayPreferred } from "@/lib/relay/client";
 import { autoRestoreSyncing } from "@/lib/autoRestore";
 import { useAutoRestoreStatus } from "@/hooks/useAutoRestoreStatus";
 import { subscribeToUpdates } from "@/lib/updatesClient";
+import { NEW_WALLET_ACCOUNTS } from "@/lib/turnkeySolana";
 import { useNetwork } from "./NetworkProvider";
+import { useShownAccount } from "./AccountScope";
 import { Spinner } from "@/components/ui/Spinner";
 
 const noopSubscribe = () => () => {};
@@ -218,7 +220,8 @@ function Sheet({ signedIn }: { signedIn: boolean }) {
         setList("read");
         return;
       }
-      await createWallet({ walletName: walletNameFor(name), accounts: ["ADDRESS_FORMAT_ETHEREUM"] });
+      // The Ethereum account it always had, and its Solana account (lib/turnkeySolana), in one wallet.
+      await createWallet({ walletName: walletNameFor(name), accounts: NEW_WALLET_ACCOUNTS.map((a) => ({ ...a })) });
       await refresh.current().catch(() => []);
       setJustCreated(true);
       setFunding(true);
@@ -278,11 +281,12 @@ function useBackup(address: string | null, embeddedConnected: boolean, justCreat
     };
   }, []);
 
-  // What this browser holds, read once the Gloam wallet is the connected one. Recovery
-  // turning on afterwards (the restore that runs by itself after sign-in, lib/autoRestore)
-  // takes the offer away.
+  // What this browser holds for the Gloam wallet, read once it is the connected one and its own
+  // private account is bound (lib/accountScope). Recovery turning on afterwards (the restore that
+  // runs by itself after sign-in, lib/autoRestore) takes the offer away.
+  const shownAccount = useShownAccount();
   useEffect(() => {
-    if (!address || !embeddedConnected) return;
+    if (!address || !embeddedConnected || shownAccount !== address.toLowerCase()) return;
     let live = true;
     let stop: (() => void) | null = null;
     void (async () => {
@@ -311,7 +315,7 @@ function useBackup(address: string | null, embeddedConnected: boolean, justCreat
       live = false;
       stop?.();
     };
-  }, [address, embeddedConnected]);
+  }, [address, embeddedConnected, shownAccount]);
 
   // While the backup may still come back by itself, offering to start one would be early.
   const restoring = autoRestoreSyncing(useAutoRestoreStatus(address));

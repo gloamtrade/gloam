@@ -15,6 +15,7 @@
  *   signature with the latest timestamp wins.
  */
 import { getAddress, isAddress, recoverMessageAddress, recoverTypedDataAddress, type Address, type Hex } from "viem";
+import { displayAmount } from "../amountShort";
 import type { VoteConfig } from "./config";
 import type { Excluded } from "./excluded";
 
@@ -475,16 +476,10 @@ export function replayTransfers(logs: TransferLog[], toBlock: number, base?: { b
   return bal;
 }
 
-/** A GLOAM amount from wei for display: whole tokens with up to 2 decimals, "<0.01" for dust. */
+/** A GLOAM amount from wei for display: two places, cut down, "<0.01" for dust (lib/amountShort displayAmount). */
 export function formatGloam(wei: bigint | string): string {
   const w = typeof wei === "string" ? BigInt(wei) : wei;
-  if (w === 0n) return "0";
-  const cents = (w * 100n) / 10n ** BigInt(GLOAM_DECIMALS);
-  if (cents === 0n) return "<0.01";
-  const whole = cents / 100n;
-  const frac = cents % 100n;
-  const head = whole.toLocaleString("en-US");
-  return frac === 0n ? head : `${head}.${frac.toString().padStart(2, "0").replace(/0$/, "")}`;
+  return displayAmount(w, GLOAM_DECIMALS);
 }
 
 /** A share in percent with one decimal, "0" when there is nothing to share. */

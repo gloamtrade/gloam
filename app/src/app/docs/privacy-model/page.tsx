@@ -6,6 +6,9 @@ import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { SCREEN_LIST_INFO } from "@/lib/screening";
 import { swapMainnets } from "@/lib/vaultSwap";
+import { RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
+import { STARKNET_DOCS_NAME, STARKNET_DOCS_NOTE } from "../starknet/starknetDocs";
 
 export const metadata: Metadata = {
   title: "What stays private",
@@ -110,6 +113,30 @@ export default function DocsPrivacyPage() {
         <li>That the pool was used, the caller of each transaction, and timing</li>
         <li>Every commitment and nullifier as opaque hashes, plus the pool total</li>
       </ul>
+
+      {SOLANA_RINGS_ENABLED && (
+        <>
+          <h2 id="solana">On {SOLANA_NAME}</h2>
+          <p>
+            Everything above is about the Gloam vault. Gloam on Solana runs
+            through Helius Privacy Rings instead. {RINGS_PRIVACY_NOTE} See{" "}
+            <Link href="/docs/chain#solana">{SOLANA_NAME}</Link>.
+          </p>
+        </>
+      )}
+
+      {STARKNET_ENABLED && (
+        <>
+          <h2 id="starknet">On {STARKNET_DOCS_NAME}</h2>
+          <p>
+            Everything above is about the Gloam vault. Gloam on Starknet runs
+            on Starknet&apos;s own privacy pool instead. {STARKNET_DOCS_NOTE}{" "}
+            Registering an account stores its viewing key encrypted to the
+            pool&apos;s auditor key, for authorized inspection; that key cannot
+            spend. See <Link href="/docs/starknet#privacy">{STARKNET_DOCS_NAME}</Link>.
+          </p>
+        </>
+      )}
 
       <h2>The anonymity set is the whole game</h2>
       <p>
@@ -296,6 +323,21 @@ export default function DocsPrivacyPage() {
         on any browser. It never needs the passkey. If you lose the passkey, a
         backup is the only way back. Browsers or passkeys without PRF support
         keep the device key, unchanged.
+      </p>
+      <h3>One private account per sign-in</h3>
+      <p>
+        Each sign-in has its own private account in a browser: its notes, its
+        Gloam address and names, its payroll runs and claim links. Signed out,
+        the app shows none of them. Another wallet signed in on the same browser
+        sees and spends none of yours, and switching back shows yours again. A
+        payment to your Gloam address opens only for you.
+      </p>
+      <p>
+        <strong>Honest limit.</strong> The accounts in one browser share its
+        device key, so the app keeps them apart, not separate encryption. Someone
+        who can run code in that browser profile could still open them, as
+        before. A passkey lock covers every account in the browser, so it is
+        offered only while the browser holds one.
       </p>
       <h3>Sanctions screening</h3>
       <p>

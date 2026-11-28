@@ -9,7 +9,7 @@ import { useNetwork } from "@/components/app/NetworkProvider";
 const NONE: ReadonlySet<string> = new Set();
 
 /**
- * The gated assets (BDX on BNB Chain; GRIFT, AI, ORBIO and native ETH on
+ * The gated assets (BDX on BNB Chain; AI, ORBIO and native ETH on
  * Robinhood Chain) whose deposit limit is open on the active network's vault, as
  * lowercase addresses, read live from the pool every minute. Pass it to
  * addableTokensFor / isAddableToken / isNativeAddable. Empty while unread, on a

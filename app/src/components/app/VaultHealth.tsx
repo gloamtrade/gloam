@@ -33,6 +33,11 @@ export function VaultHealth({ compact = false }: { compact?: boolean }) {
   const env = useMemo(() => vaultEnvDiagnostics(), []);
   // A payments vault: every mainnet, and Base Sepolia.
   const paymentsOnly = network.paymentsPool;
+  // The legacy env (NEXT_PUBLIC_POSEIDON_SHIELD_POOL and its block) only ever names
+  // Robinhood Chain testnet's vault: say it was remapped there, never on another network.
+  const envRemapped =
+    (env.remappedFromLegacy || env.deployBlockRemapped) &&
+    Boolean(network.pool && network.pool.toLowerCase() === env.productPool.toLowerCase());
 
   if (!isShieldDeployed()) return null;
 
@@ -111,9 +116,7 @@ export function VaultHealth({ compact = false }: { compact?: boolean }) {
           {" · block "}
           {/* the env block is Robinhood Chain testnet's; a payments vault carries its own */}
           {(paymentsOnly && network.deployBlock !== null ? network.deployBlock : env.deployBlock).toString()}
-          {env.remappedFromLegacy || env.deployBlockRemapped
-            ? " · remapped from legacy env"
-            : ""}
+          {envRemapped ? " · remapped from legacy env" : ""}
           {" · "}
           <a
             href={network.explorerAddress(network.pool)}
@@ -125,7 +128,7 @@ export function VaultHealth({ compact = false }: { compact?: boolean }) {
           </a>
         </p>
       )}
-      {(env.remappedFromLegacy || env.deployBlockRemapped) && (
+      {envRemapped && (
         <p className="mt-2 rounded-[10px] bg-warn-soft px-3 py-2 text-[12px] leading-relaxed text-warn">
           Vercel still has older env values. The app remaps to the current vault{" "}
           {shortAddress(env.productPool, 4)}. Clean{" "}

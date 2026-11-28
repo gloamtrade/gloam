@@ -12,7 +12,6 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { formatEth } from "@/lib/chain";
 import {
   useAppAccount,
   useAppBalance,
@@ -22,6 +21,7 @@ import {
   useAppWriteContract,
 } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
+import { useAccountScope } from "./AccountScope";
 import { getActiveNetwork } from "@/lib/networks";
 import { safeParseEther, safeParseUnits } from "@/lib/amount";
 import { amountTextError } from "@/lib/amountText";
@@ -32,11 +32,11 @@ import { formatUsd } from "@/lib/markets";
 import { addableTokensFor, approvalsBeforeDeposit, isDollarStable, isNativeAddable, nativeTokenFor } from "@/lib/tokens";
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
 import { hasCoingeckoMarks, useCoingeckoMarks } from "@/hooks/useCoingeckoMarks";
-import { surelyNotSent, walletErrorForPeople } from "@/lib/walletErrors";
+import { lacksGasFunds, surelyNotSent, walletErrorForPeople } from "@/lib/walletErrors";
 import { publicClientFor } from "@/lib/rhClient";
 
 import { isNoLimit } from "@gloamtrade/sdk";
-import { APPROVE_GAS_LIMIT, gasFor, HASH_SCHEME, NATIVE_ASSET, SHIELD_GAS_LIMIT, SHIELD_BOUND_GAS_LIMIT, type LocalNote, assetLabel, dropUnsentNote, formatAssetAmount, isShieldDeployed, makeNoteMaterial, markAllNotesRecovered, nativeGasReserve, saveLocalNote, shieldPoolAbi } from "@/lib/shield";
+import { APPROVE_GAS_LIMIT, gasFor, HASH_SCHEME, NATIVE_ASSET, SHIELD_GAS_LIMIT, SHIELD_BOUND_GAS_LIMIT, type LocalNote, assetLabel, dropUnsentNote, isShieldDeployed, makeNoteMaterial, markAllNotesRecovered, nativeGasReserve, saveLocalNote, shieldPoolAbi } from "@/lib/shield";
 import { makeBoundNotePoseidon } from "@/lib/notePoseidon";
 import { createTxLog, depositAfterLostApproval, depositCall, networkMovedMessage, type DepositCall } from "@/lib/depositFlow";
 import { SCREEN_BLOCKED_MESSAGE } from "@/lib/screening";
@@ -46,6 +46,7 @@ import { WalletMenu } from "./WalletMenu";
 import { TokenLogo } from "./TokenLogo";
 import { Select } from "@/components/ui/Select";
 import { SuccessModal } from "./SuccessModal";
+import { displayAmount, displayAmountText, typedAmount } from "@/lib/amountShort";
 import { DevKeysBanner } from "./DevKeysBanner";
 import { BridgeInCard } from "./BridgeIn";
 import { RefreshIcon } from "./VaultHealth";
@@ -54,6 +55,8 @@ import { countPerson } from "@/lib/people";
 import { pickAddAsset } from "@/lib/vaultHub";
 import { faucetFor } from "@/lib/faucet";
 import { TempoFaucetButton } from "./TempoFaucetButton";
+import { BackupStep, useBackupGate } from "./RecoveryPanel";
+import { keepStorage } from "@/lib/backupGate";
 
 type TxKind = "shield" | "approve" | "pull" | null;
 type AssetChoice = "eth" | string; // eth | token id
@@ -71,6 +74,8 @@ export const DEPOSIT_MAYBE_SENT =
 export function ShieldView() {
   const { address, isConnected, chainId, demo } = useAppAccount();
   const { network } = useNetwork();
+  // the wallet keeps switching accounts and the page can't reload yet (lib/accountScope "leaving")
+  const scopeLeaving = useAccountScope().phase === "leaving";
   // The network the page shows now. Work that outlives the render it started in
   // (a proof, an approval's wait) checks against it right before it sends.
   const networkNow = useRef(network);
@@ -321,6 +326,9 @@ export function ShieldView() {
   // again right before signing.
   const [blockedAddr, setBlockedAddr] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  /** Before money first lands in this browser: the backup step shows in place of the button (lib/backupGate). */
+  const backupGate = useBackupGate();
+  const [backupAsk, setBackupAsk] = useState(false);
   const screenBlocked = Boolean(address) && blockedAddr === address;
   useEffect(() => {
     if (!address || demo) return;
@@ -519,7 +527,7 @@ export function ShieldView() {
     countPerson("deposit", address, network.testnet);
     void import("@/lib/track").then(({ track }) => {
       track("shield_success", {
-        asset: sentLabel.replace(/[\d.]+/g, "").trim().slice(0, 16) || "asset",
+        asset: sentLabel.replace(/[<\d.,]+/g, "").trim().slice(0, 16) || "asset",
       });
     });
     setSuccessTitle("Added privately");
@@ -590,8 +598,7 @@ export function ShieldView() {
   const typedAdd = amount.trim() ? parseAmount() : null;
 
   function limitText(v: bigint): string {
-    const n = Number(formatUnits(v, decimals));
-    return `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${symbol}`;
+    return `${displayAmount(v, decimals)} ${symbol}`;
   }
 
   /** Why the vault's deposit limits refuse this amount, or null. */
@@ -629,6 +636,16 @@ export function ShieldView() {
       }
     }
     return null;
+  }
+
+  /**
+   * A token deposit's approve and deposit are paid in the chain's gas coin. A
+   * wallet with none refuses the approve before anything is sent, in words viem
+   * passes on as the call reverting. Said plainly here instead. Not blocked up
+   * front: some wallets pay the fee in a stablecoin for the person.
+   */
+  function noGasFundsText(): string {
+    return `You need a little ${network.primaryAsset.symbol} on ${network.label} for the network fee.`;
   }
 
   /**
@@ -714,7 +731,7 @@ export function ShieldView() {
       } catch (err) {
         // The note store's own words say what to do; a prover or chunk-load error is no use to read.
         setFormError(
-          err instanceof Error && err.name === "NoteSaveError"
+          err instanceof Error && (err.name === "NoteSaveError" || err.name === "SignedOutError")
             ? err.message
             : "Could not prepare your private deposit. Try again."
         );
@@ -742,8 +759,14 @@ export function ShieldView() {
     } as Parameters<typeof writeContract>[0]);
   }
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  /** `afterBackup`: the backup step just finished or was skipped, so it isn't asked again. */
+  async function onSubmit(e?: React.FormEvent, afterBackup = false) {
+    e?.preventDefault();
+    // the page is bound to another account than the one signed in: nothing is deposited
+    if (scopeLeaving) {
+      setFormError("Your wallet switched accounts. Reload the page to add money.");
+      return;
+    }
     const err = validate();
     if (err) {
       setFormError(err);
@@ -754,6 +777,14 @@ export function ShieldView() {
       setFormError("Unlock your private balance with your passkey first.");
       return;
     }
+    // Nothing is saved or sent yet: a browser with no backup is asked for one first.
+    if (!afterBackup && backupGate.needed()) {
+      setFormError(null);
+      setBackupAsk(true);
+      return;
+    }
+    // A private balance is about to live in this browser: ask it to keep its storage.
+    keepStorage();
 
     const value = parseAmount();
     if (value === null) {
@@ -785,7 +816,8 @@ export function ShieldView() {
     setApproved(false);
     handledHash.current = null;
     txLog.clear();
-    setSentLabel(`${shortAmount(value, decimals)} ${symbol}`);
+    // the success dialog's amount: two places, never rounded up
+    setSentLabel(`${displayAmount(value, decimals)} ${symbol}`);
     setSentMark(selectedToken ? { id: selectedToken.id, symbol: selectedToken.symbol } : { id: nativeToken.id, symbol: nativeToken.symbol });
     pendingShieldArgs.current = { value, commitment, note };
     // Proved while any approval is mined, so the deposit goes out as soon as it lands.
@@ -997,13 +1029,6 @@ export function ShieldView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- executeShield reads this render's form; the effect runs once per lost receipt
   }, [receiptLost, hash, pendingKind, refetchAllow]);
 
-  const maxLabel =
-    walletBalance !== undefined
-      ? selectedToken
-        ? formatUnits(walletBalance, decimals)
-        : formatEth(walletBalance, 6)
-      : "0";
-
   const amtNum = Number(amount);
   // "1,25" or "-1" is refused out loud, never quietly turned into 125 or 1
   const amountProblem = amountTextError(amount, decimals);
@@ -1036,10 +1061,8 @@ export function ShieldView() {
     pendingKind === "shield" && !isPending && !confirming && !formError;
 
   const connectedOk = isConnected && onProduct;
-  const maxDisplay =
-    selectedToken && walletBalance !== undefined
-      ? formatAssetAmount(walletBalance, selectedToken.address)
-      : maxLabel;
+  // The wallet balance beside the field: two places, cut down. Max still writes every unit into the field.
+  const maxDisplay = displayAmount(isConnected ? (walletBalance ?? BigInt(0)) : BigInt(0), decimals);
 
 
   // What stops this deposit before the wallet is asked, said on the button
@@ -1049,6 +1072,8 @@ export function ShieldView() {
   const liveLimit = typedValue !== null && typedValue > BigInt(0) ? limitProblem(typedValue) : null;
   const ctaStop: string | null = working
     ? null
+    : scopeLeaving
+      ? "Reload the page to add money"
     : walletBalance === BigInt(0)
       ? `No ${symbol} in this wallet`
       : !amount.trim() || (typedValue === null && !amountProblem) || (typedValue !== null && typedValue <= BigInt(0))
@@ -1129,7 +1154,7 @@ export function ShieldView() {
                 </button>
                 <span className="tnum -my-2 inline-flex min-h-10 min-w-0 items-center text-mute">
                   <span className="truncate">
-                    In wallet {isConnected ? maxDisplay : "0"} {symbol}
+                    In wallet {maxDisplay} {symbol}
                   </span>
                 </span>
                 </span>
@@ -1215,7 +1240,7 @@ export function ShieldView() {
                 </span>
               </div>
               <p className="tnum mt-3 truncate text-[28px] font-light leading-none tracking-[-0.02em] text-foreground">
-                {amtNum > 0 ? amount : "0"}{" "}
+                {amtNum > 0 ? typedAmount(amount) : displayAmountText("0")}{" "}
                 <span className="text-[15px] tracking-normal text-mute">{symbol}</span>
               </p>
             </div>
@@ -1244,6 +1269,19 @@ export function ShieldView() {
               <p role="status" className="rounded-[16px] bg-surface px-4 py-3.5 text-center text-[14px] text-mute">
                 {SCREEN_BLOCKED_MESSAGE}
               </p>
+            ) : backupAsk && backupGate.route ? (
+              <BackupStep
+                route={backupGate.route}
+                onDone={() => {
+                  setBackupAsk(false);
+                  void onSubmit(undefined, true);
+                }}
+                onSkip={() => {
+                  backupGate.skip();
+                  setBackupAsk(false);
+                  void onSubmit(undefined, true);
+                }}
+              />
             ) : (
               <button
                 type="submit"
@@ -1289,7 +1327,11 @@ export function ShieldView() {
               {formError ||
                 (writeError?.message.includes("OverDepositLimit")
                   ? "This deposit is over the vault's deposit limit. Try a smaller amount."
-                  : walletErrorForPeople(writeError))}
+                  : lacksGasFunds(writeError) && network.family !== "tempo"
+                    ? noGasFundsText()
+                    : walletErrorForPeople(writeError, undefined, {
+                        feeIn: network.family === "tempo" ? "stablecoin" : "gas",
+                      }))}
             </p>
           )}
           {hash && !isSuccess && (
@@ -1357,17 +1399,6 @@ export function ShieldView() {
       />
     </>
   );
-}
-
-/**
- * An amount as the receipt shows it: floored to 6 decimals, trailing zeros cut,
- * so an 18-decimal coin reads 0.003868 rather than 0.003868049052992449.
- */
-function shortAmount(v: bigint, decimals: number): string {
-  const [whole, frac = ""] = formatUnits(v, decimals).split(".");
-  const f = frac.slice(0, 6).replace(/0+$/, "");
-  if (!f && whole === "0" && v > BigInt(0)) return "<0.000001";
-  return f ? `${whole}.${f}` : whole!;
 }
 
 function AssetMark({

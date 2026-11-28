@@ -19,6 +19,8 @@ Add shielded balances, private payments, and selective disclosure to any app or 
 - [What you can build](#what-you-can-build)
 - [Install](#install)
 - [Networks: mainnet and testnet](#networks-mainnet-and-testnet)
+- [Solana](#solana)
+- [Starknet (not open yet)](#starknet-not-open-yet)
 - [Quickstart: shield your first note](#quickstart-shield-your-first-note)
 - [How it works](#how-it-works)
 - [The intent model](#the-intent-model)
@@ -152,6 +154,125 @@ Elysium mainnet is live since 9 November 2026. Elysium is Kinetiq's Hyperliquid 
 - Not on Elysium yet: private swaps (`planVaultSwap` refuses with "Private swaps are not on Elysium yet").
 - Short links: Elysium mainnet's USDC is id 45 in `SHORT_LINK_WHERE`; id 46 stays reserved for its testnet until that pool is in.
 - Keys: `src/elysium.ts` ships in the npm package, so `elysiumMainnetConfig()` and `elysiumTestnetConfig()` refuse an RPC URL with an API key in it; `redactRpcUrl(url)` hides a key for display. Keyed RPCs for Elysium go in your own env.
+
+## Solana
+
+From 0.9.0 the SDK runs Gloam on Solana, through Helius Solana Privacy Rings (the permissionless Default Ring), at the subpath `@gloamtrade/sdk/solana`. It works in Node and in browsers.
+
+**What it hides, plainly:** the asset and the amount of a private payment. The two private accounts a payment moves between are visible, adding money shows the wallet it came from, and a cash out shows its destination, asset and amount. Proofs are made by Helius's prover, in an attested enclave that sees a payment's details while it proves. Solana does not hide who paid whom.
+
+```bash
+npm i @gloamtrade/sdk @heliuslabs/spr@0.9.0-alpha @solana/kit
+```
+
+```ts
+import {
+  openSolanaAccount, solanaKeypairWallet, registerSolanaAccount, solanaBalances,
+  addToSolanaPrivate, paySolanaPrivately, cashOutSolana, solanaTxStatus,
+} from "@gloamtrade/sdk/solana";
+
+// The main wallet: a keypair (a Solana CLI keypair file's array, base58, or bytes),
+// or any wallet with address, signMessage(bytes) and signTransaction(wireBytes).
+const wallet = await solanaKeypairWallet(process.env.AGENT_SOLANA_KEY!);
+
+// One message signature opens the private account. The same wallet opens the same
+// account here and in the Gloam app, on any device; nothing is stored.
+const account = await openSolanaAccount({ wallet, index: 0 });
+account.address;                                   // the private address others pay
+
+await registerSolanaAccount(account);              // once, so it can be paid; the relay pays the rent
+await solanaBalances(account);                      // { sol, usdc, usdt, zec } in base units
+
+await addToSolanaPrivate(account, { asset: "USDC", amount: 5_000_000n });      // the main wallet pays the fee
+const paid = await paySolanaPrivately(account, { to: "<gloam private address>", asset: "USDC", amount: 1_000_000n });
+await cashOutSolana(account, { to: wallet.address, asset: "USDC", amount: 1_000_000n });
+
+// A send returns "landed", or "pending" after timeoutMs (default 120 s), never waiting forever.
+if (paid.state === "pending") await solanaTxStatus({ signature: paid.signature, blockhash: paid.blockhash });
+// -> landed | failed (nothing moved) | dropped (its blockhash expired unseen: safe to send again) | pending
+```
+
+| Call | What it does | Public on chain |
+| --- | --- | --- |
+| `openSolanaAccount({ wallet, index?, baseUrl?, store? })` | Open private account `index` from one message signature (`solanaAccountMessage`, HKDF-SHA256, the app's derivation) | Nothing |
+| `registerSolanaAccount(account)` | Publish the account in the Rings registry so it can be paid. Gloam's relay pays the rent (about 0.0016 SOL) | The private account |
+| `solanaBalances(account)` | Sync from the Rings indexer and decrypt here: `{ sol, usdc, usdt, zec }` | Nothing |
+| `addToSolanaPrivate(account, { asset, amount })` | Deposit from the main wallet, which pays Solana's fee | The main wallet, the asset and the amount |
+| `paySolanaPrivately(account, { to, asset, amount })` | Pay another registered Gloam private account. The relay pays the fee | Both private accounts. Hidden: the asset and the amount |
+| `cashOutSolana(account, { to, asset, amount })` | Cash out to any Solana address. The relay pays the fee | The private account, the destination, the asset and the amount |
+| `solanaTxStatus` / `waitForSolanaTx` | Where a send stands, with a deadline | |
+| `solanaRelayStatus()`, `isSolanaAccountRegistered()`, `buildSolanaRegistration()`, `closeSolanaAccount()` | The relay's state, registration, the signed registration (for checks), wiping keys | |
+
+- **Assets:** SOL, USDC, USDT and ZEC on mainnet (`SOLANA_ASSETS`), amounts in base units (9 decimals for SOL, 6 for the stablecoins, 8 for ZEC).
+- **ZEC** is Zcash bridged to Solana by NEAR's Omni Bridge (mint `A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS`, `SOLANA_ZEC_MINT`), a public SPL token there. Once it is private on Gloam, the token and the amount stay hidden like any Solana asset. The bridge itself and adding from a wallet are public.
+- **Endpoints:** every call goes to Gloam's endpoints at `https://www.gloam.trade/api/solana/*` (a Solana RPC and the Rings indexer and prover behind Gloam's Helius key, and Gloam's relay). `baseUrl` points elsewhere. They answer servers and gloam.trade's own pages; a page on another site gets a refusal, so in a browser app put your own server in between and pass its `baseUrl`.
+- **Fees:** the relay pays the fees of registering, paying and cashing out (and a new token account's rent on a cash out), so the private account never holds SOL. Adding money is the one transaction the main wallet pays for.
+- **Never sent twice:** a relay refusal is a `SolanaRelayError`; `maybeSent: false` means nothing went out, `maybeSent: true` means check `solanaTxStatus` (or the balance) before sending again. A send that failed or was dropped throws `SolanaTxError` and frees its funds.
+- **Balance snapshot:** pass `store` (`load()` / `save(text)`) to keep the account's sealed snapshot between runs, so a sync starts where the last one stopped. It is sealed with the account's viewing key.
+- **No dependencies at the root:** `@gloamtrade/sdk` itself exports only the facts (`solanaNetworkInfo()`, `SOLANA_PRIVACY_NOTE`, `SOLANA_PRIVACY`, `SOLANA_ASSETS`, `isSolanaAddress`, the derivation). `@heliuslabs/spr` and `@solana/kit` are optional peer dependencies, needed only for `@gloamtrade/sdk/solana`.
+
+Runnable: [`examples/solana-agent.mjs`](https://github.com/gloamtrade/gloam/tree/main/packages/sdk/examples/solana-agent.mjs).
+
+## Starknet (not open yet)
+
+From 0.10.0 the SDK has Gloam on Starknet, at the subpath `@gloamtrade/sdk/starknet`. It runs on Starknet's own privacy pool (STRK20, from `starkware-libs/starknet-privacy`), not the Gloam vault, through Gloam's routes. **Starknet is not open on Gloam yet:** until it opens, Gloam's Starknet routes refuse and every call that touches them throws `StarknetOffError`. The facts, the account derivation and claim links work offline today.
+
+**What it hides, plainly:** a payment over a channel that is already open hides who paid, who was paid and how much. The first payment to someone opens a channel to them, which shows their private account (never who paid or how much). Adding money shows the account and the amount. A cash out shows where it went and how much, never which private account it came from. The pool has a mandatory auditor key: registering stores the account's viewing key encrypted to it, so its holder can read that account's private activity for authorized inspection; it cannot spend. Proofs come from Starkscan's prover, which runs each transaction to prove it, so it sees it. On mainnet Starknet's discovery service finds an account's notes with its viewing key; the request is sealed to it (OHTTP) and passes through Gloam.
+
+```bash
+npm i @gloamtrade/sdk starknet@10.5.0
+# StarkWare publishes the privacy SDK on GitHub Packages only. Gloam vendors the build it runs:
+npm i https://github.com/gloamtrade/gloam/raw/main/app/vendor/starknet-privacy/starknet-privacy-sdk-0.14.4-rc.2-gloam.1.tgz
+```
+
+```ts
+import { privateKeyToAccount } from "viem/accounts";
+import {
+  openStarknetAccount, starknetViemWallet, registerStarknetAccount, starknetBalances,
+  addToStarknetPrivate, payStarknetPrivately, payStarknetMany, cashOutStarknet,
+  makeStarknetClaimLink, claimStarknetLink, StarknetOffError, StarknetBusyError,
+} from "@gloamtrade/sdk/starknet";
+
+// An EVM wallet signs one fixed message (twice, to be sure it signs the same way).
+// The same wallet opens the same account here and in the Gloam app. Nothing is sent.
+const account = await openStarknetAccount({ wallet: starknetViemWallet(privateKeyToAccount(process.env.AGENT_KEY!)) });
+account.address;                                   // the private account others pay
+
+await registerStarknetAccount(account);            // once: the relay deploys it, one proof opens it (free, capped)
+await starknetBalances(account);                    // { usdc: { private, public } } in base units
+
+// Money arrives at account.address from any wallet or exchange that sends USDC on Starknet.
+await addToStarknetPrivate(account, { amount: 5_000_000n });                    // shows the account and the amount
+const paid = await payStarknetPrivately(account, { to: "0x<their private account>", amount: 1_000_000n });
+paid.firstPayment;                                 // true: this payment showed their private account
+await payStarknetMany(account, { payments: [{ to: a, amount: 1_000_000n }, { to: b, amount: 2_000_000n }] }); // one proof, one fee
+await cashOutStarknet(account, { to: "0x<any Starknet address>", amount: 1_000_000n }); // shows the destination and the amount
+
+// A claim link: kept first (it is the only copy of its key), then paid. The claimer gets exactly `amount`.
+const link = await makeStarknetClaimLink(account, { amount: 1_000_000n, keep: async (l) => save(l.url) });
+await claimStarknetLink({ link: link.url, to: "0x<the claimer's private account>" });
+```
+
+| Call | What it does | Public on chain |
+| --- | --- | --- |
+| `openStarknetAccount({ wallet \| seed, index?, network?, baseUrl? })` | Open private account `index` from a wallet's signature of `starknetAccountMessage(index)` or a 32-byte seed (`starknetSeedFromGloamRoot`), the app's derivation | Nothing |
+| `registerStarknetAccount(account)` | The relay deploys the account, then one proof registers its viewing key and opens its own channel. Free, with a daily cap | The account |
+| `starknetBalances(account)` | The private balance (notes found and read here) and what sits at the account's address | Nothing |
+| `addToStarknetPrivate(account, { amount, approved?, maxFee? })` | Approve the pool (signed here, sent by the relay), then one proof deposits it and pays Gloam's fee | The account and the amount |
+| `payStarknetPrivately(account, { to, amount, maxFee? })` | Pay another Gloam private account on Starknet | A first payment: the payee's account. Later ones: nothing |
+| `payStarknetMany(account, { payments, maxFee? })` | Up to 28 people in one proof and one fee, checked on the pool first so a proof the relay would refuse for its size is never made (`StarknetTooManyError` says how many fit) | The accounts it pays a first time, together |
+| `cashOutStarknet(account, { to, amount, maxFee? })` | Cash out to any Starknet address | The destination and the amount |
+| `makeStarknetClaimLink(account, { amount, keep })`, `claimStarknetLink({ link, to })`, `readStarknetLink(link)` | A claim link (`/c#sn=`), the same format as the app's: claimed once, taken back by claiming it into your own account | Paying it shows the link's one-time account; claiming it shows the claimer's |
+| `starknetPayeeState(account, to)` | `"closed"` (no account: can't be paid), `"first"` (the payment shows them) or `"ready"` | |
+| `starknetRelayStatus()`, `starknetTxStatus(hash)`, `isStarknetAccountOpen()`, `signStarknetOutsideCall()`, `closeStarknetAccount()` | The relay's state and fee, a transaction's state, the account's, a SNIP-9 call only the relay may send, dropping keys | |
+
+- **Typed errors**, each thrown before anything is proven or sent: `StarknetOffError` (Starknet not open on that server, or the relay sends no moves yet), `StarknetBusyError` (`code` `"quota"` when Gloam's proofs for the day are used, `"limited"` or `"rate_limited"` for this caller, `"relay_day_used"`, `"paused"` and the like: try later), `StarknetFeeChangedError` (the relay's fee changed since the account last read it, or is above `maxFee`; call again to pay the new one), `StarknetInsufficientError` (`have` and `need`). All are `StarknetError`s; `maybeSent: true` means check the balance or `starknetTxStatus` before trying again.
+- **Fees:** Gloam's relay pays Starknet's fees, so the account never holds STRK. On mainnet each add, payment and cash out pays Gloam's relay fee (0.25 USDC) inside its proof; read it live with `starknetRelayStatus()` and cap it with `maxFee`. A claim link costs its amount and three fees (its payment, the link's open, its claim), so the claimer gets the amount whole.
+- **Proofs:** from Starkscan's prover through Gloam's server, a few a day for now. A proof is pinned 10 blocks behind the head, so each move waits for Starknet to make them (about 20 seconds on mainnet).
+- **Assets:** USDC on mainnet (`STARKNET_ASSETS`, 6 decimals). On mainnet the SDK proves only into Starknet's canonical pool (`STARKNET_MAINNET_POOL`), whatever a server names.
+- **Endpoints:** `https://www.gloam.trade/api/starknet/{rpc,prove,relay,discovery}`, or `baseUrl`. They answer servers and gloam.trade's own pages.
+- **No dependencies at the root:** `@gloamtrade/sdk` exports the facts (`starknetNetworkInfo()`, `STARKNET_PRIVACY_NOTE`, `STARKNET_PRIVACY`, `STARKNET_ASSETS`), the seed derivation and the claim link format. `starknet` and `@starkware-libs/starknet-privacy-sdk` are optional peer dependencies, needed only for `@gloamtrade/sdk/starknet`.
+- **Bringing money in** from another network (Circle's CCTP) is coming to the app; `addToStarknetPrivate(account, { amount, approved: true })` and `signStarknetOutsideCall` are what it builds on.
 
 ## Quickstart: shield your first note
 
@@ -858,6 +979,7 @@ Runnable references, one for each shape a builder starts from:
 | [web-shield](https://github.com/gloamtrade/gloam/tree/main/examples/web-shield) | Browser | Shield in the browser, read the balance back from chain. |
 | [receive-and-credit](https://github.com/gloamtrade/gloam/tree/main/packages/sdk/examples/receive-and-credit.ts) | Node | Take payments by request link, read each payment's note, secure it, credit the account it names. |
 | [san-verano](https://github.com/gloamtrade/gloam/tree/main/examples/san-verano) | Node | Commerce with commitments: pay a supplier privately, sweep, prove, put the receipt leaf in a nightly root; a dry run by default. |
+| [solana-agent](https://github.com/gloamtrade/gloam/tree/main/packages/sdk/examples/solana-agent.mjs) | Node | An agent on Solana: open the private account its key owns, register it, read the balance, pay privately with `--pay`. |
 
 ![Add money privately in the browser](https://raw.githubusercontent.com/gloamtrade/gloam/main/app/public/media/readme-browser.jpg)
 

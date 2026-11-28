@@ -3,6 +3,7 @@ import { liveMainnetNames } from "@/lib/mainnet";
 import Link from "next/link";
 import { LegalLayout } from "@/components/LegalLayout";
 import { EMBEDDED_WALLETS } from "@/lib/embeddedWallet";
+import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
 import { rpcProxyNetworkNames } from "@/lib/rpcProxy";
 
@@ -10,7 +11,7 @@ export const metadata: Metadata = { title: "Privacy Policy" };
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="November 12, 2026">
+    <LegalLayout title="Privacy Policy" updated="November 23, 2026">
       <p>
         This Privacy Policy describes what information Gloam (&ldquo;we,&rdquo;
         &ldquo;us&rdquo;) handles when you use gloam.trade, the Gloam app, the
@@ -260,6 +261,20 @@ export default function PrivacyPage() {
           before you choose it.
         </p>
       )}
+      {EMBEDDED_WALLETS && SOLANA_RINGS_ENABLED && (
+        <p>
+          A Gloam wallet also has a Solana account, in the same Turnkey wallet,
+          which signs your Solana transactions. Your private account on Solana
+          does not come from its signatures: it opens with your passkey (a key
+          your passkey makes on your device) or, if you sign in with an email,
+          with a backup code made in your browser and shown to you once.
+          Neither Turnkey nor our servers receive either. The backup code is
+          kept in your browser, sealed like your private balance, and in your
+          recovery backup only when that backup uses a passkey. Without your
+          passkey, the code or this browser, the private account can&apos;t be
+          opened, by you or by us.
+        </p>
+      )}
       <h2>9. Tester applications and contest entries</h2>
       <p>
         If you apply at gloam.trade/testers, we keep what you send: your name,
@@ -281,8 +296,9 @@ export default function PrivacyPage() {
         entered, when you last changed your entry, and when you agreed that
         Gloam may use your video for marketing with credit to you. We use it to
         judge the contest, to reach and pay winners, and to show we have your
-        permission when we use a video, and for nothing else. Only the Gloam
-        team can read it. Your IP address is not kept with your entry; the
+        permission when we use a video. If you gave an email, we also add it to
+        the Gloam updates list; every update has a link to unsubscribe. Only
+        the Gloam team can read it. Your IP address is not kept with your entry; the
         rate limit holds a hashed copy for up to two hours. We delete entries
         90 days after winners are paid, except the name, handle, post link and
         consent time for a video we use, which we keep while we use it. Ask at{" "}
@@ -437,9 +453,15 @@ export default function PrivacyPage() {
       <p>
         If you ask for Gloam updates by email, we keep only that email, the day
         you asked and where (sign-in, Settings or the site), and use it only to
-        send updates. It is stored on its own, apart from any wallet, and you
-        can unsubscribe with the link in any update or by writing to{" "}
-        <a href="mailto:hello@gloam.trade">hello@gloam.trade</a>.
+        send updates. It is stored on its own, apart from any wallet. We note
+        which updates went to it, so nobody gets the same one twice, and we
+        don&apos;t track whether you open an update or click its links. Resend
+        delivers the emails for us and tells us whether each one was delivered,
+        bounced or marked as spam; an address that bounces for good or reports
+        spam comes off the list. You can unsubscribe with the link in any
+        update, with your mail app&apos;s Unsubscribe button, or by writing to{" "}
+        <a href="mailto:hello@gloam.trade">hello@gloam.trade</a>. The updates
+        themselves are public at <Link href="/updates">gloam.trade/updates</Link>.
       </p>
       <h2>14. How we use information</h2>
       <p>
@@ -456,8 +478,13 @@ export default function PrivacyPage() {
         <li>Vercel: hosting, request logs and Web Analytics.</li>
         <li>
           Upstash: our database, for tester applications, recovery backups,
-          partner accounts, Glim&apos;s records, usage counts and rate-limit
-          counts.
+          partner accounts, the email updates list, Glim&apos;s records, usage
+          counts and rate-limit counts.
+        </li>
+        <li>
+          Resend: sends the email updates. It receives your email address and
+          each update we send you, and keeps delivery records under its own
+          privacy policy.
         </li>
         <li>Anthropic: writing Glim&apos;s answers and daily summary.</li>
         <li>Raeto: choosing which model writes Glim&apos;s answers in the group.</li>

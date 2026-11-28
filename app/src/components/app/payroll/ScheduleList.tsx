@@ -9,7 +9,7 @@ import {
   sortSchedules,
   type PayrollSchedule,
 } from "@/lib/payrollSchedule";
-import { formatAssetAmount, summaryDecimals } from "@/lib/shield";
+import { formatAssetAmount } from "@/lib/shield";
 import { ScheduleIcon, ScheduleStatusChip, SELF_CUSTODY_NOTE, type AssetOption } from "./scheduleUi";
 
 function people(n: number) {
@@ -56,8 +56,7 @@ export function ScheduleList({
 
       {sorted.length === 0 ? (
         <p className="mt-3 text-[13px] leading-relaxed text-mute">
-          Pay the same people on a calendar? Save a list as a schedule, with a cap per run, and this page tells you when
-          it is due.
+          Pay the same people every month? Save the list as a schedule and get a reminder on payday.
         </p>
       ) : (
         <ul className="-mx-2 mt-3 space-y-1">
@@ -101,8 +100,8 @@ export function ScheduleList({
                       {s.endsOn && st.status !== "ended" ? `, ends ${dayLabel(s.endsOn, today)}` : ""}
                     </p>
                     <p className="tnum mt-0.5 text-[12.5px] text-mute">
-                      {people(s.people.length)}, {formatAssetAmount(scheduleTotal(s), s.asset, summaryDecimals(s.asset))} {sym}
-                      <span className="text-faint"> · cap {formatAssetAmount(s.cap, s.asset, summaryDecimals(s.asset))}</span>
+                      {people(s.people.length)}, {formatAssetAmount(scheduleTotal(s), s.asset)} {sym}
+                      <span className="text-faint"> · cap {formatAssetAmount(s.cap, s.asset)}</span>
                     </p>
                     {st.owed > 1 && st.status !== "paused" && (
                       <p className="mt-1.5 text-[12.5px] leading-relaxed text-warn">
@@ -177,7 +176,7 @@ export function ScheduleList({
         </ul>
       )}
 
-      <p className="mt-4 border-t border-line pt-4 text-[12.5px] leading-relaxed text-mute">{SELF_CUSTODY_NOTE}</p>
+      {sorted.length > 0 && <p className="mt-4 border-t border-line pt-4 text-[12.5px] leading-relaxed text-mute">{SELF_CUSTODY_NOTE}</p>}
     </section>
   );
 }

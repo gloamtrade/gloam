@@ -30,14 +30,17 @@
  * Arbitrum and Solana. On 2026-11-19 they worked into USDT and USDC on BNB
  * Chain from Robinhood Chain USDG, Base USDC and USDT, and Ethereum USDC, USDT,
  * USDG and PYUSD: 9.95 in came out at 9.85 to 9.91 from Robinhood Chain or
- * Base, and 9.68 to 9.76 from Ethereum. Tempo answered "strict is not supported for
- * this origin chain", so a cash out on Tempo stays on Tempo for now.
+ * Base, and 9.68 to 9.76 from Ethereum. On 2026-11-22 they worked from BNB
+ * Chain USDT and USDC (18 decimals there) into USDC on Base, Arbitrum and
+ * Solana and USDG on X Layer. Tempo answered "strict is not supported for this
+ * origin chain", so a cash out on Tempo stays on Tempo for now.
  *
  * Cross-chain is for "now" only. A cash out for later, or in pieces, stays on
  * its own chain: a scheduled proof can wait hours, and an order's price
  * should not.
  */
-import { decodeFunctionData, formatUnits, isAddress, parseAbi, zeroAddress } from "viem";
+import { decodeFunctionData, formatUnits, isAddress, parseAbi, parseUnits, zeroAddress } from "viem";
+import { displayAmountNumber } from "./amountShort";
 import { BRIDGE_MAX_USD, BRIDGE_MIN_USD, RELAY_REFERRER, relayChainName } from "./bridge";
 
 /** Relay's id for Solana. */
@@ -79,12 +82,16 @@ export type CrossChainDestination = {
  */
 const usdc = (address: string, decimals: number): CrossChainToken => ({ symbol: "USDC", address, decimals, logo: "/brand/tokens/usdc.png" });
 const usdt = (address: string, decimals: number): CrossChainToken => ({ symbol: "USDT", address, decimals, logo: "/brand/tokens/usdt.png" });
+const usdg = (address: string, decimals: number): CrossChainToken => ({ symbol: "USDG", address, decimals, logo: "/brand/tokens/usdg.png" });
 
 const bscscanTx = (h: string) => `https://bscscan.com/tx/${h}`;
+const xlayerTx = (h: string) => `https://www.oklink.com/x-layer/evm/tx/${h}`;
 
 /**
  * Where a cash out can land instead of its own chain. Checked with live strict
- * quotes on 2026-11-09, and on 2026-11-19 for BNB Chain. A BNB Chain
+ * quotes on 2026-11-09, on 2026-11-19 for BNB Chain, and on 2026-11-22 for X
+ * Layer (from Robinhood Chain USDG, Base USDC and USDT, Ethereum USDC and USDG,
+ * to both of its stablecoins). A BNB Chain
  * destination is only Relay delivering to a wallet there: it needs nothing
  * from Gloam's BNB Chain vault, so it is offered whether that vault is on or not.
  */
@@ -96,12 +103,17 @@ export const CROSS_CHAIN_DESTINATIONS: readonly CrossChainDestination[] = [
   // BNB Chain (56): USDT first, the stablecoin most held there. Both have 18 decimals.
   { id: "bnb-usdt", chainId: 56, chain: "BNB Chain", kind: "evm", token: usdt("0x55d398326f99059fF775485246999027B3197955", 18), explorerTx: bscscanTx },
   { id: "bnb-usdc", chainId: 56, chain: "BNB Chain", kind: "evm", token: usdc("0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", 18), explorerTx: bscscanTx },
+  // X Layer (196), OKX's chain: USDC and USDG, both 6 decimals. Relay delivers to a wallet there; Gloam has no vault on it.
+  { id: "xlayer-usdc", chainId: 196, chain: "X Layer", kind: "evm", token: usdc("0xb6ceceab302e2e4948951ee7843fc24e92933061", 6), explorerTx: xlayerTx },
+  { id: "xlayer-usdg", chainId: 196, chain: "X Layer", kind: "evm", token: usdg("0x4ae46a509f6b1d9056937ba4500cb143933d2dc8", 6), explorerTx: xlayerTx },
 ];
 
 /**
  * The vault assets that can leave to another chain, by the vault's chain id:
  * stablecoins on chains where Relay takes strict deposit addresses. Addresses
- * as the vaults list them (lib/tokens), compared lowercased.
+ * as the vaults list them (lib/tokens), compared lowercased. Each states its
+ * own decimals: USDT and USDC on BNB Chain have 18, so what the vault pays
+ * Relay, the dollar bounds and the order's exact amount are all read in 18 there.
  */
 export const CROSS_CHAIN_SOURCES: Readonly<Record<number, readonly { symbol: string; address: string; decimals: number }[]>> = {
   4663: [{ symbol: "USDG", address: "0x5fc5360d0400a0fd4f2af552add042d716f1d168", decimals: 6 }],
@@ -114,6 +126,11 @@ export const CROSS_CHAIN_SOURCES: Readonly<Record<number, readonly { symbol: str
     { symbol: "USDT", address: "0xdac17f958d2ee523a2206206994597c13d831ec7", decimals: 6 },
     { symbol: "USDG", address: "0xe343167631d89b6ffc58b88d6b7fb0228795491d", decimals: 6 },
     { symbol: "PYUSD", address: "0x6c3ea9036406852006290770bedfcaba0e23a0e8", decimals: 6 },
+  ],
+  // BNB Chain: never its own destination (crossChainDestinations leaves out chain 56).
+  56: [
+    { symbol: "USDT", address: "0x55d398326f99059ff775485246999027b3197955", decimals: 18 },
+    { symbol: "USDC", address: "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d", decimals: 18 },
   ],
 };
 
@@ -323,11 +340,16 @@ export function readCrossChainQuote(
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-/** The dollar bounds on what reaches the deposit address, the same as a bridge in. */
+/**
+ * The dollar bounds on what reaches the deposit address, the same as a bridge
+ * in. Compared in raw units, never as a float: in 18 decimals (BNB Chain) a wei
+ * under a dollar reads as 1.0 once it is a Number.
+ */
 export function crossChainAmountProblem(amount: bigint, decimals: number): string | null {
-  const n = Number(formatUnits(amount, decimals));
-  if (!(n >= BRIDGE_MIN_USD) || n > BRIDGE_MAX_USD) {
-    return `Cash out ${BRIDGE_MIN_USD} to ${BRIDGE_MAX_USD.toLocaleString("en-US")} to another chain at a time.`;
+  const min = parseUnits(String(BRIDGE_MIN_USD), decimals);
+  const max = parseUnits(String(BRIDGE_MAX_USD), decimals);
+  if (amount < min || amount > max) {
+    return `Cash out ${displayAmountNumber(BRIDGE_MIN_USD)} to ${displayAmountNumber(BRIDGE_MAX_USD)} to another chain at a time.`;
   }
   return null;
 }

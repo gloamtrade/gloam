@@ -233,9 +233,8 @@ export default function DocsSdkReferencePage() {
                 <code>RH_MAINNET_CASHCAT</code>, <code>RH_MAINNET_AI</code>, <code>RH_MAINNET_ORBIO</code>
               </td>
               <td>
-                Robinhood Chain mainnet pool assets, with <code>RH_MAINNET_GRIFT</code> and native ETH
-                (<code>NATIVE_ASSET</code>). ETH, AI and ORBIO take deposits since 3 November 2026; GRIFT
-                once its timelocked limit lands (0.4.5)
+                Robinhood Chain mainnet pool assets, with native ETH (<code>NATIVE_ASSET</code>). ETH, AI
+                and ORBIO take deposits since 3 November 2026 (0.4.5)
               </td>
             </tr>
             <tr>
@@ -412,7 +411,8 @@ cashOutFee(500_000_000n);                     // what the pool keeps on a 500 US
   agentAddress?: Address | null;
 }
 interface ShieldBoundIntentParams extends ShieldIntentParams {
-  prover: Prover;             // bound to the shield circuit artifacts
+  prove: Prover;              // bound to the shield circuit artifacts
+                              // (\`prover\` works too, the older name)
 }
 interface UnshieldIntentParams {
   secretHex: \`0x\${string}\`;  // the note's spend key
@@ -430,6 +430,7 @@ interface PrivateSendIntentParams {
   asset?: Address;
   path: PoseidonMerklePath;
   prove: Prover;
+  paySeed?: \`0x\${string}\`;     // randomNoteSeed().seed: the payment fits a short claim link
   poolAddress?: Address; chainId?: number; agentAddress?: Address | null;
 }`}</code>
       </pre>

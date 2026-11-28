@@ -57,7 +57,7 @@ import {
   waitForTx,
 } from "./relay/client";
 import { publicClientFor } from "./rhClient";
-import { dataKeyLocked, getAllNotes, syncFromDisk, unlockNoteVault } from "./noteVault";
+import { dataKeyLocked, getAllNotes, noteOwnerProblem, syncFromDisk, unlockNoteVault } from "./noteVault";
 import { readDemo } from "./demoFlag";
 import {
   FILES_RETRY,
@@ -83,6 +83,7 @@ import {
 } from "./shield";
 import { syncShieldTree } from "./treeSync";
 import { escrowHolds } from "./vaultSwap";
+import { nameEscrowHolds } from "./nameClaim";
 import { supportsNativeShield } from "./tokens";
 
 /** Claimed payments are saved under this id prefix (MoveView). */
@@ -136,12 +137,15 @@ export type ClaimEnv = {
     commitment: Hex
   ) => Promise<{ spent: boolean | null; seen: boolean | null; block?: bigint | null }>;
   /**
-   * A private swap's refund note: does its money wait at the swap's escrow, at
-   * `block` (the block stateAt read)? "short": it does, but too little for this
-   * refund note (lib/vaultSwap escrowHolds). Null: unread.
+   * A private swap's or name claim's refund note: does its money wait at the
+   * escrow, at `block` (the block stateAt read)? "short": it does, but too little
+   * for this refund note (lib/vaultSwap escrowHolds). Null: unread.
    */
   escrowWaiting?: (n: LocalNote, block: bigint) => Promise<boolean | "short" | null>;
-  /** Puts a swap's waiting money back as its refund note (lib/vaultSwapRun). True when one was sent. */
+  /**
+   * Puts a swap's or name claim's waiting money back as its refund note
+   * (lib/vaultSwapRun, lib/nameClaimRun). True when one was sent.
+   */
   finishRefund?: (n: LocalNote) => Promise<boolean | void>;
   /** How a transaction ended. Null when the chain shows no receipt yet, or the read failed. */
   txOutcome?: (hash: Hex) => Promise<"success" | "reverted" | null>;
@@ -231,12 +235,22 @@ export function appClaimEnv(onStage?: (text: string) => void, net: GloamNetwork 
     leafIndexOf: async (commitment) => (await findLeaf(client, net, commitment).catch(() => null))?.idx,
     stateAt: (nullifier, commitment) => readStateAt(client, pool!, nullifier, commitment),
     escrowWaiting: async (n, block) => {
-      if (!n.vaultSwap || !n.sweptFrom) return false;
+      if (!n.sweptFrom) return false;
+      if (n.nameClaim) {
+        return nameEscrowHolds(client, n.nameClaim, n.sweptFrom.nullifier, n.commitment, BigInt(n.amountWei), block).catch(
+          () => null
+        );
+      }
+      if (!n.vaultSwap) return false;
       return escrowHolds(client, n.vaultSwap, n.sweptFrom.nullifier, n.commitment, BigInt(n.amountWei), block).catch(
         () => null
       );
     },
     finishRefund: async (n) => {
+      if (n.nameClaim) {
+        const { finishNameClaimRefund } = await import("./nameClaimRun");
+        return finishNameClaimRefund(n);
+      }
       const { finishVaultSwapRefund } = await import("./vaultSwapRun");
       return finishVaultSwapRefund(n);
     },
@@ -302,10 +316,11 @@ async function finalize(env: ClaimEnv, fresh: LocalNote, txHash: Hex | null) {
  * (stateAt), so answers from two nodes a block apart can't call a move that
  * landed dead.
  *
- * One exception: a private swap's refund note (`vaultSwap`) whose note was
- * spent by an unshield sent on its own. The money then waits at the swap's
- * escrow and lands as this note once the refund is finished, so while the
- * escrow holds it (or can't be read) the note is "refund" or pending, never dead.
+ * One exception: a private swap's or name claim's refund note (`vaultSwap`,
+ * `nameClaim`) whose note was spent by an unshield sent on its own. The money
+ * then waits at the escrow and lands as this note once the refund is finished,
+ * so while the escrow holds it (or can't be read) the note is "refund" or
+ * pending, never dead. An empty escrow means the swap or claim itself ran.
  */
 async function settlePending(env: ClaimEnv, fresh: LocalNote): Promise<"landed" | "dead" | "pending" | "refund" | "held"> {
   const { spent, seen, block } = env.stateAt
@@ -320,7 +335,7 @@ async function settlePending(env: ClaimEnv, fresh: LocalNote): Promise<"landed" 
     return "landed";
   }
   if (seen === false && spent === true) {
-    if (fresh.vaultSwap) {
+    if (fresh.vaultSwap || fresh.nameClaim) {
       // The escrow is read at the same block, or a refund landing in between
       // would read as "spent, not seen, escrow empty" and be given up.
       if (block == null) return "pending";
@@ -459,6 +474,9 @@ async function secureOnce(p: SecureParams, env: ClaimEnv): Promise<SecureResult>
   if (!pool || note.chainId !== env.chainId || note.pool.toLowerCase() !== pool.toLowerCase()) {
     throw new Error("Switch to the network this payment is on to secure it.");
   }
+  // Only the signed-in account's own claim (lib/noteVault noteOwnerProblem), like every spend path.
+  const notYours = noteOwnerProblem(note);
+  if (notYours) throw new Error(notYours);
   // Secured already, by another try that landed: nothing to send.
   const moved = landedMoveOf(note.id);
   if (moved) return securedResult(moved, null);
@@ -711,13 +729,13 @@ export async function secureClaimsInBackground(env?: ClaimEnv, opts: { now?: boo
 export const SWAP_UNSEEN_MS = 60 * 60_000;
 
 /**
- * Marks the note a pending swap spends, for a swap this tab didn't see revert.
- * With a saved hash (the tab closed, or the wait gave up) only the receipt
- * decides. With none, the swap's refund note must have sat for SWAP_UNSEEN_MS
- * with the vault showing that note unspent. True when it marked one.
+ * Marks the note a pending swap (or private name claim) spends, for one this tab
+ * didn't see revert. With a saved hash (the tab closed, or the wait gave up)
+ * only the receipt decides. With none, its refund note must have sat for
+ * SWAP_UNSEEN_MS with the vault showing that note unspent. True when it marked one.
  */
 async function markRevertedSwap(env: ClaimEnv, refund: LocalNote): Promise<boolean> {
-  const info = refund.vaultSwap;
+  const info = refund.vaultSwap ?? refund.nameClaim;
   const from = refund.sweptFrom;
   const spent = from && getAllNotes().find((n) => n.id === from.id);
   if (!info || !from || !spent || spent.swapProofAt || spent.status === "recovered") return false;

@@ -83,7 +83,7 @@ const ALLOWED: Record<string, string> = {
   "src/lib/bridge.ts": "bridge origins (BRIDGE_CHAINS)",
   // BNB Chain as a place a cash out lands through Relay: a wallet there, not the vault
   "src/lib/cashOutCrossChain.ts": "cash-out destinations (CROSS_CHAIN_DESTINATIONS)",
-  "src/app/docs/bridge/page.tsx": "bridge origins and cash-out destinations",
+  "src/app/docs/bridge/page.tsx": "bridge origins and cash-out destinations (as a cash-out source only behind BNB_ENABLED)",
   "src/lib/vote/config.ts": "a past holder vote's options",
   "src/lib/vote/optionArt.tsx": "a past holder vote's options",
   "src/app/docs/compare/page.tsx": "another project's audit names BNB Chain",
@@ -120,18 +120,18 @@ ok(ungated.length === 0, `BNB Chain copy with no gate: ${ungated.join(", ")}`);
 // /verify's planned addresses match the deployments record, before and after the deploy.
 const { BORN_GUARDED } = await import("../src/lib/contractDirectory");
 const record = JSON.parse(readFileSync(join(APP, "../contracts/deployments/bnb-mainnet.json"), "utf8"));
-const planned = BORN_GUARDED.bnb!;
+const planned = BORN_GUARDED["bnb-mainnet"]!;
 const same = (a: string | undefined, b: string | undefined) => Boolean(a && b) && a!.toLowerCase() === b!.toLowerCase();
 if (record.contracts?.ShieldPoolPayments) {
-  ok(same(planned.deployer, record.deployer), "BORN_GUARDED.bnb.deployer = the deploy's");
-  ok(same(planned.poseidon, record.contracts.PoseidonT3), "BORN_GUARDED.bnb.poseidon = the deploy's PoseidonT3");
-  ok(same(planned.guard, record.contracts.VaultOwnerGuard), "BORN_GUARDED.bnb.guard = the deploy's VaultOwnerGuard");
-  ok(same(planned.controller, record.guard?.controller) || same(planned.controller, record.guard?.pendingController), "BORN_GUARDED.bnb.controller = the guard's controller");
+  ok(same(planned.deployer, record.deployer), "BORN_GUARDED[bnb-mainnet].deployer = the deploy's");
+  ok(same(planned.poseidon, record.contracts.PoseidonT3), "BORN_GUARDED[bnb-mainnet].poseidon = the deploy's PoseidonT3");
+  ok(same(planned.guard, record.contracts.VaultOwnerGuard), "BORN_GUARDED[bnb-mainnet].guard = the deploy's VaultOwnerGuard");
+  ok(same(planned.controller, record.guard?.controller) || same(planned.controller, record.guard?.pendingController), "BORN_GUARDED[bnb-mainnet].controller = the guard's controller");
 } else {
-  ok(same(planned.deployer, record.plan.deployer), "BORN_GUARDED.bnb.deployer = the plan's");
-  ok(same(planned.poseidon, record.plan.PoseidonT3), "BORN_GUARDED.bnb.poseidon = the plan's PoseidonT3");
-  ok(same(planned.guard, record.plan.VaultOwnerGuard), "BORN_GUARDED.bnb.guard = the plan's VaultOwnerGuard");
-  ok(same(planned.controller, record.plan.guardController) && same(planned.controller, SAFE), "BORN_GUARDED.bnb.controller = the Safe");
+  ok(same(planned.deployer, record.plan.deployer), "BORN_GUARDED[bnb-mainnet].deployer = the plan's");
+  ok(same(planned.poseidon, record.plan.PoseidonT3), "BORN_GUARDED[bnb-mainnet].poseidon = the plan's PoseidonT3");
+  ok(same(planned.guard, record.plan.VaultOwnerGuard), "BORN_GUARDED[bnb-mainnet].guard = the plan's VaultOwnerGuard");
+  ok(same(planned.controller, record.plan.guardController) && same(planned.controller, SAFE), "BORN_GUARDED[bnb-mainnet].controller = the Safe");
 }
 
 // ---------------------------------------------------------------- the lists
@@ -161,16 +161,16 @@ const tool = async (name: string, args: Record<string, unknown> = {}) => {
 };
 const toolText = JSON.stringify(TOOLS);
 const mainnetKeys = () => nets.NETWORK_KEYS.filter((k) => !nets.getNetwork(k).testnet);
-const PUBLIC_RPC_HOSTS = ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.bnbchain.org"];
+const PUBLIC_RPC_HOSTS = ["https://bsc-rpc.publicnode.com", "https://bsc.drpc.org", "https://1rpc.io/bnb", "https://bsc-dataseed.bnbchain.org"];
 
 // Every run: no private swaps on BNB Chain, and the flag's words.
 ok(vaultSwapRouter(CHAIN_ID) === null, "no swap router on BNB Chain");
 ok(!swapMainnets().includes("BNB Chain"), "the swap chains leave BNB Chain out");
 for (const raw of ["1", "true", "TRUE", "on", "yes", " 1 "]) {
   ok(bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} turns it on`);
-  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw, NEXT_PUBLIC_BNB_POOL: "0x89d3042390204f57b8b4F8949D3c2203E4002164" } as unknown as NodeJS.ProcessEnv).length === 2, `${JSON.stringify(raw)} with a pool: the CSP allows its two public RPCs`);
-  // Without NEXT_PUBLIC_BNB_POOL the CSP falls back to the SDK file: nothing to allow before the deploy, the two RPCs after it.
-  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === (SDK_POOL_IN ? 2 : 0), `${JSON.stringify(raw)} with no pool in the env: ${SDK_POOL_IN ? "the SDK's pool, its two public RPCs" : "nothing to allow yet"}`);
+  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw, NEXT_PUBLIC_BNB_POOL: "0x89d3042390204f57b8b4F8949D3c2203E4002164" } as unknown as NodeJS.ProcessEnv).length === 4, `${JSON.stringify(raw)} with a pool: the CSP allows its four public RPCs`);
+  // Without NEXT_PUBLIC_BNB_POOL the CSP falls back to the SDK file: nothing to allow before the deploy, the four RPCs after it.
+  ok(bnbConnectSources({ NEXT_PUBLIC_BNB_ENABLED: raw } as unknown as NodeJS.ProcessEnv).length === (SDK_POOL_IN ? 4 : 0), `${JSON.stringify(raw)} with no pool in the env: ${SDK_POOL_IN ? "the SDK's pool, its four public RPCs" : "nothing to allow yet"}`);
 }
 for (const raw of [undefined, "", "0", "false", "off", "no", "enabled", "2"]) {
   ok(!bnb.bnbFlagFrom(raw), `${JSON.stringify(raw)} leaves it off`);
@@ -216,9 +216,9 @@ if (MODE !== "on") {
 } else {
   ok(bnb.BNB?.chainId === CHAIN_ID && bnb.BNB.pool === POOL, "on: BNB Chain is on with its pool");
   const mk = mainnetKeys();
-  ok(mk[mk.length - 1] === "bnb-mainnet", "on: the last mainnet");
+  ok(mk.indexOf("bnb-mainnet") === mk.indexOf("base-mainnet") + 1, "on: the mainnet right after Base");
   const shown = nets.shownNetworks().filter((n) => !n.testnet);
-  ok(shown[shown.length - 1]?.key === "bnb-mainnet", "on: shown last among the mainnets (SHOWN_NETWORK_KEYS)");
+  ok(shown[shown.findIndex((n) => n.key === "base-mainnet") + 1]?.key === "bnb-mainnet", "on: shown right after Base among the mainnets (SHOWN_NETWORK_KEYS)");
   ok(mainnet.MAINNET_CHAINS[mainnet.MAINNET_CHAINS.length - 1]?.name === "BNB Chain", "on: last in MAINNET_CHAINS");
   ok(mainnet.liveMainnetNames().endsWith("and BNB Chain"), "on: last in the live mainnet names");
   ok(mainnet.liveMainnetsSinceText().endsWith("BNB Chain since 21 November 2026"), "on: in the since-when line");
@@ -248,18 +248,18 @@ if (MODE !== "on") {
   const entry = contractDirectory().find((d) => d.key === "bnb-mainnet");
   ok(entry?.live && entry.kind === "mainnet", "on: /verify lists it");
   const rows = entry!.rows;
-  ok(rows.some((r) => r.name === "Owner guard" && same(r.address, BORN_GUARDED.bnb!.guard)), "on: the guard row");
+  ok(rows.some((r) => r.name === "Owner guard" && same(r.address, planned.guard)), "on: the guard row");
   ok(rows.some((r) => r.name === "Guard controller" && same(r.address, SAFE)), "on: the Safe runs the guard");
   ok(!rows.some((r) => same(r.address, "0x76b7E410a227c888aBD2Bdc24Ee32E094B0FD4D8")), "on: no owner-wallet row");
   ok(rows.some((r) => r.role === "deployer" && same(r.address, "0xec9993765e249e8e9DC677B7BCB61F78b31c6b60")), "on: its own deployer");
   const read = {
-    owner: BORN_GUARDED.bnb!.guard,
+    owner: planned.guard,
     pendingOwner: ZERO,
     setupMode: false,
     changeDelay: 3n * 24n * 60n * 60n,
     verifier: "0x29053A713E3a7D37053374446869a6f55858FcEf",
     shieldVerifier: "0xAEB8cb99B3BB43eB230F9fEB7293fB5E39080016",
-    poseidon: BORN_GUARDED.bnb!.poseidon,
+    poseidon: planned.poseidon,
     feeRecipient: "0xB3900ac9350903218e4c7597bAb0f008F01B30B8",
     withdrawFeeBps: 50,
     cashOutVerifier: null,
@@ -267,7 +267,7 @@ if (MODE !== "on") {
   } as Parameters<typeof vaultChecks>[1];
   const vc = vaultChecks(n, read);
   ok(vc.every((c) => c.ok), `on: a vault as planned passes every check (${vc.filter((c) => !c.ok).map((c) => c.label).join(", ")})`);
-  ok(PUBLIC_RPC_HOSTS.every((h) => CSP_CONNECT_SOURCES.includes(h)), "on: the CSP allows its public RPCs");
+  ok(PUBLIC_RPC_HOSTS.every((h) => CSP_CONNECT_SOURCES.includes(new URL(h).origin)), "on: the CSP allows its public RPCs");
   // Glim: live facts, the public RPC, no partnership.
   const facts = bnbFacts() ?? "";
   ok(facts.includes("chain ID 56") && facts.includes("18 decimals") && facts.includes("100,000") && facts.includes("21 November 2026"), "on: Glim's live facts");

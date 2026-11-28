@@ -51,6 +51,7 @@ delete process.env.CRON_SECRET;
 const {
   MAX_IMAGE_BYTES,
   TOPIC,
+  asksHowToBuy,
   asksTokenAddress,
   impersonates,
   moderationAsk,
@@ -92,6 +93,7 @@ const {
   pointsAtScam,
   secretLeak,
   tidyReply,
+  buyGuide,
   tokenCard,
   topicOf,
   teamMemoryText,
@@ -732,8 +734,12 @@ await test("$GLOAM: asking for the contract, and what is not asking", () => {
   for (const no of ["Is the contract audited?", "what's the contract audit status", "where do I get test tokens?", `CA is ${CA}`, "I saw $Gloam run", "the vault contract has no admin withdraw, right?"]) {
     assert.ok(!asksTokenAddress(no), no);
   }
-  assert.ok(tokenCard().includes(CA) && tokenCard().includes("gloam.trade/token") && tokenCard().includes("orynth.dev/projects/gloam"));
+  assert.ok(tokenCard().includes(CA) && tokenCard().includes("gloam.trade/token") && !tokenCard().includes("500,000"), "the CA card: the address, short");
   assert.equal(cleanReply(tokenCard(), policy), tokenCard(), "the card passes the reply rules");
+  for (const ask of ["how do I buy $Gloam?", "where can i buy $GLOAM", "Where can I buy the token what's the contract ?"]) assert.ok(asksHowToBuy(ask), ask);
+  for (const no of ["CA?", "what's the CA", "drop the contract"]) assert.ok(!asksHowToBuy(no), no);
+  assert.ok(buyGuide().includes(CA) && buyGuide().includes("Swap to $GLOAM") && buyGuide().includes("Uniswap") && !buyGuide().includes("500,000"), "the buy answer: practical ways");
+  assert.equal(cleanReply(buyGuide(), policy), buyGuide(), "the buy answer passes the reply rules");
 });
 
 await test("replies: spaced out like texts, links never cut, addresses marked, the chart link allowed", () => {
@@ -750,7 +756,7 @@ await test("replies: spaced out like texts, links never cut, addresses marked, t
   assert.match(markAddresses("is 0x661041ee2bd13d1d9e5dfab5d2d0ca7d1e9f8629 legit?"), /\[the known copycat GLOAM token, a fake flagged as a honeypot, not Gloam's\]/, "the copycat is marked as the known fake, in any letter case");
   assert.ok(cleanReply(`Chart: dexscreener.com/robinhood/${CA}`, policy));
   assert.equal(cleanReply("Chart: dexscreener.com/robinhood/0x1234567890abcdef1234567890abcdef12345678", policy), null);
-  assert.ok(tokenCard().includes(`dexscreener.com/robinhood/${CA}`) && tokenCard().split("\n\n").length >= 4, "the card is spaced too");
+  assert.ok(tokenCard().includes(`dexscreener.com/robinhood/${CA}`) && tokenCard().split("\n\n").length >= 3, "the card is spaced too");
 });
 
 // ---------------------------------------------------------------- payment codes and addresses
@@ -1263,7 +1269,8 @@ await test("$GLOAM: a CA ask gets the card with no model call, then a short poin
   await handleUpdate(upd(inTopic(TOPIC.general, "Where can I buy the token what's the contract ?", user(81, "Fola"))));
   assert.equal(modelCalls().length, 0);
   const first = String(sends()[0]!.body.text);
-  assert.ok(first.includes(CA) && first.includes("gloam.trade/token"));
+  assert.equal(first, buyGuide(), "a buy question gets the ways to buy");
+  assert.ok(first.includes(CA));
   assert.equal(sends()[0]!.body.reply_parameters && (sends()[0]!.body.reply_parameters as { message_id: number }).message_id > 0, true);
   await handleUpdate(upd(inTopic(TOPIC.general, "/contract", user(82, "Gbenga"))));
   const second = String(sends()[1]!.body.text);
@@ -1699,6 +1706,7 @@ await test("moderation: everyday messages never cost anyone their place", async 
   }
   // Glim's own card, repeated by anyone, under any name
   assert.equal(scamReason(tokenCard()), null, "the /ca card is no lure");
+  assert.equal(scamReason(buyGuide()), null, "the buy answer is no lure");
   assert.equal(scamReason(scanCodes(tokenCard()).masked), null);
   assert.equal(memberScam({ first_name: "Tolu | Team" }, tokenCard()), null);
   assert.equal(memberScam({ first_name: "Ada" }, "No presale and no team allocation: every token started in the pool."), null);

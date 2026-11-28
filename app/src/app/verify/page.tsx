@@ -21,6 +21,8 @@ import {
   type VerifyResult,
 } from "@/lib/proofs";
 import { ProofVerdict, amountOf, symbolOf } from "@/components/verify/ProofVerdict";
+import { ChainProofVerdict } from "@/components/verify/ChainProofVerdict";
+import { decodeChainProof, isChainProofText, verifyChainProof, type ChainProof, type ChainProofResult } from "@/lib/proofs/chainProofs";
 import { networkForChain } from "@/lib/proofs/chain";
 import { track } from "@/lib/track";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
@@ -28,6 +30,7 @@ import { ContractsSection } from "@/components/verify/ContractsSection";
 import { OwnershipStatement } from "@/components/verify/OwnershipStatement";
 import { CheckMark } from "@/components/verify/VerifyBits";
 import { GLOAM_OWNER } from "@/lib/contractDirectory";
+import { ELYSIUM_ENABLED } from "@/lib/elysium";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 
 type Result =
@@ -36,6 +39,8 @@ type Result =
   /** An older balance disclosure: never verified, whatever its math (lib/disclosure). */
   | { kind: "legacy"; d: Disclosure }
   | { kind: "proof"; p: AnyProof; r: VerifyResult; at: number }
+  /** A proof of payment on Solana or a payment disclosure on Starknet (lib/proofs/chainProofs). */
+  | { kind: "chain"; p: ChainProof; r: ChainProofResult; at: number }
   | { kind: "bad"; reason: string; title?: string };
 
 /**
@@ -94,8 +99,8 @@ const FACTS: Fact[] = [
     body: "The vault is not a proxy and has no upgrade function, so its code is fixed. Only the settings above can change, and only in public.",
   },
   {
-    title: "One owner wallet, then the owner guard",
-    body: `${short(GLOAM_OWNER)} owned every mainnet vault at launch. Each vault moves to the owner guard, a contract that forwards only deposit limit and fee changes and the sweep of coin sent by mistake, so it can then never get a new proof checker or a new owner. The checks above show which holds each vault. A handover takes two steps on chain: the new owner has to accept it, and a pending one shows above.`,
+    title: "An owner guard, run by a 2 of 3 Safe",
+    body: `${short(GLOAM_OWNER)} owned the first mainnet vaults at launch. Since 12 November 2026 each is held by the owner guard, a contract that forwards only deposit limit and fee changes and the sweep of coin sent by mistake, so it can never get a new proof checker or a new owner. The guard is run by the Gloam Owner Safe, which needs 2 of 3 signatures${ELYSIUM_ENABLED ? " (on Elysium, by the owner wallet until Safe runs there)" : ""}. The checks above show which holds each vault.`,
   },
   {
     title: "Keys from a public ceremony",
@@ -183,6 +188,7 @@ function ResultView({ result }: { result: Result }) {
     );
   }
   if (result.kind === "proof") return <ProofVerdict proof={result.p} result={result.r} checkedAt={result.at} />;
+  if (result.kind === "chain") return <ChainProofVerdict proof={result.p} result={result.r} checkedAt={result.at} />;
   if (result.kind === "legacy") {
     return (
       <div role="alert" className="mt-4 rounded-[18px] bg-warn-soft p-5 sm:p-6">
@@ -255,8 +261,33 @@ export default function VerifyPage() {
     }
   }
 
+  /** Solana and Starknet: decode, then their own checks against that chain. */
+  async function onVerifyChain(text: string) {
+    setResult({ kind: "checking", step: "Reading the proof" });
+    let p: ChainProof;
+    try {
+      p = await decodeChainProof(text);
+    } catch (e) {
+      setResult({
+        kind: "bad",
+        title: "Could not read this proof",
+        reason: e instanceof Error && e.message !== "Not a Gloam proof." ? e.message : "That does not look like a Gloam proof. Check that you copied all of it.",
+      });
+      return;
+    }
+    try {
+      setResult({ kind: "checking", step: p.kind === "solana-payment" ? "Checking it against Solana" : "Checking it against Starknet" });
+      const r = await verifyChainProof(p);
+      setResult({ kind: "chain", p, r, at: Math.floor(Date.now() / 1000) });
+      track("proof_verified", { kind: p.kind, ok: r.ok });
+    } catch (e) {
+      setResult({ kind: "bad", title: "Could not check this proof", reason: e instanceof Error && e.message ? e.message : "Something went wrong while checking. Try again in a moment." });
+    }
+  }
+
   async function onVerify(input: string = token) {
     if (isGloamProof(input)) return onVerifyProof(input);
+    if (isChainProofText(input)) return onVerifyChain(input);
     setResult({ kind: "checking", step: "Reading the proof" });
     let d: Disclosure;
     try {
@@ -294,7 +325,7 @@ export default function VerifyPage() {
   }
 
   const checking = result.kind === "checking";
-  const finished = result.kind === "proof" || result.kind === "legacy" || result.kind === "bad";
+  const finished = result.kind === "proof" || result.kind === "chain" || result.kind === "legacy" || result.kind === "bad";
 
   /** Leave the shared proof for the paste box, without the old proof in the address bar. */
   function checkAnother() {
@@ -321,8 +352,9 @@ export default function VerifyPage() {
               A Gloam proof, checked here
             </h1>
             <p className="mt-3 max-w-[52ch] text-[15px] leading-relaxed text-soft">
-              Your browser checks it against Gloam&apos;s vault on chain. Nothing is sent to Gloam, and you
-              need no wallet or account.
+              {result.kind === "chain"
+                ? `Your browser checks it against ${result.p.kind === "solana-payment" ? "Solana" : "Starknet's privacy pool"}, and you need no wallet or account. It stays in your browser. The chain is read through Gloam's read-only relay, which sees the ${result.p.kind === "solana-payment" ? "transaction" : "accounts"} looked up.`
+                : "Your browser checks it against Gloam's vault on chain. Nothing is sent to Gloam, and you need no wallet or account."}
             </p>
             <ResultView result={result} />
             {finished && <MakeYourOwn from="link" />}

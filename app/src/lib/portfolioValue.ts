@@ -1,21 +1,18 @@
+import { displayAmountNumber } from "./amountShort";
 import { compareHoldings } from "./vaultHub";
 
 /**
- * A token amount short enough for the big number: "8.03", "1,204", "12.3M",
- * "0.0339". The rows below it keep the full amount, so nothing is lost.
+ * A token amount in whole units on screen: two places, cut down ("8.03",
+ * "1,204.00", "<0.01"), through lib/amountShort. Zero or less reads "0.00".
  */
 export function tidyAmount(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return "0";
-  if (n < 0.0001) return "<0.0001";
-  if (n >= 1_000_000) return n.toLocaleString("en-US", { notation: "compact", maximumFractionDigits: 1 });
-  if (n >= 1_000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
-  if (n >= 1) return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
-  return n.toLocaleString("en-US", { maximumSignificantDigits: 3 });
+  if (!Number.isFinite(n) || n <= 0) return displayAmountNumber(0);
+  return displayAmountNumber(n);
 }
 
 /**
  * Dollars where every asset has a price, and the amounts of those that don't
- * next to them ("$100", "+ 1,000 GLOAM"): never a silent $0 for an asset with
+ * next to them ("$100", "+ 1,000.00 GLOAM"): never a silent $0 for an asset with
  * no price, and no "$0" in front when nothing held is priced.
  */
 function moneyParts(usd: number, unpriced: readonly string[], formatUsd: (n: number) => string): string[] {
@@ -29,23 +26,30 @@ function moneyParts(usd: number, unpriced: readonly string[], formatUsd: (n: num
 
 /**
  * The Portfolio's private balance headline, worked out apart from the page so
- * it can be checked: dollars where every asset has a price, and the amounts of
- * those that don't next to them ("$100 + 1,000 GLOAM"), never "2 assets" for a
- * vault that is mostly priced, and never a silent $0 for one that isn't.
+ * it can be checked. Dollars only ("$95"): an asset with no dollar price is
+ * named in the chips under the number and in "Not in the total" below, never
+ * tacked onto the big number ("$93 + 7.86 GLOAM + 7.99 PONS" showed while
+ * $GLOAM's price loaded, then vanished). Null while a price it needs is still
+ * loading, so the page shows a placeholder instead of a figure that jumps.
+ * With nothing priced at all: the one amount, or "2 assets", never "$0".
  */
 export function privateHeadline(args: {
   showUsd: boolean;
   /** The priced part, in dollars. */
   sealedUsd: number;
-  /** "1,000 GLOAM" for each asset held with no dollar price, largest first, each through tidyAmount. */
+  /** "1,000.00 GLOAM" for each asset held with no dollar price, largest first, each through tidyAmount. */
   unpriced: string[];
-  /** The vault as amounts ("500 USDC", "2 assets"), shown when dollars are off. */
+  /** A held asset's price is still on its way. */
+  pending?: boolean;
+  /** The vault as amounts ("500.00 USDC", "2 assets"), shown when dollars are off. */
   vaultValue: string;
   formatUsd: (n: number) => string;
-}): string {
-  const { showUsd, sealedUsd, unpriced, vaultValue, formatUsd } = args;
+}): string | null {
+  const { showUsd, sealedUsd, unpriced, pending, vaultValue, formatUsd } = args;
   if (!showUsd) return vaultValue;
-  return moneyParts(sealedUsd, unpriced, formatUsd).join(" + ");
+  if (pending) return null;
+  if (sealedUsd > 0 || unpriced.length === 0) return formatUsd(sealedUsd);
+  return unpriced.length === 1 ? unpriced[0] : vaultValue;
 }
 
 /** One balance in the Portfolio's wallet card, as the order and the total read it. */
@@ -57,7 +61,7 @@ export type WalletHolding = {
   usd: number | null;
   /** A dollar stablecoin. */
   dollar: boolean;
-  /** "20 EURC": how the total names it when it has no price. */
+  /** "20.00 EURC": how the total names it when it has no price. */
   text: string;
   /** Its price is still on its way (ETH or a stock before the first markets read). */
   pending?: boolean;
@@ -93,7 +97,7 @@ export type WalletTotal =
   | { state: "off" }
   /** A balance or a price is still being read, so any figure would be wrong. */
   | { state: "loading" }
-  /** "$140", and "+ 20 EURC" for what has no dollar price (or null). */
+  /** "$140", and "+ 20.00 EURC" for what has no dollar price (or null). */
   | { state: "ready"; figure: string; extra: string | null };
 
 /**

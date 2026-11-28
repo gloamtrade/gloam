@@ -124,7 +124,7 @@ const nextConfig: NextConfig = {
       fallback: [],
     };
   },
-  webpack: (config) => {
+  webpack: (config, { webpack }) => {
     // WalletConnect optional deps — silence missing optional modules
     config.externals.push("pino-pretty", "encoding");
     // Two libraries import a module by a computed name: web-worker's Node shim
@@ -160,6 +160,16 @@ const nextConfig: NextConfig = {
       test: /[\\/]packages[\\/]sdk[\\/]src[\\/]/,
       resolve: { modules: [path.join(__dirname, "node_modules"), "..."] },
     });
+    // Solana Privacy Rings (lib/solanaRings/client): the Poseidon hasher's browser
+    // build carries its WASM inline and passes it in, so the `new URL("*.wasm",
+    // import.meta.url)` fallback in it never runs. Webpack would still try to bundle
+    // that file, which the package does not ship next to the module.
+    config.plugins.push(
+      new webpack.IgnorePlugin({
+        resourceRegExp: /^(light_wasm_hasher_bg|hasher_wasm_simd_bg)\.wasm$/,
+        contextRegExp: /[\\/]@lightprotocol[\\/]hasher\.rs[\\/]/,
+      })
+    );
     return config;
   },
 };

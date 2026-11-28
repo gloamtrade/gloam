@@ -1,6 +1,6 @@
 "use client";
 
-import { normalizeEmail, type UpdatesSource } from "./updatesEmail";
+import { normalizeEmail, type FormUpdatesSource } from "./updatesEmail";
 
 /**
  * The browser side of the updates list (api/updates). Each call builds its body
@@ -28,7 +28,7 @@ async function send(method: "POST", body: Record<string, string>): Promise<Updat
 }
 
 /** Adds an email to the updates list. */
-export function subscribeToUpdates(email: string, source: UpdatesSource, hp?: string): Promise<UpdatesResult> {
+export function subscribeToUpdates(email: string, source: FormUpdatesSource, hp?: string): Promise<UpdatesResult> {
   const clean = normalizeEmail(email);
   if (!clean) return Promise.resolve({ ok: false, message: "That email doesn't look right. Check it and try again." });
   return send("POST", hp ? { email: clean, source, hp } : { email: clean, source });

@@ -85,37 +85,39 @@ export default function DocsProofsPage() {
       </p>
 
       <h2>What each one shows and hides</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Proof</th>
-            <th>They see</th>
-            <th>They never see</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Exact balance</td>
-            <td>The asset, that one amount, and the transaction that made it</td>
-            <td>Other balances, history</td>
-          </tr>
-          <tr>
-            <td>At least</td>
-            <td>The asset and the minimum you named</td>
-            <td>Your real balance, which balances back it, your wallet, history</td>
-          </tr>
-          <tr>
-            <td>Payment</td>
-            <td>The asset, the amount or a minimum, and when it landed</td>
-            <td>Your balance, your other payments, your wallet</td>
-          </tr>
-          <tr>
-            <td>Payroll total</td>
-            <td>The asset, the run&apos;s total, how many people were paid, and when the payments landed</td>
-            <td>What each person got, their names and addresses, your balance</td>
-          </tr>
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Proof</th>
+              <th>They see</th>
+              <th>They never see</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Exact balance</td>
+              <td>The asset, that one amount, and the transaction that made it</td>
+              <td>Other balances, history</td>
+            </tr>
+            <tr>
+              <td>At least</td>
+              <td>The asset and the minimum you named</td>
+              <td>Your real balance, which balances back it, your wallet, history</td>
+            </tr>
+            <tr>
+              <td>Payment</td>
+              <td>The asset, the amount or a minimum, and when it landed</td>
+              <td>Your balance, your other payments, your wallet</td>
+            </tr>
+            <tr>
+              <td>Payroll total</td>
+              <td>The asset, the run&apos;s total, how many people were paid, and when the payments landed</td>
+              <td>What each person got, their names and addresses, your balance</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <p>
         Proofs of funds, payments and payroll totals also carry two things you
         set: who the proof is for, and when it expires.

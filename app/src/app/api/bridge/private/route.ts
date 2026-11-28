@@ -4,7 +4,6 @@ import {
   createPublicClient,
   decodeFunctionData,
   encodeFunctionData,
-  formatUnits,
   http,
   isAddress,
   parseAbi,
@@ -34,6 +33,7 @@ import {
   type PrivateBridgeQuote,
   type PrivateBridgeTx,
 } from "@/lib/bridge";
+import { displayAmount } from "@/lib/amountShort";
 import { originChain } from "@/lib/originChains";
 import { noteRelayQuote } from "@/lib/relayLedger";
 import { serverTransport } from "@/lib/serverRpc";
@@ -69,8 +69,8 @@ function fail(status: number, message: string) {
   return NextResponse.json({ ok: false, error: { message } }, { status, headers: { "Cache-Control": "no-store" } });
 }
 
-const units = (v: bigint, decimals: number) =>
-  Number(formatUnits(v, decimals)).toLocaleString("en-US", { maximumFractionDigits: 2 });
+/** An amount in a message: two places, cut down (lib/amountShort), so a limit never reads higher than it is. */
+const units = (v: bigint, decimals: number) => displayAmount(v, decimals);
 
 const isHex = (v: unknown): v is string => typeof v === "string" && /^0x[0-9a-fA-F]*$/.test(v);
 

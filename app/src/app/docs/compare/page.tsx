@@ -5,6 +5,12 @@ import { DocsLayout } from "@/components/DocsLayout";
 import { FlowDiagram } from "@/components/docs/FlowDiagram";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { CASH_OUT_FEE_PERCENT } from "@/lib/cashOutFee";
+import { RINGS_PRIVACY_NOTE, SOLANA_NAME, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK } from "@/lib/solanaRings/config";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
+import { STARKNET_DOCS_NAME, STARKNET_DOCS_NOTE } from "../starknet/starknetDocs";
+
+/** Gloam itself runs on Helius Privacy Rings on Solana mainnet once its Solana flag is on (lib/solanaRings/config). */
+const RINGS_ON_MAINNET = SOLANA_RINGS_ENABLED && SOLANA_RINGS_NETWORK === "mainnet";
 
 /** The mainnets with a pool in, as words: Base and Ethereum join once theirs are (lib/mainnet.ts). */
 const MAINNETS = liveMainnetNames();
@@ -45,8 +51,11 @@ export default function DocsComparePage() {
       title="How Gloam compares"
       lede="Privacy onchain splits into two jobs. Some apps share secrets between many people. A payment has one owner. Gloam does the second job, and that choice decides who can see your money."
       glance={[
-        { label: "Who holds a key", value: "only you" },
-        { label: "Proofs made", value: "on your device" },
+        { label: "Who holds a key", value: STARKNET_ENABLED ? "only you; on Starknet an auditor key can read" : "only you" },
+        {
+          label: "Proofs made",
+          value: `${SOLANA_RINGS_ENABLED ? "on your device; on Solana, by Helius's prover" : "on your device"}${STARKNET_ENABLED ? "; on Starknet, by Starkscan's prover" : ""}`,
+        },
         { label: "Networks", value: `${MAINNETS} (mainnet)` },
         { label: "New cryptography", value: "none, by design" },
       ]}
@@ -96,6 +105,19 @@ export default function DocsComparePage() {
       <p>
         It also means Gloam never needs your secrets on a server. Proofs are
         made on your device, never on our servers.
+        {SOLANA_RINGS_ENABLED && (
+          <>
+            {" "}
+            Gloam on Solana is the exception: see <a href="#solana">{SOLANA_NAME}</a>.
+          </>
+        )}
+        {STARKNET_ENABLED && (
+          <>
+            {" "}
+            {SOLANA_RINGS_ENABLED ? "So is Gloam on Starknet" : "Gloam on Starknet is the exception"}: see{" "}
+            <a href="#starknet">{STARKNET_DOCS_NAME}</a>.
+          </>
+        )}
       </p>
 
       <h2 id="not-new-cryptography">Not new cryptography</h2>
@@ -168,7 +190,7 @@ export default function DocsComparePage() {
               <td>Helius Privacy</td>
               <td>Helius&apos;s server receives the full secret inputs, amounts included</td>
               <td>Whatever reached the server</td>
-              <td>Not found (Solana devnet)</td>
+              <td>{RINGS_ON_MAINNET ? "Not found (Solana)" : "Not found (Solana devnet)"}</td>
               <td>Not found</td>
               <td>Not found</td>
               <td>Not found</td>
@@ -244,14 +266,48 @@ export default function DocsComparePage() {
 
       <h3>Helius Privacy</h3>
       <p>
-        Helius Privacy is on Solana devnet. Helius&apos;s server generates the
+        Helius Privacy is on Solana {RINGS_ON_MAINNET ? "mainnet, through Privacy Rings" : "devnet"}. Helius&apos;s server generates the
         proofs, so it receives the full secret inputs, amounts included.
       </p>
       <p>
         <strong>Where they win:</strong> speed on weak phones, and reach on
-        Solana. <strong>Where Gloam differs:</strong> proofs are made on your
-        device, never on our servers.
+        Solana. <strong>Where Gloam differs:</strong>{" "}
+        {SOLANA_RINGS_ENABLED ? (
+          <>
+            on {MAINNETS}, proofs are made on your device, never on our servers. On Solana, Gloam itself runs on
+            Helius Privacy Rings (below).
+          </>
+        ) : (
+          <>proofs are made on your device, never on our servers.</>
+        )}
       </p>
+
+      {SOLANA_RINGS_ENABLED && (
+        <>
+          <h3 id="solana">Gloam on {SOLANA_NAME}</h3>
+          <p>
+            On Solana, Gloam runs on Helius Privacy Rings, with its own account
+            layer on top. {RINGS_PRIVACY_NOTE} The proof is made by Helius&apos;s
+            prover, in an attested enclave, not on your device. Everything else
+            on this page about Gloam means the vault on {MAINNETS}. See{" "}
+            <Link href="/docs/chain#solana">{SOLANA_NAME}</Link>.
+          </p>
+        </>
+      )}
+
+      {STARKNET_ENABLED && (
+        <>
+          <h3 id="starknet">Gloam on {STARKNET_DOCS_NAME}</h3>
+          <p>
+            On Starknet, Gloam runs on Starknet&apos;s own privacy pool, with
+            its own account layer on top. {STARKNET_DOCS_NOTE} So there, a key
+            other than yours can read your private activity: the pool&apos;s
+            auditor key, which cannot spend. Everything else on this page about
+            Gloam means the vault on {MAINNETS}. See{" "}
+            <Link href="/docs/starknet">{STARKNET_DOCS_NAME}</Link>.
+          </p>
+        </>
+      )}
 
       <h3>Railgun</h3>
       <p>

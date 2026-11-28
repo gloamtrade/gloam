@@ -5,7 +5,7 @@ import type { Address } from "viem";
 import { publicClientFor } from "@/lib/rhClient";
 import { DEMO_ADDRESS, useDemoLive } from "@/lib/demo";
 import { readDemo } from "@/lib/demoFlag";
-import { unlockNoteVault, syncFromDisk, onNotesSaved, NOTES_KEY } from "@/lib/noteVault";
+import { unlockNoteVault, syncFromDisk, onNotesSaved, notesKey } from "@/lib/noteVault";
 import {
   isUnsecuredClaim,
   reconcileClaims,
@@ -35,7 +35,9 @@ import {
   type LocalNote,
 } from "@/lib/shield";
 import { useNetwork } from "@/components/app/NetworkProvider";
-import type { GloamNetwork } from "@/lib/networks";
+import { useShownAccount } from "@/components/app/AccountScope";
+import { shownNetworks, type GloamNetwork } from "@/lib/networks";
+import { receiveOnOtherNetworks, receiveWaitingPayments } from "@/lib/autoReceive";
 
 /**
  * How often the page syncs while a note a reverted swap left behind waits to
@@ -64,6 +66,9 @@ export function useLocalShieldNotes(address?: string | null) {
   // connected, so a view that reads wagmi's own account (VaultTradePanel) still
   // lists them, as before.
   const wallet = demo ? address || DEMO_ADDRESS : address;
+  // The account whose store is bound to this page (lib/accountScope): the store reads
+  // nothing before the bind, so everything below reads again once it lands.
+  const shownAccount = useShownAccount();
   const [local, setLocal] = useState<LocalNote[]>([]);
   const [chain, setChain] = useState<LocalNote[]>([]);
   const [ready, setReady] = useState(false);
@@ -86,7 +91,7 @@ export function useLocalShieldNotes(address?: string | null) {
     setLocal(loadWalletNotes(wallet, network));
     setReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wallet, network.key]);
+  }, [wallet, network.key, shownAccount]);
 
   // every note asked at once (lib/spentCheck), not one read after another
   const reconcileSpent = useCallback(
@@ -124,9 +129,16 @@ export function useLocalShieldNotes(address?: string | null) {
       // cash-out splits whose move landed (or never can) since last time.
       if ((await reconcileUnfunded().catch(() => false)) && still()) setLocal(loadWalletNotes(address, net));
       if ((await reconcileClaims().catch(() => false)) && still()) setLocal(loadWalletNotes(address, net));
+      // Payments to this account's Gloam address land in the balance on their own (lib/autoReceive):
+      // this network first, then the others, so a payment on another network is there when you switch.
+      const landed = await receiveWaitingPayments(net, address as Address, { client: publicClient }).catch(() => []);
+      if (landed.length && still()) setLocal(loadWalletNotes(address, net));
       // Claimed payments the payer can still take back: secured through the relay with no one
       // asking, once any move already sent has been settled above (never sent twice). Not waited on.
       void secureClaimsInBackground().catch(() => undefined);
+      void receiveOnOtherNetworks(net, address as Address, shownNetworks())
+        .then((more) => (more.length ? secureClaimsInBackground() : undefined))
+        .catch(() => undefined);
       // once per vault: ETH notes an older sync wrongly marked spent, reopened while the vault still holds them
       if ((await reopenGhostEthNotes().catch(() => false)) && still()) setLocal(loadWalletNotes(address, net));
       // Spent checks only ask about notes with a secret, which chain rows never
@@ -165,7 +177,7 @@ export function useLocalShieldNotes(address?: string | null) {
       if (still()) setSyncing(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address, reconcileSpent, network.key, settled]);
+  }, [address, reconcileSpent, network.key, settled, shownAccount]);
 
   const refresh = useCallback(() => {
     refreshLocal();
@@ -201,7 +213,7 @@ export function useLocalShieldNotes(address?: string | null) {
 
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key === NOTES_KEY) void syncFromDisk().then(refreshLocal);
+      if (e.key !== null && e.key === notesKey()) void syncFromDisk().then(refreshLocal);
     };
     const onFocus = () => {
       const now = Date.now();

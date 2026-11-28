@@ -273,6 +273,49 @@ function TempoArt() {
   );
 }
 
+/* ---------- Live on Solana: one private payment, and what the explorer gets ---------- */
+
+/** On Solana the two private accounts show; the token and the amount do not. */
+const SOLANA_ROWS: { k: string; v: string | null }[] = [
+  { k: "From", v: "9wPk…iHzX" },
+  { k: "To", v: "4nQe…A5wYr" },
+  { k: "Token", v: null },
+  { k: "Amount", v: null },
+];
+
+function SolanaArt() {
+  return (
+    <div className="gl-glass w-full max-w-[380px] p-2 shadow-pop">
+      <div className="rounded-[12px] bg-panel p-4">
+        <div className="flex items-center justify-between gap-3">
+          <span className="inline-flex items-center gap-2 text-[13px] text-foreground">
+            <Image src="/brand/networks/solana.svg" alt="" width={20} height={20} className="h-5 w-5 rounded-md ring-1 ring-line" />
+            Solana
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-sealed-soft px-2.5 py-1 text-[12px] font-medium text-sealed">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-sealed" /> Private
+          </span>
+        </div>
+        <div className="mt-4 rounded-[12px] bg-surface px-3.5 py-1">
+          <p className="pt-2.5 text-[12px] text-mute">The explorer shows</p>
+          <ul className="divide-y divide-line">
+            {SOLANA_ROWS.map((r) => (
+              <li key={r.k} className="flex min-h-[40px] items-center justify-between gap-4 text-[13px]">
+                <span className="text-soft">{r.k}</span>
+                {r.v ? (
+                  <span className="tnum text-foreground">{r.v}</span>
+                ) : (
+                  <SealDots n={4} className="text-foreground/60" />
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Each artifact with the size it is drawn at as a thumbnail (its stage), so the
  * thumbnail can scale it to fit any card. Measured from the rendered artifact.
@@ -284,6 +327,7 @@ const COVERS: Record<PostCoverId, { Art: () => React.JSX.Element; w: number; h: 
   mainnet: { Art: MainnetArt, w: 820, h: 364 },
   operator: { Art: OperatorArt, w: 860, h: 300 },
   tempo: { Art: TempoArt, w: 380, h: 300 },
+  solana: { Art: SolanaArt, w: 380, h: 280 },
 };
 
 /**

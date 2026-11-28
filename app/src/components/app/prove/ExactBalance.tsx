@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState } from "react";
 import { encodeProof, proveBalance } from "@/lib/proofs";
-import { assetLabel, formatAssetAmount, type LocalNote } from "@/lib/shield";
+import { assetLabel, formatAssetAmount, formatAssetAmountExact, type LocalNote } from "@/lib/shield";
 import {
   AssetMark,
   ExpiryPicker,
@@ -126,7 +126,8 @@ export function ExactBalance({ notes }: { notes: LocalNote[] }) {
           token={done.token}
           headline={
             <>
-              Exactly {formatAssetAmount(done.amount, done.asset)}{" "}
+              {/* what the proof states, so every unit: the rest of the app shows two places */}
+              Exactly {formatAssetAmountExact(done.amount, done.asset)}{" "}
               <span className="text-mute">{assetLabel(done.asset)}</span>
             </>
           }
@@ -235,20 +236,17 @@ function BalanceAside({
       <ShowsPanel
         shows={[
           { label: "Asset", value: note ? assetLabel(note.asset) : unset },
-          { label: "Amount", value: note ? `${formatAssetAmount(note.amountWei, note.asset)} ${assetLabel(note.asset)}` : unset },
+          // what the proof states, so every unit
+          { label: "Amount", value: note ? `${formatAssetAmountExact(note.amountWei, note.asset)} ${assetLabel(note.asset)}` : unset },
           { label: "Who it is for", value: verifier.trim() || unset },
           { label: "Good until", value: longDate(until * 1000) },
         ]}
         never={["Your other balances", "Your history"]}
         note={
-          <ul className="space-y-2">
-            <li>Whoever has the proof can find the transaction that made this balance.</li>
-            <li>
-              A balance straight from a deposit can&apos;t be proven this way: its record names your
-              wallet. Send it to your own Gloam address first.
-            </li>
-            <li>A balance from a send you made without the relay shows that wallet too.</li>
-            <li>It does not show whether the balance moves later. An At least proof does.</li>
+          <ul className="space-y-2.5">
+            <li>Whoever has it can find the transaction behind this balance.</li>
+            <li>A balance straight from a deposit, or from a send made without the relay, names your wallet. Send it to your own Gloam address first.</li>
+            <li>It shows the balance today. For one that holds over time, use At least.</li>
           </ul>
         }
       />

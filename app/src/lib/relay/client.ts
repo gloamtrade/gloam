@@ -183,6 +183,17 @@ export async function relayVaultSwap(p: {
   return (await post({ action: "swap", ...p })).hash;
 }
 
+/** A private name claim (lib/nameClaimRun): one GLOAM note pays the names registry. */
+export async function relayNameClaim(p: {
+  chainId: number;
+  registrar: Address;
+  spend: { proof: Hex; root: Hex; nullifier: Hex; amount: bigint };
+  claim: { name: string; keyX: Hex; keyY: Hex; holder: Address; years: bigint };
+  refund: { proof: Hex; commitment: Hex; amount: bigint };
+}): Promise<Hex> {
+  return (await post({ action: "nameClaim", ...p })).hash;
+}
+
 /** Sends a swap's waiting money to the address its exit key signed for (lib/vaultSwapRun exitVaultSwap). */
 export async function relayVaultSwapExit(p: {
   chainId: number;

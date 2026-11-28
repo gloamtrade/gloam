@@ -7,7 +7,9 @@
  * endpoint uses so loading, refresh and errors behave the same everywhere.
  */
 import { useEffect, useState } from "react";
-import { MAINNET_ENABLED, NETWORK_KEYS, getNetwork, isNetworkKey, networkName, type GloamNetwork } from "@/lib/networks";
+import { MAINNET_ENABLED, NETWORK_KEYS, getNetwork, isNetworkKey, networkName, solanaSlot, type GloamNetwork } from "@/lib/networks";
+import { SOLANA_NAME } from "@/lib/solanaRings/config";
+import { SOLANA_ADMIN_ON } from "@/lib/solanaRings/metrics";
 import type { CombinedRevenue, NetworkMetrics, OnchainMetrics, Windowed } from "@/lib/onchainMetrics";
 import type { DailyCounters, StoredEvent } from "@/lib/tractionStore";
 import type { FunnelDay } from "@/lib/funnelStore";
@@ -54,7 +56,8 @@ export type Tab =
   | "updates"
   | "bugs"
   | "votes"
-  | "hunt";
+  | "hunt"
+  | "names";
 
 /** The two views: mainnet or the testnets. Never mixed. */
 export type Env = "mainnet" | "testnet";
@@ -189,9 +192,11 @@ export function adminName(net: GloamNetwork): string {
   return MAINNET_ENABLED ? networkName(net) : net.label;
 }
 
-/** The chains Gloam runs on, one side, as words: "Robinhood Chain, Tempo, Base and Ethereum" on mainnet. */
+/** The chains Gloam runs on, one side, as words: "Robinhood Chain, Base, Solana, BNB Chain and Tempo" on mainnet (Solana while it is on). */
 export function chainsOn(side: Env): string {
-  const labels = [...new Set(NETWORK_KEYS.map(getNetwork).filter((x) => x.testnet === (side === "testnet")).map((x) => x.label))];
+  const nets = NETWORK_KEYS.map(getNetwork).filter((x) => x.testnet === (side === "testnet"));
+  const labels = [...new Set(nets.map((x) => x.label))];
+  if (side === "mainnet" && SOLANA_ADMIN_ON && labels.length) labels.splice(Math.min(solanaSlot(nets.map((x) => x.key)), labels.length), 0, SOLANA_NAME);
   if (!labels.length) return "Robinhood Chain and Tempo";
   return labels.length > 1 ? `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}` : labels[0]!;
 }

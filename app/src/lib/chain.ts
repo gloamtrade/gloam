@@ -1,4 +1,5 @@
 import { defineChain, type Chain } from "viem";
+import { displayAmount } from "./amountShort";
 
 /** Robinhood Chain mainnet */
 export const robinhood = defineChain({
@@ -52,33 +53,9 @@ export function shortAddress(addr: string, chars = 4) {
   return `${addr.slice(0, 2 + chars)}…${addr.slice(-chars)}`;
 }
 
-export function formatEth(wei: bigint, digits = 4) {
-  const whole = Number(wei) / 1e18;
-  if (!Number.isFinite(whole)) return "0";
-  if (whole === 0) return "0";
-  if (whole < 0.0001) return "<0.0001";
-  // Testnet faucets hand out balances that can run to 1e30+; compact
-  // them so a wallet card never wraps. Precise below a million, K/M/B suffixes,
-  // and a clean "1T+" cap above a trillion (nothing real reaches it).
-  if (whole >= 1_000_000) {
-    if (whole >= 1e12) return "1T+";
-    const units: [number, string][] = [
-      [1e9, "B"],
-      [1e6, "M"],
-    ];
-    for (const [d, suffix] of units) {
-      if (whole >= d) {
-        const v = whole / d;
-        return `${v.toLocaleString(undefined, {
-          maximumFractionDigits: v < 10 ? 2 : v < 100 ? 1 : 0,
-        })}${suffix}`;
-      }
-    }
-  }
-  return whole.toLocaleString(undefined, {
-    maximumFractionDigits: digits,
-    minimumFractionDigits: 0,
-  });
+/** A native coin balance in wei on screen: two places, cut down (lib/amountShort displayAmount). */
+export function formatEth(wei: bigint) {
+  return displayAmount(wei, 18);
 }
 
 /** EIP-3085 params for any viem chain, so a wallet can add + switch to it. */

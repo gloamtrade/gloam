@@ -1,7 +1,9 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { getNetwork } from "@/lib/networks";
+import { getNetwork, solanaSlot } from "@/lib/networks";
+import { SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
+import { solAccountUrl, solDeposited, type SolanaMetrics } from "@/lib/solanaRings/metrics";
 import { shortAddress } from "@/lib/chain";
 import { HowItWorks } from "@/components/ui/HowItWorks";
 import { ArrowUpRight } from "@/components/ui/ArrowUpRight";
@@ -9,7 +11,7 @@ import { ActivityFeed, ChainCards, VolumeChart, type VolumeDay } from "../AdminC
 import { MetricCard } from "../cards";
 import { DayBars, StemChart, TickDonut, topSegments } from "../charts";
 import { MAINNET_DAY, adminName, flowPricing, useAdminResource, weekChange, type Env, type Tab } from "../data";
-import { fmtDay, fmtUsd, fmtUsdBig, fmtUsdShort, fmtWhen, n } from "../format";
+import { fmtAmount, fmtDay, fmtUsd, fmtUsdBig, fmtUsdShort, fmtWhen, n } from "../format";
 import { countPoints, dayPoints } from "../series";
 import { sideRevenueDays, type Side } from "../side";
 import { BridgeStream, ProductStream, VaultStream } from "../streams";
@@ -310,15 +312,36 @@ function ProgramCards({ env, go }: { env: Env; go: Go }) {
   );
 }
 
+/** "Nov 23, 2026": the day wallet adds on Solana started being counted. */
+function sinceDay(ts: number | null): string | null {
+  return ts ? new Date(ts * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : null;
+}
+
+/** What the notes say about Solana's figures, once, in plain words. */
+function solanaNote(sol: SolanaMetrics): string {
+  const since = sinceDay(sol.addsSince);
+  return ` ${sol.label}: deposits are money added from a wallet plus money brought in from another chain by a Gloam private account. Adds Gloam's relay paid the fee for are read from its history; adds a wallet paid for itself are counted ${since ? `since ${since}` : "from the day this shipped"}, nothing before, since the chain can't tell them from another app's. Private payments are counted per transaction. Net in is added and brought in, less cashed out: what Gloam's users hold there sits in a pool shared with other apps, so it can't be read, and it is not in the held totals. Gloam charges no fee on ${sol.label} yet.`;
+}
+
 export function OverviewTab({ side, go }: { side: Side; go: Go }) {
   const { agg, rev, oc, nets, nameOf, isMain, money, claim, funnel, days, peopleByDay, noPrice, heldNoPrice, data, liveRelay } = side;
+  const sol = SOLANA_RINGS_ENABLED ? side.solana : null;
   const volumeDays: VolumeDay[] = sideRevenueDays(side).map((d) => ({ day: d.day, inUsd: d.depositUsd, outUsd: d.cashoutUsd, txs: d.txs }));
   const movedIn = rev?.depositVolume.all ?? 0;
   const movedOut = rev?.cashoutVolume.all ?? 0;
-  const byNetwork = (f: (m: (typeof nets)[number]) => ReactNode, total: (c: NonNullable<typeof agg>) => ReactNode): ReactNode[] => [
-    ...nets.map((m) => f(m)),
+  // Solana's column sits right after Base, as in the network menu.
+  const solAt = sol ? solanaSlot(nets.map((m) => m.key)) : nets.length;
+  const byNetwork = (
+    f: (m: (typeof nets)[number]) => ReactNode,
+    total: (c: NonNullable<typeof agg>) => ReactNode,
+    solCell: (s: SolanaMetrics) => ReactNode = () => ""
+  ): ReactNode[] => [
+    ...nets.slice(0, solAt).map((m) => f(m)),
+    ...(sol ? [solCell(sol)] : []),
+    ...nets.slice(solAt).map((m) => f(m)),
     agg ? total(agg) : "",
   ];
+  const columns = [...nets.slice(0, solAt).map(nameOf), ...(sol ? [sol.label] : []), ...nets.slice(solAt).map(nameOf)];
 
   return (
     <>
@@ -360,14 +383,15 @@ export function OverviewTab({ side, go }: { side: Side; go: Go }) {
           {isMain && liveRelay
             ? ` Bridged and swapped through Gloam in 30 days: ${fmtUsd(liveRelay.last30.bridge.inUsd + liveRelay.last30.swap.inUsd)}, not added here: bridged money counts once it is deposited.`
             : ""}
+          {sol ? ` ${sol.label}: adds a wallet paid for itself are counted ${sinceDay(sol.addsSince) ? `since ${sinceDay(sol.addsSince)}` : "from the day this shipped"}, nothing before.` : ""}
         </Note>
       </Panel>
 
-      <ChainCards nets={nets} totalMoved={movedIn + movedOut} name={nameOf} />
+      <ChainCards nets={nets} solana={sol} totalMoved={movedIn + movedOut} name={nameOf} />
 
       <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
         <Panel title="Latest activity" sub="Deposits and cash-outs show their amount; private payments never do">
-          <ActivityFeed rows={side.recentTx} name={adminName} />
+          <ActivityFeed rows={side.recentTx} name={adminName} solanaName={sol?.label} />
         </Panel>
         <Panel title="Claim links, last 14 days" sub={claim.mixed ? "Launch day before counting by network is listed apart" : "Totals only, counted without cookies or ids"}>
           <BarChart rows={claim.steps} />
@@ -444,9 +468,19 @@ export function OverviewTab({ side, go }: { side: Side; go: Go }) {
       <Panel title="Held by asset" sub="What each vault holds now, and what moved through it">
         <DataTable
           headers={["Network", "Asset", "Held now", "USD", "Deposited", "Cashed out"]}
-          rows={nets.flatMap((m) =>
-            m.assets.map((a) => [nameOf(m), a.symbol, a.held ?? "Unknown", fmtUsd(a.heldUsd), `${a.deposited} (${a.depositCount})`, `${a.cashedOut} (${a.cashoutCount})`])
-          )}
+          rows={[
+            ...nets.flatMap((m) =>
+              m.assets.map((a) => [nameOf(m), a.symbol, a.held == null ? "Unknown" : fmtAmount(a.held), fmtUsd(a.heldUsd), `${fmtAmount(a.deposited)} (${a.depositCount})`, `${fmtAmount(a.cashedOut)} (${a.cashoutCount})`])
+            ),
+            ...(sol?.assets ?? []).map((a) => [
+              sol!.label,
+              a.symbol,
+              "Shared pool",
+              "",
+              `${fmtAmount(solDeposited(a))} (${a.addCount + a.bringCount})`,
+              `${fmtAmount(a.cashedOut)} (${a.cashoutCount})`,
+            ]),
+          ]}
           empty="Nothing held or moved yet"
           dense
         />
@@ -456,44 +490,49 @@ export function OverviewTab({ side, go }: { side: Side; go: Go }) {
           {oc?.prices.ethUsd ? `at ${fmtUsd(oc.prices.ethUsd)}` : "is not priced right now"}; stock tokens at live equity marks
           {oc?.prices.stocks === "live" ? "" : ", not available right now"}. Deposited and cashed out are token amounts, counts in brackets; private swaps are not
           in them.
+          {sol ? ` ${sol.label}'s money sits in a pool shared with other apps, so what Gloam's users hold there can't be read; its rows show what moved, added from a wallet and brought in from another chain together.` : ""}
         </Note>
       </Panel>
 
       <Panel title="By network, in detail" sub="Current vaults only">
         <DataTable
-          headers={["", ...nets.map(nameOf), "Total"]}
+          headers={["", ...columns, "Total"]}
           rows={[
-            ["Deposits", ...byNetwork((m) => n(m.deposits), (c) => n(c.deposits))],
-            ["Private transfers", ...byNetwork((m) => n(m.transfers), (c) => n(c.transfers))],
-            ["Cash-outs", ...byNetwork((m) => n(m.cashouts), (c) => n(c.cashouts))],
+            ["Deposits", ...byNetwork((m) => n(m.deposits), (c) => n(c.deposits), (x) => n(x.deposits))],
+            ["Private transfers", ...byNetwork((m) => n(m.transfers), (c) => n(c.transfers), (x) => n(x.transfers))],
+            ["Cash-outs", ...byNetwork((m) => n(m.cashouts), (c) => n(c.cashouts), (x) => n(x.cashouts))],
             ["Private swaps and trades", ...byNetwork((m) => n(m.trades), (c) => n(c.trades))],
             ["Payment messages", ...byNetwork((m) => n(m.memos), (c) => n(c.memos))],
-            ["Depositor wallets", ...byNetwork((m) => n(m.depositors), (c) => n(c.depositors))],
-            ["Active wallets", ...byNetwork((m) => n(m.activeWallets), (c) => n(c.activeWallets))],
-            ["Held (priced)", ...byNetwork((m) => fmtUsd(m.heldUsd), (c) => fmtUsd(c.heldUsd))],
+            ...(sol ? [["Accounts opened", ...byNetwork(() => "", () => n(sol.accountsOpened), (x) => n(x.accountsOpened))]] : []),
+            ["Depositor wallets", ...byNetwork((m) => n(m.depositors), (c) => n(c.depositors), (x) => n(x.depositors))],
+            ["Active wallets", ...byNetwork((m) => n(m.activeWallets), (c) => n(c.activeWallets), (x) => n(x.activeWallets))],
+            ["Held (priced)", ...byNetwork((m) => fmtUsd(m.heldUsd), (c) => fmtUsd(c.heldUsd), (x) => `Net in ${fmtUsd(x.netInUsd)}`)],
             [
               "Deposit volume",
               ...byNetwork(
                 (m) => (m.revenue ? fmtUsd(m.revenue.depositVolume.all) : ""),
-                (c) => (c.revenue ? fmtUsd(c.revenue.depositVolume.all) : "")
+                (c) => (c.revenue ? fmtUsd(c.revenue.depositVolume.all) : ""),
+                (x) => fmtUsd(x.revenue.depositVolume.all)
               ),
             ],
             [
               "Cash-out volume",
               ...byNetwork(
                 (m) => (m.revenue ? fmtUsd(m.revenue.cashoutVolume.all) : ""),
-                (c) => (c.revenue ? fmtUsd(c.revenue.cashoutVolume.all) : "")
+                (c) => (c.revenue ? fmtUsd(c.revenue.cashoutVolume.all) : ""),
+                (x) => fmtUsd(x.revenue.cashoutVolume.all)
               ),
             ],
             [
               "Cash-out fees",
               ...byNetwork(
                 (m) => (m.revenue ? fmtUsd(m.revenue.fees.all) : ""),
-                (c) => (c.revenue ? fmtUsd(c.revenue.fees.all) : "")
+                (c) => (c.revenue ? fmtUsd(c.revenue.fees.all) : ""),
+                () => fmtUsd(0)
               ),
             ],
-            ["First activity", ...byNetwork((m) => fmtWhen(m.firstActivity), (c) => fmtWhen(c.firstActivity))],
-            ["Last activity", ...byNetwork((m) => fmtWhen(m.lastActivity), (c) => fmtWhen(c.lastActivity))],
+            ["First activity", ...byNetwork((m) => fmtWhen(m.firstActivity), (c) => fmtWhen(c.firstActivity), (x) => fmtWhen(x.firstActivity))],
+            ["Last activity", ...byNetwork((m) => fmtWhen(m.lastActivity), (c) => fmtWhen(c.lastActivity), (x) => fmtWhen(x.lastActivity))],
             ["Vault since", ...byNetwork((m) => fmtWhen(m.vaultSince), () => "")],
             [
               "Vault",
@@ -509,10 +548,18 @@ export function OverviewTab({ side, go }: { side: Side; go: Go }) {
                     {shortAddress(m.pool, 4)} <ArrowUpRight />
                   </a>
                 ),
-                () => ""
+                () => "",
+                (x) =>
+                  x.relays[0] ? (
+                    <a key="v" href={solAccountUrl(x.relays[0])} target="_blank" rel="noreferrer" className="text-mute transition-colors hover:text-foreground">
+                      Relay {shortAddress(x.relays[0], 4)} <ArrowUpRight />
+                    </a>
+                  ) : (
+                    ""
+                  )
               ),
             ],
-            ["Read to block", ...byNetwork((m) => `#${m.scannedTo}`, () => "")],
+            ["Read to block", ...byNetwork((m) => `#${m.scannedTo}`, () => "", (x) => (x.lastSlot ? `Slot #${x.lastSlot}` : ""))],
           ]}
           empty={isMain ? "No mainnet vault read yet" : "No testnet vault read yet"}
           dense
@@ -520,6 +567,7 @@ export function OverviewTab({ side, go }: { side: Side; go: Go }) {
         <Note>
           Current vaults only, {money}. Active wallets deposited or received a cash-out; transfers and trades carry no wallet. The total counts a wallet used on both
           networks once.
+          {sol ? solanaNote(sol) : ""}
         </Note>
       </Panel>
     </>

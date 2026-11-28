@@ -328,7 +328,7 @@ export const elysiumTestnet = defineChain({
  */
 export const bnbMainnet = defineChain({
   ...bsc,
-  rpcUrls: { default: { http: [...(BNB?.rpcUrls ?? ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.bnbchain.org"])] } },
+  rpcUrls: { default: { http: [...(BNB?.rpcUrls ?? ["https://bsc-rpc.publicnode.com", "https://bsc.drpc.org", "https://1rpc.io/bnb", "https://bsc-dataseed.bnbchain.org"])] } },
 });
 
 /**
@@ -688,8 +688,30 @@ const NETWORKS: Record<NetworkKey, GloamNetwork> = {
 
 const hasPool = (k: NetworkKey) => NETWORKS[k].pool !== null && NETWORKS[k].deployBlock !== null;
 
-/** Mainnets whose pool is filled in, Robinhood Chain first. Empty before deploy day. */
-const MAINNET_KEYS: NetworkKey[] = (["robinhood-mainnet", "tempo-mainnet", "base-mainnet", "ethereum-mainnet", "elysium-mainnet", "bnb-mainnet"] as const).filter(hasPool);
+/**
+ * Mainnets whose pool is filled in, in the order every list shows them:
+ * Robinhood Chain, Base, BNB Chain, then Tempo, Ethereum and Elysium. Solana,
+ * not an EVM network, sits right after Base wherever it is listed
+ * (solanaSlot). Empty before deploy day.
+ */
+const MAINNET_KEYS: NetworkKey[] = (["robinhood-mainnet", "base-mainnet", "bnb-mainnet", "tempo-mainnet", "ethereum-mainnet", "elysium-mainnet"] as const).filter(hasPool);
+
+/** The mainnets listed before Solana: Robinhood Chain and Base. */
+const BEFORE_SOLANA: readonly NetworkKey[] = ["robinhood-mainnet", "base-mainnet"];
+
+/**
+ * Where Solana goes in a list of networks: right after Robinhood Chain and
+ * Base (whichever of them the list has), so a mainnet list reads Robinhood
+ * Chain, Base, Solana, BNB Chain, Tempo, Ethereum, Elysium. 0 when it has
+ * neither.
+ */
+export function solanaSlot(keys: readonly NetworkKey[]): number {
+  let at = 0;
+  keys.forEach((k, i) => {
+    if (BEFORE_SOLANA.includes(k)) at = i + 1;
+  });
+  return at;
+}
 
 /** The testnets: Robinhood Chain and Tempo, then Base Sepolia, Ethereum Sepolia and Elysium testnet once each pool is filled in (Elysium's behind its switch too). */
 const TESTNET_KEYS: NetworkKey[] = ["robinhood", "tempo", ...(["base", "ethereum", "elysium"] as const).filter(hasPool)];

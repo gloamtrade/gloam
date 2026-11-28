@@ -6,8 +6,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useReadContracts } from "wagmi";
-import { formatUnits } from "viem";
 import { formatEth } from "@/lib/chain";
+import { displayAmount } from "@/lib/amountShort";
 import { useAppAccount, useAppBalance, useAppTokenBalances } from "@/lib/demo";
 import { useNetwork } from "./NetworkProvider";
 import { faucetFor } from "@/lib/faucet";
@@ -37,18 +37,17 @@ import { COINGECKO_MARKED, hasCoingeckoMarks, useCoingeckoMarks } from "@/hooks/
 import { useOpenGatedTokens } from "@/hooks/useOpenGatedTokens";
 import {
   privateHeadline,
-  tidyAmount,
   splitWalletRows,
   walletRowValue,
   walletTotal,
   type WalletHolding,
 } from "@/lib/portfolioValue";
 import {
-  assetDecimals,
   assetLabel,
   formatAssetAmount,
   isNativeAsset,
   isShieldDeployed,
+  SIGNED_OUT_BALANCE_MESSAGE,
 } from "@/lib/shield";
 import { isClaimedNote, isSecuredClaim, isUnsecuredClaim } from "@/lib/claimSweep";
 import { canExitVaultSwap } from "@/lib/vaultSwap";
@@ -74,7 +73,7 @@ import { addAssetHref, pickAddAsset } from "@/lib/vaultHub";
 const SwapToStableButton = dynamic(() => import("./BridgeIn").then((m) => m.SwapToStableButton), { ssr: false });
 
 /* Small marks that carry the public / private duality. */
-function LockIcon({ className = "" }: { className?: string }) {
+export function LockIcon({ className = "" }: { className?: string }) {
   return (
     <svg className={className} width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
       <rect x="5" y="10.5" width="14" height="10" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
@@ -83,28 +82,28 @@ function LockIcon({ className = "" }: { className?: string }) {
   );
 }
 
-function AddIcon() {
+export function AddIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
-function SendIcon() {
+export function SendIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M7 17L17 7M9 7h8v8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
-function ReceiveIcon() {
+export function ReceiveIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M17 7L7 17M15 17H7V9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
-function CashOutIcon() {
+export function CashOutIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M12 4v10m0 0l-4-4m4 4l4-4M5 19h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -112,7 +111,7 @@ function CashOutIcon() {
   );
 }
 
-function QuickAction({
+export function QuickAction({
   href,
   label,
   short,
@@ -168,6 +167,9 @@ type WalletRow = WalletHolding & {
   /** Add takes it (the gas coin and the pool's tokens); a stock or swap token can't be added as it is. */
   addable: boolean;
 };
+
+/** An empty balance as every amount shows: two places (lib/amountShort). */
+const ZERO_SHOWN = displayAmount(BigInt(0), 0);
 
 const uiMultiplierAbi = [
   { type: "function", name: "uiMultiplier", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
@@ -443,6 +445,16 @@ export function PortfolioView() {
   const tokensUnpriced = positions.filter((p) => p.raw > BigInt(0) && !p.priced).map((p) => p.symbol);
   const publicUnpriced = [...(!isTempo && nativeWei > BigInt(0) && nativeUsdRate == null ? [nativeSymbol] : []), ...tokensUnpriced];
   const unpriced = [...new Set([...shieldUnpriced, ...publicUnpriced])];
+  // A price still loading (the markets feed's first read, CoinGecko for $GLOAM and PONS):
+  // the figures wait for it rather than show a total that jumps a second later.
+  const pricesPending =
+    unpricedRows.some((r) => {
+      if (isNativeAsset(r.asset)) return marketsPending;
+      const tok = knownHere.find((t) => t.address.toLowerCase() === r.asset.toLowerCase());
+      return tok ? pricePending(tok) : false;
+    }) ||
+    positions.some((p) => p.raw > BigInt(0) && !p.priced && p.pending) ||
+    (!isTempo && nativeWei > BigInt(0) && nativeUsdRate == null && marketsPending);
 
   // Public (wallet + tokens) vs sealed (vault) split, the whole point.
   const publicUsd = nativeHeldUsd + stocksUsd;
@@ -519,7 +531,7 @@ export function PortfolioView() {
   const totalDisplay = !balancesVisible
     ? settings.showUsd
       ? formatUsd(0)
-      : `0 ${nativeSymbol}`
+      : `${formatEth(BigInt(0))} ${nativeSymbol}`
     : totalUsd != null && settings.showUsd
       ? formatUsdCompact(totalUsd)
       : `${formatEth(nativeWei + shieldedWei)} ${nativeSymbol}`;
@@ -532,14 +544,13 @@ export function PortfolioView() {
       : `${formatEth(balancesVisible ? nativeWei : BigInt(0))} ${nativeSymbol}, ${stockCount} ${stockCount === 1 ? "token" : "tokens"}`;
 
   // The hero number: what sits in the vault, only readable in this browser. What the
-  // dollars leave out is shown by amount: "$100 + 1,000 GLOAM" rather than "2 assets".
-  // A short amount: this is the big number, and the rows below keep every decimal.
-  const amountOfRow = (r: (typeof shieldRows)[number]) =>
-    `${tidyAmount(Number(formatUnits(r.amount, isNativeAsset(r.asset) ? 18 : assetDecimals(r.asset))))} ${r.label}`;
+  // dollars leave out is shown by amount: "$100 + 1,000.00 GLOAM" rather than "2 assets".
+  // Two places, cut down, like every amount (lib/amountShort), from the raw units.
+  const amountOfRow = (r: (typeof shieldRows)[number]) => `${formatAssetAmount(r.amount, r.asset)} ${r.label}`;
   const vaultValue = !balancesVisible
-    ? "0"
+    ? ZERO_SHOWN
     : !hasShield
-      ? "0"
+      ? ZERO_SHOWN
       : shieldRows.length === 1
         ? amountOfRow(shieldRows[0])
         : `${shieldRows.length} assets`;
@@ -547,16 +558,17 @@ export function PortfolioView() {
   const privateDisplay = !balancesVisible
     ? settings.showUsd
       ? formatUsd(0)
-      : "0"
+      : ZERO_SHOWN
     : privateHeadline({
         showUsd: settings.showUsd,
         sealedUsd,
         unpriced: unpricedRows.map(amountOfRow),
+        pending: pricesPending,
         vaultValue,
         formatUsd: formatUsdCompact,
       });
   const privateSub = !isConnected
-    ? "Connect a wallet to see your private balance."
+    ? SIGNED_OUT_BALANCE_MESSAGE
     : !onProduct
       ? `Switch your wallet to ${network.label} to see balances.`
       : restoring
@@ -594,34 +606,37 @@ export function PortfolioView() {
                 Only you
               </span>
             </div>
-            <div className="-mr-2 flex items-center gap-0.5">
+            <div className="-mr-2 flex min-h-10 items-center gap-0.5">
               <NetworkPulse />
               {balancesVisible && <AmountToggle />}
-              <button
-                type="button"
-                onClick={() => void refreshAll()}
-                disabled={refreshing || !isConnected}
-                aria-label="Refresh balances"
-                title="Refresh balances"
-                className="grid h-10 w-10 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground disabled:opacity-60"
-              >
-                <svg
-                  aria-hidden
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  className={refreshing || syncing ? "animate-spin motion-reduce:animate-none" : undefined}
+              {/* Nothing to refresh before a wallet is in: no control then, rather than a dead one. */}
+              {isConnected && (
+                <button
+                  type="button"
+                  onClick={() => void refreshAll()}
+                  disabled={refreshing}
+                  aria-label="Refresh balances"
+                  title="Refresh balances"
+                  className="grid h-10 w-10 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground disabled:opacity-60"
                 >
-                  <path
-                    d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4.5h-4.5"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
+                  <svg
+                    aria-hidden
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    className={refreshing || syncing ? "animate-spin motion-reduce:animate-none" : undefined}
+                  >
+                    <path
+                      d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4.5h-4.5"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              )}
             </div>
           </div>
 
@@ -634,6 +649,8 @@ export function PortfolioView() {
               <span className="gl-skeleton inline-block h-[0.85em] w-[min(14rem,60%)] align-baseline" aria-label="Loading your private balance" />
             ) : amountsHidden && balancesVisible ? (
               <SealDots n={7} dot={14} label="Private balance hidden" className="h-[1em]" />
+            ) : privateDisplay === null ? (
+              <span className="gl-skeleton inline-block h-[0.85em] w-[min(14rem,60%)] align-baseline" aria-label="Loading your private balance" />
             ) : (
               <HeroFigure text={privateDisplay} />
             )}
@@ -647,7 +664,7 @@ export function PortfolioView() {
                   key: r.asset,
                   id: native ? nativeId : (tok?.id ?? null),
                   symbol: r.label,
-                  amount: tidyAmount(Number(formatUnits(r.amount, native ? 18 : assetDecimals(r.asset)))),
+                  amount: formatAssetAmount(r.amount, r.asset),
                 };
               })}
             />
@@ -698,6 +715,8 @@ export function PortfolioView() {
                   <dd className="text-foreground">
                     {amountsHidden ? (
                       <SealDots n={5} />
+                    ) : pricesPending && settings.showUsd ? (
+                      <span role="status" aria-label="Loading the total" className="inline-block h-3.5 w-12 rounded bg-surface-2 align-middle motion-safe:animate-pulse" />
                     ) : (
                       <>
                         {totalDisplay}
@@ -706,7 +725,7 @@ export function PortfolioView() {
                     )}
                   </dd>
                 </div>
-                {settings.showUsd && unpriced.length > 0 && !amountsHidden && (
+                {settings.showUsd && unpriced.length > 0 && !pricesPending && !amountsHidden && (
                   <div className="text-mute">Not in the total: {unpriced.join(", ")}, no dollar price</div>
                 )}
               </dl>
@@ -786,8 +805,8 @@ export function PortfolioView() {
                         {n.refundHeld && (
                           <p className="mt-0.5 text-[12.5px] text-warn">
                             {n.refundHeld === "blocked"
-                              ? "A swap of this couldn't finish, and the vault isn't taking this token back right now. It stays held and comes back once the vault takes it again. Gloam tries each time you open the app."
-                              : "A swap of this couldn't finish, so it's on its way back to your private balance."}
+                              ? `${n.nameClaim ? "A name claim with this" : "A swap of this"} couldn't finish, and the vault isn't taking this token back right now. It stays held and comes back once the vault takes it again. Gloam tries each time you open the app.`
+                              : `${n.nameClaim ? "A name claim with this" : "A swap of this"} couldn't finish, so it's on its way back to your private balance.`}
                           </p>
                         )}
                         {canExitVaultSwap(n) && <SwapExit note={n} onDone={refreshVault} />}
@@ -850,7 +869,8 @@ export function PortfolioView() {
               {/* What a private balance is for, one tap from each. */}
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line py-3 max-sm:px-5 sm:px-6">
                 <p className="text-[13px] text-mute">Pay from it privately, or cash out to any wallet.</p>
-                <div className="flex gap-1">
+                {/* quiet links: their words line up with the text above and the Pay buttons' edge, not their padding */}
+                <div className="-mx-4 flex gap-1">
                   <IntentLink href="/app/vault?tab=move" className="btn btn-quiet btn-sm h-10">
                     Pay privately
                   </IntentLink>
@@ -1053,7 +1073,7 @@ export function PortfolioView() {
  * cents quieter, and a lone token amount ("0.00387 BNB") with its symbol small
  * beside it. Anything else ("$100 + 1,000 GLOAM", "3 assets") shows as is.
  */
-function HeroFigure({ text }: { text: string }) {
+export function HeroFigure({ text }: { text: string }) {
   const usd = /^(\$[\d,]+)(\.\d+)$/.exec(text);
   if (usd) {
     return (
@@ -1076,7 +1096,7 @@ function HeroFigure({ text }: { text: string }) {
 }
 
 /** What the private balance holds, one quiet chip per asset with its own mark; three at most, then "+2". */
-function VaultChips({ rows }: { rows: { key: string; id: string | null; symbol: string; amount: string }[] }) {
+export function VaultChips({ rows }: { rows: { key: string; id: string | null; symbol: string; amount: string }[] }) {
   if (rows.length === 0) return null;
   const shown = rows.slice(0, 3);
   const more = rows.length - shown.length;

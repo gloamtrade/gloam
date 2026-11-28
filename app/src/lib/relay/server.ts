@@ -103,6 +103,8 @@ import { datedOff } from "@/lib/relay/scheduled";
 import { WrongChainRpcError, assertServerRpc, hasServerRpc, serverTransport } from "@/lib/serverRpc";
 import { SWAP_SEND_MARGIN_SECONDS, encodeRoute, escrowAddress, isKnownRoute, isSwapAsset, receiptPaysEscrow, refundAmountFor, swapExpired, swapRouterFor, vaultFeeOf, vaultSwapAbi, vaultSwapRouter, vaultSwapV3Abi, type EscrowKey, type PoolKey } from "@/lib/vaultSwap";
 import { knownTokens } from "@/lib/tokens";
+import { NAMES_REGISTRAR_ADDRESS, NAME_CLAIM_CHAIN_ID, claimArgs, claimEscrowKey, nameClaimRefundAmount, nameEscrowAddress, namesRegistrarAbi } from "@/lib/nameClaim";
+import { GLOAM_TOKEN } from "@/lib/buybacks";
 import { GAS_HIGH_CODE, formatGwei, gasHighMessage, maxFeeCapWei, maxGasPriceWei as maxGasPriceWeiFor, readGas } from "@/lib/relay/gasCeiling";
 import { ETH_USD_FEED, FEED_MAX_AGE_SEC, ethUsdFeedAbi, hasSwapFloor, smallestSwapUsd, swapFloorMessage } from "@/lib/relay/swapFloor";
 import {
@@ -257,6 +259,9 @@ const swapCallAbi = [
   { type: "error" as const, name: "OverDepositLimit", inputs: [] },
   { type: "error" as const, name: "FeeOnTransferNotSupported", inputs: [] },
 ] as const;
+
+/** The private name claim's call (lib/nameClaim), with the vault's errors. */
+const nameClaimCallAbi = [...namesRegistrarAbi, ...POOL_ERRORS, { type: "error" as const, name: "OverDepositLimit", inputs: [] }] as const;
 
 /** v3's calls, with the same vault errors. */
 const swapV3CallAbi = [
@@ -715,6 +720,8 @@ const SEND_GAS_MOST: Partial<Record<Call["kind"], bigint>> = {
   swap: 2_600_000n,
   swapV3: 2_600_000n,
   swapExit: 400_000n,
+  // a cash out, a registry write and a token pull: about 450k
+  nameClaim: 1_200_000n,
 };
 // Elysium (99901, testnet 99801) is an Arbitrum Orbit chain like Robinhood Chain: its
 // estimates carry a parent-chain (HyperEVM) cost too, so it gets the same room.
@@ -747,7 +754,8 @@ export type Call =
   | { kind: "memo"; args: readonly [Hex, Hex]; budget: MemoBudget }
   | { kind: "swap"; router: Address; args: readonly [SwapSpend, SwapDeposit, SwapDeposit, Hex] }
   | { kind: "swapV3"; router: Address; args: readonly [SwapSpend, SwapDeposit, SwapDeposit, Hex, Address, bigint] }
-  | { kind: "swapExit"; router: Address; args: readonly [Address, Required<EscrowKey>, Address, Hex] };
+  | { kind: "swapExit"; router: Address; args: readonly [Address, Required<EscrowKey>, Address, Hex] }
+  | { kind: "nameClaim"; registrar: Address; args: ReturnType<typeof claimArgs> };
 
 /** Public addresses a call pays out to: a cash out's and a swap exit's. */
 function publicRecipients(call: Call): Address[] {
@@ -889,6 +897,8 @@ function callTx(net: GloamNetwork, call: Call): { to: Address; data: Hex } | nul
       return { to: call.router, data: encodeFunctionData({ abi: swapCallAbi, functionName: "swap", args: call.args }) };
     case "swapV3":
       return { to: call.router, data: encodeFunctionData({ abi: swapV3CallAbi, functionName: "swap", args: call.args }) };
+    case "nameClaim":
+      return { to: call.registrar, data: encodeFunctionData({ abi: nameClaimCallAbi, functionName: "claim", args: call.args }) };
     default:
       return null;
   }
@@ -1082,6 +1092,8 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
         return pub.estimateContractGas({ address: call.router, abi: swapV3CallAbi, functionName: "swap", args: call.args, account });
       case "swapExit":
         return pub.estimateContractGas({ address: call.router, abi: swapV3CallAbi, functionName: "exit", args: call.args, account });
+      case "nameClaim":
+        return pub.estimateContractGas({ address: call.registrar, abi: nameClaimCallAbi, functionName: "claim", args: call.args, account });
     }
   };
   let fees: FeeCap | undefined;
@@ -1104,6 +1116,8 @@ async function submit(net: GloamNetwork, call: Call, opts: SubmitOpts = {}): Pro
         return wallet.writeContract({ address: call.router, abi: swapV3CallAbi, functionName: "swap", args: call.args, gas, nonce, chain: net.chain, account: from, ...fees });
       case "swapExit":
         return wallet.writeContract({ address: call.router, abi: swapV3CallAbi, functionName: "exit", args: call.args, gas, nonce, chain: net.chain, account: from, ...fees });
+      case "nameClaim":
+        return wallet.writeContract({ address: call.registrar, abi: nameClaimCallAbi, functionName: "claim", args: call.args, gas, nonce, chain: net.chain, account: from, ...fees });
     }
   };
 
@@ -1265,7 +1279,7 @@ function afterReply(task: () => Promise<void>): void {
  */
 async function submitSpend(
   net: GloamNetwork,
-  call: Extract<Call, { kind: "transfer" | "unshield" | "swap" | "swapV3" | "swapExit" }>,
+  call: Extract<Call, { kind: "transfer" | "unshield" | "swap" | "swapV3" | "swapExit" | "nameClaim" }>,
   opts: Pick<SubmitOpts, "afterDryRun" | "returning" | "onEnd" | "sender" | "screened" | "watchUntil" | "beforeBroadcast"> & {
     precheck?: () => Promise<void>;
     /** What the lock is on, the nullifier unless said. */
@@ -1274,7 +1288,12 @@ async function submitSpend(
 ): Promise<Hex> {
   const { precheck, lockOn, afterDryRun, returning, onEnd, sender, screened, watchUntil, beforeBroadcast } = opts;
   const isSwap = call.kind === "swap" || call.kind === "swapV3";
-  const nullifier = call.kind === "swapExit" ? call.args[1].nullifier : isSwap ? call.args[0].nullifier : call.args[2];
+  const nullifier =
+    call.kind === "swapExit"
+      ? call.args[1].nullifier
+      : isSwap || call.kind === "nameClaim"
+        ? call.args[0].nullifier
+        : call.args[2];
   const key = inflightKey(net.chainId, lockOn ?? nullifier);
   let lock: Awaited<ReturnType<typeof takeInflight>>;
   try {
@@ -1620,6 +1639,83 @@ export async function relayVaultSwap(net: GloamNetwork, body: Record<string, unk
         ]);
       },
       // a refund is never a link's swap: no binding for it
+      beforeBroadcast: (tx) => (refunding ? undefined : hooks.beforeBroadcast?.(tx)),
+    }
+  );
+}
+
+/**
+ * A private name claim (lib/nameClaim, contracts/src/GloamNamesRegistrar.sol): one GLOAM
+ * note in the Robinhood Chain vault pays the names registry, so no public wallet pays for
+ * the name. Sent the way a swap is: the note's lock, its dry run, a gas hold, and its
+ * escrow kept so a plain cash out to it is refused once the proofs are out. When the note
+ * was already spent to this claim's escrow (its unshield sent on its own), the same call
+ * puts the money back as the claim's refund note.
+ */
+export async function relayNameClaim(net: GloamNetwork, body: Record<string, unknown>, sender?: Sender, hooks: SendHooks = {}) {
+  const registrar = NAMES_REGISTRAR_ADDRESS;
+  if (!registrar || net.chainId !== NAME_CLAIM_CHAIN_ID || !net.pool) {
+    throw new RelayError("Private name claims are not live on this network.", 400, "no_name_claim");
+  }
+  if (body.registrar != null && asAddress(body.registrar, "registrar").toLowerCase() !== registrar.toLowerCase()) {
+    throw new RelayError("That is not the Gloam names registrar.", 400, "name_registrar");
+  }
+  const s = (body.spend ?? {}) as Record<string, unknown>;
+  const spend = { proof: asProof(s.proof), root: asBytes32(s.root, "root"), nullifier: asBytes32(s.nullifier, "nullifier"), amount: asAmount(s.amount) };
+  const c = (body.claim ?? {}) as Record<string, unknown>;
+  if (typeof c.name !== "string" || !/^[a-z0-9_]{3,20}$/.test(c.name)) throw new RelayError("Invalid name.");
+  const claim = {
+    name: c.name,
+    keyX: asBytes32(c.keyX, "key"),
+    keyY: asBytes32(c.keyY, "key"),
+    holder: asAddress(c.holder, "holder"),
+    years: asAmount(c.years),
+  };
+  if (claim.years < 1n || claim.years > 10n) throw new RelayError("Invalid years.");
+  const r = (body.refund ?? {}) as Record<string, unknown>;
+  const refund = { proof: asProof(r.proof), commitment: asBytes32(r.commitment, "refund commitment"), amount: asAmount(r.amount) };
+  // the refund note follows the app's rule: the note less the vault's highest possible fee
+  if (refund.amount === 0n || refund.amount > nameClaimRefundAmount(spend.amount)) throw new RelayError("Invalid refund note.");
+
+  const pub = relayPublicClient(net);
+  const escrow = nameEscrowAddress(registrar, claimEscrowKey(spend, claim, refund));
+  // a refund locks on its escrow, a claim on its nullifier
+  const left = await pub.readContract({ address: net.pool, abi: relayPoolAbi, functionName: "spent", args: [spend.nullifier] });
+  let refunding = false;
+  const precheck = async () => {
+    const [spent, known] = await Promise.all([
+      pub.readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "spent", args: [spend.nullifier] }),
+      pub.readContract({ address: net.pool!, abi: relayPoolAbi, functionName: "isKnownRoot", args: [spend.root] }),
+    ]);
+    if (!spent) {
+      if (!known) throw new RelayError(REVERT_MESSAGES.UnknownRoot, 409, "UnknownRoot");
+      await assertNoteMayRetry(net, spend.nullifier);
+      return;
+    }
+    // spent: only worth a send if this claim's money is waiting at its escrow (the refund)
+    if ((await heldAt(pub, GLOAM_TOKEN, escrow)) < refund.amount) throw new RelayError(REVERT_MESSAGES.AlreadySpent, 409, "AlreadySpent");
+    await assertNoteMayRetry(net, `refund|${escrow}`);
+    refunding = true;
+  };
+  return submitSpend(
+    net,
+    { kind: "nameClaim", registrar, args: claimArgs(spend, claim, refund) },
+    {
+      precheck,
+      lockOn: left ? escrow : undefined,
+      returning: () => refunding,
+      sender: () => sender,
+      // once its proofs passed the dry run, and before they go out: a plain cash out to this escrow is refused
+      afterDryRun: async (gasLimit) => {
+        await keepSwapEscrow(net, escrow);
+        return refunding ? holdWaiting(net, GLOAM_TOKEN, refund.amount, gasLimit) : holdSwap(net, gasLimit);
+      },
+      onEnd: async (status) => {
+        await Promise.all([
+          noteEnded(net, refunding ? `refund|${escrow}` : spend.nullifier, status).catch(() => {}),
+          hooks.onEnd?.(status).catch(() => {}),
+        ]);
+      },
       beforeBroadcast: (tx) => (refunding ? undefined : hooks.beforeBroadcast?.(tx)),
     }
   );

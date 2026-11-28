@@ -6,6 +6,8 @@ import { SealedField } from "@/components/ui/SealedField";
 import { FlowField } from "@/components/ui/FlowField";
 import { liveMainnetNames } from "@/lib/mainnet";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
+import { SOLANA_NAME, SOLANA_RINGS_ENABLED } from "@/lib/solanaRings/config";
+import { STARKNET_ENABLED } from "@/lib/starknetPrivacy/config";
 import { CursorReveal } from "@/components/ui/CursorReveal";
 import { SealStream } from "@/components/landing/SealStream";
 import { PayrollLive } from "@/components/landing/PayrollLive";
@@ -242,6 +244,10 @@ export function Landing() {
               <p className="mx-auto mt-4 max-w-[52ch] text-[17px] leading-[1.6] text-mute sm:text-[19px]">
                 Add money privately, pay anyone, and prove what you hold without
                 showing the number. Live on {liveMainnetNames()} mainnet{SHOW_TESTNETS ? ", and on testnet" : ""}.
+                {/* Solana hides the token and the amount only, and Helius's prover makes its proofs, so it gets its own line */}
+                {SOLANA_RINGS_ENABLED ? ` Also on ${SOLANA_NAME}: the token and the amount stay hidden, and Helius's prover makes the proof, not your device.` : null}
+                {/* Starknet shows the payee on a first payment, and Starkscan's prover makes its proofs: its own line too, only while it is on */}
+                {STARKNET_ENABLED ? " Also on Starknet: once a channel to someone is open, payments hide both sides and the amount. The first one shows their private account, and Starkscan's prover makes the proof." : null}
               </p>
             </div>
             <LiveProduct />
@@ -302,7 +308,7 @@ export function Landing() {
               team, your business and your agents.
             </p>
           </div>
-          <div className="-mx-4 mt-10 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-3 [&::-webkit-scrollbar]:hidden">
+          <div className="-mx-4 mt-10 flex snap-x snap-mandatory scroll-px-4 gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-3 [&::-webkit-scrollbar]:hidden">
             {USES.map((u) => {
               const To = u.href.startsWith("/app") ? AppLink : Link;
               return (
@@ -312,7 +318,7 @@ export function Landing() {
                   className="gl-tile group flex min-h-[220px] w-[78%] shrink-0 snap-start flex-col p-6 transition-colors hover:bg-surface-2 sm:w-auto"
                 >
                   {u.icon}
-                  <div className="mt-auto">
+                  <div className="mt-16">
                     <p className="text-[19px] leading-snug tracking-[-0.01em] text-foreground">
                       {u.title}
                     </p>
@@ -338,15 +344,15 @@ export function Landing() {
               </div>
               <div className="mt-10">
                 <ul className="divide-y divide-line border-y border-line text-[15px]">
-                  <li className="flex justify-between gap-6 py-4">
+                  <li className="flex flex-col gap-1 py-4 sm:flex-row sm:justify-between sm:gap-6">
                     <span>Upload a CSV</span>
                     <span className="text-mute">Name, Gloam address, amount</span>
                   </li>
-                  <li className="flex justify-between gap-6 py-4">
+                  <li className="flex flex-col gap-1 py-4 sm:flex-row sm:justify-between sm:gap-6">
                     <span>Check what the public sees</span>
                     <span className="text-mute">No names, no amounts</span>
                   </li>
-                  <li className="flex justify-between gap-6 py-4">
+                  <li className="flex flex-col gap-1 py-4 sm:flex-row sm:justify-between sm:gap-6">
                     <span>Pay everyone</span>
                     <span className="text-mute">About 8 seconds each</span>
                   </li>

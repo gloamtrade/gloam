@@ -12,6 +12,9 @@
  *     is now checked against that order (an independent model of it here).
  *   - the shortfall, the run total and the invoice rounded to two decimals
  *     (0.004 showed as 0.00, Number lost units on big amounts); they are exact.
+ *     Since 23 Nov 2026 what the screen and the invoice show reads two places,
+ *     cut down ("<0.01" for 0.004, lib/amountShort); the funding step and the
+ *     results file keep every unit.
  *
  * Security review, 25 Oct 2026: the results file put a payee's name, as typed
  * in the list, in a cell a spreadsheet runs as a formula (=, +, -, @), next to
@@ -24,7 +27,14 @@ import assert from "node:assert/strict";
 import "./browser-shim.mjs";
 import { parseUnits, type Address } from "viem";
 
-const { parsePayrollCsv, fundingPlan, PAYROLL_TEMPLATE, exportResultsCsv, claimLink } = await import("../src/lib/payroll");
+const { parsePayrollCsv, fundingPlan, PAYROLL_TEMPLATE, exportResultsCsv, claimLink, applyPayrollNames, payrollNamesToLookUp, NAME_PENDING, newBatch, payrollNameChanges, payrollNameChangeMessage } = await import("../src/lib/payroll");
+const { peopleFromDraft, scheduleCsv } = await import("../src/lib/payrollSchedule");
+// a real Gloam address (a P-256 public key), for the name checks
+const PAYROLL_TAG = await (async () => {
+  const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
+  return `gloamr1.${Buffer.from(spki).toString("base64url")}`;
+})();
 const { assetDecimals, formatAssetAmountExact } = await import("../src/lib/shield");
 
 let passed = 0;
@@ -215,6 +225,87 @@ test("the results file never writes a name as a formula, and keeps the claim lin
     assert.equal(row[5], claimLink("https://gloam.trade", "robinhood-mainnet", tickets[i]!), `row ${i}: the claim link is untouched`);
   });
   assert.ok(lines[0]!.endsWith(`"'=HYPERLINK(1)"`) || lines[0]!.endsWith(`'=HYPERLINK(1)`), "the note column too");
+});
+
+test("the results file keeps every unit of each amount, never the two places the screen shows", () => {
+  const amounts = ["0.004", "1250.123456789", "7.869953", "1"];
+  const batch = {
+    id: "b2", title: "Nov", createdAt: 0, chainId: 4663, pool: "0x39e28cde55cab798874746ac52cb4b5cc99a0194" as Address, asset: ASSET,
+    employer: "0x1111111111111111111111111111111111111111" as Address, relay: true, status: "done" as const,
+    rows: amounts.map((a, i) => ({ id: `r${i}`, name: `P${i}`, recipient: "", kind: "link", amount: units(a), status: "paid", ticket: `gloam1.eyJ2IjoxLCJrIjoi${i}` })),
+  };
+  const out = exportResultsCsv(batch as never, { origin: "https://gloam.trade", networkKey: "robinhood-mainnet", assetLabel: "X", explorerTx: (h: string) => h });
+  const cells = (line: string) => [...line.matchAll(/("(?:[^"]|"")*"|[^,]*)(,|$)/g)].map((m) => m[1]!.replace(/^"([\s\S]*)"$/, "$1")).slice(0, -1);
+  const col = out.split("\n").slice(1).map((l) => cells(l)[2]);
+  assert.deepEqual(col, ["0.004", "1,250.123456789", "7.869953", "1"]);
+});
+
+// ------------------------------------------------------------------ Gloam names in the address column
+test("an @name is paid like a Gloam address once it is looked up", () => {
+  const TAG = PAYROLL_TAG;
+  const { rows } = parsePayrollCsv(
+    ["name,gloam_address,amount", "Ada,@Ada_Obi,10", "Bo,@bob,5", "Cy,@cyd,abc", "Di,@nobody,1", "Ed,@eddie,2", "Fe,@x,1", "Gi,@ada_obi,3"].join("\n"),
+    ASSET,
+  );
+  assert.equal(rows[0]!.payName, "ada_obi", "lowercased, without the @");
+  assert.equal(rows[0]!.kind, "gloam");
+  assert.equal(rows[0]!.recipient, "", "no address until it is looked up");
+  assert.equal(rows[0]!.error, NAME_PENDING, "waits for its lookup, so it can't be paid yet");
+  assert.notEqual(rows[2]!.error, NAME_PENDING, "a bad amount still shows as the row's problem");
+  assert.ok(rows[5]!.error && rows[5]!.error.includes("isn't a Gloam name"), "@x is too short to be a name");
+  assert.deepEqual(payrollNamesToLookUp(rows, new Map()), ["ada_obi", "bob", "nobody", "eddie"], "each name once");
+
+  const answers = new Map<string, "none" | "failed" | { tag: string }>([
+    ["ada_obi", { tag: TAG }],
+    ["bob", { tag: TAG }],
+    ["nobody", "none"],
+    ["eddie", "failed"],
+  ]);
+  const done = applyPayrollNames(rows, answers);
+  assert.equal(done[0]!.recipient, TAG, "the address the name holds");
+  assert.equal(done[0]!.error, null);
+  assert.equal(done[6]!.recipient, TAG, "the same name twice pays the same address");
+  assert.ok(done[3]!.error!.startsWith("No one holds @nobody"), "a name nobody holds is that row's error");
+  assert.ok(done[4]!.error!.startsWith("Couldn't look up @eddie"), "a failed read says so, and isn't paid");
+  assert.equal(applyPayrollNames(rows, new Map())[0]!.error, NAME_PENDING, "unanswered stays pending");
+  assert.equal(applyPayrollNames(rows, new Map([["ada_obi", { tag: "gloamr1.nope" }]]))[0]!.error, "@ada_obi doesn't point to a working Gloam address.");
+  assert.deepEqual(payrollNamesToLookUp(rows, answers), [], "nothing left to look up");
+
+  const batch = newBatch({ title: "t", chainId: 1, pool: ASSET, asset: ASSET, employer: ASSET, relay: true, rows: done } as never);
+  const ada = batch.rows.find((r) => r.name === "Ada")!;
+  assert.equal(ada.recipient, TAG);
+  assert.equal(ada.payName, "ada_obi", "the run keeps the name it was paid by");
+  assert.ok(!batch.rows.some((r) => r.name === "Di" || r.name === "Ed"), "rows with a name problem are not in the run");
+});
+
+test("a name read again before the run stops it if the address moved", () => {
+  const OTHER = PAYROLL_TAG.slice(0, -4) + (PAYROLL_TAG.endsWith("AAAA") ? "BBBB" : "AAAA");
+  const known = new Map<string, "none" | "failed" | { tag: string }>([["ada", { tag: PAYROLL_TAG }], ["bob", { tag: PAYROLL_TAG }], ["cyd", { tag: PAYROLL_TAG }]]);
+  assert.deepEqual(payrollNameChanges([["ada", { tag: PAYROLL_TAG }]], known), [], "the same address: the run goes");
+  const changes = payrollNameChanges([["ada", { tag: OTHER }], ["bob", "none"], ["cyd", "failed"]], known);
+  assert.deepEqual(changes.map((c) => [c.name, c.why]), [["ada", "changed"], ["bob", "none"], ["cyd", "failed"]]);
+  assert.ok(payrollNameChangeMessage(changes).startsWith("@ada, @bob point somewhere new"), "the message names them, and says nothing was paid");
+  assert.ok(payrollNameChangeMessage(changes).includes("nothing was paid"));
+  assert.ok(payrollNameChangeMessage([{ name: "cyd", why: "failed" }]).startsWith("Couldn't confirm @cyd"));
+});
+
+test("a schedule keeps @names as names, so each payday pays the address it holds then", () => {
+  const { rows } = parsePayrollCsv(["name,gloam_address,amount", "Ada,@Ada_Obi,10", "Bo,,5"].join("\n"), ASSET);
+  const done = applyPayrollNames(rows, new Map([["ada_obi", { tag: PAYROLL_TAG }]]));
+  const people = peopleFromDraft(done);
+  assert.equal(people[0]!.recipient, "@ada_obi", "stored as the name, not today's address");
+  assert.equal(people[0]!.kind, "gloam");
+  const again = parsePayrollCsv(scheduleCsv(people, ASSET), ASSET).rows;
+  assert.equal(again[0]!.payName, "ada_obi", "loaded back into a run, it is looked up again");
+  assert.equal(again[0]!.error, NAME_PENDING);
+  assert.equal(again[1]!.kind, "link", "a claim link row stays one");
+});
+
+test("an 0x or a plain word still isn't a Gloam address", () => {
+  const { rows } = parsePayrollCsv(["name,gloam_address,amount", "Ada,ada,1", "Bo,0x1111111111111111111111111111111111111111,1"].join("\n"), ASSET);
+  assert.ok(rows[0]!.error!.includes("Gloam address or name"));
+  assert.ok(rows[1]!.error!.includes("public wallet"));
+  assert.equal(rows[0]!.payName, undefined);
 });
 
 console.log(`\n${passed} payroll list checks passed`);

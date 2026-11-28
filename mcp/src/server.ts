@@ -95,6 +95,8 @@ import { packageVersion } from "./version.js";
 import { receiptArtifacts, shieldArtifacts, transferArtifacts, unshieldArtifacts } from "./artifacts.js";
 import { SWAP_PRIVACY, refreshSwapNotes, registerSwapTools, type SwapToolContext } from "./swaps.js";
 import { payGloamCashoutQuote } from "./x402Cashout.js";
+import { SOLANA_AGENT_PRIVACY, registerSolanaTools } from "./solana.js";
+import { STARKNET_AGENT_PRIVACY, STARKNET_NOT_OPEN, registerStarknetTools } from "./starknet.js";
 import {
   allNetworks,
   defaultNetworkKey,
@@ -497,14 +499,29 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
         what: `Gloam is private stablecoin payments for people and AI agents on ${mainnetChainNames()}. Hold a private balance, pay and get paid without putting amounts or counterparties on the public chain, and prove one fact to one reader when needed.`,
         whyAgentsCareMost:
           "Agents pay for tools and data all day. On a public chain every payment shows who it pays, how much and how often, which leaks the agent's whole strategy. Gloam keeps those payments private.",
-        networks: allNetworks().map((n) => ({
-          key: n.key,
-          network: describeNetwork(n),
-          chainId: n.chainId,
-          pool: n.pool,
-          keys: n.ceremony === "production" ? "the trusted setup's final keys" : "dev keys",
-        })),
+        networks: [
+          ...allNetworks().map((n) => ({
+            key: n.key,
+            network: describeNetwork(n),
+            chainId: n.chainId,
+            pool: n.pool,
+            keys: n.ceremony === "production" ? "the trusted setup's final keys" : "dev keys",
+          })),
+          {
+            key: "solana-mainnet",
+            network: "Solana mainnet, through Helius Solana Privacy Rings (gloam_solana_* tools; SOL, USDC, USDT, ZEC)",
+            privacy: SOLANA_AGENT_PRIVACY,
+          },
+          {
+            key: "starknet-mainnet",
+            network: "Starknet mainnet, through Starknet's privacy pool (gloam_starknet_* tools; USDC). Not open on Gloam yet",
+            status: STARKNET_NOT_OPEN,
+            privacy: STARKNET_AGENT_PRIVACY,
+          },
+        ],
         defaultNetwork: defaultNet,
+        solana: `Solana is live with its own tools (gloam_solana_info first). ${SOLANA_AGENT_PRIVACY} The agent's Solana key is GLOAM_AGENT_SOLANA_KEY.`,
+        starknet: `Starknet has its own tools (gloam_starknet_info first), and is not open on Gloam yet: until it opens they say "not_open" and send nothing. ${STARKNET_AGENT_PRIVACY} The agent's Starknet account comes from GLOAM_AGENT_PRIVATE_KEY, the same account the Gloam app opens for that wallet.`,
         mainnet:
           `Mainnet is live. Private payments on every mainnet, and private swaps where the network has a swap router (gloam_swap_quote says), with deposit limits of 50,000 per deposit and 2,500,000 in total for each stablecoin (2,500,000 and 25,000,000 for GLOAM${
             ethNativeLimitText()
@@ -526,6 +543,20 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
           "gloam_verify_payment: open a presented payment (x402 X-PAYMENT or MPP Authorization: Payment), verify it, and sweep it into a fresh note; grant access only when it says so (server side)",
           "gloam_get_limits: this agent's spending limits (read)",
           "gloam_get_spending_report: spent and remaining in the last 24 hours, recent payments and refusals (read)",
+          "gloam_solana_info: Gloam on Solana, what it hides and what it shows, the relay, this agent's private Solana address (read)",
+          "gloam_solana_balance: the private balance on Solana (read; needs GLOAM_AGENT_SOLANA_KEY)",
+          "gloam_solana_register: make the private Solana account payable; the relay pays the rent (needs GLOAM_AGENT_SOLANA_KEY)",
+          "gloam_solana_add: REAL add from the agent's Solana wallet; the wallet, asset and amount are public (execution; limits tool shield)",
+          "gloam_solana_pay: REAL private payment on Solana; hides the asset and amount, not the two private accounts (execution; limits tool pay)",
+          "gloam_solana_cash_out: REAL cash out on Solana; destination, asset and amount are public (execution; limits tool pay)",
+          "gloam_solana_tx_status: landed, failed, dropped or pending for a Solana send (read)",
+          "gloam_starknet_info: Gloam on Starknet (not open yet), what it hides and what it shows, the relay and its fee, this agent's private Starknet account (read)",
+          "gloam_starknet_balance: the private balance on Starknet, and what waits at the account's address (read; needs GLOAM_AGENT_PRIVATE_KEY)",
+          "gloam_starknet_register: put the private Starknet account on chain and open it, once; the relay pays (needs GLOAM_AGENT_PRIVATE_KEY)",
+          "gloam_starknet_add: REAL add from the account's address; the account and amount are public (execution; limits tool shield)",
+          "gloam_starknet_pay: REAL private payment on Starknet; a first payment shows the payee's account, later ones show nothing (execution; limits tool pay)",
+          "gloam_starknet_cash_out: REAL cash out on Starknet; the destination and amount are public (execution; limits tool pay)",
+          "gloam_starknet_tx_status: accepted, reverted or pending for a Starknet transaction (read)",
         ],
         notes: legacy
           ? LEGACY_WARNING
@@ -566,6 +597,11 @@ export function createGloamServer(overrides: Partial<ServerDeps> = {}): McpServe
     relayStatus: (opts) => deps.relayStatus(opts),
   };
   registerSwapTools(server, swapCtx);
+
+  // Solana (src/solana.ts): its own tools, on Helius Solana Privacy Rings, under the same limits.
+  registerSolanaTools(server, { env, text, errMsg });
+  // Starknet (src/starknet.ts): its own tools, on Starknet's privacy pool, under the same limits. Not open yet.
+  registerStarknetTools(server, { env, text, errMsg });
 
   server.registerTool(
     "gloam_plan_shield",

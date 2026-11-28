@@ -11,12 +11,20 @@
  *   browser RPC proxy (/api/rpc, per proxied network).
  * Payments and relay: per network, the relay as /api/relay reports it, the
  *   relay account's gas against the relay's own reserve, and this hour's
- *   spend against its cap (lib/relay/spendCap).
+ *   spend against its cap (lib/relay/spendCap). While Gloam on Solana is on
+ *   (lib/solanaRings/config), its fee relay as /api/solana/relay reports it
+ *   (on, funded) and the relay account's SOL, read through /api/solana/rpc.
+ *   While Gloam on Starknet is on (lib/starknetPrivacy/config), its relay as
+ *   /api/starknet/relay reports it (on, funded, moves) and the relay account's STRK,
+ *   read through /api/starknet/rpc, and its prover route (/api/starknet/prove
+ *   answering starknet_specVersion: reached, never a proof spent).
  * Networks: for every network people can see (lib/networks shownNetworks: no
  *   hidden testnet, nothing behind an off flag), the RPC the server reads
  *   through (lib/serverRpc): the latest block and its age; then the vault (one
  *   eth_call, nextIndex) and its proof verifier (verify of an empty proof,
- *   which must say false).
+ *   which must say false). Solana, while it is on: getHealth through the
+ *   site's own Solana RPC (/api/solana/rpc), the one the app reads. Starknet,
+ *   while it is on: the latest block and its age through /api/starknet/rpc.
  * Bridge and integrations: Relay (relay.link) per chain, the hosted MCP server
  *   (a ping), the Glim bot's Telegram webhook, Turnkey's own status page, and,
  *   as information only, the SDK's and MCP's latest versions on npm.
@@ -28,7 +36,7 @@
  */
 import "server-only";
 import { createPublicClient, formatUnits, parseAbi, type Address, type PublicClient } from "viem";
-import { isNetworkWritable, networkName, shownNetworks, type GloamNetwork } from "@/lib/networks";
+import { isNetworkWritable, networkName, shownNetworks, solanaSlot, type GloamNetwork } from "@/lib/networks";
 import { readRateLimit } from "@/lib/mcpRemote/rateLimit";
 import { kv, kvBackend } from "@/lib/partnersKv";
 import { maxGasPriceWei } from "@/lib/relay/gasCeiling";
@@ -43,6 +51,9 @@ import {
 import { NEW_SEND_SHARE_PCT, hourlySpendWei } from "@/lib/relay/spendCap";
 import { rpcProxyChainIds } from "@/lib/rpcProxy";
 import { serverTransport } from "@/lib/serverRpc";
+import { RINGS_PROXY_PATHS, RINGS_RELAY_LOW_LAMPORTS, SOLANA_NAME, SOLANA_RINGS_ENABLED, SOLANA_RINGS_NETWORK } from "@/lib/solanaRings/config";
+import { STARKNET_ENABLED, STARKNET_NETWORK, STARKNET_PROXY_PATHS, STARKNET_STRK } from "@/lib/starknetPrivacy/config";
+import { STARKNET_RELAY_LOW_STRK } from "@/lib/starknetPrivacy/server";
 import {
   formatLatency,
   joinNames,
@@ -118,14 +129,42 @@ function proxiedNetworks(): GloamNetwork[] {
 
 export const networkPartId = (chainId: number) => `network:${chainId}`;
 export const relayPartId = (chainId: number) => `relay:${chainId}`;
+/** Gloam on Solana's parts: it has no chain id and no vault, only its fee relay and its RPC. */
+export const SOLANA_RELAY_PART = "relay:solana";
+export const SOLANA_NETWORK_PART = "network:solana";
+/** Gloam on Starknet's parts: its relay, its network and its prover route. */
+export const STARKNET_RELAY_PART = "relay:starknet";
+export const STARKNET_NETWORK_PART = "network:starknet";
+export const STARKNET_PROVER_PART = "prover:starknet";
+const STARKNET_NAME = STARKNET_NETWORK === "mainnet" ? "Starknet" : STARKNET_NETWORK === "sepolia" ? "Starknet Sepolia" : "Starknet devnet";
 
-/** Every part the page lists, in its order within each group (the groups' order is lib/status/model GROUPS). */
+/**
+ * Every part the page lists, in its order within each group (the groups' order
+ * is lib/status/model GROUPS). Solana's relay and network sit in the app's
+ * menu order: right after Base on mainnet (lib/networks solanaSlot), last on
+ * devnet.
+ */
 export function statusParts(): StatusPart[] {
   const nets = statusNetworks();
   const proxied = proxiedNetworks();
+  const at = SOLANA_RINGS_NETWORK === "devnet" ? nets.length : solanaSlot(nets.map((n) => n.key));
+  const withSolana = <T,>(evm: T[], solana: T): T[] => (SOLANA_RINGS_ENABLED ? [...evm.slice(0, at), solana, ...evm.slice(at)] : evm);
   return [
-    ...nets.map((n) => ({ id: relayPartId(n.chainId), name: `Relay on ${networkName(n)}`, group: "payments" as const, chainId: n.chainId })),
-    ...nets.map((n) => ({ id: networkPartId(n.chainId), name: networkName(n), group: "networks" as const, chainId: n.chainId })),
+    ...withSolana<StatusPart>(
+      nets.map((n) => ({ id: relayPartId(n.chainId), name: `Relay on ${networkName(n)}`, group: "payments" as const, chainId: n.chainId })),
+      { id: SOLANA_RELAY_PART, name: `Relay on ${SOLANA_NAME}`, group: "payments", note: "Pays the fees of private accounts" }
+    ),
+    ...(STARKNET_ENABLED
+      ? [
+          { id: STARKNET_RELAY_PART, name: `Relay on ${STARKNET_NAME}`, group: "payments" as const, note: "Pays the fees of private accounts" },
+          { id: STARKNET_PROVER_PART, name: `Prover on ${STARKNET_NAME}`, group: "payments" as const, note: "Proves each private move" },
+        ]
+      : []),
+    ...withSolana<StatusPart>(
+      nets.map((n) => ({ id: networkPartId(n.chainId), name: networkName(n), group: "networks" as const, chainId: n.chainId })),
+      { id: SOLANA_NETWORK_PART, name: SOLANA_NAME, group: "networks", note: "Helius Privacy Rings" }
+    ),
+    ...(STARKNET_ENABLED ? [{ id: STARKNET_NETWORK_PART, name: STARKNET_NAME, group: "networks" as const, note: "Starknet privacy pool" }] : []),
     { id: "bridge", name: "Relay bridge", group: "api", note: "relay.link" },
     { id: "leaves", name: "Vault leaves", group: "api", note: "What claims, payments and balances read" },
     ...(proxied.length
@@ -235,6 +274,131 @@ export function judgeRelayNet(r: RelayNetRead): Verdict {
   }
   if (ms > SLOW_MS) return slow(ms, detail);
   return ok(ms, detail);
+}
+
+export interface SolanaRelayRead {
+  /** /api/solana/relay's answer: null when it did not answer at all. */
+  api: { ms: number; on: boolean; funded: boolean } | null;
+  /** The relay account's SOL in lamports, read through the site's Solana RPC, or null when unread. */
+  lamports: bigint | null;
+}
+
+/**
+ * Gloam's fee relay on Solana. Off, or reporting itself unfunded (the app
+ * pauses Solana payments then): down. Its SOL under LOW_GAS_TIMES the line at
+ * which it reports itself unfunded: degraded, so it is topped up first.
+ */
+export function judgeSolanaRelay(r: SolanaRelayRead): Verdict {
+  const low = BigInt(RINGS_RELAY_LOW_LAMPORTS);
+  const detail = r.lamports !== null ? `Gas ${amountText(r.lamports, 9)} SOL` : null;
+  if (!r.api) return { status: "down", latencyMs: null, reason: "The relay did not answer.", detail };
+  const { ms } = r.api;
+  if (!r.api.on) return { status: "down", latencyMs: ms, reason: "Paused.", detail };
+  if (!r.api.funded) {
+    // funded is false when the relay's own balance read fails too
+    const reason =
+      r.lamports === null
+        ? "Paused: it reports too little SOL for fees."
+        : r.lamports < low
+          ? "Out of SOL for fees: paused until it is topped up."
+          : "Paused: it could not read its own balance.";
+    return { status: "down", latencyMs: ms, reason, detail };
+  }
+  if (r.lamports !== null && r.lamports < low * LOW_GAS_TIMES) return { status: "degraded", latencyMs: ms, reason: "Low on SOL for fees.", detail };
+  if (ms > SLOW_MS) return slow(ms, detail);
+  return ok(ms, detail);
+}
+
+/** What getHealth said: "ok", behind the chain (Solana's node-unhealthy error), another error, or nothing readable. */
+export type SolanaHealth = "ok" | "behind" | "error" | null;
+
+/** Solana's JSON-RPC code for a node that is behind or unhealthy. */
+const SOLANA_NODE_UNHEALTHY = -32005;
+
+/** getHealth's JSON-RPC answer, as a SolanaHealth. */
+export function solanaHealthOf(body: unknown): SolanaHealth {
+  const b = body as { result?: unknown; error?: { code?: unknown } | null } | null | undefined;
+  if (b?.result === "ok") return "ok";
+  if (b?.error && typeof b.error === "object") return b.error.code === SOLANA_NODE_UNHEALTHY ? "behind" : "error";
+  return null;
+}
+
+/**
+ * Solana through the site's own RPC (/api/solana/rpc, the one the app reads),
+ * by getHealth. No answer, or a refusal (off, not set up): down. Behind, an
+ * error, or busy: degraded.
+ */
+export function judgeSolanaNetwork(r: { ms: number; httpStatus: number; health: SolanaHealth } | null): Verdict {
+  if (!r) return { status: "down", latencyMs: null, reason: "The RPC did not answer.", detail: null };
+  if (r.httpStatus === 429) return { status: "degraded", latencyMs: r.ms, reason: "Busy: it asked us to slow down.", detail: null };
+  if (r.httpStatus < 200 || r.httpStatus >= 300) return { status: "down", latencyMs: r.ms, reason: `The RPC answered ${r.httpStatus}.`, detail: null };
+  if (r.health === null) return { status: "down", latencyMs: r.ms, reason: "The RPC did not answer.", detail: null };
+  if (r.health === "behind") return { status: "degraded", latencyMs: r.ms, reason: "The RPC is behind the chain.", detail: null };
+  if (r.health === "error") return { status: "degraded", latencyMs: r.ms, reason: "The RPC answered with an error.", detail: null };
+  if (r.ms > SLOW_MS) return slow(r.ms);
+  return ok(r.ms);
+}
+
+export interface StarknetRelayRead {
+  /** /api/starknet/relay's answer: null when it did not answer at all. `moves` "off": it refuses every add, payment and cash out (no fee set). */
+  api: { ms: number; on: boolean; funded: boolean; moves?: "on" | "off" } | null;
+  /** The relay account's STRK (base units), read through the site's Starknet RPC, or null when unread. */
+  strk: bigint | null;
+}
+
+/** /api/starknet/relay's GET as the status check reads it: null unless it answered ok. No `moves` (an older relay): on. */
+export function starknetRelayApi(ms: number, body: unknown): StarknetRelayRead["api"] {
+  const v = body as { ok?: unknown; on?: unknown; funded?: unknown; moves?: unknown } | null | undefined;
+  return v && v.ok === true ? { ms, on: v.on === true, funded: v.funded === true, moves: v.moves === "off" ? "off" : "on" } : null;
+}
+
+/** Starknet's relay warns this many times above the line where it pauses (a few days of moves). */
+export const STARKNET_WARN_TIMES = 3n;
+
+/**
+ * Gloam's relay on Starknet. Off, or reporting itself unfunded (the app pauses
+ * Starknet payments then): down. On but sending no moves (mainnet with no fee
+ * set: accounts open, every add, payment and cash out is refused): degraded.
+ * Its STRK under STARKNET_WARN_TIMES the line at which it pauses: degraded, so
+ * it is topped up first.
+ */
+export function judgeStarknetRelay(r: StarknetRelayRead, low: bigint = STARKNET_RELAY_LOW_STRK[STARKNET_NETWORK]): Verdict {
+  const detail = r.strk !== null ? `Gas ${amountText(r.strk, 18)} STRK` : null;
+  if (!r.api) return { status: "down", latencyMs: null, reason: "The relay did not answer.", detail };
+  const { ms } = r.api;
+  if (!r.api.on) return { status: "down", latencyMs: ms, reason: "Paused.", detail };
+  if (!r.api.funded) {
+    const reason = r.strk === null ? "Paused: it reports too little STRK for fees." : r.strk < low ? "Out of STRK for fees: paused until it is topped up." : "Paused: it could not read its own balance.";
+    return { status: "down", latencyMs: ms, reason, detail };
+  }
+  if (r.api.moves === "off") return { status: "degraded", latencyMs: ms, reason: "Adds, payments and cash outs are off: no relay fee is set.", detail };
+  if (r.strk !== null && r.strk < low * STARKNET_WARN_TIMES) return { status: "degraded", latencyMs: ms, reason: "Low on STRK for fees.", detail };
+  if (ms > SLOW_MS) return slow(ms, detail);
+  return ok(ms, detail);
+}
+
+/**
+ * Starknet through the site's own RPC (/api/starknet/rpc, the one the app
+ * reads): the latest block and its age. No answer: down. A block older than a
+ * minute: degraded; older than five: down.
+ */
+export function judgeStarknetNetwork(r: { ms: number; httpStatus: number; ageSec: number | null; block: number | null } | null): Verdict {
+  if (!r) return { status: "down", latencyMs: null, reason: "The RPC did not answer.", detail: null };
+  if (r.httpStatus === 429) return { status: "degraded", latencyMs: r.ms, reason: "Busy: it asked us to slow down.", detail: null };
+  if (r.httpStatus < 200 || r.httpStatus >= 300 || r.ageSec === null || r.block === null) return { status: "down", latencyMs: r.ms, reason: "The RPC did not answer.", detail: null };
+  const detail = `Latest block ${ageText(Math.max(0, r.ageSec))} ago`;
+  if (r.ageSec > 300) return { status: "down", latencyMs: r.ms, reason: "No new block for over five minutes.", detail };
+  if (r.ageSec > 60) return { status: "degraded", latencyMs: r.ms, reason: "Blocks are slow.", detail };
+  if (r.ms > SLOW_MS) return slow(r.ms, detail);
+  return ok(r.ms, detail);
+}
+
+/** The prover route reached (it answers starknet_specVersion without proving): up; anything else: down. */
+export function judgeStarknetProver(r: { ms: number; httpStatus: number; version: unknown } | null): Verdict {
+  if (!r) return { status: "down", latencyMs: null, reason: "The prover route did not answer.", detail: null };
+  if (r.httpStatus !== 200 || typeof r.version !== "string") return { status: "down", latencyMs: r.ms, reason: `The prover route answered ${r.httpStatus}.`, detail: null };
+  if (r.ms > SLOW_MS) return slow(r.ms);
+  return ok(r.ms);
 }
 
 /**
@@ -440,6 +604,86 @@ async function checkRelayNet(
   return judgeRelayNet({ api: api ? { ms: api.ms, network } : null, gas, spendPct });
 }
 
+/** A Solana address (base58, 32 to 44 characters). */
+const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/** One call to the site's Solana RPC, as the app makes it: its HTTP status and body, or null with no answer. */
+async function solanaRpc(method: string, params: unknown[]): Promise<{ ms: number; status: number; body: unknown } | null> {
+  const got = await timed(async () => {
+    const res = await request(`${STATUS_SITE}${RINGS_PROXY_PATHS.rpc}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+    return { status: res.status, body: (await res.json().catch(() => null)) as unknown };
+  });
+  return got ? { ms: got.ms, status: got.value.status, body: got.value.body } : null;
+}
+
+async function checkSolanaRelay(): Promise<Verdict> {
+  const got = await timed(() => getJson(`${STATUS_SITE}${RINGS_PROXY_PATHS.relay}`));
+  const v = got?.value as { ok?: unknown; on?: unknown; funded?: unknown; relayer?: unknown } | null | undefined;
+  const api = got && v && v.ok === true ? { ms: got.ms, on: v.on === true, funded: v.funded === true } : null;
+  const relayer = typeof v?.relayer === "string" && SOLANA_ADDRESS.test(v.relayer) ? v.relayer : null;
+  let lamports: bigint | null = null;
+  if (api && relayer) {
+    const bal = await solanaRpc("getBalance", [relayer, { commitment: "confirmed" }]);
+    const value = (bal?.body as { result?: { value?: unknown } } | null | undefined)?.result?.value;
+    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) lamports = BigInt(value);
+  }
+  return judgeSolanaRelay({ api, lamports });
+}
+
+async function checkSolanaNetwork(): Promise<Verdict> {
+  const got = await solanaRpc("getHealth", []);
+  return judgeSolanaNetwork(got ? { ms: got.ms, httpStatus: got.status, health: solanaHealthOf(got.body) } : null);
+}
+
+/** One JSON-RPC call to one of the site's Starknet routes, as the app makes it. */
+async function starknetRoute(path: string, method: string, params: unknown): Promise<{ ms: number; status: number; body: unknown } | null> {
+  const got = await timed(async () => {
+    const res = await request(`${STATUS_SITE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+    return { status: res.status, body: (await res.json().catch(() => null)) as unknown };
+  });
+  return got ? { ms: got.ms, status: got.value.status, body: got.value.body } : null;
+}
+
+const STARK_ADDRESS = /^0x[0-9a-fA-F]{1,64}$/;
+
+async function checkStarknetRelay(): Promise<Verdict> {
+  const got = await timed(() => getJson(`${STATUS_SITE}${STARKNET_PROXY_PATHS.relay}`));
+  const v = got?.value as { relayer?: unknown } | null | undefined;
+  const api = got ? starknetRelayApi(got.ms, got.value) : null;
+  const relayer = typeof v?.relayer === "string" && STARK_ADDRESS.test(v.relayer) ? v.relayer : null;
+  let strk: bigint | null = null;
+  if (api && relayer) {
+    const bal = await starknetRoute(STARKNET_PROXY_PATHS.rpc, "starknet_call", { request: { contract_address: STARKNET_STRK, entry_point_selector: BALANCE_OF_SELECTOR, calldata: [relayer] }, block_id: "latest" });
+    const r = (bal?.body as { result?: unknown } | null | undefined)?.result;
+    if (Array.isArray(r) && typeof r[0] === "string" && STARK_ADDRESS.test(r[0])) strk = BigInt(r[0]) + (typeof r[1] === "string" && STARK_ADDRESS.test(r[1]) ? BigInt(r[1]) << 128n : 0n);
+  }
+  return judgeStarknetRelay({ api, strk });
+}
+
+/** starknet_keccak("balance_of"), the selector the app's own reads use. */
+const BALANCE_OF_SELECTOR = "0x35a73cd311a05d46deda634c5ee045db92f811b4e74bca4437fcb5302b7af33";
+
+async function checkStarknetNetwork(): Promise<Verdict> {
+  const got = await starknetRoute(STARKNET_PROXY_PATHS.rpc, "starknet_getBlockWithTxHashes", { block_id: "latest" });
+  const b = (got?.body as { result?: { timestamp?: unknown; block_number?: unknown } } | null | undefined)?.result;
+  const ts = typeof b?.timestamp === "number" ? b.timestamp : null;
+  const block = typeof b?.block_number === "number" ? b.block_number : null;
+  return judgeStarknetNetwork(got ? { ms: got.ms, httpStatus: got.status, ageSec: ts === null ? null : Date.now() / 1000 - ts, block } : null);
+}
+
+async function checkStarknetProver(): Promise<Verdict> {
+  const got = await starknetRoute(STARKNET_PROXY_PATHS.prove, "starknet_specVersion", []);
+  return judgeStarknetProver(got ? { ms: got.ms, httpStatus: got.status, version: (got.body as { result?: unknown } | null | undefined)?.result } : null);
+}
+
 async function checkPage(path: string): Promise<Verdict> {
   const got = await reach(`${STATUS_SITE}${path}`);
   if (!got) return { status: "down", latencyMs: null, reason: "The page did not load." };
@@ -594,6 +838,19 @@ export async function runStatusChecks(): Promise<StatusSnapshot> {
     ["rpc-proxy", checkRpcProxy(proxiedNetworks())],
     ...nets.map((n) => [relayPartId(n.chainId), checkRelayNet(n, clients.get(n.chainId)!, relay)] as [string, Promise<Verdict>]),
     ...nets.map((n) => [networkPartId(n.chainId), checkNetwork(n, clients.get(n.chainId)!)] as [string, Promise<Verdict>]),
+    ...(SOLANA_RINGS_ENABLED
+      ? ([
+          [SOLANA_RELAY_PART, checkSolanaRelay()],
+          [SOLANA_NETWORK_PART, checkSolanaNetwork()],
+        ] as [string, Promise<Verdict>][])
+      : []),
+    ...(STARKNET_ENABLED
+      ? ([
+          [STARKNET_RELAY_PART, checkStarknetRelay()],
+          [STARKNET_PROVER_PART, checkStarknetProver()],
+          [STARKNET_NETWORK_PART, checkStarknetNetwork()],
+        ] as [string, Promise<Verdict>][])
+      : []),
     ["bridge", checkBridge(nets)],
     ["mcp", checkMcp()],
     ["glim", checkGlim()],

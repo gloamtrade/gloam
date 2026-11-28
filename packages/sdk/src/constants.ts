@@ -1,4 +1,6 @@
 import { defineChain, zeroAddress, type Address, type Chain } from "viem";
+import { SOLANA_MAINNET_CHAIN_ID } from "./solanaInfo.js";
+import { STARKNET_MAINNET_LIST_ID } from "./starknetInfo.js";
 import { base, baseSepolia, bsc, mainnet as ethereum, sepolia } from "viem/chains";
 import { baseSepoliaPool, ethereumSepoliaPayMemo, ethereumSepoliaPool, mainnetPoolFor, type MainnetChainId } from "./mainnet.js";
 import type { HistoryRpc, LogCanary } from "./rpc.js";
@@ -951,6 +953,8 @@ export function networkName(chainId: number): string {
   if (chainId === BASE_SEPOLIA_CHAIN_ID) return "Base testnet";
   if (chainId === ETHEREUM_SEPOLIA_CHAIN_ID) return "Ethereum Sepolia";
   if (chainId === ELYSIUM_TESTNET_CHAIN_ID) return "Elysium testnet";
+  if (chainId === SOLANA_MAINNET_CHAIN_ID) return "Solana";
+  if (chainId === STARKNET_MAINNET_LIST_ID) return "Starknet";
   return `chain ${chainId}`;
 }
 
@@ -1148,8 +1152,12 @@ export const GLOAM_ARTIFACTS_URL = "https://www.gloam.trade/circuits";
 /** The pool circuits: deposit, private send, cash out. */
 export type PoolCircuit = "shield" | "transfer" | "unshield";
 
-/** Every circuit pinned here: the pool's, and the receipt circuit behind a proof of payment, which is checked off chain. */
-export type GloamCircuit = PoolCircuit | "receipt";
+/**
+ * Every circuit pinned here: the pool's, and the ones behind proofs checked off
+ * chain: receipt (a proof of payment), funds (a proof of holdings) and
+ * payroll_total (a payroll run's total, from buildPayrollWitness).
+ */
+export type GloamCircuit = PoolCircuit | "receipt" | "funds" | "payroll_total";
 
 /**
  * SHA-256 of each circuit file, to check a download before proving with it.
@@ -1164,6 +1172,8 @@ export const CIRCUIT_SHA256: {
     transfer: "081929509c3477ee264cb2422183018c23122d59952ed4a61c4932c95d360872",
     unshield: "84ac0942b1618c6112a10bfe82ff0a62a80b7a14881565781eb513e9e581c480",
     receipt: "14733e0d4f598d6b392ce8e955eae5624ace80932aa9acdb9298d26c6d1a8fc1",
+    funds: "92107909cf3beed082adfadc26195c450e071a8350632f38ef9f8aca40cac1eb",
+    payroll_total: "0acee042752e3ae22d0e30f64084ba7638467a66bcee7d55d934041512db69f3",
   },
   zkey: {
     dev: {
@@ -1171,12 +1181,16 @@ export const CIRCUIT_SHA256: {
       transfer: "f75bc324f12e1f467f5779a7275737aa0fa514a6c317e3d775f1dba8f0234666",
       unshield: "f4b4c5bfa315cef38634eec1b64b8d9ad1d28725f61fde5e169fef1896360b63",
       receipt: "600652865c27f9b1dafa4edfe65da7c4f8b7c9c6099bf0c85da0151d91830a9a",
+      funds: "c4026803fbd091605c4a986d789ffc02ab4c48b3e11642054e6feb20303cacd9",
+      payroll_total: "f8cb1c8ea5ada2e09a07c47ab3d994860e1a71e021ea89ca96cf1c90c4c1c272",
     },
     production: {
       shield: "3054877c35e2e0e9f76c43aa4791ac2b3ac51b8967d51be2215e89c0a5fbb512",
       transfer: "bdbae966705bc85e76571b4945da74a43fc4503a955fd4e3799358bcff749cdb",
       unshield: "5a12073f3f84b52f794feaf862fb1d48301124319db95a9c6d0dc58277fa54ed",
       receipt: "b6b2352ecb393c7f0709177f89168d9d4fef53282fb24a98c1c08d9adb7cdd86",
+      funds: "e3fadcf8ce4aeaf07a6a96c2b74b6774ae0a8ba3c1aa4496a033c69f81b54228",
+      payroll_total: "29f72fea1a93806f9ffa0c7a563645f754d6cf88b028d6337a4aa4c0a000644c",
     },
   },
 };

@@ -22,8 +22,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  packages:
-    name: Packages and examples
+  # Four jobs run side by side, so a run takes as long as the slowest one, not all of them.
+  app:
+    name: App self-tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -57,19 +58,202 @@ jobs:
           NEXT_PUBLIC_ELYSIUM_ENABLED=0 ../mcp/node_modules/.bin/tsx scripts/selftest-claim-csp.mts
           NEXT_PUBLIC_BNB_ENABLED=1 NEXT_PUBLIC_BNB_POOL=0x89d3042390204f57b8b4F8949D3c2203E4002164 NEXT_PUBLIC_BNB_DEPLOY_BLOCK=134300000 NEXT_PUBLIC_BNB_LIVE_SINCE="21 November 2026" ../mcp/node_modules/.bin/tsx scripts/selftest-claim-csp.mts
 
+      # Solana (off by default): account derivation, the proxy allowlist and the relay
+      # policy; money from another chain made private (the relay's deposit rule, the
+      # flow and its retries against a fake chain); a wallet with no SOL adding a token,
+      # the relay paying the fee (its one version 0 shape, every way it is refused, who
+      # pays, the client against the real route with Helius faked, the per-wallet
+      # count); payroll's list checks, pacing and
+      # resume against a fake chain; the public site's Solana copy and status checks,
+      # off and on; a returning wallet, staying signed in and signing out, and Solana's
+      # place in the menus; bridged ZEC (its mint, shown only once its ring interface is
+      # read as set up, priced, two places); Solana in /admin (the relay's history read
+      # into accounts opened, bring-ins, wallet adds, payments and cash-outs, wallet adds
+      # reported and checked, the mainnet totals with Solana in); claim links and payment
+      # requests (the link format, no collision with EVM links, single use, take back,
+      # two claims at once, kept before paid, sent links sealed, payroll's link rows),
+      # with making links off and on (NEXT_PUBLIC_SOLANA_CLAIM_LINKS). Prove: a payment
+      # received, checked against its transaction (a real mainnet transact decoded, every
+      # tamper, change and wrong chain refused). No network.
+      - name: App Solana self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-rings.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-bridge-in.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-relay-add.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-payroll.mts
+          NEXT_PUBLIC_SOLANA_CLAIM_LINKS=1 ../mcp/node_modules/.bin/tsx scripts/selftest-solana-payroll.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-payroll-csv.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-site.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-opened.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-zec.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-metrics.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-solana-claim-links.mts
+          NEXT_PUBLIC_SOLANA_CLAIM_LINKS=1 ../mcp/node_modules/.bin/tsx scripts/selftest-solana-claim-links.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-prove-solana.mts
+
+      # Starknet (off by default): the core library behind NEXT_PUBLIC_STARKNET_ENABLED.
+      # Config (pools only from the environment), private-account keys from a wallet
+      # signature or a Gloam root (never a Solana account's), matching the devnet run
+      # that sent real transactions; what the relay will send (account deploy, the
+      # token approve, the pool's apply_actions) and every way each is refused, on the
+      # pool's real encoding; add, pay and cash out on the SDK's in-memory pool. The
+      # routes (/api/starknet/rpc, relay, prove) with the node and Starkscan faked: the
+      # proxy's read-only allowlist, the relay's checks on the chain and its limits,
+      # Starkscan's job API (key, Idempotency-Key, submit then poll) and its adapter as
+      # the SDK's prover. Payroll: the list, the account checks, proofs sized to the
+      # relay's cap, and every way a proof is left in flight against a fake chain, the
+      # sealed store and schedules. Claim links: the link format (no collision with EVM
+      # or Solana links), claiming once, take back, link rows in a run, sent links sealed.
+      # Payment requests: the link format (no other link reads it, it reads no other),
+      # Pay filled from it, what its banner says, and Receive's Request a payment.
+      # @gloamtrade/sdk/starknet against the app byte for byte (the account from a wallet
+      # signature or a Gloam root, keys, claim links, the calls the relay sends). The public
+      # site's Starknet copy (docs, llms.txt, the hosted MCP, Glim), off and on. Prove:
+      # the payments in one channel, read and signed on the in-memory pool, every
+      # tamper and wrong chain refused.
+      # No network. The devnet end to ends (scripts/e2e-starknet-devnet.mts,
+      # scripts/e2e-starknet-sdk-devnet.mts for the SDK, scripts/e2e-starknet-prove-devnet.mts
+      # for Prove) run locally.
+      - name: App Starknet self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-core.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-routes.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-payroll.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-claim-links.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-requests.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-sdk.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-starknet-site.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-prove-starknet.mts
+
+      # Every token amount the app shows: two places, cut down and never rounded up,
+      # "<0.01" for dust, "0.00" for zero, thousands separators, 6- and 18-decimal
+      # tokens and bigints (lib/amountShort, lib/shield formatAssetAmount), and the
+      # exact formatter that what is sent, copied, exported or proved keeps.
+      - name: App amount display self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-amount-display.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-amount-short.mts
+
+      # Each sign-in's own private account in a browser: signed out shows nothing, a second
+      # wallet sees and spends none of the first's, the first account goes to its owner on
+      # evidence only, backups stay per account. In-memory storage and a stand-in backup service.
+      # The Turnkey kit loads only for a stored sign-in or a Sign in tap, and what needs it
+      # (the create-a-wallet sheet, the Solana sync behind its flag) renders inside it.
+      - name: App account self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-account-scope.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-kit-load.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-auto-receive.mts
+
+      # A Gloam wallet's Solana account (lib/turnkeySolana): made in the same Turnkey
+      # wallet at Turnkey's first Solana path, transactions signed in their own slot,
+      # no message signing (its private account never opens from a Turnkey signature),
+      # found like a wallet extension and gone on sign-out. What opens that private
+      # account (lib/solanaRings/gloamRoot): the same passkey on two devices opens the
+      # same account, an email sign-in's backup code restores it on a new device, and
+      # only a passkey-keyed recovery backup carries the code. Stand-in Turnkey,
+      # WebAuthn and /api/recovery: no request leaves the process.
+      - name: App Gloam wallet on Solana self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-turnkey-solana.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-gloam-solana-root.mts
+
       # BNB Chain (off by default): off, no pool, on, and bad values; the pruned-logs check
-      # end to end through the app's own transports. Fake RPCs only, nothing reaches a host.
+      # end to end through the app's own transports; a payment to a Gloam address landing
+      # in a fresh browser through the vault client. Fake RPCs only, nothing reaches a host.
       - name: App BNB Chain self-tests
         working-directory: app
         run: |
           ../mcp/node_modules/.bin/tsx scripts/selftest-bnb.mts
           ../mcp/node_modules/.bin/tsx scripts/selftest-bnb-everywhere.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-bnb-receive.mts
+
+      # Public activity on a mainnet: the first read covers the last week (a day on
+      # BNB Chain), newest blocks first, rows show as each span returns, Show older
+      # reads one more window, a call answers at its time limit while the read goes
+      # on, and nothing read in time is an error with Retry, never a skeleton. On
+      # Base and on BNB Chain; a stand-in chain, nothing reaches a host.
+      - name: App activity self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-activity-window.mts
+          NEXT_PUBLIC_BNB_ENABLED=1 NEXT_PUBLIC_BNB_POOL=0x89d3042390204f57b8b4F8949D3c2203E4002164 NEXT_PUBLIC_BNB_DEPLOY_BLOCK=134300000 NEXT_PUBLIC_BNB_LIVE_SINCE="21 November 2026" ../mcp/node_modules/.bin/tsx scripts/selftest-activity-window.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-activity-eth.mts
+
+      # The public site, from its source: every page that sets its own openGraph still
+      # shares with a picture, next/link only points at Next pages (a static page
+      # there is prefetched into a 404), and every table scrolls inside itself on a phone.
+      - name: App site self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-share-cards.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-site-links.mts
+
+      # Email updates: the list (subscribe, unsubscribe, admin CSV) and sending it
+      # (markdown escaping, one message per person, one-click unsubscribe, never
+      # twice across a crash). A fake Resend and the in-process store: no email is sent.
+      - name: App email updates self-tests
+        working-directory: app
+        run: |
+          ../mcp/node_modules/.bin/tsx scripts/selftest-updates-list.mts
+          ../mcp/node_modules/.bin/tsx scripts/selftest-updates-mail.mts
+
+  sdk:
+    name: SDK and mppx-gloam
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # pnpm's version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The app's dependencies are installed too: some package tests check
+      # byte compatibility against the app's own source (claim links, receive
+      # tags). The app itself is not built here.
+      - name: Install
+        run: pnpm install --frozen-lockfile
 
       - name: SDK tests
         run: pnpm --filter @gloamtrade/sdk test
 
       - name: mppx-gloam tests
         run: pnpm --filter @gloamtrade/mppx-gloam test
+
+  mcp:
+    name: MCP and GAME plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # pnpm's version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The app's dependencies are installed too: some package tests check
+      # byte compatibility against the app's own source (claim links, receive
+      # tags). The app itself is not built here.
+      - name: Install
+        run: pnpm install --frozen-lockfile
 
       - name: MCP typecheck
         run: pnpm --filter @gloamtrade/mcp typecheck
@@ -82,6 +266,29 @@ jobs:
 
       - name: GAME plugin build
         run: pnpm --filter @gloamtrade/game-plugin-gloam build
+
+  examples:
+    name: Examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # pnpm's version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The app's dependencies are installed too: some package tests check
+      # byte compatibility against the app's own source (claim links, receive
+      # tags). The app itself is not built here.
+      - name: Install
+        run: pnpm install --frozen-lockfile
 
       - name: Examples typecheck
         run: pnpm --filter './examples/*' --workspace-concurrency=1 run --if-present typecheck

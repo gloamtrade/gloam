@@ -15,6 +15,7 @@ import { readTokenLive, type TokenLive, type VaultFee } from "@/lib/tokenLive";
 import { ELYSIUM } from "@/lib/elysium";
 import { BNB } from "@/lib/bnb";
 import { chainLogoSrc } from "@/lib/chainLogo";
+import { displayAmount } from "@/lib/amountShort";
 
 /**
  * The fees and the burn address are read from chain on the server
@@ -274,13 +275,9 @@ function PhaseList({ phases }: { phases: Phase[] }) {
 
 /* ---------- live numbers ---------- */
 
-const amountFmt = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-/** Base units as a token amount for display, to the nearest hundredth. The exact amount is in each row's title. */
+/** Base units as a token amount for display: two places, cut down (lib/amountShort). The exact amount is in each row's title. */
 function fmtUnits(units: bigint, decimals = 18): string {
-  const base = 10n ** BigInt(decimals);
-  const cents = (units * 100n + base / 2n) / base;
-  return amountFmt.format(Number(cents / 100n) + Number(cents % 100n) / 100);
+  return displayAmount(units, decimals);
 }
 
 /** "2026-10-31" -> "31 October 2026". */
@@ -485,18 +482,24 @@ function BuybacksSection({ live }: { live: TokenLive }) {
                   ))}
                 </dl>
                 <p className="mt-4 max-w-[62ch] text-[14px] leading-relaxed text-mute">
-                  {b.note} The burn also took {fmtUnits(toUnits(b.fromFees), decimals)} $GLOAM the treasury already held from
-                  Gloam&apos;s fees.
+                  {b.note}
+                  {toUnits(b.fromFees) > 0n && (
+                    <>
+                      {" "}The burn also took {fmtUnits(toUnits(b.fromFees), decimals)} $GLOAM the treasury already held from
+                      Gloam&apos;s fees.
+                    </>
+                  )}
                 </p>
                 <p className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-[13.5px] text-mute">
-                  {b.buyTxs.map((h, i) => (
+                  {b.buyTxs.filter((h) => h.toLowerCase() !== b.txHash.toLowerCase()).map((h, i, buys) => (
                     <ExtLink key={h} href={RH_TX(h)}>
-                      {b.buyTxs.length > 1 ? `Buy ${i + 1}` : "Buy"} <span className="tnum">{shortHash(h)}</span>{" "}
+                      {buys.length > 1 ? `Buy ${i + 1}` : "Buy"} <span className="tnum">{shortHash(h)}</span>{" "}
                       <span aria-hidden>↗</span>
                     </ExtLink>
                   ))}
                   <ExtLink href={RH_TX(b.txHash)}>
-                    Burn <span className="tnum">{shortHash(b.txHash)}</span> <span aria-hidden>↗</span>
+                    {b.buyTxs.some((h) => h.toLowerCase() === b.txHash.toLowerCase()) ? "Buy and burn" : "Burn"}{" "}
+                    <span className="tnum">{shortHash(b.txHash)}</span> <span aria-hidden>↗</span>
                   </ExtLink>
                 </p>
               </li>

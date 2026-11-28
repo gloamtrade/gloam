@@ -182,12 +182,34 @@ check("owner, treasury and deployer on the mainnet-pool vaults only; the relayer
   for (const e of entries.filter((x) => x.live)) {
     const roles = e.rows.map((r) => r.role);
     const payments = e.network.paymentsPool;
-    // Elysium's vault was born guarded: its owner is the VaultOwnerGuard from the live read, never the owner wallet row
-    assert.equal(roles.includes("owner"), payments && e.network.family !== "elysium", `${e.key} owner`);
+    // Every mainnet-pool vault lists who owns it: the owner guard and the guard's controller.
+    assert.equal(roles.includes("owner"), payments, `${e.key} owner`);
     assert.equal(roles.includes("fee_recipient"), payments, `${e.key} treasury`);
     assert.equal(roles.includes("deployer"), payments, `${e.key} deployer`);
     assert.ok(roles.includes("relayer"), `${e.key} relayer`);
   }
+});
+
+check("the Sepolia testnets list the owner wallet, never the mainnet guard or Safe", () => {
+  let seen = 0;
+  for (const key of ["base", "ethereum"] as const) {
+    const e = byKey[key];
+    if (!e?.live || !e.network.paymentsPool) continue;
+    seen++;
+    const owners = e.rows.filter((r) => r.role === "owner");
+    assert.deepEqual(owners.map((r) => r.name), ["Owner"], `${key} owner rows`);
+    assert.ok(same(owners[0]!.address, dir.GLOAM_OWNER), `${key} owner is the owner wallet`);
+    assert.ok(!e.rows.some((r) => dir.GLOAM_OWNER_GUARD && same(r.address, dir.GLOAM_OWNER_GUARD)), `${key} names no guard`);
+    assert.ok(!e.rows.some((r) => same(r.address, dir.GLOAM_OWNER_SAFE)), `${key} names no Safe`);
+    // Its owner check counts the owner wallet only: the guard holding a testnet vault would be news.
+    const n = e.network;
+    const held = dir.vaultChecks(n, { ...RH_READ, owner: dir.GLOAM_OWNER_GUARD!, feeRecipient: dir.GLOAM_TREASURY });
+    assert.equal(held.find((c) => c.label === "Owner as listed")!.ok, false, `${key} guard is not its listed owner`);
+  }
+  assert.ok(seen > 0, "a Sepolia testnet with a payments vault was checked");
+  // A testnet never takes a mainnet's born-guarded addresses (keyed by network, not by chain).
+  assert.equal(dir.BORN_GUARDED.elysium, undefined);
+  assert.ok(dir.BORN_GUARDED["bnb-mainnet"] && dir.BORN_GUARDED["elysium-mainnet"]);
 });
 
 check("the accounts match the deployment records", () => {

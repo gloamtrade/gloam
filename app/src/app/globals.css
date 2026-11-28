@@ -888,6 +888,291 @@ html.gl-lite .gl-field.gl-drift {
 }
 }
 
+/* Whitepaper: one reading column at 18px, a numbered head per section, and
+   shapes in place of run-on bullets (components/whitepaper). Theme tokens only. */
+.wp {
+  font-size: 18px;
+  line-height: 1.75;
+  color: var(--soft);
+}
+.wp-section {
+  padding-top: 4.5rem;
+  margin-top: 4.5rem;
+  border-top: 1px solid var(--line);
+  scroll-margin-top: 6.5rem;
+}
+.wp-note + .wp-section {
+  margin-top: 3.5rem;
+}
+.wp-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.wp-num {
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--sealed);
+}
+.wp-head h2 {
+  font-size: clamp(2rem, 1.4rem + 1.6vw, 2.75rem);
+  font-weight: 300;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  color: var(--foreground);
+  text-wrap: balance;
+}
+.wp-body {
+  margin-top: 2.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.wp-body > p {
+  max-width: 64ch;
+  text-wrap: pretty;
+}
+.wp h3 {
+  margin-top: 1.75rem;
+  font-size: 1.25rem;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+.wp strong,
+.wp em {
+  color: var(--foreground);
+}
+.wp strong {
+  font-weight: 500;
+}
+.wp a {
+  color: var(--foreground);
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  text-decoration-color: color-mix(in srgb, var(--foreground) 30%, transparent);
+  transition: text-decoration-color 0.15s ease;
+}
+.wp a:hover {
+  text-decoration-color: var(--foreground);
+}
+.wp :not(pre) > code {
+  font-size: 0.86em;
+  font-weight: 500;
+  color: var(--foreground);
+  background: var(--surface);
+  padding: 0.12em 0.4em;
+  border-radius: 6px;
+}
+.wp-body > ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding-left: 0;
+}
+.wp-body > ul > li {
+  position: relative;
+  padding-left: 1.5rem;
+  max-width: 64ch;
+}
+.wp-body > ul > li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.85em;
+  width: 0.6rem;
+  height: 1px;
+  background: var(--line-strong);
+}
+.wp-note {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--mute);
+  border-left: 1px solid var(--line-strong);
+  padding-left: 1.25rem;
+  max-width: 62ch;
+}
+.wp-pull {
+  margin-block: 0.75rem;
+  font-size: clamp(1.6rem, 1.2rem + 1.2vw, 2.15rem);
+  font-weight: 300;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  color: var(--foreground);
+  text-wrap: balance;
+}
+.wp-terms {
+  border-top: 1px solid var(--line);
+}
+.wp-term {
+  display: grid;
+  gap: 0.4rem;
+  padding-block: 1.35rem;
+  border-bottom: 1px solid var(--line);
+}
+.wp-term dt {
+  display: flex;
+  align-items: baseline;
+  gap: 0.85rem;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--foreground);
+}
+.wp-term-n {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--sealed);
+}
+.wp-term dd {
+  font-size: 16.5px;
+  line-height: 1.7;
+  color: var(--soft);
+  text-wrap: pretty;
+}
+@media (min-width: 768px) {
+  .wp-term {
+    grid-template-columns: 13rem minmax(0, 1fr);
+    gap: 2rem;
+  }
+}
+.wp-cols {
+  display: grid;
+  gap: 1rem;
+  margin-block: 0.5rem;
+}
+@media (min-width: 768px) {
+  .wp-cols {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.wp-col {
+  border-radius: 18px;
+  background: var(--surface);
+  padding: 1.5rem 1.4rem 1.6rem;
+}
+.wp-col.is-sealed {
+  background: var(--sealed-soft);
+}
+.wp-col-title {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--foreground);
+}
+.wp-col.is-sealed .wp-col-title {
+  color: var(--sealed);
+}
+.wp-col ul {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.wp-col li {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--soft);
+}
+.wp-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+  line-height: 1.55;
+}
+.wp-table th {
+  padding: 0 1.25rem 0.85rem 0;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--mute);
+  border-bottom: 1px solid var(--foreground);
+}
+.wp-table td {
+  padding: 1.1rem 1.25rem 1.1rem 0;
+  vertical-align: top;
+  color: var(--soft);
+  border-bottom: 1px solid var(--line);
+}
+.wp-table td:first-child {
+  color: var(--foreground);
+  white-space: nowrap;
+}
+.wp-table tr.is-us td {
+  color: var(--foreground);
+}
+.wp-table tr.is-us td:first-child {
+  color: var(--sealed);
+  font-weight: 500;
+}
+.wp-road {
+  border-top: 1px solid var(--line);
+}
+.wp-road-row {
+  display: grid;
+  gap: 0.5rem;
+  padding-block: 1.35rem;
+  border-bottom: 1px solid var(--line);
+}
+@media (min-width: 768px) {
+  .wp-road-row {
+    grid-template-columns: 8rem minmax(0, 1fr);
+    gap: 2rem;
+  }
+}
+.wp-road-k {
+  font-size: 15px;
+  color: var(--mute);
+}
+.wp-road-k.is-on {
+  color: var(--sealed);
+}
+.wp-road-row p {
+  font-size: 16.5px;
+  line-height: 1.7;
+  color: var(--soft);
+}
+.wp-risks {
+  display: grid !important;
+  gap: 0 2.5rem;
+}
+@media (min-width: 768px) {
+  .wp-risks {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.wp-body > .wp-risks > li {
+  padding-block: 1rem;
+  border-top: 1px solid var(--line);
+  font-size: 16px;
+  line-height: 1.6;
+}
+.wp-body > .wp-risks > li::before {
+  display: none;
+}
+.wp-body > .wp-risks > li {
+  padding-left: 0;
+}
+.wp-sign {
+  margin-top: 1.5rem;
+  font-size: 14px;
+  color: var(--mute);
+}
+.wp-sign a {
+  color: var(--mute);
+}
+@media (max-width: 767px) {
+  .wp {
+    font-size: 17px;
+  }
+  .wp-section {
+    padding-top: 3.25rem;
+    margin-top: 3.25rem;
+  }
+}
+
 /* Docs prose: the reading column. 16/26 body, Aeonik throughout, theme tokens
    only. Unlayered on purpose, so these beat utilities inside the column. */
 .docs-prose > :first-child {
@@ -895,19 +1180,28 @@ html.gl-lite .gl-field.gl-drift {
 }
 
 .docs-prose h2 {
-  margin-top: 3.5rem;
-  font-size: 1.75rem;
-  font-weight: 400;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
+  margin-top: 4.5rem;
+  padding-top: 2.75rem;
+  border-top: 1px solid var(--line);
+  font-size: 2rem;
+  font-weight: 300;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
   color: var(--foreground);
   text-wrap: balance;
   scroll-margin-top: 8.5rem;
 }
+.docs-prose > h2:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.docs-prose h2 + * {
+  margin-top: 1.5rem !important;
+}
 
 .docs-prose h3 {
-  margin-top: 2.25rem;
-  margin-bottom: 0.75rem;
+  margin-top: 2.75rem;
+  margin-bottom: 0.85rem;
   font-size: 1.25rem;
   font-weight: 500;
   line-height: 1.35;
@@ -920,7 +1214,11 @@ html.gl-lite .gl-field.gl-drift {
 .docs-prose p,
 .docs-prose li {
   color: var(--soft);
-  line-height: 1.625;
+  line-height: 1.75;
+  text-wrap: pretty;
+}
+.docs-prose > p {
+  max-width: 68ch;
 }
 
 .docs-prose strong {
@@ -944,7 +1242,7 @@ html.gl-lite .gl-field.gl-drift {
 .docs-prose li + li,
 .docs-prose li > ul,
 .docs-prose li > ol {
-  margin-top: 0.5rem;
+  margin-top: 0.75rem;
 }
 .docs-prose li::marker {
   color: var(--faint);
@@ -1040,7 +1338,7 @@ html.gl-lite .gl-field.gl-drift {
 }
 .docs-prose th,
 .docs-prose td {
-  padding: 0.7rem 1rem;
+  padding: 0.9rem 1.1rem;
   text-align: left;
   vertical-align: top;
 }
@@ -1307,6 +1605,19 @@ html.gl-lite .gl-field.gl-drift {
     flex-direction: row;
     align-items: flex-end;
     justify-content: space-between;
+  }
+}
+/* A quiet action in the page head has no edge of its own, so its words, not
+   its padding, line up with the title on a phone and with the cards' right
+   edge from a tablet up. */
+@media (max-width: 639.98px) {
+  .gl-pagehead > :last-child > .btn-quiet.btn-sm:first-child {
+    margin-left: -1rem;
+  }
+}
+@media (min-width: 640px) {
+  .gl-pagehead > :last-child > .btn-quiet.btn-sm:last-child {
+    margin-right: -1rem;
   }
 }
 

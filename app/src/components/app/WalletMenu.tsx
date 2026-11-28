@@ -32,6 +32,11 @@ import { walletDeclined } from "@/lib/walletErrors";
 import { embeddedAvailability, onEmbeddedAvailability, openEmbeddedSheet, signOutEmbedded } from "@/lib/turnkeyBridge";
 import { forgetClaim } from "@/lib/claimLinkStore";
 import { useNetwork } from "./NetworkProvider";
+import { STARKNET_NETWORK } from "@/lib/starknetPrivacy/config";
+import { SolanaWalletMenu } from "./SolanaWalletMenu";
+import { ExitGlyph, GearGlyph, GridGlyph, SendGlyph } from "./MenuGlyphs";
+import { shortSol } from "./SolanaAccount";
+import { GLOAM_SOLANA_OFF, gloamSolana, onGloamSolana } from "@/lib/turnkeySolana";
 // Reads the kit's state from lib/turnkeyBridge; the kit itself loads only when needed (TurnkeyKitGate).
 import { TurnkeyHeaderSignIn } from "./TurnkeyHeaderSignIn";
 
@@ -49,6 +54,10 @@ const WalletConnectSheet = dynamic(() => import("./WalletConnectSheet").then((m)
  * sidebar, `.gl-mobilebar` means compact, anything else is inline).
  */
 export type WalletMenuVariant = "sidebar" | "compact" | "inline";
+
+/** What the wallet control says it is on while Starknet is picked. */
+const STARKNET_LABEL = STARKNET_NETWORK === "mainnet" ? "Starknet" : STARKNET_NETWORK === "sepolia" ? "Starknet Sepolia" : "Starknet devnet";
+const STARKNET_LABEL_FULL = STARKNET_NETWORK === "mainnet" ? "Starknet mainnet" : STARKNET_LABEL;
 
 function detectVariant(el: HTMLElement | null): WalletMenuVariant {
   if (!el) return "inline";
@@ -68,7 +77,16 @@ function walletChainName(id: number): string {
   return ORIGIN_CHAINS.find((c) => c.id === id)?.name ?? `chain ${id}`;
 }
 
+/**
+ * The wallet control. While Solana is the network picked it is Solana's
+ * (SolanaWalletMenu): the EVM wallet stays connected underneath, untouched.
+ */
 export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
+  const { solana } = useNetwork();
+  return solana ? <SolanaWalletMenu variant={variant} /> : <EvmWalletMenu variant={variant} />;
+}
+
+function EvmWalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
   const { address, isConnected, isConnecting, chainId, demo, connector } =
     useAppAccount();
   const { connect, connectors, isPending, error, variables, reset } = useConnect();
@@ -84,7 +102,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
     forgetClaim();
     disconnect();
   };
-  const { network } = useNetwork();
+  const { network, starknet } = useNetwork();
   const { switchChainAsync, isPending: switching } = useSwitchChain();
   // Gloam wallets: offered while the Turnkey kit can work on this page.
   const embeddedState = useSyncExternalStore(onEmbeddedAvailability, embeddedAvailability, () => "starting" as const);
@@ -374,7 +392,10 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
     );
   }
 
-  const wrong = chainId !== network.chainId;
+  // On Starknet the wallet's own chain doesn't matter: it only opens the private account there.
+  const wrong = !starknet && chainId !== network.chainId;
+  const shownOn = starknet ? STARKNET_LABEL : network.label;
+  const shownOnFull = starknet ? STARKNET_LABEL_FULL : `${network.label}${network.testnet ? " testnet" : " mainnet"}`;
 
   // A passkey (Tempo Wallet) account cannot move to Robinhood Chain: offer a
   // browser wallet there instead of a network switch that cannot succeed.
@@ -474,7 +495,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
               {shortAddress(address)}
             </span>
             <span className="mt-0.5 block truncate text-[12px] leading-tight text-mute">
-              {network.label}
+              {shownOn}
             </span>
           </span>
           <UpDownGlyph className="shrink-0 text-faint" />
@@ -516,7 +537,7 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
                 {shortAddress(address, 6)}
               </p>
               <p className="mt-0.5 truncate text-[12px] text-mute">
-                {network.label}{network.testnet ? " testnet" : " mainnet"}
+                {shownOnFull}
               </p>
             </div>
             <button
@@ -529,7 +550,8 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
               {copied ? <CheckGlyph /> : <CopyGlyph />}
             </button>
           </div>
-          {isTempoFeeChain(network.chainId) && !demo && (
+          {embedded && <GloamSolanaRow />}
+          {!starknet && isTempoFeeChain(network.chainId) && !demo && (
             <TempoFeeRow
               address={address as Address}
               passkey={isTempoWallet(connector)}
@@ -599,6 +621,40 @@ export function WalletMenu({ variant }: { variant?: WalletMenuVariant } = {}) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** A Gloam wallet's Solana account (lib/turnkeySolana), once it has one: its address, to copy. */
+function GloamSolanaRow() {
+  const gloam = useSyncExternalStore(onGloamSolana, gloamSolana, () => GLOAM_SOLANA_OFF);
+  const [copied, setCopied] = useState(false);
+  const address = gloam.status === "ready" ? gloam.address : null;
+  if (!address) return null;
+  const copy = () => {
+    void navigator.clipboard?.writeText(address).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1400);
+      },
+      () => undefined
+    );
+  };
+  return (
+    <div className="-mt-1 flex items-center gap-3 pb-2.5 pl-2.5 pr-2.5">
+      <span className="text-[12.5px] text-mute">Solana</span>
+      <span className="tnum min-w-0 flex-1 truncate text-right text-[13px] text-foreground" title={address}>
+        {shortSol(address)}
+      </span>
+      <button
+        type="button"
+        onClick={copy}
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-mute transition-colors hover:bg-surface hover:text-foreground"
+        aria-label={copied ? "Solana address copied" : "Copy Solana address"}
+        title={copied ? "Copied" : "Copy Solana address"}
+      >
+        {copied ? <CheckGlyph /> : <CopyGlyph />}
+      </button>
     </div>
   );
 }
@@ -846,16 +902,6 @@ function CheckGlyph() {
     </svg>
   );
 }
-function GridGlyph() {
-  return (
-    <svg {...glyph}>
-      <rect x="4" y="4" width="6.5" height="6.5" rx="1.8" stroke="currentColor" strokeWidth="1.6" />
-      <rect x="13.5" y="4" width="6.5" height="6.5" rx="1.8" stroke="currentColor" strokeWidth="1.6" />
-      <rect x="4" y="13.5" width="6.5" height="6.5" rx="1.8" stroke="currentColor" strokeWidth="1.6" />
-      <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.8" stroke="currentColor" strokeWidth="1.6" />
-    </svg>
-  );
-}
 function TradeGlyph() {
   return (
     <svg {...glyph}>
@@ -863,37 +909,10 @@ function TradeGlyph() {
     </svg>
   );
 }
-function SendGlyph() {
-  return (
-    <svg {...glyph}>
-      <path d="M5 12h13M13 6.5 18.5 12 13 17.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function GearGlyph() {
-  return (
-    <svg {...glyph}>
-      <circle cx="12" cy="12" r="2.75" stroke="currentColor" strokeWidth="1.6" />
-      <path
-        d="M12 3.75v2M12 18.25v2M20.25 12h-2M5.75 12h-2M17.83 6.17l-1.41 1.41M7.58 16.42l-1.41 1.41M17.83 17.83l-1.41-1.41M7.58 7.58L6.17 6.17"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 function PlusGlyph() {
   return (
     <svg {...glyph}>
       <path d="M12 5.5v13M5.5 12h13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-function ExitGlyph() {
-  return (
-    <svg {...glyph}>
-      <path d="M14 5.5H7A1.5 1.5 0 0 0 5.5 7v10A1.5 1.5 0 0 0 7 18.5h7M11 12h9M17 9l3 3-3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

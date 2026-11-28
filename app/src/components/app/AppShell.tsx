@@ -12,9 +12,12 @@ import { PasskeyGate } from "./PasskeyGate";
 import { NetworkSelector } from "./NetworkSelector";
 import { useNetwork } from "./NetworkProvider";
 import { FeeRiseNotice } from "./FeeRiseNotice";
+import { ReceivedNotice } from "./ReceivedNotice";
 import { TestFundsNotice } from "./TestFundsNotice";
 import { SHOW_TESTNETS } from "@/lib/showTestnets";
 import { VaultNavGroup, VaultNavGroupStatic, navActiveFill } from "./VaultNavGroup";
+import { SOLANA_RINGS_NETWORK } from "@/lib/solanaRings/config";
+import { STARKNET_NETWORK } from "@/lib/starknetPrivacy/config";
 
 type NavItem = {
   href: string;
@@ -22,11 +25,16 @@ type NavItem = {
   icon: ReactNode;
   exact?: boolean;
   robinhoodOnly?: boolean;
+  /** Not on Solana yet: left out while Solana is the network picked. */
+  evmOnly?: boolean;
   /** Vault lists its actions under it (VaultNavGroup). */
   group?: "vault";
 };
 
 const ic = "h-[18px] w-[18px] shrink-0";
+
+/** The footer's links: a 40px tap target on a phone, plain text from a tablet up. */
+const FOOT_LINK = "inline-flex min-h-10 items-center hover:text-foreground sm:min-h-0";
 
 const nav: NavItem[] = [
   {
@@ -79,6 +87,7 @@ const nav: NavItem[] = [
   {
     href: "/app/disclose",
     label: "Prove",
+    evmOnly: true,
     icon: (
       <svg className={ic} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path d="M12 3.5l7 3v5.25c0 4.1-2.9 7.6-7 8.75-4.1-1.15-7-4.65-7-8.75V6.5l7-3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
@@ -214,26 +223,48 @@ export function AppShell({
   title,
   subtitle,
   subtitleTempo,
+  subtitleSolana,
+  subtitleStarknet,
   actions,
+  actionsSolana,
 }: {
   children: ReactNode;
   title: string;
   subtitle?: string;
   /** Optional Tempo-specific subtitle, so the payments framing leads there. */
   subtitleTempo?: string;
+  /** Optional subtitle while Solana is the network picked, where the EVM one would not hold. */
+  subtitleSolana?: string;
+  /** Optional subtitle while Starknet is the network picked. */
+  subtitleStarknet?: string;
   /** Optional controls shown at the right of the page header. */
   actions?: ReactNode;
+  /** The controls on Solana; left unset, an EVM page's controls are not shown there. */
+  actionsSolana?: ReactNode;
 }) {
   const pathname = usePathname();
-  const { network, settled: networkSettled } = useNetwork();
+  const { network, settled: networkSettled, solana, starknet } = useNetwork();
+  // Solana and Starknet are not EVM networks: the EVM side's sections, controls and notices step aside.
+  const offEvm = solana || starknet;
   const [open, setOpen] = useState(false);
 
   // Tokenized-stock Markets only exists on Robinhood Chain testnet. On Tempo
   // and on the mainnets the product is private payments, so it drops out. It
   // waits for this browser's network, so a mainnet visitor never sees it flash.
+  // On Solana (picked in the network menu), the sections Solana doesn't have
+  // yet drop out the same way.
   const isTempo = network.family === "tempo";
-  const navItems = nav.filter((item) => !(item.robinhoodOnly && (!networkSettled || !network.stocks)));
-  const shownSubtitle = isTempo && subtitleTempo ? subtitleTempo : subtitle;
+  const navItems = nav.filter(
+    (item) => !(item.robinhoodOnly && (!networkSettled || !network.stocks || offEvm)) && !(item.evmOnly && offEvm)
+  );
+  const shownSubtitle = solana
+    ? (subtitleSolana ?? subtitle)
+    : starknet
+      ? (subtitleStarknet ?? subtitle)
+      : isTempo && subtitleTempo
+        ? subtitleTempo
+        : subtitle;
+  const shownActions = solana ? actionsSolana : starknet ? undefined : actions;
 
   useEffect(() => {
     void import("@/lib/track").then(({ track }) => {
@@ -255,7 +286,10 @@ export function AppShell({
   }, [open]);
 
   return (
-    <div className="gloam-app relative flex min-h-full flex-col bg-background">
+    // flex-1 in the body's column: on a short page the frame still fills the
+    // window, so the footer sits at its foot (above the phone's tab bar), and
+    // on a long one it follows the content as before.
+    <div className="gloam-app relative flex min-h-full flex-1 flex-col bg-background">
       <WelcomeModal />
       <PasskeyGate />
       <AutoSwitchNetwork />
@@ -343,8 +377,14 @@ export function AppShell({
 
       <div className="gl-tabbar-space flex flex-1 flex-col lg:pl-[272px]">
         <main className="mx-auto w-full max-w-[1120px] flex-1 px-4 pb-16 pt-5 sm:px-8 sm:pt-7">
-          <FeeRiseNotice />
-          <TestFundsNotice />
+          {/* the EVM side's notices: not while Solana or Starknet is the network picked */}
+          {!offEvm && (
+            <>
+              <ReceivedNotice />
+              <FeeRiseNotice />
+              <TestFundsNotice />
+            </>
+          )}
           {/* in the first paint, hidden or shown before the app's JavaScript runs: nothing below it moves */}
           {/* no fade on the title: it paints with the page, not after the app's JavaScript frees the phone */}
           <div className="gl-pagehead mb-6 gap-4 sm:mb-8">
@@ -356,7 +396,7 @@ export function AppShell({
                 </p>
               )}
             </div>
-            {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+            {shownActions && <div className="flex shrink-0 items-center gap-2">{shownActions}</div>}
           </div>
           <div className="rise rise-1">{children}</div>
         </main>
@@ -366,34 +406,38 @@ export function AppShell({
             <p>
               {!networkSettled
                 ? "Gloam. Not investment, legal or tax advice."
+                : solana
+                ? `Gloam on Solana ${SOLANA_RINGS_NETWORK === "devnet" ? "devnet" : "mainnet"}. Not investment, legal or tax advice.`
+                : starknet
+                ? `Gloam on Starknet ${STARKNET_NETWORK === "mainnet" ? "mainnet" : STARKNET_NETWORK === "sepolia" ? "Sepolia" : "devnet"}. Not investment, legal or tax advice.`
                 : !network.testnet
                 ? `Gloam on ${network.label} mainnet. Not investment, legal or tax advice.`
                 : isTempo
                   ? "Gloam on Tempo testnet. Private stablecoin payments for people and agents."
                   : `Gloam on ${network.label} testnet. Not investment, legal or tax advice.`}
             </p>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="-my-2 flex flex-wrap items-center gap-x-4 sm:my-0 sm:gap-y-2">
               {SHOW_TESTNETS && (
-                <IntentLink href="/docs/testnet" className="hover:text-foreground">
+                <IntentLink href="/docs/testnet" className={FOOT_LINK}>
                   Testnet guide
                 </IntentLink>
               )}
-              <IntentLink href="/app/settings#help" className="hover:text-foreground">
+              <IntentLink href="/app/settings#help" className={FOOT_LINK}>
                 Help
               </IntentLink>
-              <IntentLink href="/privacy" className="hover:text-foreground">
+              <IntentLink href="/privacy" className={FOOT_LINK}>
                 Privacy
               </IntentLink>
-              <IntentLink href="/terms" className="hover:text-foreground">
+              <IntentLink href="/terms" className={FOOT_LINK}>
                 Terms
               </IntentLink>
-              <IntentLink href="/cookies" className="hover:text-foreground">
+              <IntentLink href="/cookies" className={FOOT_LINK}>
                 Cookies
               </IntentLink>
-              <a href="https://t.me/gloamhq" target="_blank" rel="noreferrer" className="hover:text-foreground">
+              <a href="https://t.me/gloamhq" target="_blank" rel="noreferrer" className={FOOT_LINK}>
                 Telegram
               </a>
-              <a href="https://x.com/gloamtrade" target="_blank" rel="noreferrer" className="hover:text-foreground">
+              <a href="https://x.com/gloamtrade" target="_blank" rel="noreferrer" className={FOOT_LINK}>
                 X
               </a>
             </div>

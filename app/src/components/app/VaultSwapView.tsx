@@ -73,6 +73,7 @@ import {
   type SwapPlan,
 } from "@/lib/vaultSwap";
 import { amountTextError } from "@/lib/amountText";
+import { displayAmount, displayAmountNumber } from "@/lib/amountShort";
 import { SWAP_REFUNDED, runVaultSwap } from "@/lib/vaultSwapRun";
 import type { PoseidonMerklePath } from "@/lib/merklePoseidon";
 import { countPerson } from "@/lib/people";
@@ -298,9 +299,12 @@ export function VaultSwapView() {
   // The link's token to pay with stays picked with no private balance in it, so
   // the person sees what to add; a token picked by hand needs a balance.
   const [payPinned, setPayPinned] = useState(() => Boolean(link?.from));
+  const [busy, setBusy] = useState(false);
   const offered = (a: Address) => assets.some((x) => same(x, a));
+  // Mid-swap the balance it spends can leave the list before the new one lands (a split, a
+  // sync): the tokens picked when it started stay picked until it is over.
   const payAsset: Address | null =
-    (payPick && offered(payPick) && (payPinned || holdings.has(payPick.toLowerCase())) ? payPick : null) ??
+    (payPick && offered(payPick) && (payPinned || busy || holdings.has(payPick.toLowerCase())) ? payPick : null) ??
     // The first held token in the list's order (the dollar first), not the
     // largest raw amount: 18-decimal GLOAM would always outrank 6-decimal USDG.
     assets.find((a) => holdings.has(a.toLowerCase())) ??
@@ -390,7 +394,6 @@ export function VaultSwapView() {
   const [quoteError, setQuoteError] = useState<string | null>(null);
   // About the most of the note a refused quote would take: the error line names it.
   const [quoteFits, setQuoteFits] = useState<bigint | null>(null);
-  const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -554,6 +557,8 @@ export function VaultSwapView() {
     const partnerCode = link?.partnerCode ?? null;
     const chainId = network.chainId;
     setBusy(true);
+    setPayPick(from);
+    setToPick(into);
     setError(null);
     setDone(null);
     setReceipt(null);
@@ -691,7 +696,7 @@ export function VaultSwapView() {
 
   const payUsd = payAsset && typed !== null && typed > 0n ? usdOf(typed, payAsset, marks) : null;
   const getUsd = shownPlan && toAsset ? usdOf(shownPlan.amountOut, toAsset, marks) : null;
-  const receiveText = shownPlan && toAsset ? formatAssetAmount(shownPlan.amountOut, toAsset) : "0";
+  const receiveText = shownPlan && toAsset ? formatAssetAmount(shownPlan.amountOut, toAsset) : displayAmount(0n, 0);
 
   // On a chain where gas is dear a swap's vault fee has to cover its gas (lib/relay/swapFloor), and the
   // relay counts a stablecoin at face value. The floor follows the route, each hop past the first costing
@@ -769,17 +774,11 @@ export function VaultSwapView() {
   return (
     <div className="grid items-start gap-6">
       <div className="gl-card min-w-0 p-5 sm:p-7">
-        <div className="flex items-start justify-between gap-3 px-1 pb-5">
-          <div className="min-w-0">
-            <h2 className="t-title text-foreground">Swap</h2>
-            <p className="mt-1 text-[14px] leading-relaxed text-mute">
-              Who swapped stays private. The tokens and amounts show, like any trade.
-            </p>
-          </div>
-          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-sealed-soft px-2.5 py-1 text-[12px] font-medium text-sealed">
-            <LockIcon />
-            Private
-          </span>
+        <div className="min-w-0 pb-6">
+          <h2 className="t-title text-foreground">Swap</h2>
+          <p className="mt-1 text-[14px] leading-relaxed text-mute">
+            Who swapped stays private. The tokens and amounts show, like any trade.
+          </p>
         </div>
 
         {link && (
@@ -982,7 +981,7 @@ export function VaultSwapView() {
                 <div className="gl-collapse" data-open={showDetails} aria-hidden={!showDetails}>
                   <div>
                   <dl className="divide-y divide-line border-t border-line pb-1 text-[13px]">
-                    <Row term="You receive exactly">{formatAssetLabel(shownPlan.amountOut, toAsset)}</Row>
+                    <Row term="You receive">{formatAssetLabel(shownPlan.amountOut, toAsset)}</Row>
                     <Row term={`Vault fee (${formatFeePercent(feeBps ?? 0)})`}>
                       {formatAssetLabel(withdrawFeeOf(amount, feeBps ?? 0), payAsset)}
                     </Row>
@@ -1001,7 +1000,7 @@ export function VaultSwapView() {
               </div>
             )}
 
-            {((!notes.length && linkStep?.kind !== "add") ||
+            {((!notes.length && !busy && linkStep?.kind !== "add") ||
               priceError ||
               overRoom ||
               relayOk === false ||
@@ -1011,9 +1010,9 @@ export function VaultSwapView() {
               (valueGap != null && valueGap >= VALUE_WARN_BPS) ||
               (impact != null && impact >= IMPACT_WARN_BPS) ||
               (note && amount !== null && amount < BigInt(note.amountWei))) && (
-              <div className="gl-settle mt-4 space-y-2.5 px-1 text-[12.5px] leading-[1.6]">
+              <div className="gl-settle mt-4 space-y-2.5 text-[12.5px] leading-[1.6]">
                 {/* a swap link's banner already says what to add */}
-                {!notes.length && addable.length > 0 && linkStep?.kind !== "add" && (
+                {!notes.length && !busy && addable.length > 0 && linkStep?.kind !== "add" && (
                   <p className="text-mute">
                     You can check prices now. To swap, add {listOr(addable.map(assetLabel))} to your private balance
                     first.{" "}
@@ -1101,8 +1100,9 @@ export function VaultSwapView() {
         )}
       </div>
 
-      {/* The token check (Blocktronics) and the privacy notes sit under the swap, side by side on wide screens. */}
-      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+      {/* The token check (Blocktronics) and the privacy notes sit under the swap, side by side on wide
+          screens; alone (no token check), the notes take the full width of the swap above them. */}
+      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2 [&>*]:min-w-0 lg:[&>:only-child]:col-span-2">
         <TokenCheckCard chainId={network.chainId} asset={toAsset} />
         <PrivacyNotes venue={venue} />
       </div>
@@ -1170,6 +1170,7 @@ function SwapPair({
   const to = tokenFor(chainId, receive);
   const fromSymbol = from?.symbol ?? assetLabel(pay);
   const toSymbol = to?.symbol ?? assetLabel(receive);
+  // two places, cut down (never rounded up), like every amount shown
   const paid = formatAssetAmount(payAmount, pay);
   const got = formatAssetAmount(receiveAmount, receive);
   return (
@@ -1204,14 +1205,13 @@ function usdOf(raw: bigint, asset: string, marks: Record<string, number | null>)
   return Number(formatUnits(raw, assetDecimals(asset))) * m;
 }
 
-/** "1 USDG ≈ 0.4446 GLOAM", what the swap gives for each unit paid (fees included). */
+/** "1 USDG ≈ 0.44 GLOAM", what the swap gives for each unit paid (fees included), two places, cut down. */
 function rateLine(amountIn: bigint, assetIn: string, amountOut: bigint, assetOut: string, inverse: boolean): string {
   const a = Number(formatUnits(amountIn, assetDecimals(assetIn)));
   const b = Number(formatUnits(amountOut, assetDecimals(assetOut)));
   if (!(a > 0) || !(b > 0)) return "";
   const [from, to, r] = inverse ? [assetOut, assetIn, a / b] : [assetIn, assetOut, b / a];
-  const digits = r >= 100 ? 2 : r >= 1 ? 4 : 6;
-  return `1 ${assetLabel(from)} ≈ ${r.toLocaleString("en-US", { maximumFractionDigits: digits })} ${assetLabel(to)}`;
+  return `1 ${assetLabel(from)} ≈ ${displayAmountNumber(r)} ${assetLabel(to)}`;
 }
 
 /**
@@ -1435,7 +1435,7 @@ function PrivacyNotes({ venue }: { venue: string }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex min-h-14 w-full items-center justify-between gap-4 rounded-[inherit] px-5 py-4 text-left transition-colors duration-200 hover:bg-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/15 sm:px-6"
+        className="flex min-h-14 w-full items-center justify-between gap-4 rounded-[inherit] px-5 py-4 text-left transition-colors duration-200 hover:bg-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/15 sm:px-7"
       >
         <span className="min-w-0">
           <span className="flex items-center gap-2 font-medium text-foreground">
@@ -1454,7 +1454,7 @@ function PrivacyNotes({ venue }: { venue: string }) {
         }`}
       >
         <div className="min-h-0 overflow-hidden">
-          <div className="border-t border-line px-5 pb-6 pt-5 sm:px-6">
+          <div className="border-t border-line px-5 pb-6 pt-5 sm:px-7">
             <p className="font-medium text-foreground">Private</p>
             <ul className="mt-2 space-y-2">
               <li>Who swapped. The Gloam relay sends it, so your wallet never shows.</li>

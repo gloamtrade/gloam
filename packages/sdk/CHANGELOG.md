@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.10.0 (27 November 2026)
+
+**Starknet**, through Starknet's own privacy pool (STRK20), at the new subpath `@gloamtrade/sdk/starknet`. **Not open yet:** Gloam's Starknet routes refuse until Starknet opens on Gloam, and the client says so with `StarknetOffError`. It needs `starknet` (10.5) and `@starkware-libs/starknet-privacy-sdk` (0.14.4-rc.2) installed next to the SDK (optional peer dependencies; EVM and Solana users need neither). StarkWare publishes the privacy SDK on GitHub Packages only; the Gloam repo vendors the build it runs (`app/vendor/starknet-privacy`).
+
+- `openStarknetAccount({ wallet | seed, index })` opens the same private account the Gloam app opens: from a wallet's signature of a fixed text (`starknetAccountMessage`, signed twice to be sure the wallet signs the same way), or a 32-byte seed (`starknetSeedFromGloamRoot` for a Gloam wallet's passkey or backup code). `starknetViemWallet(account)` makes a wallet of a viem account.
+- `registerStarknetAccount`, `starknetBalances`, `addToStarknetPrivate`, `payStarknetPrivately`, `payStarknetMany` (up to 28 people in one proof and one fee, checked on the pool before it is proven), `cashOutStarknet`, `makeStarknetClaimLink`, `claimStarknetLink`, `readStarknetLink`, `starknetPayeeState`, `starknetRelayStatus`, `starknetTxStatus`, `signStarknetOutsideCall`, `closeStarknetAccount`.
+- Every call goes to Gloam's routes (`https://www.gloam.trade/api/starknet/*`, or `baseUrl`). Gloam's relay deploys accounts and sends every transaction, so an account never holds STRK. On mainnet each add, payment and cash out pays the relay's fee (0.25 USDC) inside its proof; opening an account is free and capped. Proofs come from Starkscan's prover, a few a day for now.
+- Typed errors, thrown before a proof is made: `StarknetOffError`, `StarknetBusyError` (`quota` when the day's proofs are used, rate limits, the relay's day used, a pause), `StarknetFeeChangedError` (the fee changed since the account read it, or is above `maxFee`), `StarknetInsufficientError`, `StarknetTooManyError`. All extend `StarknetError`, whose `maybeSent` says whether to check before trying again.
+- On mainnet the client proves only into Starknet's canonical pool (`STARKNET_MAINNET_POOL`), whatever a server names.
+- The root export gains the facts with no dependencies: `starknetNetworkInfo()`, `STARKNET_ASSETS` (USDC), `STARKNET_PRIVACY_NOTE`, `STARKNET_PRIVACY`, `STARKNET_FEES`, the chain ids, the derivation, the claim link format (`starknetClaimBody`, `starknetClaimLinkUrl`, `readStarknetClaimBody`) and `networkName(STARKNET_MAINNET_LIST_ID)` = "Starknet" (`0x5354524b`, Gloam's own number for Starknet in lists keyed by one).
+- What Starknet hides, said plainly in the docs and the facts: over a channel already open, who paid, who was paid and the amount. The first payment to someone shows their private account; adding money shows the account and the amount; a cash out shows the destination and the amount. The pool's auditor key can read an account's private activity (registering stores its viewing key encrypted to it; it cannot spend), and Starkscan's prover sees what it proves.
+- Checked against the app byte for byte (`app/scripts/selftest-starknet-sdk.mts`) and end to end on a devnet through Gloam's routes (`app/scripts/e2e-starknet-sdk-devnet.mts`).
+
+## 0.9.1 (23 November 2026)
+
+- **ZEC on Solana.** `SOLANA_ASSETS.mainnet` lists ZEC, Zcash bridged to Solana by NEAR's Omni Bridge: mint `A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS` (`SOLANA_ZEC_MINT`), SPL Token, 8 decimals. Its Privacy Rings interface is set up on mainnet, so `addToSolanaPrivate`, `paySolanaPrivately`, `cashOutSolana` and `solanaBalances` (`zec`) take it as they take USDC. `SOLANA_ZEC_NOTE` says what stays public: the bridge itself and adding from a wallet.
+- `SolanaAsset` gains `stable` (true for USDC and USDT) and `note`.
+
+## 0.9.0 (23 November 2026)
+
+**Solana**, through Helius Solana Privacy Rings (the permissionless Default Ring), at the new subpath `@gloamtrade/sdk/solana`. It runs in Node and browsers and needs `@heliuslabs/spr` (0.9.0-alpha) and `@solana/kit` installed next to the SDK (optional peer dependencies; EVM users need neither).
+
+- `openSolanaAccount({ wallet, index })` opens the same private account the Gloam app opens for that wallet: an Ed25519 key derived by HKDF-SHA256 from the wallet's signature over a fixed text (`solanaAccountMessage`, `solanaAccountSeed`). The wallet is any signer that signs a message and a transaction; `solanaKeypairWallet(secret)` makes one from a keypair.
+- `registerSolanaAccount`, `solanaBalances`, `addToSolanaPrivate`, `paySolanaPrivately`, `cashOutSolana`, `isSolanaAccountRegistered`, `buildSolanaRegistration`, `solanaRelayStatus`, `closeSolanaAccount`.
+- `solanaTxStatus` and `waitForSolanaTx`: landed, failed, dropped (its blockhash expired unseen, safe to resend) or pending, and a wait never runs past its deadline. Sends return `pending` with their signature and blockhash instead of waiting forever. `SolanaRelayError.maybeSent` says whether a refused send may still land.
+- Every call goes to Gloam's endpoints (`https://www.gloam.trade/api/solana/*`, or `baseUrl`). Gloam's relay pays the fees of registering, paying and cashing out; adding money is paid by the main wallet. Those endpoints answer servers and gloam.trade's own pages; a page on another site needs its own server in between.
+- The root export gains the facts with no dependencies: `solanaNetworkInfo()`, `SOLANA_ASSETS` (SOL, USDC, USDT), `SOLANA_PRIVACY_NOTE`, `SOLANA_PRIVACY`, `SOLANA_MAINNET_CHAIN_ID`, `isSolanaAddress`, the account derivation, and `networkName(792703809)` = "Solana".
+- What Solana hides, said plainly in the docs and the facts: the asset and the amount of a private payment. The two private accounts a payment moves between are visible, adding money shows the wallet it came from, a cash out shows its destination, asset and amount, and proofs are made by Helius's prover.
+
+## 0.8.2 (21 November 2026)
+
+- **Circuit hashes for `funds` and `payroll_total`.** `GloamCircuit` and `CIRCUIT_SHA256` now cover both (wasm, dev zkey and ceremony-final zkey), so a headless prover for proofs of holdings or a payroll run's total can fetch them with `circuitArtifactUrls` / `circuitArtifactFiles` and check them before proving.
+- **`paySeed` on `buildPrivateSendIntent`.** Pass `randomNoteSeed().seed` and the payment note's secret is made from it, so the payment fits a short claim link (`encodeShortClaim`). Left out, the secret is random as before.
+- **`buildShieldBoundIntent` takes `prove`**, the name every other builder uses. `prover` still works.
+
 ## 0.8.1 (20 November 2026)
 
 - **BNB Chain: BDX is Beldex's BEP-20 `0x9d10a1ec41Fe7878429BB457e31F9b050D38c633`** (9 decimals), confirmed by Beldex on 20 November 2026. 0.8.0 listed the LayerZero OFT `0x6ad12E761b438beA3EA09F6C6266556Bb24C2181`, the LayerZero OFT named BDX, which is not Beldex's (Beldex's BDX exists only on BNB Chain); it was also closed (0, 0) in the Base and Ethereum vaults on 20 November 2026. `BNB_MAINNET.bdx`, `bnbMainnetAssets()` and every BNB Chain reader now name the Beldex contract.

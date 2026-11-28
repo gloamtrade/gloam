@@ -81,7 +81,7 @@ export function surelyNotSent(e: unknown): boolean {
  * extension's worker can stop after it sent, so that keeps what was kept.
  */
 const SOLANA_DECLINED = /reject|denied|declin|cancel|(?:plugin|popup|window|wallet|extension)(?: was| is)? closed/i;
-const SOLANA_NOT_SENT = /simulat|blockhash|insufficient|not enough/i;
+const SOLANA_NOT_SENT = /simulat|blockhash|insufficient|not enough|nothing left your wallet|transaction isn.t valid/i;
 
 export function solanaDeclined(message: string): boolean {
   return SOLANA_DECLINED.test(message);
@@ -91,13 +91,37 @@ export function solanaSurelyNotSent(message: string): boolean {
   return solanaDeclined(message) || SOLANA_NOT_SENT.test(message);
 }
 
+/**
+ * The wallet has too little of the chain's gas coin for the fee. A wallet that
+ * holds the token but no ETH (or BNB, or HYPE) answers its gas check with
+ * "insufficient funds for gas * price + value", which viem then reports as the
+ * contract function reverting, with those words as the reason.
+ */
+const NO_GAS_FUNDS = /insufficient funds|gas \* price|gas required exceeds allowance|insufficient balance for (?:gas|fee|transaction fee)/i;
+
+export function lacksGasFunds(e: unknown): boolean {
+  const links = chain(e);
+  if (maybeSent(links)) return false;
+  return links.some(
+    (x) =>
+      x.name === "InsufficientFundsError" ||
+      [x.shortMessage, x.message, (x as { details?: unknown }).details].some((t) => typeof t === "string" && NO_GAS_FUNDS.test(t))
+  );
+}
+
+/** viem's first line when a call reverts with a reason; the reason itself is on the next line. */
+const REVERTED_WITH = /^The contract function "[^"]*" reverted with the following (?:reason|signature):$/;
+
 /** The short, human part of a wallet or viem error (viem's long message lists the chain and call). */
 export function walletErrorText(e: unknown): string {
   const links = chain(e);
   // A Gloam wallet's own words say what to do: they win over whatever wrapped them.
   const first = links.find((x) => x.name === "EmbeddedNotSentError" || x.name === "EmbeddedMaybeSentError") ?? links[0];
   const text = first?.shortMessage || first?.message || "";
-  return text.split("\n")[0] ?? "";
+  const [head = "", next = ""] = text.split("\n");
+  // "reverted with the following reason:" says nothing without the reason under it
+  if (REVERTED_WITH.test(head.trim()) && next.trim()) return `It wouldn't go through: ${next.trim()}`;
+  return head;
 }
 
 /**
@@ -107,8 +131,22 @@ export function walletErrorText(e: unknown): string {
  */
 export const WALLET_DECLINED_TEXT = "You declined it in your wallet, so it wasn't sent.";
 
-export function walletErrorForPeople(e: unknown, fallback = "It didn't go through. Try again."): string {
+export const NO_GAS_FUNDS_TEXT = "This wallet doesn't have enough of the network's gas coin for the fee, so nothing was sent. Add a little and try again.";
+
+/** Tempo has no gas coin: its fee comes out of a USD stablecoin the wallet holds. */
+export const NO_FEE_STABLECOIN_TEXT = "This wallet doesn't have enough of its fee stablecoin for the network fee, so nothing was sent. Add a little and try again.";
+
+/**
+ * `feeIn`: what the network takes its fee in. "stablecoin" on Tempo, where a
+ * wallet short of the fee is short of a stablecoin, not of a gas coin.
+ */
+export function walletErrorForPeople(
+  e: unknown,
+  fallback = "It didn't go through. Try again.",
+  { feeIn = "gas" }: { feeIn?: "gas" | "stablecoin" } = {},
+): string {
   if (walletDeclined(e)) return WALLET_DECLINED_TEXT;
+  if (lacksGasFunds(e)) return feeIn === "stablecoin" ? NO_FEE_STABLECOIN_TEXT : NO_GAS_FUNDS_TEXT;
   const text = walletErrorText(e).trim();
   if (!text) return fallback;
   return text.length > 280 ? `${text.slice(0, 277).trimEnd()}…` : text;

@@ -2,10 +2,12 @@
  * Local address book for Gloam receive tags (private pay contacts).
  */
 
+import { scopedKey, writableKey } from "./accountSlot";
 import { readDemo } from "./demoFlag";
 import { DEMO_CONTACTS } from "./demo/chain";
 
-const KEY = "gloam.contacts.v1";
+/** The browser's first account's contacts; every other sign-in's carry a suffix (lib/accountSlot). */
+export const KEY = "gloam.contacts.v1";
 
 export type GloamContact = {
   id: string;
@@ -22,7 +24,8 @@ export function loadContacts(): GloamContact[] {
   // Recording demo: the pretend wallet's own people to pay.
   if (readDemo()) return demoList ?? DEMO_CONTACTS;
   try {
-    const raw = localStorage.getItem(KEY);
+    const key = scopedKey(KEY);
+    const raw = key ? localStorage.getItem(key) : null;
     if (!raw) return [];
     const all = JSON.parse(raw) as GloamContact[];
     return Array.isArray(all) ? all : [];
@@ -37,7 +40,7 @@ export function saveContacts(list: GloamContact[]) {
     demoList = list.slice(0, 50);
     return;
   }
-  localStorage.setItem(KEY, JSON.stringify(list.slice(0, 50)));
+  localStorage.setItem(writableKey(KEY), JSON.stringify(list.slice(0, 50)));
 }
 
 export function upsertContact(label: string, tag: string): GloamContact {

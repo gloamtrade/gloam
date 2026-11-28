@@ -5,10 +5,10 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { formatUnits, type Address } from "viem";
 import { TokenLogo } from "../TokenLogo";
-import { assetDecimals, formatAssetAmount, parseAssetAmount, summaryDecimals } from "@/lib/shield";
+import { assetDecimals, formatAssetAmount, parseAssetAmount } from "@/lib/shield";
 import { amountTextError } from "@/lib/amountText";
 import { useModalFocus } from "@/hooks/useModalFocus";
-import { PAYROLL_TEMPLATE, draftTotal, parsePayrollCsv } from "@/lib/payroll";
+import { NAME_PENDING, PAYROLL_TEMPLATE, draftTotal, parsePayrollCsv } from "@/lib/payroll";
 import {
   dayLabel,
   isIsoDay,
@@ -22,6 +22,7 @@ import {
   type ScheduleCadence,
 } from "@/lib/payrollSchedule";
 import { ScheduleIcon, SELF_CUSTODY_NOTE, type AssetOption } from "./scheduleUi";
+import { usePayrollNames } from "./usePayrollNames";
 import { Select, type SelectOption } from "@/components/ui/Select";
 
 const noopSubscribe = () => () => {};
@@ -105,9 +106,13 @@ export function ScheduleEditor({
   const token = assetOptions.find((o) => o.address.toLowerCase() === asset.toLowerCase()) ?? assetOptions[0];
   const symbol = token?.symbol ?? "";
 
-  const parsed = useMemo(() => parsePayrollCsv(peopleText, asset), [peopleText, asset]);
+  const rawParsed = useMemo(() => parsePayrollCsv(peopleText, asset), [peopleText, asset]);
+  // "@ada" in the list: looked up like Payroll does, so a name can be saved (it stays a name)
+  const names = usePayrollNames(rawParsed.rows);
+  const parsed = useMemo(() => ({ ...rawParsed, rows: names.rows }), [rawParsed, names.rows]);
   const valid = parsed.rows.filter((r) => !r.error);
-  const bad = parsed.rows.length - valid.length;
+  // a name still being looked up isn't a mistake to fix: it is counted once its answer is in
+  const bad = parsed.rows.filter((r) => r.error && r.error !== NAME_PENDING).length;
   const total = draftTotal(parsed.rows);
   const cap = parseAssetAmount(capInput, asset);
   const over = cap != null && total > cap ? total - cap : 0n;
@@ -132,6 +137,8 @@ export function ScheduleEditor({
       ? "Check the dates."
       : parsed.error
         ? parsed.error
+        : names.pending
+          ? "Looking up the @names in the list…"
         : valid.length === 0
           ? "Add at least one person to pay."
           : bad > 0
@@ -141,7 +148,7 @@ export function ScheduleEditor({
             : cap == null || cap <= 0n
               ? "Set a cap above zero."
               : over > 0n
-                ? `The list is ${formatAssetAmount(over, asset, summaryDecimals(asset))} ${symbol} over the cap. Raise the cap or trim the list.`
+                ? `The list is ${formatAssetAmount(over, asset)} ${symbol} over the cap. Raise the cap or trim the list.`
                 : paydays.length === 0
                   ? "With these dates there is no payday left. Pick a later date."
                   : null;
@@ -353,7 +360,7 @@ export function ScheduleEditor({
                 total > 0n && cap != null && cap > 0n
                   ? over > 0n
                     ? <span className="text-warn">The list is over the cap, so a run would be blocked.</span>
-                    : `This list is ${formatAssetAmount(total, asset, summaryDecimals(asset))} ${symbol}.`
+                    : `This list is ${formatAssetAmount(total, asset)} ${symbol}.`
                   : "A run above this is blocked before anything is sent."
               }
             >
@@ -362,7 +369,7 @@ export function ScheduleEditor({
                   value={capInput}
                   onChange={(e) => setCapInput(e.target.value)}
                   inputMode="decimal"
-                  placeholder="25,000"
+                  placeholder="0"
                   aria-label={`Cap per run, in ${symbol}`}
                   className="gl-input tnum h-11 pr-20 text-[14px]"
                 />
@@ -410,7 +417,7 @@ export function ScheduleEditor({
                 {bad > 0 && <span className="text-warn">, {bad} to fix</span>}
               </span>
               <span className="tnum shrink-0 text-foreground">
-                {formatAssetAmount(total, asset, summaryDecimals(asset))} <span className="text-mute">{symbol}</span>
+                {formatAssetAmount(total, asset)} <span className="text-mute">{symbol}</span>
               </span>
             </div>
             <AnimatePresence initial={false}>
@@ -437,10 +444,10 @@ export function ScheduleEditor({
                       className="gl-input tnum h-auto resize-y overflow-x-auto whitespace-pre py-3 text-[13px] leading-[1.7]"
                     />
                   </label>
-                  {parsed.rows.some((r) => r.error) && (
+                  {parsed.rows.some((r) => r.error && r.error !== NAME_PENDING) && (
                     <ul className="mt-2 space-y-1 text-[12.5px] text-warn">
                       {parsed.rows
-                        .filter((r) => r.error)
+                        .filter((r) => r.error && r.error !== NAME_PENDING)
                         .slice(0, 3)
                         .map((r) => (
                           <li key={r.line}>
@@ -448,6 +455,11 @@ export function ScheduleEditor({
                           </li>
                         ))}
                     </ul>
+                  )}
+                  {names.failed && (
+                    <button type="button" className="btn btn-ghost btn-sm mt-2" onClick={names.retry}>
+                      Look the names up again
+                    </button>
                   )}
                 </motion.div>
               )}

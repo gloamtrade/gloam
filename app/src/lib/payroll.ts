@@ -41,6 +41,7 @@ import type { PayrollNote } from "@/lib/proofs";
 import { readAmountText } from "@/lib/amountText";
 import { walletErrorForPeople } from "@/lib/walletErrors";
 import { encryptTicketForTag, isReceiveTag, isValidReceiveTag } from "@/lib/receiveTag";
+import { nameFromPayInput } from "@/lib/gloamNames";
 import { ticketToMemoBytes } from "@/lib/payMemo";
 import { cleanPaymentNote } from "@/lib/paymentNote";
 import { keepPaidCodes, loadStoredRun, saveBatch } from "@/lib/payrollStore";
@@ -50,7 +51,7 @@ import { getActiveNetwork, getNetwork, NETWORK_KEYS, type GloamNetwork } from "@
 import {
   activeSpendableNotes,
   assetDecimals,
-  formatAssetAmount,
+  formatAssetAmountExact,
   loadLocalNotes,
   noteNetworkProblem,
   NETWORK_SWITCHING_MESSAGE,
@@ -61,6 +62,7 @@ import {
   updateLocalNote,
   type LocalNote,
 } from "@/lib/shield";
+import { accountShown, SIGNED_OUT_MESSAGE } from "@/lib/accountSlot";
 
 // ------------------------------------------------------------------ types
 
@@ -83,6 +85,8 @@ export type PayrollRow = {
   /** Gloam address (gloamr1…) or "" for a claim link */
   recipient: string;
   kind: PayeeKind;
+  /** The Gloam name the list gave ("ada" for "@ada"); `recipient` is the address it held when the run was made. */
+  payName?: string;
   /** raw units of the batch asset */
   amount: string;
   /** Private note sealed into their payment, e.g. "September salary". */
@@ -139,8 +143,77 @@ export type DraftRow = {
   amount: bigint | null;
   /** From the optional note column, cleaned ("" when none). */
   note?: string;
+  /**
+   * A Gloam name in the address column ("@ada" is "ada"). The row pays the
+   * Gloam address the name holds, looked up before the run (applyPayrollNames);
+   * until then the row waits with NAME_PENDING.
+   */
+  payName?: string;
   error: string | null;
 };
+
+/** The row error while its Gloam name is still being looked up. */
+export const NAME_PENDING = "Looking up this name…";
+
+/** What looking up one Gloam name gave: the Gloam address it pays, nobody, or a failed read. */
+export type PayrollNameAnswer = { tag: string } | "none" | "failed";
+
+/** A name whose address is no longer what the list was checked against. */
+export type PayrollNameChange = { name: string; why: "changed" | "none" | "failed" };
+
+/**
+ * Names read again right before a run, against the answers the list was shown
+ * with: any that now point elsewhere, have no holder, or can't be read stop the
+ * run, so nothing stale is paid.
+ */
+export function payrollNameChanges(
+  fresh: ReadonlyArray<readonly [string, PayrollNameAnswer]>,
+  known: ReadonlyMap<string, PayrollNameAnswer>
+): PayrollNameChange[] {
+  const out: PayrollNameChange[] = [];
+  for (const [name, a] of fresh) {
+    const was = known.get(name);
+    const wasTag = was && typeof was === "object" ? was.tag : null;
+    if (a === "failed") out.push({ name, why: "failed" });
+    else if (a === "none") out.push({ name, why: "none" });
+    else if (a.tag !== wasTag) out.push({ name, why: "changed" });
+  }
+  return out;
+}
+
+/** One line for a run stopped by changed names: nothing was paid. */
+export function payrollNameChangeMessage(changes: PayrollNameChange[]): string {
+  const of = (why: PayrollNameChange["why"]) => changes.filter((c) => c.why === why).map((c) => `@${c.name}`);
+  const moved = [...of("changed"), ...of("none")];
+  if (moved.length) {
+    return `${moved.join(", ")} ${moved.length === 1 ? "points" : "point"} somewhere new since the list loaded, so nothing was paid. Check the list, then pay again.`;
+  }
+  return `Couldn't confirm ${of("failed").join(", ")} just now, so nothing was paid. Try again in a moment.`;
+}
+
+/** Every Gloam name the rows still need looked up, each once. */
+export function payrollNamesToLookUp(rows: DraftRow[], known: ReadonlyMap<string, PayrollNameAnswer>): string[] {
+  const out = new Set<string>();
+  for (const r of rows) if (r.payName && r.error === NAME_PENDING && !known.has(r.payName)) out.add(r.payName);
+  return [...out];
+}
+
+/**
+ * Rows with each Gloam name swapped for the address it pays. A name nobody
+ * holds, or one the registry couldn't be read for, becomes that row's error;
+ * a name not looked up yet keeps NAME_PENDING, so the row can't be paid.
+ */
+export function applyPayrollNames(rows: DraftRow[], answers: ReadonlyMap<string, PayrollNameAnswer>): DraftRow[] {
+  return rows.map((r) => {
+    if (!r.payName || r.error !== NAME_PENDING) return r;
+    const a = answers.get(r.payName);
+    if (!a) return r;
+    if (a === "none") return { ...r, error: `No one holds @${r.payName}. Check the name, or use their Gloam address.` };
+    if (a === "failed") return { ...r, error: `Couldn't look up @${r.payName} just now. Try again in a moment.` };
+    if (!isValidReceiveTag(a.tag)) return { ...r, error: `@${r.payName} doesn't point to a working Gloam address.` };
+    return { ...r, recipient: a.tag, error: null };
+  });
+}
 
 // ------------------------------------------------------------------ CSV
 
@@ -210,7 +283,7 @@ function splitCsvLine(line: string, delimiter: CsvDelimiter): string[] | null {
 }
 
 const NAME_KEYS = ["name", "payee", "employee", "person", "contractor", "full name"];
-const RECIPIENT_KEYS = ["gloam_address", "gloam address", "gloam", "address", "recipient", "to", "wallet"];
+const RECIPIENT_KEYS = ["gloam_address", "gloam address", "gloam_name", "gloam name", "gloam", "address", "recipient", "to", "wallet"];
 const AMOUNT_KEYS = ["amount", "pay", "salary", "usd", "value", "total"];
 const NOTE_KEYS = ["note", "notes", "memo", "reference", "ref", "description"];
 
@@ -275,15 +348,22 @@ export function parsePayrollCsv(text: string, asset: Address): { rows: DraftRow[
         : null;
     let error: string | null = unreadable;
     let kind: PayeeKind = "link";
+    let payName: string | undefined;
     if (!error && recipient) {
       if (isValidReceiveTag(recipient)) {
         kind = "gloam";
+      } else if (nameFromPayInput(recipient)) {
+        // a Gloam name: paid like a Gloam address once it is looked up
+        kind = "gloam";
+        payName = nameFromPayInput(recipient)!;
+      } else if (recipient.startsWith("@")) {
+        error = "That isn't a Gloam name: 3 to 20 letters, numbers or underscores after the @.";
       } else if (isReceiveTag(recipient)) {
         error = "That Gloam address is incomplete or mistyped. Copy it again from their Receive page.";
       } else if (/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
         error = "That is a public wallet, paying it would show the amount. Use their Gloam address, or leave it blank for a claim link.";
       } else {
-        error = "Not a Gloam address (they start with gloamr1). Leave it blank to send a claim link.";
+        error = "Not a Gloam address or name (they start with gloamr1 or @). Leave it blank to send a claim link.";
       }
     }
     // the same reader as every amount field: "1,25" or "-1" is a row error, never 125 or 1
@@ -294,7 +374,19 @@ export function parsePayrollCsv(text: string, asset: Address): { rows: DraftRow[
     } else if (!error && (amount === null || amount <= 0n)) {
       error = "Enter an amount above zero.";
     }
-    return { line: i, name, recipient: kind === "gloam" ? recipient : "", kind, amountInput, amount, note, error };
+    // a name waits for its lookup; until then the row can't be paid
+    if (!error && payName) error = NAME_PENDING;
+    return {
+      line: i,
+      name,
+      recipient: kind === "gloam" && !payName ? recipient : "",
+      kind,
+      amountInput,
+      amount,
+      note,
+      ...(payName ? { payName } : {}),
+      error,
+    };
   });
   return { rows, error: null };
 }
@@ -422,6 +514,7 @@ export function newBatch(args: {
         name: r.name,
         recipient: r.recipient,
         kind: r.kind,
+        ...(r.payName ? { payName: r.payName } : {}),
         amount: r.amount!.toString(),
         ...(r.note ? { note: r.note } : {}),
         status: "queued" as const,
@@ -461,7 +554,8 @@ export function exportResultsCsv(
     return [
       r.name,
       r.kind === "gloam" ? r.recipient : "claim link",
-      formatAssetAmount(r.amount, batch.asset, 6),
+      // every unit, never the two places the screen shows
+      formatAssetAmountExact(r.amount, batch.asset),
       opts.assetLabel,
       r.status,
       link,
@@ -624,6 +718,8 @@ export function runPayroll(batch: PayrollBatch, deps: PayrollEngineDeps): Promis
  * this run's payments without failing.
  */
 export function runNetworkProblem(batch: Pick<PayrollBatch, "chainId" | "pool">, client: { chain?: { id: number } }): string | null {
+  // a run spends the signed-in account's notes: none while no one is signed in (lib/accountSlot)
+  if (!accountShown()) return SIGNED_OUT_MESSAGE;
   const problem = noteNetworkProblem(batch, getActiveNetwork());
   if (problem) return problem === NOTE_OTHER_NETWORK_MESSAGE ? "This run is on another network. Switch to it, then resume." : problem;
   if (client.chain && client.chain.id !== batch.chainId) return NETWORK_SWITCHING_MESSAGE;
@@ -912,6 +1008,14 @@ async function payRow(
           .filter((n) => BigInt(n.amountWei) >= amount)
           .sort((a, b) => (BigInt(a.amountWei) < BigInt(b.amountWei) ? -1 : 1))
       );
+      // the signed-in account's own note, like every spend path (lib/noteVault noteOwnerProblem)
+      const notYours = note ? noteNetworkProblem(note, batch) : null;
+      if (notYours) {
+        row.status = "queued";
+        row.error = notYours;
+        await emit();
+        throw new PayrollStop();
+      }
       if (!note) {
         batch.status = "needs_funds";
         row.status = "queued";

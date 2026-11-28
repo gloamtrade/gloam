@@ -11,7 +11,7 @@ Every tool that touches a chain takes a `network`:
 | `network` | What it is | Assets | Keys |
 | --- | --- | --- | --- |
 | `tempo-mainnet` | Tempo mainnet | USDC.e, pathUSD, USDT0, OUSD | Final ceremony keys |
-| `robinhood-mainnet` | Robinhood Chain mainnet | USDG, GLOAM, PONS, CASHCAT, ETH, AI, ORBIO; GRIFT once its timelocked limit lands | Final ceremony keys |
+| `robinhood-mainnet` | Robinhood Chain mainnet | USDG, GLOAM, PONS, CASHCAT, ETH, AI, ORBIO | Final ceremony keys |
 | `base-mainnet` | Base mainnet | USDC, EURC, USDT, ETH | Final ceremony keys |
 | `ethereum-mainnet` | Ethereum mainnet | USDC, USDT, USDG, PYUSD, EURC, ETH | Final ceremony keys |
 | `tempo` | Tempo testnet (Moderato) | PathUSD and other test stablecoins | Dev keys |
@@ -102,12 +102,72 @@ The server reads its environment, then `~/.gloam/agent.env` (or the file in `GLO
 | `gloam_get_limits` | read | This agent's spending limits: tools, assets, per payment, per day, recipients, expiry |
 | `gloam_get_spending_report` | read | Spent and left in the last 24 hours per asset, recent payments, refused attempts |
 | `gloam_retry_veya_receipts` | execute | Offered with VEYA receipts on: see where a payment's receipt stands (it is built after the payment's answer), or retry one that failed. Pays nothing |
+| `gloam_solana_info` | read | Gloam on Solana: assets, what it hides and shows, the relay, this agent's private Solana address (see [Solana](#solana)) |
+| `gloam_solana_balance` | read | The private balance on Solana (SOL, USDC, USDT, ZEC) and whether the account is registered |
+| `gloam_solana_register` | execute | Make the private Solana account payable. Gloam's relay pays the rent; nothing is spent |
+| `gloam_solana_add` | execute | **Real add** from the agent's Solana wallet. Public: the wallet, the asset and the amount. Limits tool `shield` |
+| `gloam_solana_pay` | execute | **Real private payment** to another Gloam private account on Solana. Hides the asset and the amount, not the two accounts. Limits tool `pay` |
+| `gloam_solana_cash_out` | execute | **Real cash out** to any Solana address (default: the agent's own wallet). Public: destination, asset and amount. Limits tool `pay` |
+| `gloam_solana_tx_status` | read | Landed, failed, dropped (safe to resend) or pending for a Solana send |
+| `gloam_starknet_info` | read | Gloam on Starknet (not open yet): USDC, what it hides and shows, the auditor key and the prover, the relay and its fee, this agent's private Starknet account (see [Starknet](#starknet-not-open-yet)) |
+| `gloam_starknet_balance` | read | The private USDC balance on Starknet, what waits at the account's address, and whether the account is open |
+| `gloam_starknet_register` | execute | Put the private Starknet account on chain and open it, once. Gloam's relay pays; nothing is spent. Shows the account |
+| `gloam_starknet_add` | execute | **Real add** of USDC that sits at the account's address. Public: the account and the amount. Limits tool `shield` |
+| `gloam_starknet_pay` | execute | **Real private payment** to another Gloam private account on Starknet. The first payment to someone shows their account; later ones show nothing. Limits tool `pay` (amount and fee) |
+| `gloam_starknet_cash_out` | execute | **Real cash out** to any Starknet address (default: the agent's own account address). Public: destination and amount. Limits tool `pay` (amount and fee) |
+| `gloam_starknet_tx_status` | read | Accepted, reverted or pending for a Starknet transaction |
 
 `gloam_execute_shield` is the private-execution rail: the agent ends up with a shielded balance only this server can spend. The agent sees a note handle such as `n-k3x9p2qw7m`, never the note's secret. When no signer is configured, every execute tool returns a plan instead of acting, and we never return a fake private fill.
 
 The x402 tools are private agent payments (the MCPay pattern, but the settlement is private). `gloam_payment_requirements` prices a resource to the payee's receive tag. The paying agent calls `gloam_execute_private_pay` (or `gloam_fetch_paid` for the whole request), which settles a private send and seals the payment note to that tag, so only the payee can open it. The payee calls `gloam_verify_payment`, which opens the note, checks it binds the required amount and asset, and sweeps it into a fresh note before saying `grantAccess: true`. Unlike a Tempo Zone, no operator sees the transaction: it is private from the public and self-custodial, with an optional per-payment issuer-scoped compliance disclosure. See `TEMPO_EXPANSION.md`.
 
 Scheme `gloam-cashout` is for gateways that pay out to a public address (a creator's splitter) in USDG on Robinhood Chain. `gloam_fetch_paid` pays it with a cash out of exactly the quoted amount from this server's notes to that address, through the Gloam relay, splitting a larger note privately first, and retries with `X-PAYMENT` = base64 JSON `{ scheme, txHash, quoteId }`. The payee and the amount are public; this server's wallet and balance are not. It needs `maxAmount`, and the same quote asked again is presented, never paid twice. With `gloam-private` offered too, `gloam-private` is paid unless `prefer` says `gloam-cashout`.
+
+## Solana
+
+From 0.11.0 the server runs Gloam on Solana mainnet, through Helius Solana Privacy Rings (the permissionless Default Ring), with the `gloam_solana_*` tools above.
+
+**What it hides, plainly:** the asset and the amount of a private payment. The two private accounts a payment moves between are visible, adding money shows the wallet it came from, a cash out shows its destination, asset and amount, and proofs are made by Helius's prover. Sender and recipient are not hidden on Solana.
+
+- **Key:** `GLOAM_AGENT_SOLANA_KEY`, the agent's Solana keypair (a keypair file's JSON array, or its base58 text), in the environment or `~/.gloam/agent.env`. It opens the same private account the Gloam app opens for that wallet (`GLOAM_SOLANA_ACCOUNT_INDEX`, default 0). It never leaves the server and is never printed; a malformed one stops the server at start. Without it, `gloam_solana_info` still answers and the rest say how to add one.
+- **Fees:** Gloam's relay pays the fees of registering, paying and cashing out, so the private account never needs SOL. Adding money is paid by the agent's wallet.
+- **Assets:** SOL, USDC, USDT and ZEC. ZEC is Zcash bridged to Solana by NEAR's Omni Bridge (mint `A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS`, 8 decimals), a public token there: once it is private, the token and the amount stay hidden; the bridge itself and adding from the agent's wallet are public.
+- **Limits:** the network is `solana-mainnet`. SOL and ZEC are Solana's only; name USDC and USDT with `"network": "solana-mainnet"` (or `GLOAM_LIMIT_NETWORK=solana-mainnet`), or by mint. Adding money counts as `shield`, paying and cashing out as `pay`; a cash out to the agent's own wallet needs no recipient entry. No limits still means no spending.
+- **No endless waits:** each send comes back `landed`, or `pending` with its signature and blockhash after `timeoutMs` (default 120 s). `gloam_solana_tx_status` then says landed, failed, dropped (nothing moved, safe to resend) or pending. A relay refusal says whether anything may have been sent.
+- **First run:** `gloam_solana_register` once, so other Gloam accounts can pay the agent; `gloam_solana_add` to fund it from its wallet.
+
+```bash
+# ~/.gloam/agent.env (chmod 600)
+GLOAM_AGENT_SOLANA_KEY=[12,34,...]
+GLOAM_LIMIT_ASSETS=USDC
+GLOAM_LIMIT_NETWORK=solana-mainnet
+GLOAM_LIMIT_MAX_PER_PAYMENT=5
+GLOAM_LIMIT_MAX_PER_DAY=25
+GLOAM_LIMIT_RECIPIENTS=any
+```
+
+## Starknet (not open yet)
+
+From 0.12.0 the server has Gloam on Starknet mainnet, through Starknet's own privacy pool (STRK20), with the `gloam_starknet_*` tools above. **Starknet is not open on Gloam yet:** until it opens, Gloam's Starknet routes refuse, and every tool that would touch them answers `"status": "not_open"` without sending, reserving or logging anything.
+
+**What it hides, plainly:** over a channel that is already open, a payment hides who paid, who was paid and the amount. The first payment to someone opens a channel to them, which shows their private account (never who paid or how much). Adding money shows the account and the amount; a cash out shows the destination and the amount, never which private account it came from. The pool has a mandatory auditor key: registering stores the account's viewing key encrypted to it, so its holder can read the account's private activity for authorized inspection; it cannot spend. Proofs are made by Starkscan's prover, which sees what it proves.
+
+- **Key:** the agent's EVM key, `GLOAM_AGENT_PRIVATE_KEY`. It signs the Gloam app's fixed account text, so the agent gets the same private Starknet account the Gloam app opens for that wallet (`GLOAM_STARKNET_ACCOUNT_INDEX`, default 0). It never leaves the server and is never printed.
+- **Fees:** Gloam's relay deploys the account and sends every transaction, so the agent never needs STRK. Each add, payment and cash out pays Gloam's relay fee (0.25 USDC on mainnet) inside its proof: `gloam_starknet_info` reads it live, and `maxFee` caps it per call. A fee that changed since the server last read it stops the move before anything is proven; call again to pay it.
+- **Busy:** proofs come from a small daily quota for now. When it is used, a move answers `"status": "busy"`, `"code": "quota"`, and nothing is sent.
+- **Assets:** USDC on Starknet. Money reaches the agent's account address from any wallet or exchange that sends USDC on Starknet; `gloam_starknet_add` makes it private.
+- **Limits:** the network is `starknet-mainnet`. Name USDC with `"network": "starknet-mainnet"` (or `GLOAM_LIMIT_NETWORK=starknet-mainnet`), or by its address. Adding money counts as `shield`, paying and cashing out as `pay`, with Gloam's fee counted on top of the amount. A cash out to the agent's own account address needs no recipient entry. Write Starknet recipients as `0x` and 64 hex digits (any case). No limits still means no spending.
+- **First run:** `gloam_starknet_register` once, so the account is on chain and other Gloam accounts can pay it; send USDC to its address and `gloam_starknet_add` it.
+
+```bash
+# ~/.gloam/agent.env (chmod 600)
+GLOAM_AGENT_PRIVATE_KEY=0x...
+GLOAM_LIMIT_ASSETS=USDC
+GLOAM_LIMIT_NETWORK=starknet-mainnet
+GLOAM_LIMIT_MAX_PER_PAYMENT=5
+GLOAM_LIMIT_MAX_PER_DAY=25
+GLOAM_LIMIT_RECIPIENTS=any
+```
 
 ## Private swaps
 
@@ -266,7 +326,7 @@ Assets are named by symbol or by `0x` token address (with `decimals` for a token
 | Network | Symbols |
 | --- | --- |
 | `tempo-mainnet` | `USDC.e`, `pathUSD`, `USDT0`, `OUSD` |
-| `robinhood-mainnet` | `USDG`, `GLOAM`, `GRIFT`, `PONS`, `CASHCAT`, `AI`, `ORBIO`, `ETH` |
+| `robinhood-mainnet` | `USDG`, `GLOAM`, `PONS`, `CASHCAT`, `AI`, `ORBIO`, `ETH` |
 | `tempo` (testnet) | `PathUSD`, `OUSD`, `AlphaUSD`, `BetaUSD`, `ThetaUSD` |
 | `robinhood` (testnet) | `ETH`, `USDG` |
 | `base-mainnet` | `USDC`, `EURC`, `USDT`, `ETH` |

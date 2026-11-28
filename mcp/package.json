@@ -1,10 +1,10 @@
 {
   "name": "@gloamtrade/mcp",
   "mcpName": "io.github.cryptoduke01/gloam",
-  "version": "0.10.1",
+  "version": "0.12.0",
   "private": false,
   "type": "module",
-  "description": "Gloam MCP server: private stablecoin payments for AI agents on Tempo, Robinhood Chain, Base, Ethereum, Elysium and BNB Chain, live on mainnet and testnet, under spending limits the agent cannot lift.",
+  "description": "Gloam MCP server: private stablecoin payments for AI agents on Tempo, Robinhood Chain, Base, Ethereum, Elysium, BNB Chain and Solana, live on mainnet, with Starknet ready for when it opens, under spending limits the agent cannot lift.",
   "license": "MIT",
   "homepage": "https://gloam.trade/docs/agents",
   "repository": {
@@ -29,7 +29,9 @@
     "zero-knowledge",
     "access-keys",
     "spending-limits",
-    "robinhood-chain"
+    "robinhood-chain",
+    "solana",
+    "starknet"
   ],
   "bin": {
     "gloam-mcp": "dist/index.js"
@@ -52,7 +54,7 @@
     "build": "node scripts/build.mjs",
     "prepublishOnly": "npm run typecheck && npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test scripts/test-spend-limits.mts scripts/test-notes.mts scripts/test-wallet-send.mts scripts/test-access-key.mts scripts/test-mpp.mts scripts/test-mainnet.mts scripts/test-base.mts scripts/test-ethereum.mts scripts/test-elysium.mts scripts/test-bnb.mts scripts/test-ethereum-sepolia.mts scripts/test-safe-fetch.mts scripts/test-wormhole.mts scripts/test-veya.mts scripts/test-veya-proof.mts scripts/test-veya-adversarial.mts scripts/test-plugin-pins.mts scripts/test-swaps.mts scripts/test-x402-cashout.mts",
+    "test": "tsx --test scripts/test-spend-limits.mts scripts/test-notes.mts scripts/test-wallet-send.mts scripts/test-access-key.mts scripts/test-mpp.mts scripts/test-mainnet.mts scripts/test-base.mts scripts/test-ethereum.mts scripts/test-elysium.mts scripts/test-bnb.mts scripts/test-ethereum-sepolia.mts scripts/test-safe-fetch.mts scripts/test-wormhole.mts scripts/test-veya.mts scripts/test-veya-proof.mts scripts/test-veya-adversarial.mts scripts/test-plugin-pins.mts scripts/test-swaps.mts scripts/test-x402-cashout.mts scripts/test-solana.mts scripts/test-starknet.mts",
     "test:fork": "tsx --test --test-concurrency=1 --test-reporter=tap scripts/fork-send-receipts.mts",
     "authorize-access-key": "tsx scripts/authorize-access-key.mts",
     "demo:tempo": "tsx scripts/demo-tempo-agent.mts",
@@ -60,9 +62,12 @@
     "smoke": "node scripts/smoke-stdio.mjs"
   },
   "dependencies": {
+    "@heliuslabs/spr": "0.9.0-alpha",
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@solana/kit": "^8.3.0",
     "circomlibjs": "0.1.7",
     "snarkjs": "^0.7.5",
+    "starknet": "10.5.0",
     "undici": "^6.21.2",
     "viem": "^2.55.2",
     "zod": "^3.23.8"
@@ -70,6 +75,7 @@
   "devDependencies": {
     "@gloamtrade/mppx-gloam": "workspace:^",
     "@gloamtrade/sdk": "workspace:^",
+    "@starkware-libs/starknet-privacy-sdk": "file:../app/vendor/starknet-privacy/starknet-privacy-sdk-0.14.4-rc.2-gloam.1.tgz",
     "@types/node": "^20",
     "esbuild": "^0.28.1",
     "tsx": "^4",
